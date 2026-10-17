@@ -513,11 +513,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v27.md",
+		"prompt-extract-metric-candidates-v28.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v26.md",
+		"prompt-enrich-metrics-v27.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2850,7 +2850,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v26.md"
+		promptRef = "prompt-enrich-metrics-v27.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3607,7 +3607,8 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	type pass2Result struct {
 		metrics     []map[string]any
 		uncertain   []map[string]any
-		tagged      []map[string]any // rows carrying a drop-reason tag
+		tagged      []map[string]any   // rows carrying a drop-reason tag
+		dropped     []droppedMetricRow // candidates listed in dropped_candidates
 		language    string
 		coverageErr error
 	}
@@ -3680,9 +3681,11 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		lang := strings.TrimSpace(asString(payload["language"]))
 		metricsRaw, _ := payload["metrics"].([]any)
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
+		droppedRaw, _ := payload["dropped_candidates"].([]any)
 		result := pass2Result{
 			metrics:     normalizeMetricList(metricsRaw),
 			uncertain:   normalizeMetricList(uncertainRaw),
+			dropped:     enrichCandidateDropRows(droppedRaw, batch.candidates),
 			language:    lang,
 			coverageErr: coverageErr,
 		}
@@ -3734,12 +3737,14 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	metrics := make([]map[string]any, 0, len(candidates))
 	uncertain := make([]map[string]any, 0)
 	var tagged []map[string]any
+	var candidateDrops []droppedMetricRow
 	detectedLanguage := "unknown"
 	for _, r := range pass2Results {
 		pass2Err = errors.Join(pass2Err, r.coverageErr)
 		metrics = append(metrics, r.metrics...)
 		uncertain = append(uncertain, r.uncertain...)
 		tagged = append(tagged, r.tagged...)
+		candidateDrops = append(candidateDrops, r.dropped...)
 		if r.language != "" && detectedLanguage == "unknown" {
 			detectedLanguage = r.language
 		}
@@ -3759,7 +3764,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	p.logMultiValueMetricRows(ctx, recordID, metrics)
 
 	// Set-aside rows, in stage order (spec metric-row-soft-drop, design D2).
-	var dropped []droppedMetricRow
+	dropped := candidateDrops
 	dropConditionPropertyRepeats(tagged)
 	tagged = dedupeFinalMetricRows(tagged)
 	canonicalizeMetricValueRangeTypes(tagged)

@@ -563,11 +563,35 @@ func metricValueHoldsSeveralValues(value string) bool {
 	return metricListSepRe.MatchString(v) || (strings.Contains(v, "男") && strings.Contains(v, "女"))
 }
 
+var metricPairedNotationRe = regexp.MustCompile(`^[≥≤<>=]*(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)$`)
+
+// metricRowHoldsSeveralValues also catches a paired notation of two component quantities with one
+// comparator ("180/110" mmHg: systolic and diastolic pressure), which metricValueHoldsSeveralValues
+// leaves alone because "a/b" is usually a fraction. A fraction is a part of a whole or of another
+// limit (1/10 倍, 3/4 in, 30/70 %): it has no physical unit, or a numerator below the denominator.
+func metricRowHoldsSeveralValues(m map[string]any) bool {
+	value := asString(m["metric_value"])
+	if metricValueHoldsSeveralValues(value) {
+		return true
+	}
+	parts := metricPairedNotationRe.FindStringSubmatch(compactMetricValue(value))
+	if parts == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(metricRowUnit(m))) {
+	case "", "倍", "%", "‰", "ratio", "比":
+		return false
+	}
+	a, errA := strconv.ParseFloat(parts[1], 64)
+	b, errB := strconv.ParseFloat(parts[2], 64)
+	return errA == nil && errB == nil && a > b
+}
+
 // multiValueMetricRows lists the rows whose metric_value holds several values.
 func multiValueMetricRows(metrics []map[string]any) []map[string]any {
 	var out []map[string]any
 	for _, m := range metrics {
-		if metricValueHoldsSeveralValues(asString(m["metric_value"])) {
+		if metricRowHoldsSeveralValues(m) {
 			out = append(out, map[string]any{
 				"candidate_id":      m["candidate_id"],
 				"metric_name":       m["metric_name"],

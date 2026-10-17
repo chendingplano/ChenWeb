@@ -14,6 +14,7 @@ import (
 
 // Drop stages, in pipeline order (design D2).
 const (
+	metricDropStageEnrich        = "enrich" // a candidate the enrich pass listed in dropped_candidates
 	metricDropStageLLMTag        = "llm_tag"
 	metricDropStageStatementKind = "statement_kind"
 	metricDropStageNoValue       = "no_value"
@@ -32,6 +33,47 @@ type droppedMetricRow struct {
 
 func newDroppedMetricRow(row map[string]any, stage, reason string) droppedMetricRow {
 	return droppedMetricRow{Row: row, Stage: stage, Reason: reason, Kind: metricStatementKind(row)}
+}
+
+// enrichCandidateDropRows turns the enrich pass's dropped_candidates into set-aside rows that
+// carry the candidate's own text, so a wrong drop can be reviewed and scored like any other.
+// Unknown candidate IDs keep the ID and reason only.
+func enrichCandidateDropRows(dropped []any, candidates []metricCandidate) []droppedMetricRow {
+	byID := make(map[string]metricCandidate, len(candidates))
+	for _, c := range candidates {
+		byID[c.CandidateID] = c
+	}
+	var rows []droppedMetricRow
+	for _, d := range dropped {
+		raw, ok := d.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(asString(raw["candidate_id"]))
+		if id == "" {
+			continue
+		}
+		c := byID[id]
+		var evidence []string
+		for _, mention := range c.SupportingMentions {
+			if q := strings.TrimSpace(asString(mention["evidence_quote"])); q != "" {
+				evidence = append(evidence, q)
+			}
+		}
+		row := map[string]any{
+			"candidate_id":        id,
+			"metric_name":         c.MetricNameHint,
+			"subject":             c.SubjectHint,
+			"metric_value":        c.ValueHint,
+			"unit":                c.UnitHint,
+			"condition":           c.ConditionHint,
+			"threshold_or_target": strings.Join(evidence, " … "),
+			"source_line_spans":   candidateSourceLineSpans(c),
+		}
+		rows = append(rows, droppedMetricRow{Row: row, Stage: metricDropStageEnrich,
+			Reason: strings.TrimSpace(asString(raw["reason"]))})
+	}
+	return rows
 }
 
 // DroppedMetricsStore persists set-aside rows. MetricsSQLStore implements it; a store

@@ -10,7 +10,7 @@ import (
 )
 
 func TestMetricEnrichmentPromptSeparatesPositionsFromCounts(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v26.md"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v27.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +139,52 @@ func TestMultiValueRecoveryPreservesSigns(t *testing.T) {
 			}
 		} else if len(got) != 2 {
 			t.Fatalf("rejected valid signed values: %v", got)
+		}
+	}
+}
+
+func TestEnrichMetricCandidatesSplitsPairedBloodPressure(t *testing.T) {
+	bp := func(name, value string) map[string]any {
+		return map[string]any{"candidate_id": "14_4", "metric_name": name, "metric_value": value, "unit": "mmHg",
+			"value_range_type": "upper_bound", "subject": "高血压极高危患者", "source_line_spans": []any{"2"},
+			"context": "直至降到 180/110mmHg 以下"}
+	}
+	ext := &fakeJSONExtractor{outs: []map[string]any{
+		{"metrics": []any{bp("降压目标血压", "180/110")}},
+		{"metrics": []any{bp("降压目标收缩压", "180"), bp("降压目标舒张压", "110")}},
+	}}
+	p := makeTestMetricsProcessor(ext, 1)
+	p.MetricEnrichGroupSize = 12
+	metrics, _, _, err := p.enrichMetricCandidates(context.Background(), 364,
+		[]metricCandidate{{CandidateID: "14_4", ChunkIndex: 7}},
+		metricsBlocksToChunks([]Block{makeMetricsBlock(7, 2)}), "")
+	if err != nil || ext.structuredCalledCount != 2 || len(metrics) != 2 {
+		t.Fatalf("rows=%v err=%v calls=%d, want the paired value split into two rows", metrics, err, ext.structuredCalledCount)
+	}
+	for _, m := range metrics {
+		if metricRowHoldsSeveralValues(m) {
+			t.Fatalf("paired value kept: %v", m)
+		}
+	}
+}
+
+// Record 364 lost triggers (抽搐超过15min, 年龄≥75岁, 近2周外伤史), the D.2.2 heading, a repeat count
+// written "重复一次", one of two alternative drugs and the diastolic half of 180/110 mmHg.
+func TestMetricPromptsKeepTriggersAlternativesAndPairs(t *testing.T) {
+	for file, wants := range map[string][]string{
+		"prompt-extract-metric-candidates-v28.md": {"## Triggers", "headings or TOC entries that are only titles",
+			"近2周有外伤史", "重复一次", "沙丁胺醇或特布他林", "180/110", "符合任何1项"},
+		"prompt-enrich-metrics-v27.md": {"### Triggers Are Rows", "`70+年龄×2`", "`触发`", "never drop a trigger as `condition_of:<id>`",
+			"高龄患者（年龄≥75岁）", "重复一次", "沙丁胺醇或特布他林", "Never `metric_value` \"180/110\"", "符合任何1项"},
+	} {
+		b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(b), want) {
+				t.Errorf("%s missing %q", file, want)
+			}
 		}
 	}
 }

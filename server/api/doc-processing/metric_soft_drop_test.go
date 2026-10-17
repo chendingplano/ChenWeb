@@ -169,3 +169,42 @@ func TestExcludeRowsWithoutValue(t *testing.T) {
 		t.Fatalf("dropped = %v, want %v", droppedNames, want)
 	}
 }
+
+func TestEnrichMetricCandidatesKeepsDroppedCandidates(t *testing.T) {
+	// The enrich pass's dropped_candidates are set aside with their candidate text, so a wrong
+	// drop (record 364: 抽搐超过15min dropped as condition_of) is visible in kb.metrics_dropped.
+	ext := &fakeJSONExtractor{outs: []map[string]any{{
+		"metrics": []any{map[string]any{"candidate_id": "17_11", "metric_name": "苯巴比妥剂量", "metric_value": "15~20",
+			"unit": "mg/kg", "value_range_type": "range", "subject": "苯巴比妥", "source_line_spans": []any{"2"}}},
+		"dropped_candidates": []any{map[string]any{"candidate_id": "17_10", "reason": "not_a_metric:condition_of:17_11"}},
+	}}}
+	p := makeTestMetricsProcessor(ext, 1)
+	p.MetricEnrichGroupSize = 12
+	cands := []metricCandidate{
+		{CandidateID: "17_10", ChunkIndex: 7, MetricNameHint: "抽搐未缓解时间", SubjectHint: "儿童抽搐", ValueHint: ">15", UnitHint: "min",
+			SupportingMentions: []map[string]any{{"evidence_quote": "抽搐超过 15min 未缓解，予苯巴比妥", "source_line_spans": []any{"2"}}}},
+		{CandidateID: "17_11", ChunkIndex: 7, MetricNameHint: "苯巴比妥剂量"},
+	}
+	_, _, dropped, err := p.enrichMetricCandidates(context.Background(), 364, cands,
+		metricsBlocksToChunks([]Block{makeMetricsBlock(7, 2)}), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *droppedMetricRow
+	for i := range dropped {
+		if dropped[i].Stage == metricDropStageEnrich {
+			got = &dropped[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("no enrich-stage drop in %v", dropped)
+	}
+	if got.Reason != "not_a_metric:condition_of:17_11" || got.Row["candidate_id"] != "17_10" ||
+		got.Row["metric_name"] != "抽搐未缓解时间" || got.Row["metric_value"] != ">15" || got.Row["unit"] != "min" ||
+		got.Row["threshold_or_target"] != "抽搐超过 15min 未缓解，予苯巴比妥" {
+		t.Fatalf("enrich drop row = %#v reason=%q", got.Row, got.Reason)
+	}
+	if spans := toStringSlice(got.Row["source_line_spans"]); len(spans) != 1 || spans[0] != "2" {
+		t.Fatalf("source_line_spans = %v", got.Row["source_line_spans"])
+	}
+}

@@ -90,13 +90,16 @@ func TestMultiValueMetricRows(t *testing.T) {
 		{"metric_name": "有效量程", "metric_value": "600~1600"},
 		{"metric_name": "误差比例", "metric_value": "1/10"},
 		{"metric_name": "量程", "metric_value": "0次/min~300次/min"},
+		{"metric_name": "降压目标血压", "metric_value": "180/110", "unit": "mmHg"},
+		{"metric_name": "允许误差比例", "metric_value": "1/10", "unit": "倍"},
+		{"metric_name": "管螺纹尺寸", "metric_value": "3/4", "unit": "in"},
 	}
 	got := multiValueMetricRows(rows)
 	var names []string
 	for _, r := range got {
 		names = append(names, r["metric_name"].(string))
 	}
-	if !slices.Equal(names, []string{"台阶高度", "允许误差", "主尺检验点"}) {
+	if !slices.Equal(names, []string{"台阶高度", "允许误差", "主尺检验点", "降压目标血压"}) {
 		t.Fatalf("multi-value rows = %v", names)
 	}
 }
@@ -333,5 +336,26 @@ func TestInheritServedQuantityConditions(t *testing.T) {
 	e := row("台阶高度允许误差", "±5", "", "")
 	if n := inheritServedQuantityConditions([]map[string]any{a, b, e}); n != 0 || e["condition"] != "" {
 		t.Errorf("ambiguous served quantity changed the row: n=%d condition=%q", n, e["condition"])
+	}
+}
+
+func TestMetricRowHoldsSeveralValuesPairedNotation(t *testing.T) {
+	for _, c := range []struct {
+		value, unit string
+		want        bool
+	}{
+		{"180/110", "mmHg", true}, // systolic/diastolic: two quantities
+		{"≥180/110", "mmHg", true},
+		{"140/90", "mm Hg", true},
+		{"1/10", "倍", false},    // a limit relative to another limit
+		{"1/10", "", false},     // a bare fraction
+		{"3/4", "in", false},    // a fraction of a unit
+		{"30/70", "%", false},   // a split of a whole
+		{"2/1", "ratio", false}, // a ratio
+	} {
+		m := map[string]any{"metric_value": c.value, "unit": c.unit}
+		if got := metricRowHoldsSeveralValues(m); got != c.want {
+			t.Errorf("metricRowHoldsSeveralValues(%q %q)=%v, want %v", c.value, c.unit, got, c.want)
+		}
 	}
 }

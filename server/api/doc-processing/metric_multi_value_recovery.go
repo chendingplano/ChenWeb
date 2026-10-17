@@ -18,7 +18,7 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 ) []map[string]any {
 	flagged := make(map[string]bool)
 	for _, m := range metrics {
-		if metricValueHoldsSeveralValues(asString(m["metric_value"])) {
+		if metricRowHoldsSeveralValues(m) {
 			flagged[asString(m["candidate_id"])] = true
 		}
 	}
@@ -45,7 +45,7 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 			if allowed[id] {
 				evidence[id] = append(evidence[id], toStringSlice(m["source_line_spans"])...)
 			}
-			if allowed[asString(m["candidate_id"])] && metricValueHoldsSeveralValues(asString(m["metric_value"])) {
+			if allowed[asString(m["candidate_id"])] && metricRowHoldsSeveralValues(m) {
 				combined = append(combined, m)
 			}
 		}
@@ -74,7 +74,7 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 			}
 			spans := toStringSlice(m["source_line_spans"])
 			if strings.TrimSpace(asString(m["metric_name"])) == "" || strings.TrimSpace(asString(m["metric_value"])) == "" ||
-				!metricSplitEvidenceWithin(spans, evidence[id]) || metricValueHoldsSeveralValues(asString(m["metric_value"])) || metricDropReasonTag(m) != "" {
+				!metricSplitEvidenceWithin(spans, evidence[id]) || metricRowHoldsSeveralValues(m) || metricDropReasonTag(m) != "" {
 				invalid[id] = true
 			}
 			byCandidate[id] = append(byCandidate[id], m)
@@ -94,7 +94,7 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 	var out []map[string]any
 	for _, m := range metrics {
 		id := asString(m["candidate_id"])
-		if rows, ok := replacements[id]; ok && metricValueHoldsSeveralValues(asString(m["metric_value"])) {
+		if rows, ok := replacements[id]; ok && metricRowHoldsSeveralValues(m) {
 			out = append(out, rows...)
 			// Insert replacement rows once even when the candidate had multiple
 			// combined rows. Non-combined siblings remain for final deduplication.

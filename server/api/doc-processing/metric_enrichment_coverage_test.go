@@ -126,3 +126,39 @@ func TestEnrichMetricCandidatesReportsUnresolvedCoverageWithoutDiscardingRows(t 
 		t.Fatalf("metrics=%v err=%v calls=%d, want bounded recovery and explicit missing ID", metrics, err, ext.structuredCalledCount)
 	}
 }
+
+// Record 364 run 233: one enrich batch returned every row without metric_value although each
+// row's range type said it had a number, and all nine true metrics were set aside as no_value.
+func TestEnrichMetricCandidatesRetriesRowsThatLostTheirValue(t *testing.T) {
+	row := func(value any) map[string]any {
+		m := map[string]any{"candidate_id": "12_4", "metric_name": "腺苷剂量", "unit": "mg", "value_range_type": "exact",
+			"subject": "腺苷", "threshold_or_target": "6mg静脉快速推注", "source_line_spans": []any{"2"}}
+		if value != nil {
+			m["metric_value"] = value
+		}
+		return m
+	}
+	ext := &fakeJSONExtractor{outs: []map[string]any{
+		{"metrics": []any{row(nil)}},
+		{"metrics": []any{row("6")}},
+	}}
+	p := makeTestMetricsProcessor(ext, 1)
+	p.MetricEnrichGroupSize = 12
+	metrics, _, dropped, err := p.enrichMetricCandidates(context.Background(), 364,
+		[]metricCandidate{{CandidateID: "12_4", ChunkIndex: 7}}, metricsBlocksToChunks([]Block{makeMetricsBlock(7, 2)}), "")
+	if err != nil || ext.structuredCalledCount != 2 || len(metrics) != 1 || asString(metrics[0]["metric_value"]) != "6" {
+		t.Fatalf("metrics=%v dropped=%v err=%v calls=%d, want the value recovered by one retry", metrics, dropped, err, ext.structuredCalledCount)
+	}
+}
+
+func TestEnrichMetricCandidatesKeepsValuelessRowWhenRetryFails(t *testing.T) {
+	row := map[string]any{"candidate_id": "12_4", "metric_name": "腺苷剂量", "value_range_type": "exact", "source_line_spans": []any{"2"}}
+	ext := &fakeJSONExtractor{outs: []map[string]any{{"metrics": []any{row}}, {"metrics": []any{row}}}}
+	p := makeTestMetricsProcessor(ext, 1)
+	p.MetricEnrichGroupSize = 12
+	_, _, dropped, err := p.enrichMetricCandidates(context.Background(), 364,
+		[]metricCandidate{{CandidateID: "12_4", ChunkIndex: 7}}, metricsBlocksToChunks([]Block{makeMetricsBlock(7, 2)}), "")
+	if err != nil || len(dropped) != 1 || dropped[0].Stage != metricDropStageNoValue {
+		t.Fatalf("dropped=%v err=%v, want the row set aside as no_value, not a coverage error", dropped, err)
+	}
+}
