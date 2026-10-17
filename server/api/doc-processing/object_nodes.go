@@ -259,7 +259,7 @@ type ambiguousResolveResult struct {
 }
 
 // reconcileArtifactObjectsWithLLM reconciles artifact objects against
-// kb.object_nodes in three phases:
+// kb.object_nodes in four phases:
 //
 //  1. Sequential reconcile — ReconcileOne creates nodes on the no-match path, so
 //     it must stay ordered (parallel runs would race same-named objects into
@@ -268,8 +268,9 @@ type ambiguousResolveResult struct {
 //     call with no DB writes; this is the latency-dominant step, so it runs with
 //     bounded concurrency.
 //  3. Sequential apply + logging — decision application performs DB merges/updates
-//     (kept ordered), emits per-object warnings, and records every LLM outcome
+//     (kept ordered) and records every LLM outcome
 //     (resolved, unresolved, failed) to kb.doc_proc_logs via logSink.
+//  4. Refresh unresolved candidates after those writes, then emit final warnings.
 func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger, llmResolver AmbiguousObjectLLMResolver, minConfidence float64, logSink objectReconcileLogSink) ([]ArtifactObject, error) {
 	out := make([]ArtifactObject, len(objects))
 	items := make([]reconcileObjectItem, len(objects))
@@ -332,7 +333,8 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 		resolvedByIdx[idx] = resolved[k]
 	}
 
-	// Phase 3 (sequential): apply decisions, warn, and log every LLM outcome.
+	// Phase 3 (sequential): apply decisions and log every LLM outcome.
+	nodesChanged := false
 	for i := range items {
 		it := items[i]
 		obj := it.obj
@@ -368,6 +370,9 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 						Decision:         rr.decision, Err: applyErr, MSUsed: rr.ms,
 					})
 				} else if applied {
+					if applyStore != nil && (len(rr.decision.NodeUpdates) > 0 || len(rr.decision.Merges) > 0) {
+						nodesChanged = true
+					}
 					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 						Status: reconcileOutcomeResolved, Object: resolvedObj, Candidates: it.candidates,
 						CandidateDisplay: objectReconcileCandidateDisplay(it.candidates),
@@ -383,6 +388,32 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 						Decision:         rr.decision, MSUsed: rr.ms,
 					})
 				}
+			}
+		}
+	}
+
+	// A later decision can merge an earlier object's tied candidates. The DB
+	// merge cannot repoint these objects yet: the caller persists this snapshot
+	// only after we return. Recheck against the final node state before saving.
+	for i, it := range items {
+		if out[i].ReconcileStatus != "" {
+			continue // already resolved by the LLM
+		}
+		obj := it.obj
+		if nodesChanged && it.result.Status == ObjectReconcileAmbiguous {
+			candidates, err := fetchSortedCandidates(ctx, reconciler, obj)
+			if err != nil {
+				return nil, err
+			}
+			it.candidates = candidates
+			if len(candidates) > 0 && candidates[0].Score >= 0.95 && (len(candidates) == 1 || candidates[0].Score > candidates[1].Score) {
+				best := candidates[0]
+				it.result = ObjectReconcileResult{ObjectID: best.Node.ObjectID, Status: ObjectReconcileMatched, Confidence: best.Score, Method: best.Method}
+				logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
+					Status: reconcileOutcomeResolved, Object: obj, Candidates: candidates,
+					CandidateDisplay: objectReconcileCandidateDisplay(candidates), ResolvedID: best.Node.ObjectID,
+					Decision: AmbiguousObjectLLMDecision{ResolutionConfidence: best.Score},
+				})
 			}
 		}
 

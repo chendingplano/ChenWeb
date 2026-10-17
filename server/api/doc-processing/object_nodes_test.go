@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"regexp"
+	"sync"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -245,6 +247,73 @@ func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
 type fakeAmbiguousObjectLLMResolver struct {
 	decision AmbiguousObjectLLMDecision
 	err      error
+}
+
+// A later artifact can merge the candidates after an earlier artifact's LLM
+// decision fell below the confidence threshold.
+func TestReconcileArtifactObjectsRefreshesAmbiguityAfterBatchMerge(t *testing.T) {
+	for _, failedFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failed_first_%t", failedFirst), func(t *testing.T) {
+			store := &batchMergeObjectStore{stubObjectNodeStore: stubObjectNodeStore{candidates: []ObjectNodeCandidate{
+				{Node: ObjectNode{ObjectID: "old", CanonicalName: "血压"}, Score: 1, Method: "exact_name"},
+				{Node: ObjectNode{ObjectID: "survivor", CanonicalName: "血压"}, Score: 1, Method: "exact_name"},
+			}}}
+			objects := []ArtifactObject{
+				{ArtifactID: "364_mtc_83", ObjectName: "血压"},
+				{ArtifactID: "364_mtc_87", ObjectName: "血压"},
+			}
+			logger := &batchMergeLogger{}
+			got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: store}, logger,
+				batchMergeObjectResolver{failedFirst: failedFirst}, 0.85, objectReconcileLogSink{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got[0].ObjectID != "survivor" || got[0].ReconcileStatus != ObjectReconcileMatched {
+				t.Fatalf("first object = %+v, want matched survivor after later merge", got[0])
+			}
+			for _, warning := range logger.warns {
+				if warning.message == "object reconciliation ambiguous" {
+					t.Fatal("stale ambiguous warning after batch merge")
+				}
+			}
+		})
+	}
+}
+
+type batchMergeObjectStore struct{ stubObjectNodeStore }
+
+// LLM calls log concurrently; fakeLogger alone is not safe for that use.
+type batchMergeLogger struct {
+	fakeLogger
+	mu sync.Mutex
+}
+
+func (l *batchMergeLogger) Info(string, ...any) {}
+
+func (l *batchMergeLogger) Warn(message string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.fakeLogger.Warn(message, args...)
+}
+
+func (s *batchMergeObjectStore) ApplyAmbiguousObjectLLMNodeChanges(_ context.Context, _ ArtifactObject, _ []AmbiguousObjectNodeLLMUpdate, _ []AmbiguousObjectNodeLLMMerge, _ AmbiguousObjectLLMAudit) error {
+	s.candidates = s.candidates[1:]
+	return nil
+}
+
+type batchMergeObjectResolver struct{ failedFirst bool }
+
+func (r batchMergeObjectResolver) ResolveAmbiguousObject(_ context.Context, obj ArtifactObject, _ []ObjectNodeCandidate) (AmbiguousObjectLLMDecision, error) {
+	if obj.ArtifactID == "364_mtc_83" {
+		if r.failedFirst {
+			return AmbiguousObjectLLMDecision{}, fmt.Errorf("model unavailable")
+		}
+		return AmbiguousObjectLLMDecision{ResolutionObjectID: "old", ResolutionConfidence: 0.84}, nil
+	}
+	return AmbiguousObjectLLMDecision{
+		ResolutionObjectID: "survivor", ResolutionConfidence: 0.9,
+		Merges: []AmbiguousObjectNodeLLMMerge{{SurvivorObjectID: "survivor", LoserObjectIDs: []string{"old"}, Confidence: 0.9}},
+	}, nil
 }
 
 func (r fakeAmbiguousObjectLLMResolver) ResolveAmbiguousObject(_ context.Context, _ ArtifactObject, _ []ObjectNodeCandidate) (AmbiguousObjectLLMDecision, error) {
