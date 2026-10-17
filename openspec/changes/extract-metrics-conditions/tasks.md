@@ -77,4 +77,5 @@
 - [x] 11.2 Candidates v22 / enrich v20: apparatus by name only, table column label as condition, `检验项目`, no `取值区段`, clause/list/sibling-subclause apparatus and medium, `适用条件` exemptions; update code defaults, tests and the local mise pins
 - [x] 11.3 `inheritClauseConditions` (design D4a) with tests for list items, sibling clauses, table lines, two methods in one clause, the same apparatus under another label and a qualifier outside the clause lead; replay on run 226 changes 9 rows, all toward gold, none away
 - [x] 11.4 Live quality cases pass with v22/v20 (7 cases); the simulation-method case now expects the apparatus name and rejects capabilities
-- [ ] 11.5 Restart the doc-processor, re-extract record 371 and score against gold `20261016_162743`
+- [x] 11.5 Corrected gold copy `20261017_060405` (6.6.0 / claude-opus-5-5): 24 rows of 5.4.3.3, 6.4.2.3, 6.4.2.6 and Table C.1 made consistent (category as condition, every item qualifier on every row of the item)
+- [ ] 11.6 Restart the doc-processor, re-extract record 371 and score against gold `20261017_060405`
