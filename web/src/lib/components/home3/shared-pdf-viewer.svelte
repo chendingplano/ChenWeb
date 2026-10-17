@@ -165,6 +165,7 @@
 	let floatingOverlayPage = $state<number | null>(null);
 	let floatingOverlayLeft = $state(8);
 	let floatingOverlayTop = $state(8);
+	let floatingOverlayMaxHeight = $state(0);
 	let floatingOverlayWidth = $state(320);
 	let floatingOverlayEl = $state<HTMLDivElement | null>(null);
 	let floatingOverlayManuallyMoved = $state(false);
@@ -431,18 +432,39 @@
 			return;
 		}
 		if (floatingOverlayManuallyMoved) return;
+		const host = pdfCanvasHostEl;
+		if (!host) return;
+		const hostRect = host.getBoundingClientRect();
 		for (const pageNo of pdfRenderedPages) {
 			const overlay = document.getElementById(
 				`${viewerId}-overlay-${pageNo}`
 			) as HTMLDivElement | null;
 			const viewport = pdfViewportByPage.get(pageNo);
 			const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
-			if (!overlay || !viewport || !firstHighlight) continue;
+			const pageShell = overlay?.closest('.pdf-canvas-shell') as HTMLElement | null;
+			if (!overlay || !viewport || !firstHighlight || !pageShell) continue;
 			const maxLeft = Math.max(8, viewport.width - floatingOverlayWidth - 8);
 			floatingOverlayPage = pageNo;
 			floatingOverlayLeft = maxLeft;
-			const cardHeight = floatingOverlayEl?.offsetHeight ?? 0;
-			floatingOverlayTop = firstHighlight.offsetTop - cardHeight - 12;
+			const shellRect = pageShell.getBoundingClientRect();
+			const visibleTop = Math.max(8, hostRect.top + 8 - shellRect.top);
+			const visibleBottom = Math.min(
+				viewport.height - 8,
+				hostRect.bottom - 8 - shellRect.top
+			);
+			floatingOverlayMaxHeight = Math.max(0, visibleBottom - visibleTop);
+			const cardHeight = Math.min(
+				floatingOverlayEl?.offsetHeight ?? 0,
+				floatingOverlayMaxHeight
+			);
+			const highlightTop = firstHighlight.offsetTop;
+			const belowHighlight = highlightTop + firstHighlight.offsetHeight + 12;
+			const aboveHighlight = highlightTop - cardHeight - 12;
+			const preferredTop = aboveHighlight >= visibleTop ? aboveHighlight : belowHighlight;
+			floatingOverlayTop = Math.max(
+				visibleTop,
+				Math.min(preferredTop, visibleBottom - cardHeight)
+			);
 			return;
 		}
 		floatingOverlayPage = null;
@@ -491,22 +513,16 @@
 		const hostRect = host.getBoundingClientRect();
 		const highlightRect = firstHighlight.getBoundingClientRect();
 
-		const margin = Math.min(64, host.clientHeight * 0.12);
-		const visibleTop = hostRect.top + margin;
-		const visibleBottom = hostRect.bottom - margin;
-		let targetScrollTop = host.scrollTop;
-
-		if (highlightRect.height > visibleBottom - visibleTop) {
-			const relativeTop = highlightRect.top - hostRect.top + host.scrollTop;
-			targetScrollTop = relativeTop - host.clientHeight / 2 + highlightRect.height / 2;
-		} else if (highlightRect.top < visibleTop) {
-			targetScrollTop -= visibleTop - highlightRect.top;
-		} else if (highlightRect.bottom > visibleBottom) {
-			targetScrollTop += highlightRect.bottom - visibleBottom;
-		} else {
+		if (
+			highlightRect.height <= host.clientHeight &&
+			highlightRect.top >= hostRect.top &&
+			highlightRect.bottom < hostRect.bottom
+		) {
 			return true;
 		}
 
+		const relativeTop = highlightRect.top - hostRect.top + host.scrollTop;
+		const targetScrollTop = relativeTop - host.clientHeight / 2 + highlightRect.height / 2;
 		host.scrollTo({ top: Math.max(0, targetScrollTop), behavior });
 		return true;
 	}
@@ -791,6 +807,7 @@
 			<div
 				class="pdf-canvas-host"
 				bind:this={pdfCanvasHostEl}
+				onscroll={updateFloatingOverlayAnchor}
 				onpointerdown={onDragPointerDown}
 				onpointermove={onDragPointerMove}
 				onpointerup={onDragPointerUp}
@@ -821,6 +838,7 @@
 											class="pdf-floating-overlay-card"
 											class:dragging={floatingOverlayDrag !== null}
 											bind:this={floatingOverlayEl}
+								style={`box-sizing:border-box;max-height:${floatingOverlayMaxHeight}px;overflow-y:auto;`}
 											onpointerdown={startFloatingOverlayDrag}
 											onpointermove={moveFloatingOverlay}
 											onpointerup={stopFloatingOverlayDrag}
