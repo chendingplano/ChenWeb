@@ -84,3 +84,9 @@
 
 - [x] 12.1 Candidates v23 / enrich v21: a category boundary of the people or things the object is for (age bands) and a counting, naming or unit convention (360° per turn) are `term_definition`, not metrics; a threshold classifying the document's object by a measured property and a value required of a person or sample stay rows. Code defaults, tests and the local mise pins updated
 - [x] 12.2 Live quality case for 371 lines 97–102 and 291 (no 周岁 row, no 360° row, 1 min kept); all 8 cases pass with v23/v21. The isolated case also passes with v22/v20, so it guards regressions; the full-document effect needs 11.6
+
+## 13. Prescribed-value tables versus data sets (2026-10-17)
+
+- [x] 13.1 Root cause of the intermittent Table 3 miss (371, 20 resistor values; runs 221, 223, 227, 228): the v16 data-set bullet ("parameter library … reference data table") makes the candidates pass skip the table. On the production chunk 17 input: v15 6/6, v16–v23 0–1/6, v23 without the bullet 6/6 (but Table E.1 leaks ~35 records)
+- [x] 13.2 Candidates v24 / enrich v22: a data set is a table whose rows are records of individual cases (表 E.1); a table prescribing test, apparatus or reference-standard values per model/grade/setting (表 3) is kept cell by cell with the row as condition. Probe: Table 3 6/6 with 20 cells each, Table E.1 0 candidates 6/6. Defaults, tests and local mise pins updated
+- [x] 13.3 Live quality case "prescribed-value table versus data-set records" (20 Table 3 rows, no Table E.1 row): passes 4/4 with v24/v22, fails 1 of 2 with v23/v21. All 9 live cases pass

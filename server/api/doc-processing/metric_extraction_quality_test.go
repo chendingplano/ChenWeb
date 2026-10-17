@@ -126,6 +126,24 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				{291, "1", "min", "exact", statementKindTestParameter, ""},
 			},
 		},
+		{
+			name: "prescribed-value table versus data-set records",
+			lines: []Line{
+				{LineNo: 227, PageNo: 17, LineType: "paragraph", Content: "6.5.5.3 采用误差不大于1%标准电阻模型测试仪器输出的交流阻抗。试验环境温度(20±5)℃, 标准电阻模型如图1所示, 测试用电阻RA、LA、TR、RL、LL取值见表3。在5 kHz、50 kHz、250 kHz输出频率上分别对每个模型进行测试, 重复测量次数不应少于3次。"},
+				{LineNo: 230, PageNo: 17, LineType: "table-caption", Content: "表 3 标准电阻模型阻值"},
+				{LineNo: 231, PageNo: 17, LineType: "table-caption", Content: "单位为欧"},
+				{LineNo: 233, PageNo: 17, LineType: "table", Content: "<table><tr><td>模型</td><td>RA</td><td>LA</td><td>TR</td><td>RL</td><td>LL</td></tr><tr><td>模型 1</td><td>150</td><td>150</td><td>10</td><td>150</td><td>150</td></tr><tr><td>模型 2</td><td>300</td><td>300</td><td>30</td><td>300</td><td>300</td></tr><tr><td>模型 3</td><td>430</td><td>430</td><td>51</td><td>430</td><td>430</td></tr><tr><td>模型 4</td><td>590</td><td>590</td><td>75</td><td>590</td><td>590</td></tr></table>"},
+				{LineNo: 371, PageNo: 30, LineType: "paragraph", Content: "体脂率模拟测试参数库体脂率模拟测试参数库见表E.1。"},
+				{LineNo: 372, PageNo: 31, LineType: "table-caption", Content: "表 E.1 体指率模拟测试参数库"},
+				{LineNo: 374, PageNo: 31, LineType: "table", Content: "<table><tr><td rowspan=\"3\">序号</td><td colspan=\"31\">输入参数</td><td>输出标准值</td><td></td><td></td><td></td></tr><tr><td rowspan=\"2\">性别</td><td rowspan=\"2\">年龄岁</td><td rowspan=\"2\">身高cm</td><td rowspan=\"2\">体重kg</td><td colspan=\"5\">1 kHz</td><td colspan=\"5\">5 kHz</td><td colspan=\"5\">50 kHz</td><td colspan=\"5\">250 kHz</td><td colspan=\"5\">500 kHz</td><td colspan=\"3\">1 000 kHz</td><td>体脂率/%</td><td></td><td></td></tr><tr><td>左上肢</td><td>右上肢</td><td>躯干</td><td>左下肢</td><td>右下肢</td><td>左上肢</td><td>右上肢</td><td>躯干</td><td>左下肢</td><td>右下肢</td><td>左上肢</td><td>右上肢</td><td>躯干</td><td>左下肢</td><td>右下肢</td><td>左上肢</td><td>右上肢</td><td>躯干</td><td>左下肢</td><td>右下肢</td><td>左上肢</td><td>右上肢</td><td>躯干</td><td>左下肢</td><td>右下肢</td><td>左上肢</td><td>右上肢</td><td>躯干</td><td>左下肢</td><td>右下肢</td><td></td></tr><tr><td>1</td><td>女</td><td>17</td><td>165.0</td><td>48.0</td><td>510.2</td><td>499.7</td><td>26.8</td><td>281.7</td><td>282.1</td><td>503.9</td><td>493.9</td><td>26.0</td><td>271.3</td><td>277.7</td><td>465.0</td><td>455.9</td><td>23.0</td><td>254.1</td><td>251.8</td><td>428.9</td><td>420.2</td><td>20.1</td><td>232.8</td><td>229.8</td><td>416.1</td><td>407.5</td><td>19.0</td><td>228.7</td><td>225.4</td><td>407.0</td><td>399.9</td><td>17.7</td><td>224.6</td><td>221.3</td><td>18.8</td></tr><tr><td>2</td><td>女</td><td>18</td><td>170.0</td><td>51.0</td><td>581.1</td><td>583.4</td><td>35.6</td><td>354.1</td><td>350.0</td><td>575.3</td><td>576.5</td><td>34.7</td><td>348.7</td><td>344.8</td><td>539.7</td><td>535.8</td><td>31.3</td><td>318.7</td><td>317.3</td><td>501.9</td><td>496.6</td><td>28.0</td><td>291.7</td><td>292.3</td><td>487.0</td><td>481.7</td><td>26.6</td><td>287.0</td><td>287.1</td><td>478.8</td><td>474.8</td><td>24.9</td><td>282.6</td><td>282.7</td><td>29.6</td></tr><tr><td>3</td><td>女</td><td>18</td><td>171.0</td><td>58.0</td><td>492.3</td><td>455.8</td><td>31.3</td><td>290.6</td><td>287.2</td><td>483.8</td><td>448.0</td><td>30.3</td><td>285.4</td><td>282.4</td><td>445.9</td><td>409.0</td><td>26.6</td><td>260.5</td><td>257.9</td><td>410.8</td><td>375.3</td><td>23.5</td><td>237.7</td><td>235.3</td><td>397.9</td><td>363.7</td><td>22.3</td><td>233.1</td><td>230.7</td><td>386.6</td><td>358.2</td><td>21.0</td><td>229.0</td><td>226.6</td><td>26.3</td></tr><tr><td>4</td><td>女</td><td>18</td><td>152.0</td><td>58.0</td><td>403.6</td><td>407.0</td><td>25.1</td><td>265.5</td><td>269.3</td><td>398.4</td><td>401.8</td><td>24.3</td><td>260.5</td><td>264.4</td><td>372.6</td><td>375.2</td><td>21.7</td><td>235.4</td><td>238.9</td><td>345.9</td><td>348.7</td><td>19.1</td><td>214.1</td><td>218.3</td><td>336.6</td><td>339.6</td><td>18.0</td><td>209.6</td><td>213.8</td><td>330.8</td><td>335.0</td><td>17.2</td><td>208.9</td><td>209.7</td><td>35.4</td></tr></table>"},
+			},
+			want: []wantMetric{
+				{233, "10", "Ω", "exact", statementKindTestParameter, "模型 1"},
+				{233, "30", "Ω", "exact", statementKindTestParameter, "模型 2"},
+				{233, "51", "Ω", "exact", statementKindTestParameter, "模型 3"},
+				{233, "75", "Ω", "exact", statementKindTestParameter, "模型 4"},
+			},
+		},
 	}
 
 	client, _, err := BuildReviewerLLMClient(os.Getenv("ENRICH_METRICS_MODEL_NAME"))
@@ -203,8 +221,22 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"366"}}) && compactMetricValue(asString(m["metric_value"])) == "25" {
 					t.Error("adjustment trigger incorrectly emitted as a separate metric")
 				}
+				if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"374"}}) {
+					t.Errorf("data-set record (Table E.1) emitted as a metric: %v", m)
+				}
 				if metricRowUnit(m) == "周岁" || (compactMetricValue(asString(m["metric_value"])) == "360" && metricRowUnit(m) == "°") {
 					t.Errorf("definitional number (category boundary or counting convention) emitted as a metric: %v", m)
+				}
+			}
+			if strings.HasPrefix(tc.name, "prescribed-value table") {
+				n := 0
+				for _, m := range r.Metrics {
+					if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"233"}}) && metricRowUnit(m) == "Ω" {
+						n++
+					}
+				}
+				if n != 20 {
+					t.Errorf("Table 3 should give 20 resistor rows (one per cell), got %d", n)
 				}
 			}
 			t.Logf("%d candidates, %d metrics", r.Candidates, len(r.Metrics))
