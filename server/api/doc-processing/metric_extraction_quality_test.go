@@ -112,6 +112,20 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				{366, "15~25", "mm", "range", statementKindRequirementWithCriterion, ""},
 			},
 		},
+		{
+			name: "definitional numbers: population age bands and counting convention",
+			lines: []Line{
+				{LineNo: 97, Content: "4 分类"},
+				{LineNo: 98, Content: "测试器材通常可按下述分类,其分类对应关系见附录 A。"},
+				{LineNo: 100, Content: "b) 按适用人群分为: 幼儿、儿童青少年(学生)、成年人和老年人测试器材。"},
+				{LineNo: 102, Content: "注 1: 3 周岁～6 周岁为幼儿,7 周岁～19 周岁为儿童青少年(学生),20 周岁～59 周岁为成年人,60 周岁～79 周岁为老年人。"},
+				{LineNo: 288, Content: "6.5.21 跳绳测试仪"},
+				{LineNo: 291, Content: "6.5.21.3 采用跳绳绕轴 $360^{\\circ}$ 计一圈的方法计数的模拟装置，在1次 $/ \\mathrm{min} \\sim 400$ 次/min范围内的两端数值及其中间区段的任意2个～3个数值上，进行 $1\\mathrm{min}$ 的模拟试验，每个试验次数不应少于3次。"},
+			},
+			want: []wantMetric{
+				{291, "1", "min", "exact", statementKindTestParameter, ""},
+			},
+		},
 	}
 
 	client, _, err := BuildReviewerLLMClient(os.Getenv("ENRICH_METRICS_MODEL_NAME"))
@@ -188,6 +202,9 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				}
 				if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"366"}}) && compactMetricValue(asString(m["metric_value"])) == "25" {
 					t.Error("adjustment trigger incorrectly emitted as a separate metric")
+				}
+				if metricRowUnit(m) == "周岁" || (compactMetricValue(asString(m["metric_value"])) == "360" && metricRowUnit(m) == "°") {
+					t.Errorf("definitional number (category boundary or counting convention) emitted as a metric: %v", m)
 				}
 			}
 			t.Logf("%d candidates, %d metrics", r.Candidates, len(r.Metrics))

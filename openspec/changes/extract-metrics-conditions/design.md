@@ -85,8 +85,10 @@ The rules are notation-only and work the same in any domain. Anything needing ju
 the prompt.
 
 **D4. New prompt versions, never edits.** Current defaults are
-`prompt-extract-metric-candidates-v22.md`, `prompt-enrich-metrics-v20.md` and
-`prompt-merge-resolve-metrics-v2.md`. The initial condition work used v16/v13; the record-371
+`prompt-extract-metric-candidates-v23.md`, `prompt-enrich-metrics-v21.md` and
+`prompt-merge-resolve-metrics-v2.md`. v23/v21 (2026-10-17) follow benchmark rules 6.7.0: a number
+that only fixes what a word means — a category boundary of the people or things the object is for
+(4 注 1's age bands) or a counting convention ("绕轴360°计一圈") — is dropped as `term_definition`. The initial condition work used v16/v13; the record-371
 scoring follow-up (v18/v15) adds normal-line numeric coverage, candidate population binding, apparatus
 condition inheritance, explicit role classification and centred-tolerance rules. v19/v16 make a
 number that only qualifies another value of its clause (a paired load, an apparatus grade, a

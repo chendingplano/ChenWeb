@@ -79,3 +79,8 @@
 - [x] 11.4 Live quality cases pass with v22/v20 (7 cases); the simulation-method case now expects the apparatus name and rejects capabilities
 - [x] 11.5 Corrected gold copy `20261017_060405` (6.6.0 / claude-opus-5-5): 24 rows of 5.4.3.3, 6.4.2.3, 6.4.2.6 and Table C.1 made consistent (category as condition, every item qualifier on every row of the item)
 - [ ] 11.6 Restart the doc-processor, re-extract record 371 and score against gold `20261017_060405`
+
+## 12. Definitional numbers (benchmark rules 6.7.0, 2026-10-17)
+
+- [x] 12.1 Candidates v23 / enrich v21: a category boundary of the people or things the object is for (age bands) and a counting, naming or unit convention (360° per turn) are `term_definition`, not metrics; a threshold classifying the document's object by a measured property and a value required of a person or sample stay rows. Code defaults, tests and the local mise pins updated
+- [x] 12.2 Live quality case for 371 lines 97–102 and 291 (no 周岁 row, no 360° row, 1 min kept); all 8 cases pass with v23/v21. The isolated case also passes with v22/v20, so it guards regressions; the full-document effect needs 11.6
