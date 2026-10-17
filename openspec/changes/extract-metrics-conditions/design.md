@@ -85,8 +85,9 @@ The rules are notation-only and work the same in any domain. Anything needing ju
 the prompt.
 
 **D4. New prompt versions, never edits.** Current defaults are
-`prompt-extract-metric-candidates-v24.md`, `prompt-enrich-metrics-v22.md` and
-`prompt-merge-resolve-metrics-v2.md`. v24/v22 (2026-10-17) define a data set by rows that are
+`prompt-extract-metric-candidates-v25.md`, `prompt-enrich-metrics-v23.md` and
+`prompt-merge-resolve-metrics-v2.md`. v25/v23 (2026-10-17) store a size written as a product
+(250 mm×200 mm) as one row with value `250×200`. v24/v22 (2026-10-17) define a data set by rows that are
 records of individual cases and keep a table of prescribed test, apparatus or reference-standard
 values cell by cell (371 表 3, skipped by most v16–v23 runs). v23/v21 (2026-10-17) follow benchmark rules 6.7.0: a number
 that only fixes what a word means — a category boundary of the people or things the object is for

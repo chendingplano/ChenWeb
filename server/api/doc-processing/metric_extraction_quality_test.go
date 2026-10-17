@@ -144,6 +144,14 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				{233, "75", "Ω", "exact", statementKindTestParameter, "模型 4"},
 			},
 		},
+		{
+			name: "size written as a product is one metric",
+			lines: []Line{
+				{LineNo: 191, PageNo: 15, LineType: "paragraph", Content: "6.4.2.3 直接承载人体载荷或承受拉压载荷的测试器材(如:身高、体重、握力、背力、台阶试验等)的超负载能力试验,按下列规定进行。"},
+				{LineNo: 192, PageNo: 15, LineType: "paragraph", Content: "a) 对承受人体站姿载荷的器材,应在人体站立的中心位置  $250 \\, mm \\times 200 \\, mm$  的面上施加按 5.4.3.3 规定的单一垂直静载荷,并保持 1 min;对于承载多人使用的器材受力构件(如:台阶试验中适用于多人踩踏的踏台等),则应按照 GB 19272—2011 中 6.4.4 和该条款的负载规定,实施 A 法(分布载荷法)或者 B 法(集中载荷法)的多人承载能力试验,并保持 1 min。"},
+				{LineNo: 119, PageNo: 12, LineType: "table", Content: "<table><tr><td>测试器材</td><td>适用人群</td><td>有效量程或仪器规格要求</td><td>分度值</td><td>允许误差</td></tr><tr><td rowspan=\"2\">15 m 绕障碍跑测试仪</td><td rowspan=\"2\">幼儿</td><td>0 s~999.9 s</td><td>0.1 s</td><td>±1.5%</td></tr><tr><td>障碍物为锥桶形状,塑料或橡胶材质,底座尺寸为长300 mm×宽 300 mm 的方形或直径为 300 mm 的圆形,锥桶高度为 550 mm</td><td>—</td><td>±5 mm</td></tr></table>"},
+			},
+		},
 	}
 
 	client, _, err := BuildReviewerLLMClient(os.Getenv("ENRICH_METRICS_MODEL_NAME"))
@@ -226,6 +234,26 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				}
 				if metricRowUnit(m) == "周岁" || (compactMetricValue(asString(m["metric_value"])) == "360" && metricRowUnit(m) == "°") {
 					t.Errorf("definitional number (category boundary or counting convention) emitted as a metric: %v", m)
+				}
+			}
+			if strings.HasPrefix(tc.name, "size written as a product") {
+				sizes := map[string]int{}
+				for _, m := range r.Metrics {
+					v := strings.NewReplacer("x", "×", "X", "×", "*", "×").Replace(compactMetricValue(asString(m["metric_value"])))
+					for _, line := range []string{"192", "119"} {
+						if !metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{line}}) || metricRowUnit(m) != "mm" {
+							continue
+						}
+						if v == "250×200" || v == "300×300" {
+							sizes[line+"|"+v]++
+						}
+						if v == "250" || v == "200" || (line == "119" && v == "300" && !strings.Contains(asString(m["metric_name"]), "直径")) {
+							t.Errorf("product size split into a single dimension: %v", m)
+						}
+					}
+				}
+				if sizes["192|250×200"] != 1 || sizes["119|300×300"] != 1 {
+					t.Errorf("want one 250×200 mm row on 192 and one 300×300 mm row on 119, got %v", sizes)
 				}
 			}
 			if strings.HasPrefix(tc.name, "prescribed-value table") {
