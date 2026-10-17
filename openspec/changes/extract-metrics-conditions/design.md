@@ -85,7 +85,7 @@ The rules are notation-only and work the same in any domain. Anything needing ju
 the prompt.
 
 **D4. New prompt versions, never edits.** Current defaults are
-`prompt-extract-metric-candidates-v21.md`, `prompt-enrich-metrics-v19.md` and
+`prompt-extract-metric-candidates-v22.md`, `prompt-enrich-metrics-v20.md` and
 `prompt-merge-resolve-metrics-v2.md`. The initial condition work used v16/v13; the record-371
 scoring follow-up (v18/v15) adds normal-line numeric coverage, candidate population binding, apparatus
 condition inheritance, explicit role classification and centred-tolerance rules. v19/v16 make a
@@ -103,6 +103,21 @@ the condition of each other; only the plan name and the inspection level stay in
 "取3处" is a row. Older files stay so old runs can be reproduced.
 Enrich v19 separates percentage check-point positions from intermediate-point counts and defines
 the corrective enrichment pass, addressing run 223's two combined rows on lines 286 and 287.
+Candidates v22 / enrich v20 (2026-10-17) adopt the condition conventions of gold run
+`20261016_162743` (rules 6.6.0), against which run 226 scored 53.7% on conditions: an apparatus
+qualifier is the apparatus's name only (no capabilities, accuracy, cited standard or parentheses),
+a table cell's column label is a condition (`模型：模型 1；电阻位置：RA`, name `电阻阻值`), the part a
+clause checks is `检验项目：…`, no `取值区段` qualifier, and clause-wide apparatus, medium and
+applicability limits (exemptions, "另有规定的除外") on every row they govern.
+
+**D4a. Clause-wide qualifiers are inherited in code.** `inheritClauseConditions`
+(`metric_value_notation.go`) runs before final dedupe. It groups non-table rows by the nearest
+numbered line above their source lines and copies a `试验装置` / `试验方法` / `试验介质` qualifier to
+the clause's rows that lack that label, only when the clause's rows agree on one value, the value
+appears in the clause's lead (its numbered line, or the line after a numbered heading), and the row
+has no qualifier already containing it. The lead requirement keeps a qualifier written in one list
+item (371 5.4.3) from spreading to the clause's other items; a medium stated only in a list item
+(6.5.7 e) 试验介质为空气) is left to the prompt.
 
 **D5. `dataset_record` is a drop reason** like `procedure_count`. It goes into
 `metricDropReasonTags`, so a row the model keeps but tags this way is set aside (stage `llm_tag`)

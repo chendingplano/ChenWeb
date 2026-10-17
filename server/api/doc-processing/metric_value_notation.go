@@ -76,6 +76,166 @@ func dropConditionPropertyRepeats(metrics []map[string]any) {
 	}
 }
 
+// metricClauseNumberRe matches the clause number that starts a numbered clause or heading line:
+// "6.5.7 肺活量测试仪(计)", "6.5.4.2 对于…", "B.2.3 横梁弹性检验…".
+var metricClauseNumberRe = regexp.MustCompile(`^(?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+)(?:\s|$)`)
+
+// metricInheritedConditionLabels are the clause-wide qualifiers inheritClauseConditions copies.
+var metricInheritedConditionLabels = []string{"试验装置", "试验方法", "试验介质"}
+
+// inheritClauseConditions copies a clause's apparatus, method and medium qualifiers to the rows of
+// the same clause that lack them. A clause names its apparatus once ("应采用…气体流量标准装置按下列条件进行
+// 检验", then a) 环境温度 … ), and the model often writes it only on the rows of the line that names it,
+// or only in some of the clause's enrich batches (371, gold 20261016_162743). A row's clause is the
+// nearest numbered line at or above its first source line; rows from table lines are left alone,
+// because one table line holds rows with different methods. A label is copied only when the
+// clause's rows agree on one value for it, so two methods in one clause stay as the model wrote them.
+// The value must also appear in the clause's lead (its numbered line, or the line after a numbered
+// heading): a qualifier stated for the whole clause is stated there, while one written only in a
+// later list item belongs to that item (371 5.4.3 lists several kinds of equipment, each with its
+// own load and method). It returns the number of rows changed.
+func inheritClauseConditions(metrics []map[string]any, chunks []Chunk) int {
+	lines := map[int]Line{}
+	for _, c := range chunks {
+		for _, ml := range c.Lines {
+			lines[ml.Line.LineNo] = ml.Line
+		}
+	}
+	nums := make([]int, 0, len(lines))
+	for n := range lines {
+		nums = append(nums, n)
+	}
+	slices.Sort(nums)
+	// A clause's lead is its numbered line, plus the next line when the numbered line is a heading
+	// ("6.5.7 肺活量测试仪(计)" then "应采用…气体流量标准装置按下列条件进行检验").
+	clauseOf, lead, current, headingOpen := make(map[int]string, len(nums)), map[string]string{}, "", false
+	for _, n := range nums {
+		l := lines[n]
+		if l.LineType != "table" {
+			if num := metricClauseNumberRe.FindString(strings.TrimSpace(l.Content)); num != "" {
+				current = strings.TrimSpace(num)
+				lead[current] = metricConditionCompact(l.Content)
+				headingOpen = strings.HasPrefix(l.LineType, "heading")
+			} else if headingOpen && current != "" {
+				lead[current] += metricConditionCompact(l.Content)
+				headingOpen = false
+			}
+		}
+		clauseOf[n] = current
+	}
+
+	groups := map[string][]int{}
+	for i, m := range metrics {
+		if key := metricRowClause(m, lines, clauseOf); key != "" {
+			groups[key] = append(groups[key], i)
+		}
+	}
+	changed := map[int]bool{}
+	for clause, idx := range groups {
+		if len(idx) < 2 {
+			continue
+		}
+		for _, label := range metricInheritedConditionLabels {
+			var part, partEn string
+			values := map[string]bool{}
+			for _, i := range idx {
+				if q, en, ok := metricConditionPart(metrics[i], label); ok {
+					values[metricConditionCompact(q)] = true
+					part, partEn = q, en
+				}
+			}
+			value := metricConditionCompact(strings.TrimPrefix(part, metricConditionLabelRe.FindString(part)))
+			if len(values) != 1 || value == "" || !strings.Contains(lead[clause], value) {
+				continue
+			}
+			for _, i := range idx {
+				if _, _, ok := metricConditionPart(metrics[i], label); ok || metricConditionOverlaps(metrics[i], part) {
+					continue
+				}
+				m := metrics[i]
+				cond := strings.TrimSpace(asString(m["condition"]))
+				condEn := strings.TrimSpace(asString(m["condition_en"]))
+				aligned := metricConditionCount(cond, "；") == metricConditionCount(condEn, ";")
+				m["condition"] = strings.TrimPrefix(cond+"；"+part, "；")
+				if partEn != "" && aligned {
+					m["condition_en"] = strings.TrimPrefix(condEn+"; "+partEn, "; ")
+				}
+				changed[i] = true
+			}
+		}
+	}
+	return len(changed)
+}
+
+// metricRowClause returns the clause of a row's source lines, or "" when a line is a table line,
+// unknown, or the lines belong to different clauses.
+func metricRowClause(m map[string]any, lines map[int]Line, clauseOf map[int]string) string {
+	clause := ""
+	for _, span := range toStringSlice(m["source_line_spans"]) {
+		start, end := parseLineSpanRange(span)
+		if start == 0 {
+			return ""
+		}
+		for n := start; n <= end; n++ {
+			l, ok := lines[n]
+			if !ok || l.LineType == "table" || clauseOf[n] == "" {
+				return ""
+			}
+			if clause != "" && clause != clauseOf[n] {
+				return ""
+			}
+			clause = clauseOf[n]
+		}
+	}
+	return clause
+}
+
+// metricConditionPart returns the row's qualifier with the given label and, when condition_en
+// has the same number of qualifiers, its English counterpart.
+func metricConditionPart(m map[string]any, label string) (string, string, bool) {
+	cond := strings.TrimSpace(asString(m["condition"]))
+	if cond == "" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.ReplaceAll(cond, ";", "；"), "；")
+	enParts := strings.Split(asString(m["condition_en"]), ";")
+	for i, q := range parts {
+		q = strings.TrimSpace(q)
+		l := metricConditionLabelRe.FindString(q)
+		if strings.TrimRight(width.Fold.String(l), ":") != label || strings.TrimSpace(strings.TrimPrefix(q, l)) == "" {
+			continue
+		}
+		if len(enParts) == len(parts) {
+			return q, strings.TrimSpace(enParts[i]), true
+		}
+		return q, "", true
+	}
+	return "", "", false
+}
+
+// metricConditionOverlaps reports whether the row already has a qualifier whose value contains, or
+// is contained in, the value of part: the same apparatus under another label (试验装置：脉冲信号发生器 vs
+// 试验方法：脉冲信号发生器法).
+func metricConditionOverlaps(m map[string]any, part string) bool {
+	v := metricConditionCompact(strings.TrimPrefix(part, metricConditionLabelRe.FindString(part)))
+	if v == "" {
+		return false
+	}
+	for _, q := range strings.Split(strings.ReplaceAll(asString(m["condition"]), ";", "；"), "；") {
+		q = strings.TrimSpace(q)
+		w := metricConditionCompact(strings.TrimPrefix(q, metricConditionLabelRe.FindString(q)))
+		if w != "" && (strings.Contains(w, v) || strings.Contains(v, w)) {
+			return true
+		}
+	}
+	return false
+}
+
+// metricConditionCount counts the non-empty qualifiers of a condition string.
+func metricConditionCount(s, sep string) int {
+	return len(compactNonEmptyStrings(strings.Split(strings.ReplaceAll(s, ";", sep), sep)))
+}
+
 // metricConditionApparatusLabel reports whether a qualifier label names a test apparatus or method.
 func metricConditionApparatusLabel(label string) bool {
 	l := strings.ToLower(width.Fold.String(label))

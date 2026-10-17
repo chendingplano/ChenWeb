@@ -208,3 +208,95 @@ func TestDropConditionPropertyRepeats(t *testing.T) {
 		})
 	}
 }
+
+func clauseLines(lines ...Line) []Chunk {
+	ml := make([]MarkedLine, 0, len(lines))
+	for _, l := range lines {
+		ml = append(ml, MarkedLine{Line: l})
+	}
+	return []Chunk{{SeqNo: 1, Lines: ml}}
+}
+
+func clauseRow(name, cond, condEn string, spans ...string) map[string]any {
+	return map[string]any{"metric_name": name, "condition": cond, "condition_en": condEn, "source_line_spans": spans}
+}
+
+func TestInheritClauseConditions(t *testing.T) {
+	chunks := clauseLines(
+		Line{LineNo: 238, LineType: "heading-2", Content: "6.5.7 肺活量测试仪(计)"},
+		Line{LineNo: 239, LineType: "paragraph", Content: "应采用精确度为 0.5% 的气体流量标准装置按下列条件进行检验。"},
+		Line{LineNo: 240, LineType: "paragraph", Content: "a) 试验环境温度 (20±5)℃。"},
+		Line{LineNo: 243, LineType: "paragraph", Content: "e）试验介质为空气。"},
+		Line{LineNo: 244, LineType: "paragraph", Content: "f) 气体流量标准装置分别在 200 mL/s 的流量点上进行测量"},
+		Line{LineNo: 290, LineType: "paragraph", Content: "6.5.13.1 采用标准测力计…加载装置宽度为80 mm"},
+		Line{LineNo: 291, LineType: "paragraph", Content: "6.5.13.2 采用标准砝码…加载装置宽度为80 mm"},
+		Line{LineNo: 292, LineType: "paragraph", Content: "重复测量3次"},
+		Line{LineNo: 360, LineType: "table", Content: "<table>…</table>"},
+		Line{LineNo: 400, LineType: "paragraph", Content: "6.5.30.1 采用A装置或B装置检验"},
+	)
+	rows := []map[string]any{
+		clauseRow("气体流量标准装置精确度", "试验装置：气体流量标准装置；试验介质：空气", "Apparatus: gas flow standard; Medium: air", "239"),
+		clauseRow("环境温度", "", "", "240"),
+		clauseRow("通气量", "流量点：200 mL/s", "Flow point: 200 mL/s", "244"),
+		clauseRow("加载装置宽度", "试验装置：标准测力计", "", "290"),
+		clauseRow("加载装置宽度", "试验装置：标准砝码", "", "291"),
+		clauseRow("每个数值测量次数", "", "", "292"),
+		clauseRow("质量", "试验装置：分度值为1 g的衡器", "", "360"),
+		clauseRow("直径", "", "", "360"),
+		clauseRow("x", "试验装置：A装置", "", "400"),
+		clauseRow("y", "试验装置：B装置", "", "400"),
+		clauseRow("z", "", "", "400"),
+	}
+	if n := inheritClauseConditions(rows, chunks); n != 3 {
+		t.Fatalf("rows changed = %d, want 3", n)
+	}
+	want := []string{
+		"试验装置：气体流量标准装置；试验介质：空气",
+		"试验装置：气体流量标准装置", // the medium is stated in item e), not in the clause's lead
+		"流量点：200 mL/s；试验装置：气体流量标准装置",
+		"试验装置：标准测力计",
+		"试验装置：标准砝码",
+		"试验装置：标准砝码", // 292 has no number of its own, so it belongs to 6.5.13.2
+		"试验装置：分度值为1 g的衡器",
+		"",                         // table lines are left alone
+		"试验装置：A装置", "试验装置：B装置", "", // two apparatus in one clause: nothing copied
+	}
+	for i, w := range want {
+		if got := rows[i]["condition"]; got != w {
+			t.Errorf("row %d condition = %q, want %q", i, got, w)
+		}
+	}
+	if got := rows[2]["condition_en"]; got != "Flow point: 200 mL/s; Apparatus: gas flow standard" {
+		t.Errorf("row 2 condition_en = %q", got)
+	}
+	if got := rows[1]["condition_en"]; got != "Apparatus: gas flow standard" {
+		t.Errorf("row 1 condition_en = %q", got)
+	}
+}
+
+func TestInheritClauseConditionsSkipsSameApparatusUnderOtherLabel(t *testing.T) {
+	chunks := clauseLines(Line{LineNo: 260, LineType: "paragraph", Content: "6.5.6.1 用脉冲信号发生器对任意3个值分别测量3次"})
+	rows := []map[string]any{
+		clauseRow("测量数值数量", "试验装置：脉冲信号发生器", "", "260"),
+		clauseRow("每个数值测量次数", "试验方法：脉冲信号发生器法", "", "260"),
+	}
+	if n := inheritClauseConditions(rows, chunks); n != 0 {
+		t.Fatalf("rows changed = %d, want 0: %v", n, rows)
+	}
+}
+
+func TestInheritClauseConditionsNeedsTheClauseLead(t *testing.T) {
+	// 371 5.4.3: one list item names its own method; the other items keep theirs.
+	chunks := clauseLines(
+		Line{LineNo: 100, LineType: "paragraph", Content: "5.4.3.2 受力构件应按下列规定进行静载荷试验："},
+		Line{LineNo: 101, LineType: "paragraph", Content: "a) 对承受人体站姿载荷的器材，施加载荷并保持 1 min；"},
+		Line{LineNo: 102, LineType: "paragraph", Content: "b) 对多人承载器材，按 GB 19272—2011 中 6.4.4 的 A 法进行，保持 1 min。"},
+	)
+	rows := []map[string]any{
+		clauseRow("保持时间", "受力形式：承受人体站姿载荷的器材", "", "101"),
+		clauseRow("保持时间", "受力形式：多人承载器材；试验方法：GB 19272—2011 中 6.4.4 的 A 法", "", "102"),
+	}
+	if n := inheritClauseConditions(rows, chunks); n != 0 {
+		t.Fatalf("rows changed = %d, want 0: %v", n, rows)
+	}
+}

@@ -70,3 +70,11 @@
 - [x] 10.4 Preserve originals and the existing warning on failed/invalid retries; test omitted counts, duplicates, unrelated evidence, changed signs and incomplete multiple-row replacements
 - [x] 10.5 Verify the complete doc-processing suite, go vet for processors/handlers and strict OpenSpec validation; the live two-clause check returns all six expected assertions among ten metrics without database metric writes. Two scoring-handler tests also fail on the unmodified baseline (expected score 75, actual 90); leave those outside this fix
 - [x] 10.6 Update the conditions devdoc and contract. Existing stored rows and full-document scores are not changed; re-extraction applies the new behavior
+
+## 11. Condition conventions of gold 20261016_162743 (run 226, 2026-10-17)
+
+- [x] 11.1 Classify run 226's 234 failed condition pairs (53.7%): prompt-vs-gold conventions (~76), clause-wide qualifiers not inherited (~85), gold inconsistencies (~25), the rest synonyms and single misses
+- [x] 11.2 Candidates v22 / enrich v20: apparatus by name only, table column label as condition, `检验项目`, no `取值区段`, clause/list/sibling-subclause apparatus and medium, `适用条件` exemptions; update code defaults, tests and the local mise pins
+- [x] 11.3 `inheritClauseConditions` (design D4a) with tests for list items, sibling clauses, table lines, two methods in one clause, the same apparatus under another label and a qualifier outside the clause lead; replay on run 226 changes 9 rows, all toward gold, none away
+- [x] 11.4 Live quality cases pass with v22/v20 (7 cases); the simulation-method case now expects the apparatus name and rejects capabilities
+- [ ] 11.5 Restart the doc-processor, re-extract record 371 and score against gold `20261016_162743`

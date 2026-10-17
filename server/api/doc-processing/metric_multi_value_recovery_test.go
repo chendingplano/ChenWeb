@@ -10,7 +10,7 @@ import (
 )
 
 func TestMetricEnrichmentPromptSeparatesPositionsFromCounts(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v19.md"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v20.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

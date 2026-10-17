@@ -90,13 +90,13 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 			},
 		},
 		{
-			name: "alternative simulation methods retain apparatus capabilities",
+			name: "alternative simulation methods name their apparatus",
 			lines: []Line{
 				{LineNo: 268, Content: "6.5.14.1 采用可以触动俯卧撑测试仪的运动起点和运动终点予以信号反应且具有调速功能的运动模拟装置，运动频率在1次/min~60次/min范围内，每组往复模拟运动试验不应少于10个循环，重复测试3次。"},
 				{LineNo: 269, Content: "6.5.14.2 用模拟物在俯卧撑测试仪的运动起点和运动终点之间往复模拟运动，触发起点和终点信号，运动频率在1次/min~60次/min范围内，每组往复模拟运动试验不应少于10个循环，重复测试3次。"},
 			},
 			want: []wantMetric{
-				{268, "1~60", "次/min", "range", statementKindTestParameter, "调速"},
+				{268, "1~60", "次/min", "range", statementKindTestParameter, "运动模拟装置"},
 				{269, "1~60", "次/min", "range", statementKindTestParameter, "模拟物"},
 			},
 		},
@@ -181,6 +181,10 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 							toOptionalFloat(m["value_min"]) != float64(2) || toOptionalFloat(m["value_max"]) != float64(3)) {
 						t.Errorf("point count lost intermediate-region identity or endpoints: %v", m)
 					}
+				}
+				if strings.HasPrefix(tc.name, "alternative simulation") &&
+					(strings.ContainsAny(asString(m["condition"]), "（(") || strings.Contains(asString(m["condition"]), "调速")) {
+					t.Errorf("apparatus qualifier kept its capabilities instead of its name: %v", m)
 				}
 				if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"366"}}) && compactMetricValue(asString(m["metric_value"])) == "25" {
 					t.Error("adjustment trigger incorrectly emitted as a separate metric")
