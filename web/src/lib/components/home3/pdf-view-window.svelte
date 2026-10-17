@@ -21,6 +21,7 @@
 		zoom = $bindable(0.5),
 		numPages = $bindable(0),
 		highlightVersion = 0,
+		highlightPages,
 		renderHighlights,
 		tableReferences = [],
 		loadingLabel = m.pdf_view_window_rendering_page(),
@@ -53,6 +54,7 @@
 		zoom?: number;
 		numPages?: number;
 		highlightVersion?: number | string;
+		highlightPages?: number[];
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
 		tableReferences?: TableReference[];
 		loadingLabel?: string;
@@ -354,6 +356,7 @@
 			bind:zoom
 			bind:numPages
 			highlightVersion={effectiveHighlightVersion}
+			{highlightPages}
 			repaintVersion={useBuiltinDialog ? builtinRepaintVersion : undefined}
 			{tableReferences}
 			renderHighlights={effectiveRenderHighlights}

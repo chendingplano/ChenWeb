@@ -49,6 +49,7 @@
 		zoom = $bindable(0.5),
 		numPages = $bindable(0),
 		highlightVersion = 0,
+		highlightPages,
 		repaintVersion = 0,
 		renderHighlights,
 		tableReferences = [],
@@ -70,6 +71,7 @@
 		zoom?: number;
 		numPages?: number;
 		highlightVersion?: number | string;
+		highlightPages?: number[];
 		repaintVersion?: number | string;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
 		tableReferences?: TableReference[];
@@ -104,6 +106,8 @@
 
 	let tableGeometry = $state<TableGeometry | null>(null);
 	let tableHighlights = $derived(resolveTableReferences(tableReferences, tableGeometry, respectPageRotation));
+	let tableGeometryDocumentId: number | null = null;
+	let tableGeometryRequestedInputId: number | null = null;
 	// Lines whose cited table rows were located; callers draw the whole line for the rest.
 	let resolvedTableLines = $derived(new Set(tableHighlights.map(box => box.line)));
 	let tablePaintSeq = 0;
@@ -111,26 +115,28 @@
 
 	$effect(() => {
 		const id = inputId;
-		const references = tableReferences;
-		// Revalidate on selection/retrieval, even when the same record is open.
-		const version = highlightVersion;
-		tableGeometry = null;
-		if (!id || references.length === 0) return;
-		const controller = new AbortController();
-		let cancelled = false;
+		const hasReferences = tableReferences.length > 0;
+		if (tableGeometryDocumentId !== id) {
+			tableGeometry = null;
+			tableGeometryDocumentId = id;
+			tableGeometryRequestedInputId = null;
+		}
+		if (!id || !hasReferences || tableGeometryRequestedInputId === id) return;
+		tableGeometryRequestedInputId = id;
 		fetch(`/api/v1/kb/inputs/${id}/table-geometry`, {
-			credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+			credentials: 'same-origin', cache: 'no-store'
 		}).then(async response => {
 			if (!response.ok) throw new Error(`table geometry HTTP ${response.status}`);
 			const geometry = await response.json() as TableGeometry;
-			if (!cancelled && inputId === id && highlightVersion === version) tableGeometry = geometry;
+			if (inputId === id && tableGeometryDocumentId === id) tableGeometry = geometry;
 		}).catch(error => {
-			if (!cancelled) console.warn('PDF table geometry unavailable', error);
+			console.warn('PDF table geometry unavailable', error);
 		});
-		return () => { cancelled = true; controller.abort(); };
 	});
 
 	$effect(() => {
+		// Selection changes repaint overlays on just the previously and newly highlighted pages.
+		highlightVersion;
 		const highlights = tableHighlights;
 		const seq = ++tablePaintSeq;
 		tableNavigationPending = highlights.length > 0;
@@ -138,8 +144,9 @@
 			if (seq !== tablePaintSeq) return;
 			const first = highlights.find(box => box.page <= loadedPageCount());
 			if (first) { page = first.page; tableNavigationPending = false; }
-			paintHighlights();
-			if (first) scrollToFirstHighlight(first.page, 'auto');
+			paintChangedHighlightPages();
+			const targetPage = first?.page ?? clampPage(page);
+			if (!scrollToFirstHighlight(targetPage, 'auto')) scrollToPage(targetPage, 'auto');
 		});
 	});
 
@@ -155,7 +162,6 @@
 	let pdfRenderedPages = $state<number[]>([]);
 	let pdfLastRenderWidth = 0;
 	let pdfResizeRaf = 0;
-	let pdfHighlightPaintSeq = 0;
 	let pdfStageEl = $state<HTMLDivElement | null>(null);
 	let pdfCanvasHostEl = $state<HTMLDivElement | null>(null);
 	let pdfSidebarClusterEl = $state<HTMLDivElement | null>(null);
@@ -400,11 +406,25 @@
 		page = clampPage(page);
 	}
 
-	function paintHighlights() {
-		for (const pageNo of pdfRenderedPages) {
+	function paintHighlights(pageNumbers: Iterable<number> = pdfRenderedPages) {
+		for (const pageNo of new Set(pageNumbers)) {
 			paintOverlayForPage(pageNo);
 		}
 		updateFloatingOverlayAnchor();
+	}
+
+	function paintChangedHighlightPages() {
+		if (highlightPages === undefined) {
+			paintHighlights();
+			return;
+		}
+		const changedPages = new Set(highlightPages);
+		for (const box of tableHighlights) changedPages.add(box.page);
+		for (const pageNo of pdfRenderedPages) {
+			const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`);
+			if (overlay?.querySelector('.pdf-highlight')) changedPages.add(pageNo);
+		}
+		paintHighlights(changedPages);
 	}
 
 	function paintOverlayForPage(pageNo: number) {
@@ -651,26 +671,8 @@
 		const currentPage = page;
 		void tick().then(() => {
 			if (!pdfDoc || !pdfCanvasHostEl) return;
-			paintHighlights();
 			if (!scrollToFirstHighlight(clampPage(currentPage), 'auto')) {
 				scrollToPage(clampPage(currentPage), 'auto');
-			}
-		});
-	});
-
-	$effect(() => {
-		const version = highlightVersion;
-		const seq = ++pdfHighlightPaintSeq;
-		void tick().then(() => {
-			if (
-				seq !== pdfHighlightPaintSeq ||
-				highlightVersion !== version ||
-				pdfViewportByPage.size === 0
-			)
-				return;
-			paintHighlights();
-			if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
-				scrollToPage(clampPage(page), 'auto');
 			}
 		});
 	});

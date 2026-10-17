@@ -440,6 +440,9 @@
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
 	});
+	let selectedMetricPages = $derived(
+		selectedMetric ? normalizeMetricSpans(selectedMetric, lineNumToPage).map((span) => span.page_number) : []
+	);
 	let visibleMetrics = $derived(
 		metrics.filter((metric) => (metricView === 'dropped' ? metric.dropped : !metric.dropped))
 	);
@@ -2011,6 +2014,7 @@
 							floatingOverlayPages={showAllMetricInfoBoxes ? [...metricCardsByPage.keys()] : []}
 							showAllFloatingOverlays={showAllMetricInfoBoxes}
 							highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
+							highlightPages={selectedMetricPages}
 							renderHighlights={renderMetricHighlights}
 							tableReferences={selectedMetric?.source_table_rows ?? []}
 							bind:showingLines={showLines}
