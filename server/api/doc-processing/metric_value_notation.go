@@ -167,6 +167,84 @@ func inheritClauseConditions(metrics []map[string]any, chunks []Chunk) int {
 	return len(changed)
 }
 
+// metricServedQuantitySuffixes name the rows that serve another quantity of the same cell: its
+// permitted error and its resolution.
+var metricServedQuantitySuffixes = []string{"允许误差", "分度值"}
+
+// inheritServedQuantityConditions copies to a permitted-error or resolution row ("底座尺寸允许误差")
+// the qualifiers it lacks from the row of the quantity it serves ("底座尺寸"): the same subject, the
+// name without the suffix, and an overlapping source line. A table cell "底座尺寸为长300 mm×宽 300 mm
+// 的方形或直径为 300 mm 的圆形 | — | ±5 mm" gives 底座尺寸 with 形状：方形底座, and the ±5 mm holds for
+// that square base; the model wrote the shape on the size row but dropped it from the tolerance
+// row in two of three runs (371, 2026-10-17). A qualifier is copied only when exactly one served
+// row matches and the row has no qualifier with that label or an overlapping value. It returns the
+// number of rows changed.
+func inheritServedQuantityConditions(metrics []map[string]any) int {
+	changed := 0
+	for _, m := range metrics {
+		name := metricConditionCompact(asString(m["metric_name"]))
+		base := ""
+		for _, suffix := range metricServedQuantitySuffixes {
+			if strings.HasSuffix(name, suffix) {
+				base = strings.TrimSuffix(strings.TrimSuffix(name, suffix), "的")
+				break
+			}
+		}
+		if base == "" {
+			continue
+		}
+		subject := metricRowSubject(m)
+		var served map[string]any
+		matches := 0
+		for _, o := range metrics {
+			if metricConditionCompact(asString(o["metric_name"])) != base ||
+				metricRowSubject(o) != subject || !metricLineSpansOverlap(m, o) {
+				continue
+			}
+			served = o
+			matches++
+		}
+		if matches != 1 {
+			continue
+		}
+		parts := strings.Split(strings.ReplaceAll(asString(served["condition"]), ";", "；"), "；")
+		enParts := strings.Split(asString(served["condition_en"]), ";")
+		rowChanged := false
+		for i, q := range parts {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			label := strings.TrimRight(width.Fold.String(metricConditionLabelRe.FindString(q)), ":")
+			if label != "" {
+				if _, _, ok := metricConditionPart(m, label); ok {
+					continue
+				}
+			}
+			if metricConditionOverlaps(m, q) {
+				continue
+			}
+			cond := strings.TrimSpace(asString(m["condition"]))
+			condEn := strings.TrimSpace(asString(m["condition_en"]))
+			aligned := metricConditionCount(cond, "；") == metricConditionCount(condEn, ";")
+			m["condition"] = strings.TrimPrefix(cond+"；"+q, "；")
+			if len(enParts) == len(parts) && aligned {
+				m["condition_en"] = strings.TrimPrefix(condEn+"; "+strings.TrimSpace(enParts[i]), "; ")
+			}
+			rowChanged = true
+		}
+		if rowChanged {
+			changed++
+		}
+	}
+	return changed
+}
+
+// metricRowSubject returns the row's compacted subject under either the Pass 2 or the kb.metrics key.
+func metricRowSubject(m map[string]any) string {
+	return metricConditionCompact(firstNonEmptyTrimmed(asString(m["metric_subject"]), asString(m["subject"])))
+}
+
 // metricRowClause returns the clause of a row's source lines, or "" when a line is a table line,
 // unknown, or the lines belong to different clauses.
 func metricRowClause(m map[string]any, lines map[int]Line, clauseOf map[int]string) string {

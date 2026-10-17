@@ -252,6 +252,25 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 						}
 					}
 				}
+				squareTol := 0
+				for _, m := range r.Metrics {
+					if !metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"119"}}) {
+						continue
+					}
+					name, cond := asString(m["metric_name"]), asString(m["condition"])
+					if strings.Contains(name, "长度允许误差") || strings.Contains(name, "宽度允许误差") {
+						t.Errorf("tolerance of the square base split into length/width: %v", m)
+					}
+					if strings.Contains(cond, "材质") {
+						t.Errorf("material description used as a condition: %v", m)
+					}
+					if strings.HasSuffix(name, "尺寸允许误差") && strings.Contains(cond, "方形") {
+						squareTol++
+					}
+				}
+				if squareTol != 1 {
+					t.Errorf("want one 底座尺寸允许误差 row with the square-base shape, got %d", squareTol)
+				}
 				if sizes["192|250×200"] != 1 || sizes["119|300×300"] != 1 {
 					t.Errorf("want one 250×200 mm row on 192 and one 300×300 mm row on 119, got %v", sizes)
 				}

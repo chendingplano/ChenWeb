@@ -138,8 +138,8 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 	if p.MentionPromptRef != "prompt-extract-metric-candidates-v25.md" {
 		t.Fatalf("MentionPromptRef=%q, want v25", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v23.md" {
-		t.Fatalf("RelationPromptRef=%q, want v23", p.RelationPromptRef)
+	if p.RelationPromptRef != "prompt-enrich-metrics-v24.md" {
+		t.Fatalf("RelationPromptRef=%q, want v24", p.RelationPromptRef)
 	}
 	if p.MergeResolvePromptRef != "prompt-merge-resolve-metrics-v2.md" {
 		t.Fatalf("MergeResolvePromptRef=%q, want v2", p.MergeResolvePromptRef)

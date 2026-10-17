@@ -300,3 +300,38 @@ func TestInheritClauseConditionsNeedsTheClauseLead(t *testing.T) {
 		t.Fatalf("rows changed = %d, want 0: %v", n, rows)
 	}
 }
+
+func TestInheritServedQuantityConditions(t *testing.T) {
+	row := func(name, value, cond, condEn string) map[string]any {
+		return map[string]any{"metric_name": name, "subject": "15 m 绕障碍跑测试仪障碍物", "metric_value": value,
+			"condition": cond, "condition_en": condEn, "source_line_spans": []any{"119"}}
+	}
+	size := row("底座尺寸", "300×300", "适用人群：幼儿；形状：方形底座", "Population: young children; Shape: square base")
+	sizeErr := row("底座尺寸允许误差", "±5", "适用人群：幼儿", "Population: young children")
+	dia := row("底座直径", "300", "适用人群：幼儿；形状：圆形底座", "Population: young children; Shape: round base")
+	diaErr := row("底座直径允许误差", "±5", "适用人群：幼儿；形状：圆形底座", "Population: young children; Shape: round base")
+	height := row("锥桶高度", "550", "适用人群：幼儿", "Population: young children")
+	heightErr := row("锥桶高度允许误差", "±5", "", "")
+	other := row("锥桶高度允许误差", "±5", "", "")
+	other["source_line_spans"] = []any{"200"} // another line: never matched
+	if n := inheritServedQuantityConditions([]map[string]any{size, sizeErr, dia, diaErr, height, heightErr, other}); n != 2 {
+		t.Fatalf("rows changed = %d, want 2", n)
+	}
+	if sizeErr["condition"] != "适用人群：幼儿；形状：方形底座" || sizeErr["condition_en"] != "Population: young children; Shape: square base" {
+		t.Errorf("tolerance did not inherit the square-base shape: %v / %v", sizeErr["condition"], sizeErr["condition_en"])
+	}
+	if diaErr["condition"] != "适用人群：幼儿；形状：圆形底座" {
+		t.Errorf("a qualifier already present was changed: %v", diaErr["condition"])
+	}
+	if heightErr["condition"] != "适用人群：幼儿" || other["condition"] != "" {
+		t.Errorf("height tolerance %q / other-line row %q", heightErr["condition"], other["condition"])
+	}
+
+	// Two served rows with the same name on the line: ambiguous, nothing is copied.
+	a := row("台阶高度", "300", "性别：男", "")
+	b := row("台阶高度", "250", "性别：女", "")
+	e := row("台阶高度允许误差", "±5", "", "")
+	if n := inheritServedQuantityConditions([]map[string]any{a, b, e}); n != 0 || e["condition"] != "" {
+		t.Errorf("ambiguous served quantity changed the row: n=%d condition=%q", n, e["condition"])
+	}
+}

@@ -517,7 +517,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v23.md",
+		"prompt-enrich-metrics-v24.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -2849,7 +2849,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v23.md"
+		promptRef = "prompt-enrich-metrics-v24.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -3745,6 +3745,10 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	}
 	if n := inheritClauseConditions(metrics, chunks); n > 0 {
 		p.Logger.Info("pass2: inherited clause-wide condition qualifiers",
+			"record_id", recordID, "rows_changed", n)
+	}
+	if n := inheritServedQuantityConditions(metrics); n > 0 {
+		p.Logger.Info("pass2: inherited the served quantity's qualifiers on error/resolution rows",
 			"record_id", recordID, "rows_changed", n)
 	}
 	dropConditionPropertyRepeats(metrics)

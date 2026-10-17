@@ -95,3 +95,9 @@
 
 - [x] 14.1 371 mtc_3/4 (加载面长度 250 / 宽度 200) and mtc_267/268 (底座长度 / 宽度 300) split a size written as a product, as v24/v22 told them to. Candidates v25 / enrich v23: "250 mm×200 mm" and "长300 mm×宽 300 mm" are one row each (加载面尺寸 `250×200` mm, 底座尺寸 `300×300` mm, exact), and a tolerance serving the size is one row. Separately stated dimensions stay split. No Go change: unit stripping already yields `250×200` and `×` is not a list separator
 - [x] 14.2 Live quality case "size written as a product is one metric" (lines 191–192 and the 119 obstacle row): passes 3/3 with v25/v23, fails with v24/v22 (the four split rows). All 10 live cases pass; defaults, tests and local mise pins updated
+
+## 15. Tolerance of a product size (user review, 2026-10-17)
+
+- [x] 15.1 371 mtc_271/272 split the ±5 mm of "底座尺寸为长300 mm×宽 300 mm 的方形" into 长度/宽度 tolerances; the ±5 mm holds for the square base. v25/v23 already give one 底座尺寸允许误差 row, but its 形状：方形底座 survived in only 1 of 3 runs and some runs added 材质：塑料或橡胶
+- [x] 15.2 `inheritServedQuantityConditions`: an 允许误差/分度值 row copies missing qualifiers from the single row of the quantity it serves (same subject, name without the suffix, overlapping line); unit test covers inheritance, existing labels, other lines and an ambiguous served quantity
+- [x] 15.3 Enrich v24: error/resolution rows carry the served quantity's qualifiers; a form or material description that selects nothing is not a condition. Live case now requires one 底座尺寸允许误差 with 方形, no 长度/宽度 tolerance and no 材质 qualifier: 4/4. All 10 live cases pass
