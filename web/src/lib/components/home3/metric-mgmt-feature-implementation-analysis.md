@@ -124,6 +124,16 @@ Reference and companion contracts, backfill and limitations are documented in
 Regression tests are in `pdf-table-geometry.test.ts`, the Go documentgeometry and
 converter packages, and Python `tests/test_table_geometry.py`.
 
+When the cited table line no longer exists in the geometry after line renumbering,
+the viewer can recover it only if every cited row/cell has a saved row hash and
+exactly one current table matches all those row IDs and hashes. It retains the
+original citation line in the resolved highlight so the caller suppresses the
+obsolete whole-line box. Existing table lines with changed hashes, missing hashes,
+and ambiguous matches are not relocated. For example, `364_mtc_119` cites `106#r1`
+but its unchanged heart-rate row now lives at line 119: hash `4c0d8b652acd` resolves
+to the row band `[129, 810, 894, 830]` on PDF page 6. This is display-time recovery;
+stored citations and extracted metric content are not rewritten.
+
 ---
 
 ## 4) PDF Rendering Model Used

@@ -22,6 +22,8 @@ export type TableGeometry = {
 		}[];
 	}[];
 };
+// line retains the cited line so callers suppress its ordinary line-box highlight,
+// including when the physical table was recovered after line renumbering.
 export type TableHighlight = GeometryBox & { line: number; target: string };
 
 function validBox(box: GeometryBox): boolean {
@@ -68,8 +70,22 @@ export function resolveTableReferences(
 	const resolved: TableHighlight[] = [];
 	const seen = new Set<string>();
 	const selectedRows = new Set<string>();
-	for (const ref of refs) {
-		const table = geometry.tables.find((t) => t.line === ref.line);
+	const references = refs.map((ref) => {
+		let table = geometry.tables.find((t) => t.line === ref.line);
+		if (!table) {
+			// Renumbering can move an unchanged table. Recover only when every cited
+			// row has a saved hash and exactly one current table matches them all.
+			const ids = [...(ref.rows ?? []), ...(ref.cells ?? []).map((cell) => cell.split(':')[0])];
+			if (ids.length > 0 && ids.every((id) => !!ref.row_hash?.[id])) {
+				const matches = geometry.tables.filter((t) => ids.every((id) =>
+					t.rows?.some((row) => row.id === id && row.hash === ref.row_hash![id])
+				));
+				if (matches.length === 1) table = matches[0];
+			}
+		}
+		return { ref, table };
+	});
+	for (const { ref, table } of references) {
 		for (const id of ref.rows ?? []) {
 			const row = table?.rows?.find((r) => r.id === id);
 			if (
@@ -80,8 +96,7 @@ export function resolveTableReferences(
 				selectedRows.add(`${ref.line}#${id}`);
 		}
 	}
-	for (const ref of refs) {
-		const table = geometry.tables.find((t) => t.line === ref.line);
+	for (const { ref, table } of references) {
 		if (!table || !Array.isArray(table.rows)) continue;
 		const targets = [
 			...(ref.rows ?? []),

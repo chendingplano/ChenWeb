@@ -93,3 +93,38 @@ test('a stale row selection cannot suppress a valid cell selection', () => {
 	assert.equal(boxes.length, 1);
 	assert.equal(boxes[0].target, 'r3:c4');
 });
+
+test('document 364 heart-rate row survives table line renumbering from 106 to 119', () => {
+	const current: TableGeometry = {
+		...geometry,
+		tables: [{
+			line: 119,
+			rows: [{
+				id: 'r1', hash: '4c0d8b652acd',
+				boxes: [{ page: 6, coords: [129, 810, 894, 830] }], cells: []
+			}]
+		}]
+	};
+	const refs = [{ line: 106, rows: ['r1'], row_hash: { r1: '4c0d8b652acd' } }];
+	assert.deepEqual(resolveTableReferences(refs, current), [
+		{ page: 6, coords: [129, 810, 894, 830], line: 106, target: 'r1' }
+	]);
+	assert.deepEqual(resolveTableReferences([{ line: 106, rows: ['r1'] }], current), []);
+	assert.deepEqual(resolveTableReferences([
+		{ ...refs[0], row_hash: { r1: 'changed' } }
+	], current), []);
+	assert.deepEqual(resolveTableReferences(refs, {
+		...current, tables: [...current.tables, { ...current.tables[0], line: 130 }]
+	}), []);
+});
+
+test('renumbering recovery requires hashes for every cited row and cell', () => {
+	assert.deepEqual(resolveTableReferences([
+		{ line: 106, rows: ['r3', 'r4'], row_hash: { r3: '5364693c56e5' } }
+	], geometry), []);
+	assert.deepEqual(resolveTableReferences([
+		{ line: 106, cells: ['r3:c4'], row_hash: { r3: '5364693c56e5' } }
+	], geometry), [
+		{ page: 7, coords: [440, 270, 750, 398], line: 106, target: 'r3:c4' }
+	]);
+});
