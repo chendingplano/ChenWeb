@@ -125,6 +125,27 @@ func TestEnforceOneToOnePairs(t *testing.T) {
 	}
 }
 
+func TestEnforceOneToOnePairsPreservesAlreadyMissed(t *testing.T) {
+	payload := map[string]any{
+		"pairs": []any{
+			map[string]any{"gold": "g1", "pred": "p1"},
+			map[string]any{"gold": "g2", "pred": "p1"},
+			map[string]any{"gold": "g3", "pred": "p1"},
+		},
+		"missed": []any{map[string]any{"gold": "g2", "note": "merged into g1"}},
+	}
+	for i := 0; i < 2; i++ {
+		enforceOneToOnePairs(payload)
+		pairs, missed := payload["pairs"].([]any), payload["missed"].([]any)
+		if len(pairs) != 1 || pairs[0].(map[string]any)["gold"] != "g1" {
+			t.Fatalf("unexpected pairs: %v", pairs)
+		}
+		if len(missed) != 2 || missed[0].(map[string]any)["gold"] != "g2" || missed[0].(map[string]any)["note"] != "merged into g1" || missed[1].(map[string]any)["gold"] != "g3" {
+			t.Fatalf("unexpected missed: %v", missed)
+		}
+	}
+}
+
 func TestMetricScoreSubprocessNoGold(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "score_io.py")
 	if err := os.WriteFile(script, []byte("import sys\nprint('SECRET',file=sys.stderr)\nsys.exit(3)\n"), 0600); err != nil {

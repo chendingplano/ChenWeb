@@ -205,12 +205,19 @@ func dropEmptyPairsAlsoMissed(payload map[string]any) {
 // to missed. The model sometimes reuses one prediction for several gold rows with the same value;
 // the scorer requires one-to-one pairs, and the prompt's tie-break is "pair the earlier assertion,
 // mark the others missed", which is what this applies.
+// Preserve an existing missed entry rather than accounting for that gold row twice.
 func enforceOneToOnePairs(payload map[string]any) {
 	pairs, ok := payload["pairs"].([]any)
 	if !ok {
 		return
 	}
 	missed, _ := payload["missed"].([]any)
+	alreadyMissed := map[any]bool{}
+	for _, row := range missed {
+		if m, ok := row.(map[string]any); ok {
+			alreadyMissed[m["gold"]] = true
+		}
+	}
 	used := map[any]bool{}
 	kept := make([]any, 0, len(pairs))
 	for _, row := range pairs {
@@ -222,7 +229,10 @@ func enforceOneToOnePairs(payload map[string]any) {
 			kept = append(kept, row)
 			continue
 		}
-		missed = append(missed, map[string]any{"gold": m["gold"], "note": fmt.Sprintf("prediction %v already paired to an earlier gold row; %v", m["pred"], m["note"])})
+		if !alreadyMissed[m["gold"]] {
+			missed = append(missed, map[string]any{"gold": m["gold"], "note": fmt.Sprintf("prediction %v already paired to an earlier gold row; %v", m["pred"], m["note"])})
+			alreadyMissed[m["gold"]] = true
+		}
 	}
 	payload["pairs"], payload["missed"] = kept, missed
 }
