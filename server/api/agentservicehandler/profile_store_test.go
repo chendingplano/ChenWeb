@@ -39,15 +39,16 @@ func profileRegistryFixture(t *testing.T) *ProfileRegistry {
 func TestProfileStoreEnsureSeededStoresBothResolvedPromptSnapshots(t *testing.T) {
 	store, mock := profileStoreFixture(t)
 	registry := profileRegistryFixture(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT pg_advisory_xact_lock").WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
+	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	for _, slug := range []string{"knowledge-guide", "problem-diagnostics"} {
 		profile := registry.versions[slug][registry.active[slug]]
 		promptHash := sha256.Sum256([]byte(profile.SystemPrompt))
-		mock.ExpectBegin()
-		mock.ExpectQuery("SELECT EXISTS").WithArgs(slug).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 		mock.ExpectExec("INSERT INTO kb.agentic_service_profile_versions").WithArgs(slug, "v1", sqlmock.AnyArg(), profile.PromptFile, hex.EncodeToString(promptHash[:]), profile.SystemPrompt).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec("INSERT INTO kb.agentic_service_profiles").WithArgs(slug, "v1").WillReturnResult(sqlmock.NewResult(0, 1))
-		mock.ExpectCommit()
 	}
+	mock.ExpectCommit()
 	if err := store.EnsureSeeded(context.Background(), registry); err != nil {
 		t.Fatal(err)
 	}
@@ -59,19 +60,34 @@ func TestProfileStoreEnsureSeededStoresBothResolvedPromptSnapshots(t *testing.T)
 func TestProfileStoreEnsureSeededRepeatDoesNotOverwrite(t *testing.T) {
 	store, mock := profileStoreFixture(t)
 	registry := profileRegistryFixture(t)
-	for i := 0; i < 2; i++ {
-		for _, slug := range []string{"knowledge-guide", "problem-diagnostics"} {
-			mock.ExpectBegin()
-			mock.ExpectQuery("SELECT EXISTS").WithArgs(slug).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(i == 1))
-			if i == 0 {
-				mock.ExpectExec("INSERT INTO kb.agentic_service_profile_versions").WithArgs(slug, "v1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("INSERT INTO kb.agentic_service_profiles").WithArgs(slug, "v1").WillReturnResult(sqlmock.NewResult(0, 1))
-			}
-			mock.ExpectCommit()
-		}
-		if err := store.EnsureSeeded(context.Background(), registry); err != nil {
-			t.Fatal(err)
-		}
+	// A version for just one slug means the persisted store is authoritative;
+	// initialization must not fill in the other slug from environment defaults.
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT pg_advisory_xact_lock").WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
+	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectCommit()
+	if err := store.EnsureSeeded(context.Background(), registry); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProfileStoreEnsureSeededRollsBackPartialInitialization(t *testing.T) {
+	store, mock := profileStoreFixture(t)
+	registry := profileRegistryFixture(t)
+	first := registry.versions["knowledge-guide"][registry.active["knowledge-guide"]]
+	firstHash := sha256.Sum256([]byte(first.SystemPrompt))
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT pg_advisory_xact_lock").WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
+	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec("INSERT INTO kb.agentic_service_profile_versions").WithArgs(first.Slug, "v1", sqlmock.AnyArg(), first.PromptFile, hex.EncodeToString(firstHash[:]), first.SystemPrompt).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO kb.agentic_service_profiles").WithArgs(first.Slug, "v1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO kb.agentic_service_profile_versions").WillReturnError(errors.New("insert failed"))
+	mock.ExpectRollback()
+	if err := store.EnsureSeeded(context.Background(), registry); err == nil {
+		t.Fatal("EnsureSeeded() error = nil, want failure")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -130,6 +146,29 @@ func TestProfileStoreActivateVersionRejectsStaleExpectedVersion(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestProfileStoreRestoreActiveVersionIsConditional(t *testing.T) {
+	t.Run("restores just-activated version", func(t *testing.T) {
+		store, mock := profileStoreFixture(t)
+		mock.ExpectExec("UPDATE kb.agentic_service_profiles").WithArgs("knowledge-guide", "v2", "v1").WillReturnResult(sqlmock.NewResult(0, 1))
+		if err := store.RestoreActiveVersion(context.Background(), "knowledge-guide", "v2", "v1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("conflicts when active version has moved", func(t *testing.T) {
+		store, mock := profileStoreFixture(t)
+		mock.ExpectExec("UPDATE kb.agentic_service_profiles").WithArgs("knowledge-guide", "v2", "v1").WillReturnResult(sqlmock.NewResult(0, 0))
+		if err := store.RestoreActiveVersion(context.Background(), "knowledge-guide", "v2", "v1"); !errors.Is(err, ErrProfileVersionConflict) {
+			t.Fatalf("RestoreActiveVersion() error = %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // jsonMarshal keeps test setup focused on the store behavior.

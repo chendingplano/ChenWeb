@@ -35,50 +35,53 @@ func (s *SQLProfileVersionStore) EnsureSeeded(ctx context.Context, registry *Pro
 	if registry == nil {
 		return errors.New("profile registry is required")
 	}
+	profiles := make([]AgentServiceProfile, 0, 2)
 	for _, slug := range []string{"knowledge-guide", "problem-diagnostics"} {
 		version := registry.active[slug]
 		profile, ok := registry.versions[slug][version]
 		if !ok {
 			return fmt.Errorf("seed profile %q: active version %q is missing", slug, version)
 		}
-		profileJSON, err := json.Marshal(profile)
-		if err != nil {
-			return err
+		profiles = append(profiles, profile)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// A transaction-scoped advisory lock serializes initialization across
+	// processes, including when no rows exist yet to lock.
+	var locked any
+	if err = tx.QueryRowContext(ctx, `SELECT pg_advisory_xact_lock(721904251)`).Scan(&locked); err != nil {
+		return err
+	}
+	var hasVersions bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.agentic_service_profile_versions)`).Scan(&hasVersions); err != nil {
+		return err
+	}
+	if hasVersions {
+		return tx.Commit()
+	}
+	for _, profile := range profiles {
+		profileJSON, marshalErr := json.Marshal(profile)
+		if marshalErr != nil {
+			return marshalErr
 		}
 		hash := sha256.Sum256([]byte(profile.SystemPrompt))
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		var hasVersions bool
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.agentic_service_profile_versions WHERE service_slug=$1)`, slug).Scan(&hasVersions)
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if hasVersions {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
-			continue
-		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO kb.agentic_service_profile_versions
 (service_slug, version, profile_json, prompt_ref, prompt_hash, prompt_snapshot, created_by)
-VALUES ($1, $2, $3::jsonb, $4, $5, $6, 'system') ON CONFLICT (service_slug, version) DO NOTHING`,
-			slug, version, profileJSON, profile.PromptFile, hex.EncodeToString(hash[:]), profile.SystemPrompt)
-		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO kb.agentic_service_profiles (service_slug, active_version)
-VALUES ($1, $2) ON CONFLICT (service_slug) DO NOTHING`, slug, version)
-		}
+			VALUES ($1, $2, $3::jsonb, $4, $5, $6, 'system')`,
+			profile.Slug, profile.Version, profileJSON, profile.PromptFile, hex.EncodeToString(hash[:]), profile.SystemPrompt)
 		if err != nil {
-			_ = tx.Rollback()
 			return err
 		}
-		if err = tx.Commit(); err != nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO kb.agentic_service_profiles (service_slug, active_version)
+VALUES ($1, $2)`, profile.Slug, profile.Version)
+		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 const profileSelect = `SELECT v.profile_json, v.prompt_snapshot
