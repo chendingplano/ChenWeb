@@ -57,7 +57,7 @@ func TestProfileStoreEnsureSeededStoresBothResolvedPromptSnapshots(t *testing.T)
 	}
 }
 
-func TestProfileStoreEnsureSeededRepeatDoesNotOverwrite(t *testing.T) {
+func TestProfileStoreEnsureSeededSkipsWhenAnyProfileHasVersions(t *testing.T) {
 	store, mock := profileStoreFixture(t)
 	registry := profileRegistryFixture(t)
 	// A version for just one slug means the persisted store is authoritative;
@@ -142,6 +142,48 @@ func TestProfileStoreActivateVersionRejectsStaleExpectedVersion(t *testing.T) {
 	_, _, err := store.ActivateVersion(context.Background(), AgentServiceProfile{Slug: "knowledge-guide"}, "v2", "user-1")
 	if !errors.Is(err, ErrProfileVersionConflict) {
 		t.Fatalf("ActivateVersion() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProfileStoreActivateVersionCommitsNextImmutableVersion(t *testing.T) {
+	store, mock := profileStoreFixture(t)
+	profile := AgentServiceProfile{
+		Slug: "knowledge-guide", FriendlyName: "Updated Guide", PromptFile: "prompt-v2.md",
+		SystemPrompt: "resolved prompt v2", Enabled: true,
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT active_version FROM kb.agentic_service_profiles WHERE service_slug=\\$1 FOR UPDATE").
+		WithArgs("knowledge-guide").
+		WillReturnRows(sqlmock.NewRows([]string{"active_version"}).AddRow("v3"))
+	mock.ExpectQuery("SELECT COALESCE\\(MAX\\(SUBSTRING\\(version FROM 2\\)::integer\\), 0\\)").
+		WithArgs("knowledge-guide").
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(3))
+	profile.Version = "v4"
+	profileJSON, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256([]byte(profile.SystemPrompt))
+	mock.ExpectExec("INSERT INTO kb.agentic_service_profile_versions").
+		WithArgs("knowledge-guide", "v4", profileJSON, profile.PromptFile, hex.EncodeToString(hash[:]), profile.SystemPrompt, "user-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE kb.agentic_service_profiles SET active_version=\\$2, updated_at=NOW()").
+		WithArgs("knowledge-guide", "v4").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	got, previous, err := store.ActivateVersion(context.Background(), AgentServiceProfile{
+		Slug: "knowledge-guide", FriendlyName: "Updated Guide", PromptFile: "prompt-v2.md",
+		SystemPrompt: "resolved prompt v2", Enabled: true,
+	}, "v3", "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != "v4" || previous != "v3" {
+		t.Fatalf("ActivateVersion() = version %q, previous %q; want v4, v3", got.Version, previous)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
