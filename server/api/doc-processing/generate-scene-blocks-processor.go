@@ -1776,15 +1776,7 @@ func loadSceneBlocksPromptFromEnv() (promptText string, promptRef string, prompt
 }
 
 func loadScenePromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptErr error) {
-	for _, key := range envKeys {
-		promptRef = strings.TrimSpace(os.Getenv(key))
-		if promptRef != "" {
-			break
-		}
-	}
-	if promptRef == "" {
-		promptRef = defaultRef
-	}
+	promptRef = promptRefFromEnvKeys(envKeys, defaultRef)
 
 	paths := make([]string, 0, 8)
 	addCandidate := func(p string) {
@@ -1809,7 +1801,7 @@ func loadScenePromptFromEnvKeys(envKeys []string, defaultRef string) (promptText
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = fmt.Errorf("(MID_26051820) failed reading file. Path:%s, error:%w", candidate, err)
 			continue

@@ -135,13 +135,13 @@ func TestMetricsProcessorDefaultPromptsExcludePureRequirements(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
-	if p.MentionPromptRef != "prompt-extract-metric-candidates-v28.md" {
-		t.Fatalf("MentionPromptRef=%q, want v27", p.MentionPromptRef)
+	if p.MentionPromptRef != "prompt-extract-metric-candidates-v29.md" {
+		t.Fatalf("MentionPromptRef=%q, want v29", p.MentionPromptRef)
 	}
-	if p.RelationPromptRef != "prompt-enrich-metrics-v27.md" {
+	if p.RelationPromptRef != "prompt-enrich-metrics-v28.md" {
 		t.Fatalf("RelationPromptRef=%q, want v26", p.RelationPromptRef)
 	}
-	if p.MergeResolvePromptRef != "prompt-merge-resolve-metrics-v2.md" {
+	if p.MergeResolvePromptRef != "prompt-merge-resolve-metrics-v3.md" {
 		t.Fatalf("MergeResolvePromptRef=%q, want v2", p.MergeResolvePromptRef)
 	}
 	// Prompts load relative to the server's working directory; from this test,

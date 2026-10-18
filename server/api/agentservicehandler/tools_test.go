@@ -171,7 +171,7 @@ func TestInternalToolEndpointRejectsMalformedBearerAndTrailingJSON(t *testing.T)
 }
 
 func TestProfileAccessCheckerRevalidatesVersionAndScope(t *testing.T) {
-	registry := &ProfileRegistry{versions: map[string]map[string]PiProfile{"p": {"v1": {Slug: "p", Version: "v1", Enabled: true, AllowedTools: []string{"search_knowledge"}, AllowedKnowledgeStores: []string{"store-1"}, AllowedDocumentGroups: []string{"published"}}}}, active: map[string]string{"p": "v1"}}
+	registry := &ProfileRegistry{versions: map[string]map[string]AgentServiceProfile{"p": {"v1": {Slug: "p", Version: "v1", Enabled: true, AllowedTools: []string{"search_knowledge"}, AllowedKnowledgeStores: []string{"store-1"}, AllowedDocumentGroups: []string{"published"}}}}, active: map[string]string{"p": "v1"}}
 	next := &captureAccessChecker{}
 	checker := ProfileAccessChecker{Registry: registry, Next: next}
 	req := KnowledgeAccessRequest{UserID: "u", ProfileSlug: "p", ProfileVersion: "v1", ToolName: "search_knowledge", KnowledgeStoreID: "7", DocumentGroup: "published"}

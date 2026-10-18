@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-type GatewaySource struct {
+type AgentSource struct {
 	KnowledgeStoreID string `json:"knowledge_store_id"`
 	DocumentID       string `json:"document_id"`
 	ArtifactID       string `json:"artifact_id,omitempty"`
@@ -26,21 +26,21 @@ type GatewaySource struct {
 }
 
 type AgentPublicEvent struct {
-	Type             string          `json:"type"`
-	Text             string          `json:"text,omitempty"`
-	Status           string          `json:"status,omitempty"`
-	Tool             string          `json:"tool,omitempty"`
-	ToolCallID       string          `json:"toolCallId,omitempty"`
-	ToolName         string          `json:"toolName,omitempty"`
-	Error            bool            `json:"error,omitempty"`
-	RequestID        string          `json:"requestId,omitempty"`
-	Sources          []GatewaySource `json:"sources,omitempty"`
-	InputTokens      int64           `json:"inputTokens,omitempty"`
-	OutputTokens     int64           `json:"outputTokens,omitempty"`
-	CacheReadTokens  int64           `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens int64           `json:"cacheWriteTokens,omitempty"`
-	Message          string          `json:"message,omitempty"`
-	Attempt          int             `json:"attempt,omitempty"`
+	Type             string        `json:"type"`
+	Text             string        `json:"text,omitempty"`
+	Status           string        `json:"status,omitempty"`
+	Tool             string        `json:"tool,omitempty"`
+	ToolCallID       string        `json:"toolCallId,omitempty"`
+	ToolName         string        `json:"toolName,omitempty"`
+	Error            bool          `json:"error,omitempty"`
+	RequestID        string        `json:"requestId,omitempty"`
+	Sources          []AgentSource `json:"sources,omitempty"`
+	InputTokens      int64         `json:"inputTokens,omitempty"`
+	OutputTokens     int64         `json:"outputTokens,omitempty"`
+	CacheReadTokens  int64         `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int64         `json:"cacheWriteTokens,omitempty"`
+	Message          string        `json:"message,omitempty"`
+	Attempt          int           `json:"attempt,omitempty"`
 }
 
 func WriteAgentSSE(w io.Writer, event AgentPublicEvent) error {
@@ -60,7 +60,7 @@ type CompletedToolCall struct {
 type RunEventResult struct {
 	Answer       string
 	Status       string
-	Sources      []GatewaySource
+	Sources      []AgentSource
 	ToolCalls    []CompletedToolCall
 	InputTokens  int64
 	OutputTokens int64
@@ -75,21 +75,21 @@ type RunEventCollector struct {
 }
 
 func NewRunEventCollector(runID string, maxAnswerBytes int) *RunEventCollector {
-	return &RunEventCollector{runID: runID, maxAnswer: maxAnswerBytes, toolCalls: make(map[string]CompletedToolCall), result: RunEventResult{Sources: []GatewaySource{}, ToolCalls: []CompletedToolCall{}}}
+	return &RunEventCollector{runID: runID, maxAnswer: maxAnswerBytes, toolCalls: make(map[string]CompletedToolCall), result: RunEventResult{Sources: []AgentSource{}, ToolCalls: []CompletedToolCall{}}}
 }
 
 func (c *RunEventCollector) Accept(line []byte) (AgentPublicEvent, error) {
 	if c == nil || len(line) > 128*1024 {
-		return AgentPublicEvent{}, errors.New("unsafe gateway event")
+		return AgentPublicEvent{}, errors.New("unsafe adapter event")
 	}
 	var event AgentPublicEvent
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&event); err != nil {
-		return AgentPublicEvent{}, errors.New("invalid gateway event")
+		return AgentPublicEvent{}, errors.New("invalid adapter event")
 	}
 	if c.completed && event.Type != "completion" {
-		return AgentPublicEvent{}, errors.New("gateway event after completion")
+		return AgentPublicEvent{}, errors.New("adapter event after completion")
 	}
 	if c.completed && event.Type == "completion" {
 		return AgentPublicEvent{}, nil
@@ -134,7 +134,7 @@ func (c *RunEventCollector) Accept(line []byte) (AgentPublicEvent, error) {
 		}
 	case "error":
 		if len(event.Message) > 300 || strings.Contains(strings.ToLower(event.Message), "api key") {
-			return AgentPublicEvent{}, errors.New("unsafe gateway error")
+			return AgentPublicEvent{}, errors.New("unsafe adapter error")
 		}
 	case "completion":
 		if event.Status != "completed" && event.Status != "failed" && event.Status != "cancelled" && event.Status != "timed_out" && event.Status != "limit_reached" {
@@ -143,7 +143,7 @@ func (c *RunEventCollector) Accept(line []byte) (AgentPublicEvent, error) {
 		c.result.Status = event.Status
 		c.completed = true
 	default:
-		return AgentPublicEvent{}, errors.New("unsafe gateway event type")
+		return AgentPublicEvent{}, errors.New("unsafe adapter event type")
 	}
 	return event, nil
 }

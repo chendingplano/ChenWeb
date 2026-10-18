@@ -56,13 +56,13 @@ func TestListMetricsTestbedFiltersBySkillVersionAndModel(t *testing.T) {
 					AddRow("extract-metrics-benchmark", tc.wantVersion, "selected-model", "20261010_055329"))
 			goldRows := sqlmock.NewRows([]string{"id"})
 			if tc.query["include_dropped"] == "true" {
-				columns := make([]string, 46)
-				values := make([]driver.Value, 46)
+				columns := make([]string, 48)
+				values := make([]driver.Value, 48)
 				for i := range columns {
 					columns[i] = strconv.Itoa(i)
 				}
 				values[0], values[1], values[2], values[4] = int64(8), int64(244), "244_gold_1", "input.pdf"
-				values[5], values[7], values[16], values[35] = "Gold pressure", `["2"]`, "selected-model", "2026-10-10T05:53:29-05:00"
+				values[5], values[7], values[17], values[36] = "Gold pressure", `["2"]`, "selected-model", "2026-10-10T05:53:29-05:00"
 				goldRows = sqlmock.NewRows(columns).AddRow(values...)
 			}
 			mock.ExpectQuery(regexp.QuoteMeta(testbedMetricsQuery)).

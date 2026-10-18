@@ -213,6 +213,21 @@ export async function listDocProcLogs(params: {
 
 export type SourceLineSpan = { page_number: number; line_number: number } | string | number;
 
+
+/** One resource of a metric frame: an agent, apparatus, reagent, … with its own specification. */
+export interface KbMetricFrameResource {
+	role: string;
+	name: string;
+	name_en?: string;
+	spec?: { property: string; property_en?: string; value: string; unit?: string }[];
+}
+
+/** kb.metrics.frame (openspec change metric-frame). */
+export interface KbMetricFrame {
+	uses?: KbMetricFrameResource[];
+	method?: { label: string; value: string; label_en?: string; value_en?: string }[];
+	procedure?: { step?: string; stage?: string; stage_en?: string; after?: string; after_en?: string };
+}
 export type KbMetricRecord = {
 	id: number;
 	input_record_id: number;
@@ -230,6 +245,7 @@ export type KbMetricRecord = {
 	metric_context_en?: string;
 	metric_keywords?: string[];
 	metric_keywords_en?: string[];
+	search_document?: string | null;
 	model_name?: string;
 	location_type?: string;
 	metric_unit?: string;
@@ -245,6 +261,8 @@ export type KbMetricRecord = {
 	condition?: string | null;
 	/** English rendering of condition for non-English documents. */
 	condition_en?: string | null;
+	/** Resources the value uses, its method and its place in a procedure (kb.metrics.frame). */
+	frame?: KbMetricFrame | null;
 	measurement_frequency?: string;
 	confidence?: number;
 	is_explicit_metric?: boolean;

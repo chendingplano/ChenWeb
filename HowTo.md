@@ -4998,7 +4998,13 @@ Peak hours: 9:00 - 12:00 and 14:00-18:00 UTC on weekdays,
 |-------|-------|--------|
 | Qwen 3.8 Max | 
 
+# How to add images to markdown files
+```text
+![text describing the image](relative-path/to/image)
+```
+
 # Anthropic Pricing
+![Anthropic Pricing](../KnowledgeStore/Images/image_2026101701.png)
 
 # Tmux Commands
 Prefix is the default Ctrl-b:
@@ -5023,4 +5029,3 @@ sudo networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 dig +short onto.bzton.cn        # should print 210.5.158.91
 ```
-

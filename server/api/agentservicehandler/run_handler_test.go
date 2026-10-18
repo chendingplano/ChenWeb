@@ -16,7 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func TestPiGatewayClientForwardsOnlyPrivateBearerAndBoundedRun(t *testing.T) {
+func TestPiHarnessAdapterForwardsOnlyPrivateBearerAndBoundedRun(t *testing.T) {
 	var gotAuthorization, gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuthorization, gotPath = r.Header.Get("Authorization"), r.URL.Path
@@ -27,8 +27,8 @@ func TestPiGatewayClientForwardsOnlyPrivateBearerAndBoundedRun(t *testing.T) {
 		_, _ = io.WriteString(w, `{"type":"completion","status":"completed"}`+"\n")
 	}))
 	defer server.Close()
-	client := NewPiGatewayClient(server.URL, "private-secret-private-secret", server.Client())
-	response, err := client.Start(context.Background(), GatewayRunRequest{RunID: "run-1", ConversationID: "c", UserID: "u", Message: "help", Capability: "cap", Profile: GatewayRunProfile{Slug: "guide", Version: "v1", Provider: "anthropic", Model: "model", SystemPrompt: "guide", AllowedTools: []string{"search_knowledge"}, MaxToolCalls: 2, MaxElapsedMs: 1000, MaxOutputTokens: 100, MaxEvidenceBytes: 1024, PermissionDefault: PermissionAuto, ThinkingLevel: "off"}})
+	client := NewPiHarnessAdapter(server.URL, "private-secret-private-secret", server.Client())
+	response, err := client.Start(context.Background(), AgentRunRequest{RunID: "run-1", ConversationID: "c", UserID: "u", Message: "help", Capability: "cap", Profile: AgentRunProfile{Slug: "guide", Version: "v1", Provider: "anthropic", Model: "model", SystemPrompt: "guide", AllowedTools: []string{"search_knowledge"}, MaxToolCalls: 2, MaxElapsedMs: 1000, MaxOutputTokens: 100, MaxEvidenceBytes: 1024, PermissionDefault: PermissionAuto, ThinkingLevel: "off"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestPiGatewayClientForwardsOnlyPrivateBearerAndBoundedRun(t *testing.T) {
 }
 
 func TestPiGatewayDefaultMatchesLoopbackGatewayPort(t *testing.T) {
-	client := NewPiGatewayClient("", "private-secret-private-secret", nil)
+	client := NewPiHarnessAdapter("", "private-secret-private-secret", nil)
 	if !client.available() || client.endpoint("/health") != "http://127.0.0.1:4317/health" {
 		t.Fatalf("gateway default URL %q", client.endpoint("/health"))
 	}
@@ -105,9 +105,9 @@ func TestRunCollectorAcceptsSafeRetryActivityButRejectsLateAnswer(t *testing.T) 
 }
 
 func TestGatewayProfileMappingUsesPinnedLimitsAndDisclosure(t *testing.T) {
-	p := PiProfile{Slug: "guide", Version: "v1", Provider: "anthropic", Model: "model-1", SystemPrompt: "safe", ThinkingLevel: "medium", PermissionDefault: PermissionAsk,
+	p := AgentServiceProfile{Slug: "guide", Version: "v1", Provider: "anthropic", Model: "model-1", SystemPrompt: "safe", ThinkingLevel: "medium", PermissionDefault: PermissionAsk,
 		AllowedTools: []string{"search_knowledge"}, Limits: ProfileLimits{MaxToolCalls: 3, MaxElapsed: time.Minute, MaxOutputTokens: 100, MaxEvidenceBytes: 2048}}
-	mapped := MapGatewayProfile(p, PermissionAsk)
+	mapped := MapAgentProfile(p, PermissionAsk)
 	encoded, err := json.Marshal(mapped)
 	if err != nil {
 		t.Fatal(err)
@@ -209,8 +209,8 @@ func (f *fakeRunStore) GetRunAttempt(context.Context, string, string, string) (R
 	return ResponseAttempt{ID: "run-1", ConversationID: "conversation-1", Status: status}, nil
 }
 
-type fakeGatewayBridge struct {
-	request      GatewayRunRequest
+type fakeHarnessAdapter struct {
+	request      AgentRunRequest
 	stream       string
 	streamReader io.ReadCloser
 	startErr     error
@@ -218,14 +218,14 @@ type fakeGatewayBridge struct {
 	decision     bool
 	window       int
 	windowErr    error
-	summarized   []GatewaySummaryRequest
+	summarized   []AgentSummaryRequest
 	summaryText  string
 }
 
-func (g *fakeGatewayBridge) ModelContextWindow(context.Context, string, string) (int, error) {
+func (g *fakeHarnessAdapter) ModelContextWindow(context.Context, string, string) (int, error) {
 	return g.window, g.windowErr
 }
-func (g *fakeGatewayBridge) Summarize(_ context.Context, in GatewaySummaryRequest) (string, error) {
+func (g *fakeHarnessAdapter) Summarize(_ context.Context, in AgentSummaryRequest) (string, error) {
 	g.summarized = append(g.summarized, in)
 	if g.summaryText == "" {
 		return "", errors.New("summary unavailable")
@@ -241,7 +241,7 @@ func (allowRunSources) CheckSourceWithGroups(context.Context, string, []string, 
 func (allowRunSources) CheckDocumentAccess(context.Context, string, []string, []string, string) error {
 	return nil
 }
-func (g *fakeGatewayBridge) Start(_ context.Context, run GatewayRunRequest) (io.ReadCloser, error) {
+func (g *fakeHarnessAdapter) Start(_ context.Context, run AgentRunRequest) (io.ReadCloser, error) {
 	g.request = run
 	if g.startErr != nil {
 		return nil, g.startErr
@@ -251,8 +251,8 @@ func (g *fakeGatewayBridge) Start(_ context.Context, run GatewayRunRequest) (io.
 	}
 	return io.NopCloser(strings.NewReader(g.stream)), nil
 }
-func (g *fakeGatewayBridge) Cancel(context.Context, string) error { g.cancelled = true; return nil }
-func (g *fakeGatewayBridge) Decide(_ context.Context, _, _ string, allowed bool) error {
+func (g *fakeHarnessAdapter) Cancel(context.Context, string) error { g.cancelled = true; return nil }
+func (g *fakeHarnessAdapter) Decide(_ context.Context, _, _ string, allowed bool) error {
 	g.decision = allowed
 	return nil
 }
@@ -262,7 +262,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	profile := testAgentProfileRegistry()
 	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", OwnerUserID: "user-1", ServiceSlug: "knowledge-guide", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"},
 		Messages: []Message{{ID: "old-user", AttemptID: strPtr("old-run"), SequenceNo: 1, Role: "user", Content: "Old question", Status: "complete"}, {ID: "old-answer", AttemptID: strPtr("old-run"), SequenceNo: 2, Role: "assistant", Content: "Old answer", Status: "complete"}}}}
-	gateway := &fakeGatewayBridge{stream: strings.Join([]string{
+	gateway := &fakeHarnessAdapter{stream: strings.Join([]string{
 		`{"type":"answer_delta","text":"Flow is low."}`,
 		`{"type":"sources","toolCallId":"call-1","toolName":"search_knowledge","sources":[{"knowledge_store_id":"7","document_id":"42","source_title":"Guide","source_version":"v1","source_fingerprint":"abc","line_start":10,"line_end":11}]}`,
 		`{"type":"activity","status":"completed","tool":"search_knowledge","toolCallId":"call-1","error":false}`,
@@ -299,7 +299,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 func TestRunWithoutGrantedStoreProceedsWithoutKnowledgeTools(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true, noStores: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", OwnerUserID: "user-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
-	gateway := &fakeGatewayBridge{stream: `{"type":"answer_delta","text":"I can explain what this service does."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
+	gateway := &fakeHarnessAdapter{stream: `{"type":"answer_delta","text":"I can explain what this service does."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer).SetDefaultKnowledgeStoreName(func() string { return "Research" }))
@@ -322,7 +322,7 @@ func TestRunWithoutGrantedStoreProceedsWithoutKnowledgeTools(t *testing.T) {
 func TestDuplicateRunKeyDoesNotCreateMessagesOrCallGateway(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: false, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
-	gateway := &fakeGatewayBridge{}
+	gateway := &fakeHarnessAdapter{}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), nil, gateway, signer))
@@ -353,7 +353,7 @@ func TestGrantedStoreScopeUsesCurrentUserGrantsAndStableIDs(t *testing.T) {
 func TestRunDoesNotTellBrowserCompletedBeforeFinalization(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true, finalizeErr: errors.New("database unavailable"), state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
-	gateway := &fakeGatewayBridge{stream: `{"type":"answer_delta","text":"Draft"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
+	gateway := &fakeHarnessAdapter{stream: `{"type":"answer_delta","text":"Draft"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
@@ -366,7 +366,7 @@ func TestRunDoesNotTellBrowserCompletedBeforeFinalization(t *testing.T) {
 func TestRunRejectsSourceFromFailedTool(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
-	gateway := &fakeGatewayBridge{stream: strings.Join([]string{
+	gateway := &fakeHarnessAdapter{stream: strings.Join([]string{
 		`{"type":"answer_delta","text":"Possibly"}`,
 		`{"type":"sources","toolCallId":"call-1","toolName":"search_knowledge","sources":[{"knowledge_store_id":"7","document_id":"42","source_title":"Guide","source_version":"v1","source_fingerprint":"abc","line_start":10,"line_end":11}]}`,
 		`{"type":"activity","status":"completed","tool":"search_knowledge","toolCallId":"call-1","error":true}`,
@@ -384,7 +384,7 @@ func TestRunRejectsSourceFromFailedTool(t *testing.T) {
 func TestRunControlsRequireOwnedActiveAttempt(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true}
-	gateway := &fakeGatewayBridge{}
+	gateway := &fakeHarnessAdapter{}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), nil, gateway, signer))
@@ -403,7 +403,7 @@ func TestRunControlsRequireOwnedActiveAttempt(t *testing.T) {
 func TestGatewayFailureSettlesRunAndReturnsRetryableUnavailable(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
-	gateway := &fakeGatewayBridge{startErr: errors.New("connection refused")}
+	gateway := &fakeHarnessAdapter{startErr: errors.New("connection refused")}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
@@ -416,7 +416,7 @@ func TestGatewayFailureSettlesRunAndReturnsRetryableUnavailable(t *testing.T) {
 func TestRunWithoutGatewayCompletionIsInterruptedAndKeepsPartialAnswer(t *testing.T) {
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
-	gateway := &fakeGatewayBridge{stream: `{"type":"answer_delta","text":"Partial check"}` + "\n"}
+	gateway := &fakeHarnessAdapter{stream: `{"type":"answer_delta","text":"Partial check"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
@@ -453,7 +453,7 @@ func TestBrowserDisconnectSettlesAttemptWithoutLeakingFinalSignal(t *testing.T) 
 	withAgentUser(t, "user-1")
 	store := &fakeRunStore{created: true, state: ResumeState{Conversation: Conversation{ID: "conversation-1", ProfileSlug: "knowledge-guide", ProfileVersion: "v1", ModelName: "model-1"}}}
 	ctx, cancel := context.WithCancel(context.Background())
-	gateway := &fakeGatewayBridge{streamReader: &cancelOnRead{reader: strings.NewReader(`{"type":"answer_delta","text":"Partial"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"), cancel: cancel}}
+	gateway := &fakeHarnessAdapter{streamReader: &cancelOnRead{reader: strings.NewReader(`{"type":"answer_delta","text":"Partial"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"), cancel: cancel}}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))

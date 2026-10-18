@@ -20,8 +20,9 @@ import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 import TypeIcon from '@lucide/svelte/icons/type';
 
 export type NormalizedSpan = { page_number: number; line_number: number };
-export type AttrKind = 'text' | 'chips' | 'lines';
+export type AttrKind = 'text' | 'chips' | 'lines' | 'json';
 export type LineEntry = { head: string; content: string; lineType: string };
+export type JsonEntry = { key: string; value: string | null; depth: number };
 export type AttrDef = {
 	key: string;
 	label: string;
@@ -30,6 +31,7 @@ export type AttrDef = {
 	value: string; // formatted value for `text` kind, joined for chips/lines summary
 	items: string[]; // for `chips` and `lines` kinds (joined head + content for lines)
 	entries: LineEntry[]; // structured per-line entries for `lines` kind
+	jsonEntries?: JsonEntry[];
 	count: number; // 1 for scalars with a value, items.length for lists, 0 if empty
 	hasValue: boolean;
 };
@@ -46,6 +48,30 @@ function toPositiveInt(v: unknown): number | null {
 	if (!Number.isFinite(n)) return null;
 	const i = Math.trunc(n);
 	return i > 0 ? i : null;
+}
+
+function flattenJsonEntries(value: unknown, depth = 0, key = ''): JsonEntry[] {
+	if (Array.isArray(value)) {
+		if (value.length === 0) return [{ key, value: '[]', depth }];
+		if (value.every((item) => item == null || typeof item !== 'object')) {
+			return [{ key, value: JSON.stringify(value), depth }];
+		}
+		return [
+			{ key, value: null, depth },
+			...value.flatMap((item, index) => flattenJsonEntries(item, depth + 1, `[${index}]`))
+		];
+	}
+	if (value != null && typeof value === 'object') {
+		const entries = Object.entries(value as Record<string, unknown>);
+		if (entries.length === 0) return [{ key, value: '{}', depth }];
+		return [
+			{ key, value: null, depth },
+			...entries.flatMap(([childKey, childValue]) =>
+				flattenJsonEntries(childValue, depth + 1, childKey)
+			)
+		];
+	}
+	return [{ key, value: value == null ? 'null' : String(value), depth }];
 }
 
 /** Maps line_number → page_number, built from a document's loaded raw lines. */
@@ -97,6 +123,20 @@ export function normalizeMetricSpans(
 export function confidencePct(c?: number): string {
 	if (c == null) return '—';
 	return `${Math.round(c * 100)}%`;
+}
+
+/** Display label of a frame resource role (agent, apparatus, …); an unknown role shows as-is. */
+export function metricFrameRoleLabel(role: string): string {
+	const labels: Record<string, () => string> = {
+		agent: msg.metric_frame_role_agent,
+		material: msg.metric_frame_role_material,
+		apparatus: msg.metric_frame_role_apparatus,
+		reagent: msg.metric_frame_role_reagent,
+		medium: msg.metric_frame_role_medium,
+		sample: msg.metric_frame_role_sample,
+		device: msg.metric_frame_role_device
+	};
+	return labels[role]?.() ?? role;
 }
 
 export function buildMetricGroupAttrs(
@@ -162,6 +202,16 @@ export function buildMetricGroupAttrs(
 
 	const kwItems = (m.metric_keywords ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
 	const tags = (m.reasoning_tags ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
+	const frame = m.frame ?? {};
+	const useItems = (frame.uses ?? []).map((r) => {
+		const spec = (r.spec ?? []).map((s) => `${s.property} ${s.value}${s.unit ?? ''}`.trim()).join(', ');
+		const name = spec ? `${r.name} (${spec})` : r.name;
+		return msg.metric_frame_use_item({ role: metricFrameRoleLabel(r.role), name });
+	});
+	const methodItems = (frame.method ?? []).map((q) => (q.label ? `${q.label}：${q.value}` : q.value));
+	const procedureText = [frame.procedure?.step, frame.procedure?.stage, frame.procedure?.after]
+		.filter((v) => v != null && v.trim() !== '')
+		.join(' · ');
 
 	const metadata: AttrDef[] = [
 		textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
@@ -229,7 +279,14 @@ export function buildMetricGroupAttrs(
 			has(m.table_name_or_section)
 		),
 		textAttr('context', 'Context', BookOpenIcon, fmt(m.metric_context), has(m.metric_context)),
-		chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', '))
+		chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', ')),
+		textAttr(
+			'search_document',
+			msg.metric_mgmt_search_document(),
+			FileTextIcon,
+			fmt(m.search_document),
+			has(m.search_document)
+		)
 	];
 
 	const metric: AttrDef[] = [
@@ -244,6 +301,9 @@ export function buildMetricGroupAttrs(
 			fmt(m.condition_en),
 			has(m.condition_en)
 		),
+		chipsAttr('frame_uses', msg.metric_frame_uses(), TagIcon, useItems, useItems.join('; ')),
+		chipsAttr('frame_method', msg.metric_frame_method(), TagIcon, methodItems, methodItems.join('; ')),
+		textAttr('frame_procedure', msg.metric_frame_procedure(), ListIcon, procedureText, procedureText !== ''),
 		textAttr('object_name', 'Object', FileIcon, fmt(m.object_name), has(m.object_name)),
 		textAttr(
 			'frequency',
@@ -283,7 +343,21 @@ export function buildMetricGroupAttrs(
 			fmt(m.value_range_type),
 			has(m.value_range_type)
 		),
-		textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type))
+		textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type)),
+		{
+			key: 'frame_json',
+			label: msg.metric_frame_json(),
+			icon: ListIcon,
+			kind: 'json',
+			value: '',
+			items: [],
+			entries: [],
+			jsonEntries: Object.entries(m.frame ?? {}).flatMap(([key, value]) =>
+				flattenJsonEntries(value, 1, key)
+			),
+			count: Object.keys(m.frame ?? {}).length,
+			hasValue: Object.keys(m.frame ?? {}).length > 0
+		}
 	];
 
 	const reasoning: AttrDef[] = [chipsAttr('reasoning_tags', 'Tags', TagIcon, tags, tags.join(', '))];

@@ -2679,15 +2679,7 @@ func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
 }
 
 func loadProductPromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptPath string, promptErr error) {
-	for _, key := range envKeys {
-		promptRef = strings.TrimSpace(os.Getenv(key))
-		if promptRef != "" {
-			break
-		}
-	}
-	if promptRef == "" {
-		promptRef = defaultRef
-	}
+	promptRef = promptRefFromEnvKeys(envKeys, defaultRef)
 
 	return loadPromptByRef(promptRef)
 }
@@ -2729,7 +2721,7 @@ func loadPromptByRef(promptRef string) (promptText string, promptRefOut string, 
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = fmt.Errorf("(MID_26052060) failed reading file. Path:%s, error:%w", candidate, err)
 			continue

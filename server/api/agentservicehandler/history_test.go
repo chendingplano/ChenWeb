@@ -186,7 +186,7 @@ func TestTitleFromMessage(t *testing.T) {
 
 // runHistoryTurn sends one message through the run endpoint with the given
 // conversation state and gateway, and returns them for inspection.
-func runHistoryTurn(t *testing.T, store *fakeRunStore, gateway *fakeGatewayBridge) {
+func runHistoryTurn(t *testing.T, store *fakeRunStore, gateway *fakeHarnessAdapter) {
 	t.Helper()
 	withAgentUser(t, "user-1")
 	if gateway.stream == "" {
@@ -218,7 +218,7 @@ func TestRunSendsOnlyCompleteTurnsAndSetsTitleOnce(t *testing.T) {
 	store := &fakeRunStore{created: true, state: historyConversation("",
 		turnMessages("a1", 1, "Q1", "A1", "complete"),
 		turnMessages("a2", 3, "Q2", "failed", "incomplete"))}
-	gateway := &fakeGatewayBridge{window: 200000}
+	gateway := &fakeHarnessAdapter{window: 200000}
 	runHistoryTurn(t, store, gateway)
 	history := gateway.request.History
 	if len(history) != 2 || history[0].Content != "Q1" || history[1].Content != "A1" {
@@ -229,7 +229,7 @@ func TestRunSendsOnlyCompleteTurnsAndSetsTitleOnce(t *testing.T) {
 	}
 
 	titled := &fakeRunStore{created: true, state: historyConversation("Existing")}
-	runHistoryTurn(t, titled, &fakeGatewayBridge{window: 200000})
+	runHistoryTurn(t, titled, &fakeHarnessAdapter{window: 200000})
 	if titled.titleSets != 0 {
 		t.Fatalf("existing title was rewritten %d times", titled.titleSets)
 	}
@@ -239,7 +239,7 @@ func TestRunSendsStoredSummaryWithLaterTurnsOnly(t *testing.T) {
 	store := &fakeRunStore{created: true, summary: HistorySummary{Text: "Earlier: pumps.", ThroughSeq: 2}, state: historyConversation("t",
 		turnMessages("a1", 1, "Q1", "A1", "complete"),
 		turnMessages("a2", 3, "Q2", "A2", "complete"))}
-	gateway := &fakeGatewayBridge{window: 200000}
+	gateway := &fakeHarnessAdapter{window: 200000}
 	runHistoryTurn(t, store, gateway)
 	if gateway.request.HistorySummary != "Earlier: pumps." || len(gateway.request.History) != 2 || gateway.request.History[0].Content != "Q2" {
 		t.Fatalf("summary=%q history=%+v", gateway.request.HistorySummary, gateway.request.History)
@@ -272,7 +272,7 @@ func TestRunKeepsSummaryAndAnswersAfterOldRevocation(t *testing.T) {
 		{AttemptID: "a2", ToolCallID: "t1", ToolName: "search_knowledge", Result: `{"items":[]}`, DocumentIDs: []string{"revoked"}},
 		{AttemptID: "a2", ToolCallID: "t2", ToolName: "search_knowledge", Result: `{"items":[]}`, DocumentIDs: []string{"ok"}},
 	}}
-	gateway := &fakeGatewayBridge{window: 200000, stream: `{"type":"answer_delta","text":"Answer."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
+	gateway := &fakeHarnessAdapter{window: 200000, stream: `{"type":"answer_delta","text":"Answer."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), revokedDocumentSources{}, gateway, signer))
@@ -301,7 +301,7 @@ func TestCompletedRunFoldsOverflowingHistory(t *testing.T) {
 		turnMessages("a1", 1, big, big, "complete"),
 		turnMessages("a2", 3, big, big, "complete"))}
 	// A 4,000-token window gives the 2,000-token floor budget, so both turns overflow it.
-	gateway := &fakeGatewayBridge{window: 4000, summaryText: "Folded summary."}
+	gateway := &fakeHarnessAdapter{window: 4000, summaryText: "Folded summary."}
 	runHistoryTurn(t, store, gateway)
 	if len(gateway.request.History) != 0 {
 		t.Fatalf("oversized turns were sent: %d messages", len(gateway.request.History))
@@ -317,7 +317,7 @@ func TestCompletedRunFoldsOverflowingHistory(t *testing.T) {
 func TestFailedSummaryLeavesTurnCompleted(t *testing.T) {
 	big := strings.Repeat("word ", 2000)
 	store := &fakeRunStore{created: true, state: historyConversation("t", turnMessages("a1", 1, big, big, "complete"))}
-	gateway := &fakeGatewayBridge{window: 4000}
+	gateway := &fakeHarnessAdapter{window: 4000}
 	runHistoryTurn(t, store, gateway)
 	if len(gateway.summarized) != 1 || store.savedSummary != nil || len(store.settled) != 1 || store.settled[0].Status != "completed" {
 		t.Fatalf("summarized=%d saved=%+v settled=%+v", len(gateway.summarized), store.savedSummary, store.settled)

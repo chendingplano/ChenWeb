@@ -10,7 +10,7 @@ import (
 )
 
 func TestMetricEnrichmentPromptSeparatesPositionsFromCounts(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v27.md"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v28.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,9 +172,9 @@ func TestEnrichMetricCandidatesSplitsPairedBloodPressure(t *testing.T) {
 // written "重复一次", one of two alternative drugs and the diastolic half of 180/110 mmHg.
 func TestMetricPromptsKeepTriggersAlternativesAndPairs(t *testing.T) {
 	for file, wants := range map[string][]string{
-		"prompt-extract-metric-candidates-v28.md": {"## Triggers", "headings or TOC entries that are only titles",
+		"prompt-extract-metric-candidates-v29.md": {"## Triggers", "headings or TOC entries that are only titles",
 			"近2周有外伤史", "重复一次", "沙丁胺醇或特布他林", "180/110", "符合任何1项"},
-		"prompt-enrich-metrics-v27.md": {"### Triggers Are Rows", "`70+年龄×2`", "`触发`", "never drop a trigger as `condition_of:<id>`",
+		"prompt-enrich-metrics-v28.md": {"### Triggers Are Rows", "`70+年龄×2`", "`触发`", "never drop a trigger as `condition_of:<id>`",
 			"高龄患者（年龄≥75岁）", "重复一次", "沙丁胺醇或特布他林", "Never `metric_value` \"180/110\"", "符合任何1项"},
 	} {
 		b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", file))

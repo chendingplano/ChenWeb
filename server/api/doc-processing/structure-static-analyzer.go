@@ -803,7 +803,7 @@ func staticInputLinesToJSON(lines []staticInputLine) string {
 
 // loadTOCDetectPromptFromEnv loads the TOC detection prompt from the DETECT_TOC_LINES_PROMPT env var.
 func loadTOCDetectPromptFromEnv() (promptText, promptRef, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("DETECT_TOC_LINES_PROMPT"))
+	promptRef = promptRefFromEnv("DETECT_TOC_LINES_PROMPT", "")
 	if promptRef == "" {
 		return "", "", "", fmt.Errorf("(MID_26061103) DETECT_TOC_LINES_PROMPT not set")
 	}
@@ -836,7 +836,7 @@ func loadTOCDetectPromptFromEnv() (promptText, promptRef, promptPath string, pro
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = err
 			continue

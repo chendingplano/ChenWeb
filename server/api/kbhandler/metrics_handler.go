@@ -37,6 +37,7 @@ type metricRecord struct {
 	MetricContextEn     *string         `json:"metric_context_en,omitempty"`
 	MetricKeywords      json.RawMessage `json:"metric_keywords,omitempty"`
 	MetricKeywordsEn    json.RawMessage `json:"metric_keywords_en,omitempty"`
+	SearchDocument      *string         `json:"search_document,omitempty"`
 	ModelName           *string         `json:"model_name,omitempty"`
 	LocationType        *string         `json:"location_type,omitempty"`
 	MetricUnit          *string         `json:"metric_unit,omitempty"`
@@ -84,6 +85,9 @@ type metricRecord struct {
 	// (openspec change extract-metrics-conditions).
 	Condition   *string `json:"condition,omitempty"`
 	ConditionEn *string `json:"condition_en,omitempty"`
+	// Frame is kb.metrics.frame: the resources the value uses, its method and its place in a
+	// procedure (openspec change metric-frame). Always serialized; null when the row has none.
+	Frame json.RawMessage `json:"frame"`
 	// TableContext is built at read time from SourceTableRows: header + matched rows
 	// + one neighbor data row either side. Never stored.
 	TableContext []docprocessing.TableContextWindow `json:"table_context,omitempty"`
@@ -183,7 +187,7 @@ SELECT
     m.id, m.input_record_id, m.metric_id, NULL::text AS event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
-    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_keywords, m.metric_keywords_en, NULL::text AS search_document, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric,
@@ -195,7 +199,7 @@ SELECT
     NULL::text AS keyword_concept_id, NULL::text AS metric_definition_term_id, NULL::text AS value_range_type_error,
     m.source_table_rows, NULL::bigint AS provision_id,
     NULL::bigint AS ref_mention_id, NULL::bigint AS ref_input_record_id, NULL::text AS ref_metric_id,
-    m.condition, m.condition_en
+    m.condition, m.condition_en, m.frame
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
@@ -241,7 +245,7 @@ SELECT
     m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
-    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_keywords, m.metric_keywords_en, m.search_document, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric,
@@ -253,7 +257,7 @@ SELECT
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
     m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
-    m.condition, m.condition_en
+    m.condition, m.condition_en, m.frame
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -318,6 +322,7 @@ ORDER BY m.id ASC
 			keywordsEnBytes []byte
 			reasoningBytes  []byte
 			tableRowsBytes  []byte
+			frameBytes      []byte
 			confidence      sql.NullFloat64
 			isExplicit      sql.NullBool
 		)
@@ -325,7 +330,7 @@ ORDER BY m.id ASC
 			&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
 			&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
 			&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
-			&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
+			&keywordsBytes, &keywordsEnBytes, &r.SearchDocument, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
 			&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 			&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 			&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
@@ -333,7 +338,7 @@ ORDER BY m.id ASC
 			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 			&tableRowsBytes, &r.ProvisionID,
 			&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
-			&r.Condition, &r.ConditionEn,
+			&r.Condition, &r.ConditionEn, &frameBytes,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -352,6 +357,9 @@ ORDER BY m.id ASC
 		}
 		if len(reasoningBytes) > 0 {
 			r.ReasoningTags = json.RawMessage(reasoningBytes)
+		}
+		if len(frameBytes) > 0 {
+			r.Frame = json.RawMessage(frameBytes)
 		}
 		if len(tableRowsBytes) > 0 {
 			r.SourceTableRows = json.RawMessage(tableRowsBytes)
@@ -444,7 +452,7 @@ SELECT
     m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
-    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_keywords, m.metric_keywords_en, m.search_document, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric,
@@ -456,7 +464,7 @@ SELECT
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
     m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
-    m.condition, m.condition_en
+    m.condition, m.condition_en, m.frame
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -479,6 +487,7 @@ WHERE m.id = $1
 		keywordsEnBytes []byte
 		reasoningBytes  []byte
 		tableRowsBytes  []byte
+		frameBytes      []byte
 		confidence      sql.NullFloat64
 		isExplicit      sql.NullBool
 	)
@@ -486,7 +495,7 @@ WHERE m.id = $1
 		&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
 		&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
 		&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
-		&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
+		&keywordsBytes, &keywordsEnBytes, &r.SearchDocument, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
 		&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 		&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo, &r.ObjectName,
@@ -494,10 +503,13 @@ WHERE m.id = $1
 		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 		&tableRowsBytes, &r.ProvisionID,
 		&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
-		&r.Condition, &r.ConditionEn,
+		&r.Condition, &r.ConditionEn, &frameBytes,
 	)
 	if err != nil {
 		return metricRecord{}, err
+	}
+	if len(frameBytes) > 0 {
+		r.Frame = json.RawMessage(frameBytes)
 	}
 	if len(tableRowsBytes) > 0 {
 		r.SourceTableRows = json.RawMessage(tableRowsBytes)

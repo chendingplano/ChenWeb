@@ -1520,6 +1520,8 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			"at a distance of 1 m",
 			nil, // value_min: not a range
 			nil, // value_max
+			`{"uses":[{"role":"apparatus","name":"声级计"}]}`,
+			nil, // provision_id: not linked
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -1560,6 +1562,7 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 				"metric_categories_en":  []string{"performance_en"},
 				"condition":             "在 1 m 距离处",
 				"condition_en":          "at a distance of 1 m",
+				"frame":                 &metricFrame{Uses: []metricFrameResource{{Role: "apparatus", Name: "声级计"}}},
 			},
 		},
 	})
@@ -1596,7 +1599,8 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"适用人群：幼儿", nil, float64(600), float64(1600)).
+			"适用人群：幼儿", nil, float64(600), float64(1600),
+			`{"method":[{"label":"试验方法","value":"A 法"}]}`, int64(7)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
@@ -1605,7 +1609,9 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 		Metrics: []map[string]any{
 			{"metric_id": "173_mtc_1", "metric_name": "Latency", "source_line_spans": []any{float64(2)},
 				"condition": "适用人群：幼儿", "condition_en": "ignored for English documents",
-				"value_min": float64(600), "value_max": float64(1600)},
+				"value_min": float64(600), "value_max": float64(1600),
+				"frame":        &metricFrame{Method: []metricFrameQualifier{{Label: "试验方法", Value: "A 法"}}},
+				"provision_id": int64(7)},
 		},
 	})
 	if err != nil {
@@ -1659,7 +1665,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
 		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en",
 		"keyword_concept_id", "metric_definition_term_id", "subject_concept_id", "ext_info",
-		"source_table_rows", "condition", "condition_en", "value_min", "value_max",
+		"source_table_rows", "condition", "condition_en", "value_min", "value_max", "frame",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1671,6 +1677,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"kwc:latency", "mdt:latency", "kwc:api", `{"language":"zh","schema_version":"2"}`,
 		`[{"line":116,"rows":["r1"],"row_hash":{"r1":"3fa1c09b7e22"}}]`,
 		"适用人群：幼儿", "Population: preschool children", nil, nil,
+		`{"uses":[{"role":"agent","name":"葡萄糖注射液","spec":[{"property":"浓度","value":"50","unit":"%"}]}]}`,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).
@@ -1698,6 +1705,9 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 	}
 	if row["value_min"] != nil || row["value_max"] != nil {
 		t.Fatalf("value_min=%#v value_max=%#v, want nil for NULL columns", row["value_min"], row["value_max"])
+	}
+	if f := metricRowFrame(row); f == nil || f.Uses[0].Name != "葡萄糖注射液" || f.Uses[0].Spec[0].Value != "50" {
+		t.Fatalf("frame=%#v", row["frame"])
 	}
 	kwEn, ok := row["metric_keywords_en"].([]any)
 	if !ok || len(kwEn) != 1 || kwEn[0] != "latency" {

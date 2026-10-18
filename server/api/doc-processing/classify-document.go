@@ -479,14 +479,10 @@ const defaultClassifyDocumentPromptRef = "prompt-classify-document-v1.md"
 
 // LoadClassifyDocumentPrompt loads the versioned classify_document prompt
 // from the standard prompt search paths. The ref is overridable via
-// CLASSIFY_DOCUMENT_PROMPT so the prompt is never hard-coded in the binary
-// (spec section 7: "The prompt is a versioned file under ChenWeb/prompts;
-// it is never embedded in Go").
+// CLASSIFY_DOCUMENT_PROMPT; the configured prompt also has a generated Go
+// default so the doc-processor can run when its prompt file is not deployed.
 func LoadClassifyDocumentPrompt() (promptText, promptRef, promptPath string, err error) {
-	ref := strings.TrimSpace(os.Getenv("CLASSIFY_DOCUMENT_PROMPT"))
-	if ref == "" {
-		ref = defaultClassifyDocumentPromptRef
-	}
+	ref := promptRefFromEnv("CLASSIFY_DOCUMENT_PROMPT", defaultClassifyDocumentPromptRef)
 	return loadPromptByRef(ref)
 }
 

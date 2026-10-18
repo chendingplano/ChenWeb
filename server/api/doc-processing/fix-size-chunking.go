@@ -3444,7 +3444,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 }
 
 func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_PROMPT"))
+	promptRef = promptRefFromEnv("EXTRACT_TOPIC_PROMPT", "")
 	if promptRef == "" {
 		return "", "", "", errors.New("(MID_26042020) missing EXTRACT_TOPIC_PROMPT")
 	}
@@ -3477,7 +3477,7 @@ func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, pro
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = err
 			continue
@@ -3499,9 +3499,9 @@ func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, pro
 }
 
 func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("GENERATE_SUMMARY_PROMPT"))
+	promptRef = promptRefFromEnv("GENERATE_SUMMARY_PROMPT", "")
 	if promptRef == "" {
-		promptRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_PROMPT"))
+		promptRef = promptRefFromEnv("EXTRACT_TOPIC_PROMPT", "")
 	}
 	if promptRef == "" {
 		return "", "", "", errors.New("(MID_26042909) missing GENERATE_SUMMARY_PROMPT")
@@ -3534,7 +3534,7 @@ func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, p
 	}
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = err
 			continue

@@ -90,7 +90,7 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + prompts/ + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). BINS=server,doc-processor subsets; default builds all five."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all five."
 run = '''
 set -euo pipefail
 
@@ -126,6 +126,13 @@ case " $SELECTED " in
 esac
 
 built=""
+DOC_PROMPT_REFS=/tmp/chenweb-doc-processor-prompt-refs.txt
+rm -f "$DOC_PROMPT_REFS"
+case " $SELECTED " in
+  *" doc-processor:"*)
+    python3 "$REPO/scripts/generate-doc-processor-prompt-defaults.py" --refs-out "$DOC_PROMPT_REFS"
+    ;;
+esac
 for pair in $SELECTED; do
   name="${pair%%:*}"; pkg="${pair##*:}"
   echo "==> building $name-linux  ($pkg)"
@@ -158,18 +165,23 @@ for d in project_migrations shared_migrations; do
   fi
 done
 
-# Ship the prompts/ directory too. PROMPT_DIR (or the ./prompts fallback) is
-# read from disk per-call (doc-structure-analyzer.go, extract-doc-metadata.go,
-# extract-metrics.go, etc.), not go:embed'd, so a binaries-only payload leaves
-# the box's prompts frozen wherever the last hand-rsync left them -- this bit
-# onto.bzton.cn for real (2026-09-22: box was missing/stale on product-mention
-# and product-extraction prompts after a rename on the Mac went undeployed).
-# Always shipped regardless of BINS: prompts are not per-binary.
+# Ship runtime prompts for services that still load them from disk. When the
+# doc-processor is built, its currently configured prompt files are embedded in
+# the binary and removed from the package below.
 if [ -d "$REPO/prompts" ]; then
   mkdir -p "$OUT/prompts"
   cp -a "$REPO/prompts"/. "$OUT/prompts"/
+  if [ -f "$DOC_PROMPT_REFS" ]; then
+    while IFS= read -r prompt_name; do
+      [ -n "$prompt_name" ] && rm -f "$OUT/prompts/$prompt_name"
+    done < "$DOC_PROMPT_REFS"
+  fi
   prompt_count=$(ls -1 "$OUT/prompts" | wc -l | tr -d " ")
-  echo "==> staged prompts ($prompt_count files)"
+  if [ -f "$DOC_PROMPT_REFS" ]; then
+    echo "==> staged runtime prompts ($prompt_count files; configured doc-processor prompts excluded)"
+  else
+    echo "==> staged runtime prompts ($prompt_count files)"
+  fi
 else
   echo "==> WARNING: $REPO/prompts not found -- no prompts staged" >&2
   prompt_count=0

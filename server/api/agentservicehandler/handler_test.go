@@ -28,10 +28,10 @@ func withAgentUser(t *testing.T, id string) {
 }
 
 func testAgentProfileRegistry() *ProfileRegistry {
-	p := PiProfile{Slug: "knowledge-guide", Version: "v1", FriendlyName: "Knowledge Guide", Provider: "anthropic", Model: "model-1", Enabled: true,
+	p := AgentServiceProfile{Slug: "knowledge-guide", Version: "v1", FriendlyName: "Knowledge Guide", Provider: "anthropic", Model: "model-1", Enabled: true,
 		AllowedTools: []string{"search_knowledge"}, AllowedKnowledgeStores: []string{"Research"}, PermissionDefault: PermissionAuto,
 		Limits: ProfileLimits{MaxToolCalls: 2, MaxElapsed: time.Minute, MaxOutputTokens: 100, MaxEvidenceBytes: 1024}}
-	return &ProfileRegistry{versions: map[string]map[string]PiProfile{"knowledge-guide": {"v1": p}}, active: map[string]string{"knowledge-guide": "v1"},
+	return &ProfileRegistry{versions: map[string]map[string]AgentServiceProfile{"knowledge-guide": {"v1": p}}, active: map[string]string{"knowledge-guide": "v1"},
 		knowledgeContext: mustKnowledgeContextTemplate()}
 }
 

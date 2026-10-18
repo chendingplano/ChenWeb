@@ -80,10 +80,12 @@ func dropConditionPropertyRepeats(metrics []map[string]any) {
 // "6.5.7 肺活量测试仪(计)", "6.5.4.2 对于…", "B.2.3 横梁弹性检验…".
 var metricClauseNumberRe = regexp.MustCompile(`^(?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+)(?:\s|$)`)
 
-// metricInheritedConditionLabels are the clause-wide qualifiers inheritClauseConditions copies.
-var metricInheritedConditionLabels = []string{"试验装置", "试验方法", "试验介质"}
+// metricInheritedFrameKinds are the clause-wide frame items inheritClauseConditions copies: the
+// apparatus, the test method and the medium (before openspec change metric-frame, the 试验装置 /
+// 试验方法 / 试验介质 condition qualifiers).
+var metricInheritedFrameKinds = []string{"uses:apparatus", "method:试验方法", "uses:medium"}
 
-// inheritClauseConditions copies a clause's apparatus, method and medium qualifiers to the rows of
+// inheritClauseConditions copies a clause's apparatus, method and medium frame items to the rows of
 // the same clause that lack them. A clause names its apparatus once ("应采用…气体流量标准装置按下列条件进行
 // 检验", then a) 环境温度 … ), and the model often writes it only on the rows of the line that names it,
 // or only in some of the clause's enrich batches (371, gold 20261016_162743). A row's clause is the
@@ -135,31 +137,24 @@ func inheritClauseConditions(metrics []map[string]any, chunks []Chunk) int {
 		if len(idx) < 2 {
 			continue
 		}
-		for _, label := range metricInheritedConditionLabels {
-			var part, partEn string
+		for _, kind := range metricInheritedFrameKinds {
+			var item metricFrameItem
 			values := map[string]bool{}
 			for _, i := range idx {
-				if q, en, ok := metricConditionPart(metrics[i], label); ok {
-					values[metricConditionCompact(q)] = true
-					part, partEn = q, en
+				if it, ok := metricFrameItemOf(metrics[i], kind); ok {
+					values[metricConditionCompact(it.value())] = true
+					item = it
 				}
 			}
-			value := metricConditionCompact(strings.TrimPrefix(part, metricConditionLabelRe.FindString(part)))
+			value := metricConditionCompact(item.value())
 			if len(values) != 1 || value == "" || !strings.Contains(lead[clause], value) {
 				continue
 			}
 			for _, i := range idx {
-				if _, _, ok := metricConditionPart(metrics[i], label); ok || metricConditionOverlaps(metrics[i], part) {
+				if _, ok := metricFrameItemOf(metrics[i], kind); ok || metricFrameOverlaps(metrics[i], item.value()) {
 					continue
 				}
-				m := metrics[i]
-				cond := strings.TrimSpace(asString(m["condition"]))
-				condEn := strings.TrimSpace(asString(m["condition_en"]))
-				aligned := metricConditionCount(cond, "；") == metricConditionCount(condEn, ";")
-				m["condition"] = strings.TrimPrefix(cond+"；"+part, "；")
-				if partEn != "" && aligned {
-					m["condition_en"] = strings.TrimPrefix(condEn+"; "+partEn, "; ")
-				}
+				addMetricFrameItem(metrics[i], item)
 				changed[i] = true
 			}
 		}
@@ -172,7 +167,8 @@ func inheritClauseConditions(metrics []map[string]any, chunks []Chunk) int {
 var metricServedQuantitySuffixes = []string{"允许误差", "分度值"}
 
 // inheritServedQuantityConditions copies to a permitted-error or resolution row ("底座尺寸允许误差")
-// the qualifiers it lacks from the row of the quantity it serves ("底座尺寸"): the same subject, the
+// the qualifiers and frame resources and methods it lacks from the row of the quantity it serves
+// ("底座尺寸"): the same subject, the
 // name without the suffix, and an overlapping source line. A table cell "底座尺寸为长300 mm×宽 300 mm
 // 的方形或直径为 300 mm 的圆形 | — | ±5 mm" gives 底座尺寸 with 形状：方形底座, and the ±5 mm holds for
 // that square base; the model wrote the shape on the size row but dropped it from the tolerance
@@ -231,6 +227,9 @@ func inheritServedQuantityConditions(metrics []map[string]any) int {
 			if len(enParts) == len(parts) && aligned {
 				m["condition_en"] = strings.TrimPrefix(condEn+"; "+strings.TrimSpace(enParts[i]), "; ")
 			}
+			rowChanged = true
+		}
+		if inheritServedFrame(m, served) {
 			rowChanged = true
 		}
 		if rowChanged {

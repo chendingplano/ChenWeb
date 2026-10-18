@@ -1541,6 +1541,17 @@
 														>{item}</span
 													>{/each}
 											</div>
+										{:else if a.kind === 'json'}
+											<div class="gip-json">
+												{#each a.jsonEntries ?? [] as entry, i (`${a.key}-${i}`)}
+													<div class="gip-json-row" style={`padding-left:${entry.depth * 16}px`}>
+														<span class="gip-json-key">{entry.key}</span>
+														{#if entry.value !== null}
+															<span class="gip-json-value">{entry.value}</span>
+														{/if}
+													</div>
+												{/each}
+											</div>
 										{:else}
 											<div class="gip-line-cards">
 												{#each a.entries as entry, i (`${a.key}-${i}`)}
@@ -4678,6 +4689,28 @@
 		line-height: 1.45;
 		word-break: break-word;
 		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.gip-json {
+		display: grid;
+		gap: 4px;
+	}
+	.gip-json-row {
+		display: grid;
+		grid-template-columns: minmax(72px, 25%) minmax(0, 1fr);
+		gap: 8px;
+		align-items: baseline;
+		font-size: 12px;
+		line-height: 1.45;
+	}
+	.gip-json-key {
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+		word-break: break-word;
+	}
+	.gip-json-value {
+		color: var(--text-primary);
+		word-break: break-word;
 		min-width: 0;
 	}
 	.gip-empty {

@@ -431,13 +431,9 @@ func ambiguousObjectNodeCandidateLLMInput(candidates []ObjectNodeCandidate) []ma
 }
 
 // ambiguousObjectLLMPrompt loads the DR7 adjudicator prompt from the prompts
-// directory. The ref is overridable via RESOLVE_AMBIGUOUS_OBJECT_PROMPT so the
-// prompt is never hard-coded in the binary.
+// directory. RESOLVE_AMBIGUOUS_OBJECT_PROMPT overrides the generated default.
 func ambiguousObjectLLMPrompt() (string, error) {
-	promptRef := strings.TrimSpace(os.Getenv("RESOLVE_AMBIGUOUS_OBJECT_PROMPT"))
-	if promptRef == "" {
-		promptRef = defaultResolveAmbiguousPromptRef
-	}
+	promptRef := promptRefFromEnv("RESOLVE_AMBIGUOUS_OBJECT_PROMPT", defaultResolveAmbiguousPromptRef)
 	text, _, _, err := loadPromptByRef(promptRef)
 	if err != nil {
 		return "", err

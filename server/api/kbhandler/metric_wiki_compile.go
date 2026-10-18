@@ -72,7 +72,7 @@ SELECT
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
-    m.provision_id, m.condition, m.condition_en
+    m.provision_id, m.condition, m.condition_en, m.frame
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.ref_mention_id IS NULL AND m.metric_id = $1
@@ -84,6 +84,7 @@ WHERE m.ref_mention_id IS NULL AND m.metric_id = $1
 		keywordsBytes   []byte
 		keywordsEnBytes []byte
 		reasoningBytes  []byte
+		frameBytes      []byte
 		confidence      sql.NullFloat64
 		isExplicit      sql.NullBool
 		)
@@ -95,10 +96,13 @@ WHERE m.ref_mention_id IS NULL AND m.metric_id = $1
 		&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 		&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
-		&r.ProvisionID, &r.Condition, &r.ConditionEn,
+		&r.ProvisionID, &r.Condition, &r.ConditionEn, &frameBytes,
 	)
 		if err != nil {
 			return metricRecord{}, err
+		}
+		if len(frameBytes) > 0 {
+			r.Frame = json.RawMessage(frameBytes)
 		}
 		if len(spansBytes) > 0 {
 			r.SourceLineSpans = json.RawMessage(spansBytes)

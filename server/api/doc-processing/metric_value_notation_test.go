@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -250,31 +251,58 @@ func TestInheritClauseConditions(t *testing.T) {
 		clauseRow("y", "试验装置：B装置", "", "400"),
 		clauseRow("z", "", "", "400"),
 	}
+	splitLegacyConditions(rows) // as applyMetricFrames does before the inheritance steps
 	if n := inheritClauseConditions(rows, chunks); n != 3 {
 		t.Fatalf("rows changed = %d, want 3", n)
 	}
 	want := []string{
-		"试验装置：气体流量标准装置；试验介质：空气",
-		"试验装置：气体流量标准装置", // the medium is stated in item e), not in the clause's lead
-		"流量点：200 mL/s；试验装置：气体流量标准装置",
-		"试验装置：标准测力计",
-		"试验装置：标准砝码",
-		"试验装置：标准砝码", // 292 has no number of its own, so it belongs to 6.5.13.2
-		"试验装置：分度值为1 g的衡器",
-		"",                         // table lines are left alone
-		"试验装置：A装置", "试验装置：B装置", "", // two apparatus in one clause: nothing copied
+		"uses:apparatus=气体流量标准装置,uses:medium=空气",
+		"uses:apparatus=气体流量标准装置", // the medium is stated in item e), not in the clause's lead
+		"流量点：200 mL/s|uses:apparatus=气体流量标准装置",
+		"uses:apparatus=标准测力计",
+		"uses:apparatus=标准砝码",
+		"uses:apparatus=标准砝码", // 292 has no number of its own, so it belongs to 6.5.13.2
+		"uses:apparatus=分度值为1 g的衡器",
+		"",                                             // table lines are left alone
+		"uses:apparatus=A装置", "uses:apparatus=B装置", "", // two apparatus in one clause: nothing copied
 	}
 	for i, w := range want {
-		if got := rows[i]["condition"]; got != w {
-			t.Errorf("row %d condition = %q, want %q", i, got, w)
+		if got := metricFrameSummary(rows[i]); got != w {
+			t.Errorf("row %d = %q, want %q", i, got, w)
 		}
 	}
-	if got := rows[2]["condition_en"]; got != "Flow point: 200 mL/s; Apparatus: gas flow standard" {
+	if got := rows[2]["condition_en"]; got != "Flow point: 200 mL/s" {
 		t.Errorf("row 2 condition_en = %q", got)
 	}
-	if got := rows[1]["condition_en"]; got != "Apparatus: gas flow standard" {
-		t.Errorf("row 1 condition_en = %q", got)
+	if f := metricRowFrame(rows[1]); f == nil || f.Uses[0].NameEn != "gas flow standard" {
+		t.Errorf("row 1 frame = %+v", f)
 	}
+}
+
+// splitLegacyConditions applies splitLegacyCondition to every row.
+func splitLegacyConditions(rows []map[string]any) {
+	for _, m := range rows {
+		splitLegacyCondition(m)
+	}
+}
+
+// metricFrameSummary renders a row's condition and frame items for comparison:
+// "<condition>|uses:<role>=<name>,method:<label>=<value>".
+func metricFrameSummary(m map[string]any) string {
+	var items []string
+	if f := metricRowFrame(m); f != nil {
+		for _, r := range f.Uses {
+			items = append(items, "uses:"+r.Role+"="+r.Name)
+		}
+		for _, q := range f.Method {
+			items = append(items, "method:"+q.Label+"="+q.Value)
+		}
+	}
+	out := asString(m["condition"])
+	if len(items) > 0 {
+		out = strings.TrimPrefix(out+"|"+strings.Join(items, ","), "|")
+	}
+	return out
 }
 
 func TestInheritClauseConditionsSkipsSameApparatusUnderOtherLabel(t *testing.T) {
@@ -283,6 +311,7 @@ func TestInheritClauseConditionsSkipsSameApparatusUnderOtherLabel(t *testing.T) 
 		clauseRow("测量数值数量", "试验装置：脉冲信号发生器", "", "260"),
 		clauseRow("每个数值测量次数", "试验方法：脉冲信号发生器法", "", "260"),
 	}
+	splitLegacyConditions(rows)
 	if n := inheritClauseConditions(rows, chunks); n != 0 {
 		t.Fatalf("rows changed = %d, want 0: %v", n, rows)
 	}
@@ -299,6 +328,7 @@ func TestInheritClauseConditionsNeedsTheClauseLead(t *testing.T) {
 		clauseRow("保持时间", "受力形式：承受人体站姿载荷的器材", "", "101"),
 		clauseRow("保持时间", "受力形式：多人承载器材；试验方法：GB 19272—2011 中 6.4.4 的 A 法", "", "102"),
 	}
+	splitLegacyConditions(rows)
 	if n := inheritClauseConditions(rows, chunks); n != 0 {
 		t.Fatalf("rows changed = %d, want 0: %v", n, rows)
 	}

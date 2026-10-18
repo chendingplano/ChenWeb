@@ -16,7 +16,7 @@ import (
 func metricsIdentical(a, b map[string]any) bool {
 	// A resolved concept names the property, not the metric instance: the same property under
 	// another condition is another metric (openspec change extract-metrics-conditions, D2).
-	if !metricConditionsEqual(a, b) {
+	if !metricConditionsEqual(a, b) || !metricFramesEqual(a, b) {
 		return false
 	}
 	conceptA := strings.TrimSpace(asString(a["keyword_concept_id"]))
@@ -59,7 +59,7 @@ func metricLineSpansOverlap(a, b map[string]any) bool {
 // existing row satisfies this predicate, the caller must retain the group for
 // LLM adjudication.
 func metricStaticMatch(candidate, existing map[string]any) bool {
-	if !metricConditionsEqual(candidate, existing) {
+	if !metricConditionsEqual(candidate, existing) || !metricFramesEqual(candidate, existing) {
 		return false
 	}
 	candidateConcept := strings.TrimSpace(asString(candidate["keyword_concept_id"]))
@@ -353,7 +353,7 @@ func metricMergeComparedFields(metric map[string]any) map[string]any {
 	fields := []string{
 		"metric_id", "keyword_concept_id", "metric_definition_term_id", "metric_name", "metric_subject", "metric_unit", "metric_value",
 		"value_data_type", "value_range_type", "value_class", "threshold_or_target",
-		"condition", "source_line_spans",
+		"condition", "frame", "source_line_spans",
 	}
 	compared := make(map[string]any, len(fields))
 	for _, field := range fields {

@@ -144,6 +144,19 @@ var measurementModule = moduleContent{
 		{ID: "mea:has_quantity_kind", Kind: "property", Def: "Binds a metric or value to its quantity kind.", Labels: enPref("has quantity kind")},
 		{ID: "mea:has_unit", Kind: "property", Def: "Binds a value to its unit term.", Labels: enPref("has unit")},
 		{ID: "mea:measured_by", Kind: "property", Def: "Binds a metric to the procedure that measures it.", Labels: enPref("measured by")},
+		// The resources a metric's value uses (openspec change metric-frame): an agent and its
+		// strength, an apparatus and its grade. kb.metrics.frame.uses holds them per row.
+		{ID: "mea:resource", Kind: "class", Def: "A thing a metric's value uses: an agent, material, apparatus, reagent, medium, sample or device.", Labels: enPref("resource")},
+		{ID: "mea:uses_resource", Kind: "property", Def: "Binds a metric assertion to a resource its value uses.", Labels: enPref("uses resource")},
+		{ID: "mea:resource_role", Kind: "property", Def: "The role a resource plays for a metric's value.", Labels: enPref("resource role")},
+		{ID: "mea:has_spec", Kind: "property", Def: "Binds a resource to its own specification (strength, concentration, dilution, grade) that names which product is used.", Labels: enPref("has specification")},
+		{ID: "mea:role_agent", Kind: "concept", Def: "Resource role: a drug, fluid or gas given to the case.", Labels: enPref("agent")},
+		{ID: "mea:role_material", Kind: "concept", Def: "Resource role: a material the value is stated for or made with.", Labels: enPref("material")},
+		{ID: "mea:role_apparatus", Kind: "concept", Def: "Resource role: a test apparatus, instrument, gauge or simulator.", Labels: enPref("apparatus")},
+		{ID: "mea:role_reagent", Kind: "concept", Def: "Resource role: a reagent of a test.", Labels: enPref("reagent")},
+		{ID: "mea:role_medium", Kind: "concept", Def: "Resource role: a test medium, solvent, diluent or carrier.", Labels: enPref("medium")},
+		{ID: "mea:role_sample", Kind: "concept", Def: "Resource role: a sample or specimen.", Labels: enPref("sample")},
+		{ID: "mea:role_device", Kind: "concept", Def: "Resource role: a device used in a step of a procedure.", Labels: enPref("device")},
 	},
 }
 

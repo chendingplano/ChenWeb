@@ -193,6 +193,7 @@ func droppedMetricRecord(id, recordID int64, dropID, stage, reason string, decis
 		ThresholdOrTarget:   str("threshold_or_target"),
 		Condition:           str("condition"),
 		ConditionEn:         str("condition_en"),
+		Frame:               raw("frame"),
 		MeasurementFreq:     str("measurement_frequency"),
 		TableNameOrSection:  str("table_name_or_section"),
 		ReasoningTags:       raw("reasoning_tags"),

@@ -537,7 +537,7 @@ func (p *ExtractDocMetadataProcessor) failAndPersist(ctx context.Context, rec Do
 }
 
 func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT"))
+	promptRef = promptRefFromEnv("EXTRACT_DOCMETA_PROMPT", defaultDocMetaPromptRef)
 	if promptRef == "" {
 		promptRef = defaultDocMetaPromptRef
 	}
@@ -570,7 +570,7 @@ func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = err
 			continue

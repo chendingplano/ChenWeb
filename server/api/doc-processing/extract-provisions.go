@@ -1593,7 +1593,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-extract-provisions-v3.md"
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v3.md")
 	}
 
 	paths := make([]string, 0, 8)
@@ -1624,7 +1624,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = fmt.Errorf("(MID_26050533) failed reading file. Path:%s, error:%w", candidate, err)
 			continue

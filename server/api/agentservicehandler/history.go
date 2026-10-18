@@ -59,7 +59,7 @@ type historyTurn struct {
 	AssistantSeq int
 	User         string
 	Assistant    string
-	ToolCalls    []GatewayHistoryToolCall
+	ToolCalls    []AgentHistoryToolCall
 	Tokens       int
 }
 
@@ -158,20 +158,20 @@ func historyToolResult(record ToolResultRecord, limit int) string {
 	return string(encoded)
 }
 
-func historyToolCalls(records []ToolResultRecord, limit int) []GatewayHistoryToolCall {
+func historyToolCalls(records []ToolResultRecord, limit int) []AgentHistoryToolCall {
 	if len(records) == 0 {
 		return nil
 	}
 	if limit <= 0 {
 		limit = defaultMaxHistoryToolResultBytes
 	}
-	out := make([]GatewayHistoryToolCall, 0, len(records))
+	out := make([]AgentHistoryToolCall, 0, len(records))
 	for _, record := range records {
 		arguments := record.Arguments
 		if len(arguments) == 0 || !json.Valid(arguments) || arguments[0] != '{' {
 			arguments = json.RawMessage(`{}`)
 		}
-		out = append(out, GatewayHistoryToolCall{ID: record.ToolCallID, Name: record.ToolName, Arguments: arguments,
+		out = append(out, AgentHistoryToolCall{ID: record.ToolCallID, Name: record.ToolName, Arguments: arguments,
 			Result: historyToolResult(record, limit), IsError: record.IsError})
 	}
 	return out
@@ -241,12 +241,12 @@ func selectHistory(turns []historyTurn, budget, summaryTokens int) []historyTurn
 	return turns[start:]
 }
 
-func historyMessages(turns []historyTurn) []GatewayHistoryMessage {
-	out := make([]GatewayHistoryMessage, 0, 2*len(turns))
+func historyMessages(turns []historyTurn) []AgentHistoryMessage {
+	out := make([]AgentHistoryMessage, 0, 2*len(turns))
 	for _, turn := range turns {
 		out = append(out,
-			GatewayHistoryMessage{Role: "user", Content: turn.User},
-			GatewayHistoryMessage{Role: "assistant", Content: turn.Assistant, ToolCalls: turn.ToolCalls})
+			AgentHistoryMessage{Role: "user", Content: turn.User},
+			AgentHistoryMessage{Role: "assistant", Content: turn.Assistant, ToolCalls: turn.ToolCalls})
 	}
 	return out
 }

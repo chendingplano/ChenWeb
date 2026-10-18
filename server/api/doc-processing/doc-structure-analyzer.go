@@ -1064,7 +1064,7 @@ func (p *StructureAnalyzerProcessor) failAndPersist(
 }
 
 func loadStructurePromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("STRUCTURE_PROMPT"))
+	promptRef = promptRefFromEnv("STRUCTURE_PROMPT", "")
 	if promptRef == "" {
 		return "", "", "", errors.New("(MID_26042435) missing STRUCTURE_PROMPT")
 	}
@@ -1097,7 +1097,7 @@ func loadStructurePromptFromEnv() (promptText string, promptRef string, promptPa
 
 	var lastErr error
 	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
+		bs, err := readPromptCandidate(candidate)
 		if err != nil {
 			lastErr = err
 			continue

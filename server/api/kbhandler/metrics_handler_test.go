@@ -318,7 +318,7 @@ SELECT
     m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
-    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_keywords, m.metric_keywords_en, m.search_document, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric,
@@ -330,7 +330,7 @@ SELECT
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
     m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
-    m.condition, m.condition_en
+    m.condition, m.condition_en, m.frame
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -349,23 +349,24 @@ WHERE m.id = $1
 	rows := sqlmock.NewRows([]string{
 		"id", "input_record_id", "metric_id", "event_id", "input_filename", "metric_name", "metric_name_en",
 		"source_line_spans", "metric_subject", "metric_subject_en", "metric_desc", "metric_desc_en",
-		"metric_context", "metric_context_en", "metric_keywords", "metric_keywords_en", "model_name",
+		"metric_context", "metric_context_en", "metric_keywords", "metric_keywords_en", "search_document", "model_name",
 		"location_type", "metric_unit", "metric_unit_en", "metric_value", "value_data_type",
 		"value_range_type", "value_class", "value_class_en", "formula_or_definition",
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"document_title", "document_doc_no", "object_name",
 		"table_name_or_section", "reasoning_tags", "created_at",
 		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error", "source_table_rows", "provision_id",
-		"ref_mention_id", "ref_input_record_id", "ref_metric_id", "condition", "condition_en",
+		"ref_mention_id", "ref_input_record_id", "ref_metric_id", "condition", "condition_en", "frame",
 	}).AddRow(
 		int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
-		"Metric context", "Metric context EN", `["energy","intensity"]`, `["energy","intensity"]`, "gpt-4.1",
+		"Metric context", "Metric context EN", `["energy","intensity"]`, `["energy","intensity"]`, "searchable metric content", "gpt-4.1",
 		"table", "kWh", "kWh", "12.3", "number", "exact", "performance", "performance",
 		"Definition", "Threshold", "monthly", 0.82, true, "Dynamic BP Spec", "T/JXAS 010—2021", "Adult patient",
 		"Table 2", `["named_metric"]`,
 		"2026-05-07T13:00:00+00:00",
 		nil, nil, nil, nil, nil, nil, nil, nil, "适用人群：成年人", "Population: adults",
+		`{"uses":[{"role":"apparatus","name":"血压计"}]}`,
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(11)).WillReturnRows(rows)
 
@@ -394,6 +395,9 @@ WHERE m.id = $1
 	}
 	if payload.Record.MetricName == nil || *payload.Record.MetricName != "Updated Metric" {
 		t.Fatalf("expected updated metric name, got %+v", payload.Record.MetricName)
+	}
+	if !strings.Contains(string(payload.Record.Frame), `"name":"血压计"`) {
+		t.Fatalf("expected frame with the apparatus, got %s", payload.Record.Frame)
 	}
 	if payload.Record.ObjectName == nil || *payload.Record.ObjectName != "Adult patient" {
 		t.Fatalf("expected object name, got %+v", payload.Record.ObjectName)
@@ -454,7 +458,7 @@ SELECT
     m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
-    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_keywords, m.metric_keywords_en, m.search_document, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
     m.confidence, m.is_explicit_metric,
@@ -466,7 +470,7 @@ SELECT
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
     m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
-    m.condition, m.condition_en
+    m.condition, m.condition_en, m.frame
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -487,21 +491,21 @@ ORDER BY m.id ASC
 	cols := []string{
 		"id", "input_record_id", "metric_id", "event_id", "input_filename", "metric_name", "metric_name_en",
 		"source_line_spans", "metric_subject", "metric_subject_en", "metric_desc", "metric_desc_en",
-		"metric_context", "metric_context_en", "metric_keywords", "metric_keywords_en", "model_name",
+		"metric_context", "metric_context_en", "metric_keywords", "metric_keywords_en", "search_document", "model_name",
 		"location_type", "metric_unit", "metric_unit_en", "metric_value", "value_data_type",
 		"value_range_type", "value_class", "value_class_en", "formula_or_definition",
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"document_title", "document_doc_no", "object_name", "table_name_or_section", "reasoning_tags", "created_at",
 		"keyword_concept_id", "metric_definition_term_id", "value_range_type_error", "source_table_rows", "provision_id",
-		"ref_mention_id", "ref_input_record_id", "ref_metric_id", "condition", "condition_en",
+		"ref_mention_id", "ref_input_record_id", "ref_metric_id", "condition", "condition_en", "frame",
 	}
 	addRow := func(rows *sqlmock.Rows, id int64, name string, spans string) *sqlmock.Rows {
 		return rows.AddRow(
 			id, int64(244), "metric-"+strconv.FormatInt(id, 10), "evt-"+strconv.FormatInt(id, 10), "input_244.pdf",
 			name, name, spans, "subject", "subject", "desc", "desc", "context", "context",
-			`[]`, `[]`, "model", "paragraph", "mmHg", "mmHg", "", "number", "exact", "class", "class",
+			`[]`, `[]`, "searchable metric content", "model", "paragraph", "mmHg", "mmHg", "", "number", "exact", "class", "class",
 			"", "", "", 0.95, true, "title", "doc-no", "object", "section", `[]`, "2026-07-12T10:00:00+00:00",
-			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		)
 	}
 	rows := sqlmock.NewRows(cols)

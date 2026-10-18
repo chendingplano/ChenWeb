@@ -25,11 +25,11 @@ type GrantedKnowledgeStore struct {
 	Name string `json:"name"`
 }
 
-// GatewayKnowledgeContext is the run-scoped knowledge context sent to Pi.
+// AgentKnowledgeContext is the run-scoped knowledge context sent to the selected adapter.
 // PromptContext is appended to the profile's system prompt; DefaultStoreID
 // lets the gateway fill in knowledge_store_id when the model leaves it out.
 // ChenWeb still enforces the store list through the run capability.
-type GatewayKnowledgeContext struct {
+type AgentKnowledgeContext struct {
 	Stores         []GrantedKnowledgeStore `json:"stores"`
 	DefaultStoreID string                  `json:"defaultStoreId,omitempty"`
 	PromptContext  string                  `json:"promptContext"`
@@ -73,9 +73,9 @@ func selectDefaultKnowledgeStore(stores []GrantedKnowledgeStore, defaultName str
 // BuildKnowledgeContext renders the knowledge context for one run. A run with
 // no granted stores still gets a context, which tells Pi it has no knowledge
 // tools.
-func (r *ProfileRegistry) BuildKnowledgeContext(stores []GrantedKnowledgeStore, defaultStoreID string) (GatewayKnowledgeContext, error) {
+func (r *ProfileRegistry) BuildKnowledgeContext(stores []GrantedKnowledgeStore, defaultStoreID string) (AgentKnowledgeContext, error) {
 	if r == nil || r.knowledgeContext == nil {
-		return GatewayKnowledgeContext{}, ErrKnowledgeContextUnavailable
+		return AgentKnowledgeContext{}, ErrKnowledgeContextUnavailable
 	}
 	safe := make([]GrantedKnowledgeStore, 0, len(stores))
 	for _, store := range stores {
@@ -87,9 +87,9 @@ func (r *ProfileRegistry) BuildKnowledgeContext(stores []GrantedKnowledgeStore, 
 		DefaultStoreID string
 	}{safe, defaultStoreID}
 	if err := r.knowledgeContext.Execute(&out, data); err != nil {
-		return GatewayKnowledgeContext{}, fmt.Errorf("render knowledge context: %w", err)
+		return AgentKnowledgeContext{}, fmt.Errorf("render knowledge context: %w", err)
 	}
-	return GatewayKnowledgeContext{Stores: safe, DefaultStoreID: defaultStoreID, PromptContext: strings.TrimSpace(out.String())}, nil
+	return AgentKnowledgeContext{Stores: safe, DefaultStoreID: defaultStoreID, PromptContext: strings.TrimSpace(out.String())}, nil
 }
 
 // promptSafeStoreName keeps an administrator-entered store name on one short

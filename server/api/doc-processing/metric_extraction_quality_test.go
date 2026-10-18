@@ -152,6 +152,30 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 				{LineNo: 119, PageNo: 12, LineType: "table", Content: "<table><tr><td>测试器材</td><td>适用人群</td><td>有效量程或仪器规格要求</td><td>分度值</td><td>允许误差</td></tr><tr><td rowspan=\"2\">15 m 绕障碍跑测试仪</td><td rowspan=\"2\">幼儿</td><td>0 s~999.9 s</td><td>0.1 s</td><td>±1.5%</td></tr><tr><td>障碍物为锥桶形状,塑料或橡胶材质,底座尺寸为长300 mm×宽 300 mm 的方形或直径为 300 mm 的圆形,锥桶高度为 550 mm</td><td>—</td><td>±5 mm</td></tr></table>"},
 			},
 		},
+		{
+			name: "resource specs belong to the frame (364 A.2.4)",
+			lines: []Line{
+				{LineNo: 181, PageNo: 10, LineType: "heading-1", Content: "A.2 昏迷患者的现场处理"},
+				{LineNo: 185, PageNo: 10, LineType: "list-item", Content: "A.2.4 立即采用指血血糖仪进行快速血糖检测，如血糖＜2.8mmol/L（新生儿＜2.6mmol/L）或临床判断无法除外低血糖昏迷者，可予静推50％葡萄糖40ml（儿童给予10％葡萄糖5ml/kg～10ml/kg或25％葡萄糖2ml/kg～4ml/kg），若患者意识转清，之后以10％葡萄糖静点并建议转诊。"},
+				{LineNo: 186, PageNo: 10, LineType: "list-item", Content: "A.2.5 有严重头痛、喷射性呕吐、颈强直等颅内高压表现者，可抬高床头，予20％甘露醇250ml(儿童剂量2.5ml/kg～5ml/kg)，15min～20min快速静点以降低颅压。如没有甘露醇的情况下，成人患者可应用呋塞米20mg静推。"},
+			},
+			want: []wantMetric{
+				{185, "40", "ml", "exact", statementKindRequirementWithCriterion, "葡萄糖"},
+				{185, "5~10", "ml/kg", "range", statementKindRequirementWithCriterion, "葡萄糖"},
+				{185, "2~4", "ml/kg", "range", statementKindRequirementWithCriterion, "葡萄糖"},
+				{186, "250", "ml", "exact", statementKindRequirementWithCriterion, "甘露醇"},
+			},
+		},
+		{
+			name: "reagent concentration of a test method is a resource spec",
+			lines: []Line{
+				{LineNo: 52, PageNo: 4, LineType: "paragraph", Content: "6.3.2 称取试样 5 g，置于 250 mL 锥形瓶中，加入 0.1 mol/L 盐酸溶液 50 mL，振荡提取 30 min，静置后取上清液测定。"},
+			},
+			want: []wantMetric{
+				{52, "50", "mL", "exact", statementKindTestParameter, "盐酸"},
+				{52, "30", "min", "exact", statementKindTestParameter, "盐酸"},
+			},
+		},
 	}
 
 	client, _, err := BuildReviewerLLMClient(os.Getenv("ENRICH_METRICS_MODEL_NAME"))
@@ -201,7 +225,7 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 					}
 					if value == want.value && metricRowUnit(m) == want.unit &&
 						asString(m["value_range_type"]) == want.rangeType && metricStatementKind(m) == want.kind &&
-						strings.Contains(asString(m["condition"]), want.condition) {
+						strings.Contains(metricQualifierText(m), want.condition) {
 						found++
 					}
 				}
@@ -223,7 +247,7 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 					}
 				}
 				if strings.HasPrefix(tc.name, "alternative simulation") &&
-					(strings.ContainsAny(asString(m["condition"]), "（(") || strings.Contains(asString(m["condition"]), "调速")) {
+					(strings.ContainsAny(metricQualifierText(m), "（(") || strings.Contains(metricQualifierText(m), "调速")) {
 					t.Errorf("apparatus qualifier kept its capabilities instead of its name: %v", m)
 				}
 				if metricLineSpansOverlap(m, map[string]any{"source_line_spans": []string{"366"}}) && compactMetricValue(asString(m["metric_value"])) == "25" {
@@ -275,6 +299,28 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 					t.Errorf("want one 250×200 mm row on 192 and one 300×300 mm row on 119, got %v", sizes)
 				}
 			}
+			if strings.HasPrefix(tc.name, "resource specs") || strings.HasPrefix(tc.name, "reagent concentration") {
+				for _, m := range r.Metrics {
+					value, unit := compactMetricValue(asString(m["metric_value"])), metricRowUnit(m)
+					if (unit == "%" || unit == "％" || unit == "mol/L") && (value == "50" || value == "10" || value == "25" || value == "20" || value == "0.1") {
+						t.Errorf("resource spec emitted as a metric: %v", m)
+					}
+					if strings.ContainsAny(asString(m["metric_name"]), "%％") {
+						t.Errorf("metric name carries the resource's strength: %v", m)
+					}
+				}
+				specs := 0
+				for _, m := range r.Metrics {
+					if f := metricRowFrame(m); f != nil {
+						for _, res := range f.Uses {
+							specs += len(res.Spec)
+						}
+					}
+				}
+				if specs == 0 {
+					t.Error("no resource spec was kept in any row's frame")
+				}
+			}
 			if strings.HasPrefix(tc.name, "prescribed-value table") {
 				n := 0
 				for _, m := range r.Metrics {
@@ -298,4 +344,23 @@ func TestMetricExtractionQualityLive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// metricQualifierText is a row's condition followed by its frame's resources (with their specs)
+// and methods, for the substring checks above: since openspec change metric-frame an apparatus or
+// method is in the frame, not in the condition.
+func metricQualifierText(m map[string]any) string {
+	parts := []string{asString(m["condition"])}
+	if f := metricRowFrame(m); f != nil {
+		for _, r := range f.Uses {
+			parts = append(parts, r.Name)
+			for _, sp := range r.Spec {
+				parts = append(parts, sp.Value+sp.Unit)
+			}
+		}
+		for _, q := range f.Method {
+			parts = append(parts, q.Value)
+		}
+	}
+	return strings.Join(parts, "；")
 }

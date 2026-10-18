@@ -15,7 +15,7 @@
 # nats-server, nothing else. Everything this script writes lives under
 # ~/Workspace/ChenWeb, already owned by gui, so no other step needs root.
 # First, syncs migration files (project_migrations/, shared_migrations/), then
-# prompts/ (mirrored with --delete), then the *.local.toml reviewer configs,
+# runtime prompts/ (mirrored with --delete), then the *.local.toml reviewer configs,
 # then config.toml + config/ + docs/doc-templates -- all read from disk at
 # runtime, not compiled into the binaries, so a binaries-only payload leaves
 # them stale or missing. Migrations must land before any unit starts, since
@@ -144,9 +144,10 @@ fi
 echo
 
 # --- prompts ------------------------------------------------------------------
-# prompts/ is read from disk per-call (PROMPT_DIR, falling back to ./prompts),
-# not go:embed'd, so a binaries-only payload leaves the box's prompts frozen
-# wherever the last hand-rsync left them. Unlike migrations, mirrored with
+# Runtime prompts still used by disk-based consumers are read from PROMPT_DIR
+# (falling back to ./prompts), so binaries-only payloads leave those files
+# frozen. The configured doc-processor prompts are embedded in the binary and
+# intentionally absent from the payload. Unlike migrations, mirrored with
 # --delete: a prompt renamed/removed on the source should not keep being read
 # on the box (there's no "already applied" tracking to protect, unlike goose).
 # This bit onto.bzton.cn for real (2026-09-22: stale product-mention /

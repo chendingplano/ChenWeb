@@ -154,5 +154,5 @@ func (r entityObjectClassifierJSONResolver) ClassifyEntityForObjectLink(ctx cont
 }
 
 func entityObjectResolvePromptRefFromEnv() string {
-	return firstNonEmptyTrimmed(strings.TrimSpace(os.Getenv("ENTITY_OBJECT_RESOLVE_PROMPT")), defaultEntityObjectResolvePromptRef)
+	return promptRefFromEnv("ENTITY_OBJECT_RESOLVE_PROMPT", defaultEntityObjectResolvePromptRef)
 }
