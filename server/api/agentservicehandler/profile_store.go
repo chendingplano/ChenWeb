@@ -63,7 +63,7 @@ func (s *SQLProfileVersionStore) EnsureSeeded(ctx context.Context, registry *Pro
 		return tx.Commit()
 	}
 	for _, profile := range profiles {
-		profileJSON, marshalErr := json.Marshal(profile)
+		profileJSON, marshalErr := marshalStoredProfile(profile)
 		if marshalErr != nil {
 			return marshalErr
 		}
@@ -129,12 +129,26 @@ FROM kb.agentic_service_profile_versions WHERE service_slug=$1 AND version=$2`, 
 }
 
 func decodeStoredProfile(raw []byte, prompt string) (AgentServiceProfile, error) {
-	var profile AgentServiceProfile
-	if err := json.Unmarshal(raw, &profile); err != nil {
+	var stored storedAgentServiceProfile
+	if err := json.Unmarshal(raw, &stored); err != nil {
 		return AgentServiceProfile{}, err
 	}
+	profile := stored.AgentServiceProfile
+	profile.PilotUsers = append([]string(nil), stored.PilotUsers...)
 	profile.SystemPrompt = prompt
 	return profile, nil
+}
+
+type storedAgentServiceProfile struct {
+	AgentServiceProfile
+	PilotUsers []string `json:"pilot_users"`
+}
+
+func marshalStoredProfile(profile AgentServiceProfile) ([]byte, error) {
+	return json.Marshal(storedAgentServiceProfile{
+		AgentServiceProfile: profile,
+		PilotUsers:          append([]string(nil), profile.PilotUsers...),
+	})
 }
 
 func (s *SQLProfileVersionStore) ActivateVersion(ctx context.Context, profile AgentServiceProfile, expectedVersion, createdBy string) (AgentServiceProfile, string, error) {
@@ -164,7 +178,7 @@ FROM kb.agentic_service_profile_versions WHERE service_slug=$1 AND version ~ '^v
 		return AgentServiceProfile{}, "", err
 	}
 	profile.Version = "v" + strconv.Itoa(max+1)
-	profileJSON, err := json.Marshal(profile)
+	profileJSON, err := marshalStoredProfile(profile)
 	if err != nil {
 		return AgentServiceProfile{}, "", err
 	}

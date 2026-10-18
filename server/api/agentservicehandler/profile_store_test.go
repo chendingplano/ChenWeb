@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"runtime"
@@ -96,7 +95,7 @@ func TestProfileStoreEnsureSeededRollsBackPartialInitialization(t *testing.T) {
 
 func TestProfileStoreListActive(t *testing.T) {
 	store, mock := profileStoreFixture(t)
-	profile := AgentServiceProfile{Slug: "knowledge-guide", Version: "v2", FriendlyName: "Guide", SystemPrompt: "saved prompt"}
+	profile := AgentServiceProfile{Slug: "knowledge-guide", Version: "v2", FriendlyName: "Guide", SystemPrompt: "saved prompt", PilotUsers: []string{"alice"}}
 	data, err := jsonMarshal(profile)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +105,7 @@ func TestProfileStoreListActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Version != "v2" || got[0].SystemPrompt != "saved prompt" {
+	if len(got) != 1 || got[0].Version != "v2" || got[0].SystemPrompt != "saved prompt" || len(got[0].PilotUsers) != 1 || got[0].PilotUsers[0] != "alice" {
 		t.Fatalf("ListActive() = %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -116,7 +115,7 @@ func TestProfileStoreListActive(t *testing.T) {
 
 func TestProfileStoreLoadVersionUsesStoredPromptSnapshot(t *testing.T) {
 	store, mock := profileStoreFixture(t)
-	profile := AgentServiceProfile{Slug: "problem-diagnostics", Version: "v1", PromptFile: "removed-or-changed.md"}
+	profile := AgentServiceProfile{Slug: "problem-diagnostics", Version: "v1", PromptFile: "removed-or-changed.md", PilotUsers: []string{"alice"}}
 	data, err := jsonMarshal(profile)
 	if err != nil {
 		t.Fatal(err)
@@ -126,8 +125,8 @@ func TestProfileStoreLoadVersionUsesStoredPromptSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SystemPrompt != "historical prompt" {
-		t.Fatalf("prompt = %q", got.SystemPrompt)
+	if got.SystemPrompt != "historical prompt" || len(got.PilotUsers) != 1 || got.PilotUsers[0] != "alice" {
+		t.Fatalf("loaded historical profile = %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -152,7 +151,7 @@ func TestProfileStoreActivateVersionCommitsNextImmutableVersion(t *testing.T) {
 	store, mock := profileStoreFixture(t)
 	profile := AgentServiceProfile{
 		Slug: "knowledge-guide", FriendlyName: "Updated Guide", PromptFile: "prompt-v2.md",
-		SystemPrompt: "resolved prompt v2", Enabled: true,
+		SystemPrompt: "resolved prompt v2", Enabled: true, PilotUsers: []string{"alice"},
 	}
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT active_version FROM kb.agentic_service_profiles WHERE service_slug=\\$1 FOR UPDATE").
@@ -162,7 +161,7 @@ func TestProfileStoreActivateVersionCommitsNextImmutableVersion(t *testing.T) {
 		WithArgs("knowledge-guide").
 		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(3))
 	profile.Version = "v4"
-	profileJSON, err := json.Marshal(profile)
+	profileJSON, err := marshalStoredProfile(profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +176,7 @@ func TestProfileStoreActivateVersionCommitsNextImmutableVersion(t *testing.T) {
 
 	got, previous, err := store.ActivateVersion(context.Background(), AgentServiceProfile{
 		Slug: "knowledge-guide", FriendlyName: "Updated Guide", PromptFile: "prompt-v2.md",
-		SystemPrompt: "resolved prompt v2", Enabled: true,
+		SystemPrompt: "resolved prompt v2", Enabled: true, PilotUsers: []string{"alice"},
 	}, "v3", "user-1")
 	if err != nil {
 		t.Fatal(err)
@@ -214,4 +213,4 @@ func TestProfileStoreRestoreActiveVersionIsConditional(t *testing.T) {
 }
 
 // jsonMarshal keeps test setup focused on the store behavior.
-func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
+func jsonMarshal(profile AgentServiceProfile) ([]byte, error) { return marshalStoredProfile(profile) }
