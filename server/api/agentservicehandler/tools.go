@@ -192,7 +192,7 @@ func (h *InternalToolHandler) executeSavedResult(c echo.Context) error {
 		return h.respond(c, claims, savedToolResultTool, input, http.StatusNotFound, notFound, nil)
 	}
 	if h.now().Sub(record.CreatedAt) > h.profiles.SnapshotWindow() {
-		profile, err := h.profiles.ResolveVersion(claims.ProfileSlug, claims.ProfileVersion, claims.UserID)
+		profile, err := h.profiles.ResolvePinned(ctx, claims.ProfileSlug, claims.ProfileVersion, claims.UserID)
 		if err != nil {
 			return h.respond(c, claims, savedToolResultTool, input, http.StatusNotFound, notFound, nil)
 		}
@@ -233,7 +233,7 @@ func (p ProfileAccessChecker) CheckKnowledgeAccess(ctx context.Context, req Know
 	if p.Registry == nil || p.Next == nil {
 		return ErrKnowledgeAccessDenied
 	}
-	profile, err := p.Registry.ResolveVersion(req.ProfileSlug, req.ProfileVersion, req.UserID)
+	profile, err := p.Registry.ResolvePinned(ctx, req.ProfileSlug, req.ProfileVersion, req.UserID)
 	if err != nil || !stringIn(profile.AllowedTools, req.ToolName) ||
 		(req.DocumentGroup != "" && len(profile.AllowedDocumentGroups) > 0 && !stringIn(profile.AllowedDocumentGroups, req.DocumentGroup)) {
 		return ErrKnowledgeAccessDenied

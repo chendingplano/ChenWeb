@@ -50,9 +50,22 @@ func (h *ConversationHandler) ListServices(c echo.Context) error {
 	if h == nil || h.profiles == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent services unavailable"})
 	}
-	services := make([]PiProfile, 0, len(h.profiles.active))
+	services := make([]AgentServiceProfile, 0, len(h.profiles.active))
+	if h.profiles.VersionStoreReady() {
+		activeProfiles, err := h.profiles.versionStore.ListActive(c.Request().Context())
+		if err != nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent services unavailable"})
+		}
+		for _, stored := range activeProfiles {
+			profile, err := authorizeProfile(stored, userID)
+			if err == nil {
+				services = append(services, profile)
+			}
+		}
+		return c.JSON(http.StatusOK, services)
+	}
 	for slug := range h.profiles.active {
-		profile, err := h.profiles.Resolve(slug, userID)
+		profile, err := h.profiles.ResolveActive(c.Request().Context(), slug, userID)
 		if err == nil {
 			services = append(services, profile)
 		}
@@ -76,8 +89,11 @@ func (h *ConversationHandler) CreateConversation(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent services unavailable"})
 	}
 	slug := strings.TrimSpace(c.Param("slug"))
-	profile, err := h.profiles.Resolve(slug, userID)
+	profile, err := h.profiles.ResolveActive(c.Request().Context(), slug, userID)
 	if err != nil {
+		if !isProfileAvailabilityError(err) {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
+		}
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "service unavailable"})
 	}
 	var body struct {
@@ -129,8 +145,11 @@ func (h *ConversationHandler) GetConversation(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load conversation"})
 	}
-	profile, err := h.profiles.ResolveVersion(state.Conversation.ProfileSlug, state.Conversation.ProfileVersion, userID)
+	profile, err := h.profiles.ResolvePinned(c.Request().Context(), state.Conversation.ProfileSlug, state.Conversation.ProfileVersion, userID)
 	if err != nil {
+		if !isProfileAvailabilityError(err) {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
+		}
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "service no longer available"})
 	}
 	sources, err := h.store.LoadSourceDependencies(c.Request().Context(), userID, state.Conversation.ID)

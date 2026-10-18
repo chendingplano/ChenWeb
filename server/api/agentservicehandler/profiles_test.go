@@ -1,6 +1,7 @@
 package agentservicehandler
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,26 @@ import (
 	"testing"
 	"time"
 )
+
+type resolvingProfileStore struct {
+	active []AgentServiceProfile
+	pinned AgentServiceProfile
+	err    error
+}
+
+func (s resolvingProfileStore) EnsureSeeded(context.Context, *ProfileRegistry) error { return nil }
+func (s resolvingProfileStore) ListActive(context.Context) ([]AgentServiceProfile, error) {
+	return s.active, s.err
+}
+func (s resolvingProfileStore) LoadVersion(context.Context, string, string) (AgentServiceProfile, error) {
+	return s.pinned, s.err
+}
+func (s resolvingProfileStore) ActivateVersion(context.Context, AgentServiceProfile, string, string) (AgentServiceProfile, string, error) {
+	return AgentServiceProfile{}, "", nil
+}
+func (s resolvingProfileStore) RestoreActiveVersion(context.Context, string, string, string) error {
+	return nil
+}
 
 func repositoryPromptDir(t *testing.T) string {
 	t.Helper()
@@ -42,7 +63,7 @@ func TestLoadProfileRegistryLoadsTwoIndependentVersionedProfiles(t *testing.T) {
 	if knowledge.FriendlyName == diagnostics.FriendlyName || knowledge.SystemPrompt == diagnostics.SystemPrompt {
 		t.Fatal("profiles must have independent names and prompts")
 	}
-	for _, profile := range []PiProfile{knowledge, diagnostics} {
+	for _, profile := range []AgentServiceProfile{knowledge, diagnostics} {
 		if profile.Provider == "" || profile.Model == "" || profile.ProviderDisclosure == "" {
 			t.Fatalf("provider metadata incomplete: %+v", profile)
 		}
@@ -64,6 +85,38 @@ func TestLoadProfileRegistryLoadsTwoIndependentVersionedProfiles(t *testing.T) {
 	if !strings.Contains(strings.ToLower(diagnostics.SystemPrompt), "medical") ||
 		!strings.Contains(strings.ToLower(diagnostics.SystemPrompt), "read-only") {
 		t.Fatal("diagnostics prompt must state high-stakes and read-only limits")
+	}
+}
+
+func TestResolveUsesActiveAndPinnedStoreVersionsAfterInitialization(t *testing.T) {
+	registry, err := LoadProfileRegistry(repositoryPromptDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := AgentServiceProfile{Slug: "knowledge-guide", Version: "v2", Provider: "new-provider", Model: "new-model", Enabled: true}
+	pinned := AgentServiceProfile{Slug: "knowledge-guide", Version: "v1", Provider: "old-provider", Model: "old-model", Enabled: true}
+	registry.WithVersionStore(resolvingProfileStore{active: []AgentServiceProfile{active}, pinned: pinned})
+	registry.versionStoreReady.Store(true)
+
+	gotActive, err := registry.ResolveActive(context.Background(), "knowledge-guide", "user-1")
+	if err != nil || gotActive.Version != "v2" || gotActive.Model != "new-model" {
+		t.Fatalf("ResolveActive() = %+v, %v", gotActive, err)
+	}
+	gotPinned, err := registry.ResolvePinned(context.Background(), "knowledge-guide", "v1", "user-1")
+	if err != nil || gotPinned.Version != "v1" || gotPinned.Model != "old-model" {
+		t.Fatalf("ResolvePinned() = %+v, %v", gotPinned, err)
+	}
+}
+
+func TestResolveFailsClosedOnInitializedStoreError(t *testing.T) {
+	registry, err := LoadProfileRegistry(repositoryPromptDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.WithVersionStore(resolvingProfileStore{err: errors.New("database unavailable")})
+	registry.versionStoreReady.Store(true)
+	if _, err := registry.ResolveActive(context.Background(), "knowledge-guide", "user-1"); err == nil {
+		t.Fatal("ResolveActive() fell back to environment profiles after store error")
 	}
 }
 

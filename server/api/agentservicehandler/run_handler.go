@@ -32,12 +32,12 @@ type RunStore interface {
 	SetConversationTitleIfEmpty(context.Context, string, string, string) error
 }
 
-type GatewayBridge interface {
-	Start(context.Context, GatewayRunRequest) (io.ReadCloser, error)
+type HarnessAdapter interface {
+	Start(context.Context, AgentRunRequest) (io.ReadCloser, error)
 	Cancel(context.Context, string) error
 	Decide(context.Context, string, string, bool) error
 	ModelContextWindow(context.Context, string, string) (int, error)
-	Summarize(context.Context, GatewaySummaryRequest) (string, error)
+	Summarize(context.Context, AgentSummaryRequest) (string, error)
 }
 
 type RunSourceChecker interface {
@@ -49,7 +49,7 @@ type RunHandler struct {
 	store    RunStore
 	profiles *ProfileRegistry
 	sources  RunSourceChecker
-	gateway  GatewayBridge
+	adapter  HarnessAdapter
 	signer   *CapabilitySigner
 	// defaultStoreName returns [frontend].default_knowledge_store; nil means
 	// no default.
@@ -60,8 +60,8 @@ type RunHandler struct {
 // has finished; tests replace it to run synchronously.
 var runInBackground = func(f func()) { go f() }
 
-func NewRunHandler(store RunStore, profiles *ProfileRegistry, sources RunSourceChecker, gateway GatewayBridge, signer *CapabilitySigner) *RunHandler {
-	return &RunHandler{store: store, profiles: profiles, sources: sources, gateway: gateway, signer: signer}
+func NewRunHandler(store RunStore, profiles *ProfileRegistry, sources RunSourceChecker, adapter HarnessAdapter, signer *CapabilitySigner) *RunHandler {
+	return &RunHandler{store: store, profiles: profiles, sources: sources, adapter: adapter, signer: signer}
 }
 
 // SetDefaultKnowledgeStoreName supplies the configured default knowledge store
@@ -78,7 +78,7 @@ func RegisterRunRoutes(group *echo.Group, handler *RunHandler) {
 }
 
 func (h *RunHandler) available() bool {
-	return h != nil && h.store != nil && h.profiles != nil && h.gateway != nil && h.signer != nil
+	return h != nil && h.store != nil && h.profiles != nil && h.adapter != nil && h.signer != nil
 }
 
 func (h *RunHandler) Start(c echo.Context) error {
@@ -109,8 +109,11 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load conversation"})
 	}
-	profile, err := h.profiles.ResolveVersion(state.Conversation.ProfileSlug, state.Conversation.ProfileVersion, userID)
+	profile, err := h.profiles.ResolvePinned(ctx, state.Conversation.ProfileSlug, state.Conversation.ProfileVersion, userID)
 	if err != nil {
+		if !isProfileAvailabilityError(err) {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
+		}
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "service no longer available"})
 	}
 	if profile.Model != state.Conversation.ModelName {
@@ -173,7 +176,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	defer stopSettlement()
 	outcome := AttemptOutcome{Status: "failed", ErrorCode: "run_failed", ErrorMessage: "The agent run could not complete."}
 	streamStarted := false
-	var verifiedSources []GatewaySource
+	var verifiedSources []AgentSource
 	defer func() {
 		if _, settleErr := h.store.SetAttemptOutcome(settleCtx, userID, attempt.ID, outcome); settleErr != nil {
 			logger.Error("agent run settlement failed", "run_id", attempt.ID, "error", settleErr)
@@ -229,10 +232,10 @@ func (h *RunHandler) Start(c echo.Context) error {
 	budget := h.historyBudget(ctx, profile, logger)
 	turns := completeTurns(visible.Messages, visible.SourcesByMessage, visible.ToolResults, summary.ThroughSeq, profile.Limits.MaxHistoryToolResultBytes)
 	selected := selectHistory(turns, budget, estimateTokens(summary.Text))
-	gatewayProfile := MapGatewayProfile(profile, permission)
-	gatewayProfile.AllowedTools = allowedTools
-	request := GatewayRunRequest{RunID: attempt.ID, ConversationID: state.Conversation.ID, UserID: userID,
-		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: gatewayProfile, History: historyMessages(selected), Knowledge: &knowledge, HistorySummary: summary.Text}
+	agentProfile := MapAgentProfile(profile, permission)
+	agentProfile.AllowedTools = allowedTools
+	request := AgentRunRequest{RunID: attempt.ID, ConversationID: state.Conversation.ID, UserID: userID,
+		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: agentProfile, History: historyMessages(selected), Knowledge: &knowledge, HistorySummary: summary.Text}
 	for len(selected) > 0 {
 		if raw, err := json.Marshal(request); err == nil && len(raw) <= maxRunRequestBytes {
 			break
@@ -243,7 +246,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if len(selected) < len(turns) {
 		logger.Info("agent history trimmed", "run_id", attempt.ID, "turns", len(turns), "sent", len(selected), "budget", budget)
 	}
-	stream, err := h.gateway.Start(ctx, request)
+	stream, err := h.adapter.Start(ctx, request)
 	if err != nil {
 		logger.Error("Pi gateway start failed", "run_id", attempt.ID, "error", err)
 		outcome.ErrorCode = "gateway_unavailable"
@@ -363,7 +366,7 @@ const maxRunRequestBytes = 480 * 1024
 
 // documentAccess is the snapshot rule's access-only check for history older
 // than the snapshot period.
-func (h *RunHandler) documentAccess(userID string, profile PiProfile) func(context.Context, string) error {
+func (h *RunHandler) documentAccess(userID string, profile AgentServiceProfile) func(context.Context, string) error {
 	return func(ctx context.Context, documentID string) error {
 		if h.sources == nil {
 			return ErrKnowledgeAccessDenied
@@ -372,8 +375,8 @@ func (h *RunHandler) documentAccess(userID string, profile PiProfile) func(conte
 	}
 }
 
-func (h *RunHandler) historyBudget(ctx context.Context, profile PiProfile, logger interface{ Warn(string, ...any) }) int {
-	contextWindow, err := h.gateway.ModelContextWindow(ctx, profile.Provider, profile.Model)
+func (h *RunHandler) historyBudget(ctx context.Context, profile AgentServiceProfile, logger interface{ Warn(string, ...any) }) int {
+	contextWindow, err := h.adapter.ModelContextWindow(ctx, profile.Provider, profile.Model)
 	if err != nil {
 		logger.Warn("model context window unavailable; using fallback history budget", "provider", profile.Provider, "model", profile.Model, "error", err)
 		contextWindow = 0
@@ -384,7 +387,7 @@ func (h *RunHandler) historyBudget(ctx context.Context, profile PiProfile, logge
 // foldHistory folds the oldest unsummarized turns into the conversation's
 // rolling summary once they no longer fit the history budget. It runs after
 // the turn has finished; a failure only means the next turn trims instead.
-func (h *RunHandler) foldHistory(userID, conversationID string, profile PiProfile, budget int) {
+func (h *RunHandler) foldHistory(userID, conversationID string, profile AgentServiceProfile, budget int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	logger := loggerutil.CreateDefaultLogger("20261004-582")
@@ -415,7 +418,7 @@ func (h *RunHandler) foldHistory(userID, conversationID string, profile PiProfil
 	if len(fold) == 0 {
 		return
 	}
-	text, err := h.gateway.Summarize(ctx, GatewaySummaryRequest{UserID: userID, Provider: profile.Provider, Model: profile.Model,
+	text, err := h.adapter.Summarize(ctx, AgentSummaryRequest{UserID: userID, Provider: profile.Provider, Model: profile.Model,
 		SystemPrompt: h.profiles.HistorySummaryPrompt(), PreviousSummary: summary.Text, Messages: historyMessages(fold), MaxTokens: min(1024, budget/4)})
 	if err != nil {
 		logger.Warn("history fold: summarize failed", "conversation_id", conversationID, "turns", len(fold), "error", err)
@@ -481,7 +484,7 @@ func (h *RunHandler) Cancel(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "active run not found"})
 	}
-	if err := h.gateway.Cancel(c.Request().Context(), attempt.ID); err != nil {
+	if err := h.adapter.Cancel(c.Request().Context(), attempt.ID); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "could not stop run"})
 	}
 	return c.JSON(http.StatusAccepted, map[string]string{"status": "stop_requested"})
@@ -503,7 +506,7 @@ func (h *RunHandler) Decide(c echo.Context) error {
 	if err := decoder.Decode(&body); err != nil || body.Allowed == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid permission decision"})
 	}
-	if err := h.gateway.Decide(c.Request().Context(), attempt.ID, c.Param("requestId"), *body.Allowed); err != nil {
+	if err := h.adapter.Decide(c.Request().Context(), attempt.ID, c.Param("requestId"), *body.Allowed); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "permission request is no longer active"})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "decision_recorded"})

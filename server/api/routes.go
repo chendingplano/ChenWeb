@@ -286,6 +286,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	if profileErr != nil {
 		return fmt.Errorf("initialize Pi profiles: %w", profileErr)
 	}
+	profileVersionStore := agentservicehandler.NewSQLProfileVersionStore(ApiTypes.ProjectDBHandle)
+	profileRegistry.WithVersionStore(profileVersionStore)
+	if seedErr := profileRegistry.EnsureVersionStoreSeeded(context.Background()); seedErr != nil {
+		logger.Warn("Pi profile version store initialization deferred", "error", seedErr)
+	}
 	var capabilitySigner *agentservicehandler.CapabilitySigner
 	if secret := os.Getenv("PI_RUN_CAPABILITY_SECRET"); secret != "" {
 		var signerErr error
@@ -309,13 +314,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
+	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
+	agentservicehandler.RegisterProfileAdminRoutes(apiGroup.Group("/system-admin/pi-harness"),
+		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")))
 	agentServiceGroup := apiGroup.Group("/agent-services")
 	agentservicehandler.RegisterConversationRoutes(agentServiceGroup,
 		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources))
-	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
 	agentservicehandler.RegisterRunRoutes(agentServiceGroup,
 		agentservicehandler.NewRunHandler(agentStore, profileRegistry, agentSources,
-			agentservicehandler.NewPiGatewayClient(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner).
+			agentservicehandler.NewPiHarnessAdapter(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner).
 			SetDefaultKnowledgeStoreName(appconfig.GetDefaultKnowledgeStoreName))
 	chadSessionsHandler, err := chadsessionshandler.NewDefault()
 	if err != nil {

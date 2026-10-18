@@ -1,12 +1,14 @@
 package agentservicehandler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"text/template"
 	"time"
 )
@@ -46,7 +48,7 @@ const (
 	defaultSnapshotHours = 48
 )
 
-type PiProfile struct {
+type AgentServiceProfile struct {
 	Slug                       string        `json:"slug"`
 	Version                    string        `json:"version"`
 	FriendlyName               string        `json:"friendly_name"`
@@ -68,14 +70,83 @@ type PiProfile struct {
 }
 
 type ProfileRegistry struct {
-	versions         map[string]map[string]PiProfile
-	active           map[string]string
-	knowledgeContext *template.Template
+	versions          map[string]map[string]AgentServiceProfile
+	active            map[string]string
+	knowledgeContext  *template.Template
+	versionStore      ProfileVersionStore
+	versionStoreReady atomic.Bool
 	// historySummaryPrompt is the system prompt for folding earlier turns.
 	historySummaryPrompt string
 	// snapshotWindow is PI_HISTORY_SNAPSHOT_DUR: history younger than this is
 	// shown and resent as saved.
 	snapshotWindow time.Duration
+}
+
+// WithVersionStore attaches durable profile storage. The registry keeps using
+// its environment-backed profiles until EnsureVersionStoreSeeded succeeds.
+func (r *ProfileRegistry) WithVersionStore(store ProfileVersionStore) *ProfileRegistry {
+	r.versionStore = store
+	return r
+}
+
+func (r *ProfileRegistry) EnsureVersionStoreSeeded(ctx context.Context) error {
+	if r.versionStore == nil {
+		return errors.New("profile version store is unavailable")
+	}
+	if err := r.versionStore.EnsureSeeded(ctx, r); err != nil {
+		return err
+	}
+	r.versionStoreReady.Store(true)
+	return nil
+}
+
+func (r *ProfileRegistry) VersionStoreReady() bool {
+	return r != nil && r.versionStore != nil && r.versionStoreReady.Load()
+}
+
+// ResolveActive loads the active profile from durable storage after initial
+// seeding; before that it retains the environment-backed startup behavior.
+func (r *ProfileRegistry) ResolveActive(ctx context.Context, slug, userID string) (AgentServiceProfile, error) {
+	if !r.VersionStoreReady() {
+		return r.Resolve(slug, userID)
+	}
+	profiles, err := r.versionStore.ListActive(ctx)
+	if err != nil {
+		return AgentServiceProfile{}, err
+	}
+	for _, profile := range profiles {
+		if profile.Slug == strings.TrimSpace(slug) {
+			return authorizeProfile(profile, userID)
+		}
+	}
+	return AgentServiceProfile{}, ErrProfileNotFound
+}
+
+// ResolvePinned loads the exact immutable profile version recorded on a
+// conversation after initial seeding.
+func (r *ProfileRegistry) ResolvePinned(ctx context.Context, slug, version, userID string) (AgentServiceProfile, error) {
+	if !r.VersionStoreReady() {
+		return r.ResolveVersion(slug, version, userID)
+	}
+	profile, err := r.versionStore.LoadVersion(ctx, strings.TrimSpace(slug), strings.TrimSpace(version))
+	if err != nil {
+		return AgentServiceProfile{}, err
+	}
+	return authorizeProfile(profile, userID)
+}
+
+func authorizeProfile(profile AgentServiceProfile, userID string) (AgentServiceProfile, error) {
+	if !profile.Enabled {
+		return AgentServiceProfile{}, ErrProfileDisabled
+	}
+	if len(profile.PilotUsers) > 0 && !contains(profile.PilotUsers, strings.TrimSpace(userID)) {
+		return AgentServiceProfile{}, ErrProfileNotAvailable
+	}
+	return cloneProfile(profile), nil
+}
+
+func isProfileAvailabilityError(err error) bool {
+	return errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileDisabled) || errors.Is(err, ErrProfileNotAvailable)
 }
 
 type profileDefinition struct {
@@ -139,7 +210,7 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 	registry := &ProfileRegistry{
 		historySummaryPrompt: historySummaryPrompt,
 		snapshotWindow:       time.Duration(snapshotHours) * time.Hour,
-		versions:             make(map[string]map[string]PiProfile, len(definitions)),
+		versions:             make(map[string]map[string]AgentServiceProfile, len(definitions)),
 		active:               make(map[string]string, len(definitions)),
 		knowledgeContext:     knowledgeContext,
 	}
@@ -148,7 +219,7 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("load profile %q: %w", definition.slug, err)
 		}
-		registry.versions[profile.Slug] = map[string]PiProfile{profile.Version: profile}
+		registry.versions[profile.Slug] = map[string]AgentServiceProfile{profile.Version: profile}
 		activeVersion := envDefault(definition.envPrefix+"_ACTIVE_VERSION", "v1")
 		if _, ok := registry.versions[profile.Slug][activeVersion]; !ok {
 			return nil, fmt.Errorf("profile %q active version %q is unavailable", profile.Slug, activeVersion)
@@ -158,59 +229,59 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 	return registry, nil
 }
 
-func loadProfile(promptDir string, definition profileDefinition) (PiProfile, error) {
+func loadProfile(promptDir string, definition profileDefinition) (AgentServiceProfile, error) {
 	promptPath := filepath.Join(promptDir, definition.promptFile)
 	promptBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		return PiProfile{}, fmt.Errorf("read prompt %q: %w", promptPath, err)
+		return AgentServiceProfile{}, fmt.Errorf("read prompt %q: %w", promptPath, err)
 	}
 	if strings.TrimSpace(string(promptBytes)) == "" {
-		return PiProfile{}, fmt.Errorf("prompt %q is empty", promptPath)
+		return AgentServiceProfile{}, fmt.Errorf("prompt %q is empty", promptPath)
 	}
 
 	enabled, err := envBool(definition.envPrefix+"_ENABLED", true)
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	permission := strings.ToLower(envDefault(definition.envPrefix+"_PERMISSION_DEFAULT", PermissionAuto))
 	if permission != PermissionAsk && permission != PermissionAuto {
-		return PiProfile{}, fmt.Errorf("%s_PERMISSION_DEFAULT must be ask or auto", definition.envPrefix)
+		return AgentServiceProfile{}, fmt.Errorf("%s_PERMISSION_DEFAULT must be ask or auto", definition.envPrefix)
 	}
 	maxToolCalls, err := envPositiveInt(definition.envPrefix+"_MAX_TOOL_CALLS", definition.limits.MaxToolCalls)
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	maxElapsedSeconds, err := envPositiveInt(definition.envPrefix+"_MAX_ELAPSED_SECONDS", int(definition.limits.MaxElapsed/time.Second))
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	maxOutputTokens, err := envPositiveInt(definition.envPrefix+"_MAX_OUTPUT_TOKENS", definition.limits.MaxOutputTokens)
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	maxEvidenceBytes, err := envPositiveInt(definition.envPrefix+"_MAX_EVIDENCE_BYTES", definition.limits.MaxEvidenceBytes)
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	maxHistoryTokens, err := envPositiveInt(definition.envPrefix+"_MAX_HISTORY_TOKENS", defaultMaxHistoryTokens)
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	maxHistoryToolResultBytes, err := envPositiveInt(definition.envPrefix+"_MAX_HISTORY_TOOL_RESULT_BYTES", defaultMaxHistoryToolResultBytes)
 	if err != nil {
-		return PiProfile{}, err
+		return AgentServiceProfile{}, err
 	}
 	if maxHistoryToolResultBytes > maxHistoryToolResultBytesCeiling {
-		return PiProfile{}, fmt.Errorf("%s_MAX_HISTORY_TOOL_RESULT_BYTES must be %d or less", definition.envPrefix, maxHistoryToolResultBytesCeiling)
+		return AgentServiceProfile{}, fmt.Errorf("%s_MAX_HISTORY_TOOL_RESULT_BYTES must be %d or less", definition.envPrefix, maxHistoryToolResultBytesCeiling)
 	}
 
 	provider := envDefault(definition.envPrefix+"_PROVIDER", definition.provider)
 	model := envDefault(definition.envPrefix+"_MODEL", definition.model)
 	stores := envCSV(definition.envPrefix+"_ALLOWED_STORES", definition.stores)
 	if len(stores) == 0 {
-		return PiProfile{}, fmt.Errorf("%s_ALLOWED_STORES must contain at least one store", definition.envPrefix)
+		return AgentServiceProfile{}, fmt.Errorf("%s_ALLOWED_STORES must contain at least one store", definition.envPrefix)
 	}
-	return PiProfile{
+	return AgentServiceProfile{
 		Slug: definition.slug, Version: "v1", FriendlyName: definition.friendlyName,
 		Description: definition.description, Provider: provider, Model: model,
 		ProviderDisclosure: envDefault(definition.envPrefix+"_PROVIDER_DISCLOSURE", "Messages and retrieved evidence are sent to the "+provider+" model provider."),
@@ -225,45 +296,33 @@ func loadProfile(promptDir string, definition profileDefinition) (PiProfile, err
 	}, nil
 }
 
-func (r *ProfileRegistry) Resolve(slug, userID string) (PiProfile, error) {
+func (r *ProfileRegistry) Resolve(slug, userID string) (AgentServiceProfile, error) {
 	slug = strings.TrimSpace(slug)
 	version, ok := r.active[slug]
 	if !ok {
-		return PiProfile{}, ErrProfileNotFound
+		return AgentServiceProfile{}, ErrProfileNotFound
 	}
 	profile := r.versions[slug][version]
-	if !profile.Enabled {
-		return PiProfile{}, ErrProfileDisabled
-	}
-	if len(profile.PilotUsers) > 0 && !contains(profile.PilotUsers, strings.TrimSpace(userID)) {
-		return PiProfile{}, ErrProfileNotAvailable
-	}
-	return cloneProfile(profile), nil
+	return authorizeProfile(profile, userID)
 }
 
-func (r *ProfileRegistry) ResolveVersion(slug, version, userID string) (PiProfile, error) {
+func (r *ProfileRegistry) ResolveVersion(slug, version, userID string) (AgentServiceProfile, error) {
 	versions, ok := r.versions[strings.TrimSpace(slug)]
 	if !ok {
-		return PiProfile{}, ErrProfileNotFound
+		return AgentServiceProfile{}, ErrProfileNotFound
 	}
 	profile, ok := versions[strings.TrimSpace(version)]
 	if !ok {
-		return PiProfile{}, ErrProfileNotFound
+		return AgentServiceProfile{}, ErrProfileNotFound
 	}
-	if !profile.Enabled {
-		return PiProfile{}, ErrProfileDisabled
-	}
-	if len(profile.PilotUsers) > 0 && !contains(profile.PilotUsers, strings.TrimSpace(userID)) {
-		return PiProfile{}, ErrProfileNotAvailable
-	}
-	return cloneProfile(profile), nil
+	return authorizeProfile(profile, userID)
 }
 
 func (r *ProfileRegistry) ActiveVersion(slug string) string {
 	return r.active[strings.TrimSpace(slug)]
 }
 
-func cloneProfile(profile PiProfile) PiProfile {
+func cloneProfile(profile AgentServiceProfile) AgentServiceProfile {
 	profile.AllowedTools = append([]string(nil), profile.AllowedTools...)
 	profile.AllowedKnowledgeStores = append([]string(nil), profile.AllowedKnowledgeStores...)
 	profile.AllowedDocumentGroups = append([]string(nil), profile.AllowedDocumentGroups...)
