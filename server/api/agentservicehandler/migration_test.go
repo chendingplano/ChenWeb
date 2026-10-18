@@ -85,6 +85,9 @@ func TestPiAgentProfileVersionsMigrationPreservesImmutableSnapshots(t *testing.T
 		"prompt_snapshot TEXT NOT NULL",
 		"created_by TEXT NOT NULL",
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+		"CREATE OR REPLACE FUNCTION kb.reject_agentic_service_profile_version_mutation()",
+		"agentic service profile versions are immutable",
+		"BEFORE UPDATE OR DELETE ON kb.agentic_service_profile_versions",
 		"CREATE TABLE IF NOT EXISTS kb.agentic_service_profiles",
 		"active_version TEXT NOT NULL",
 		"PRIMARY KEY (service_slug)",
@@ -93,6 +96,8 @@ func TestPiAgentProfileVersionsMigrationPreservesImmutableSnapshots(t *testing.T
 		"-- +goose Up",
 		"-- +goose Down",
 		"DROP TABLE IF EXISTS kb.agentic_service_profiles",
+		"DROP TRIGGER IF EXISTS trg_agentic_service_profile_versions_immutable",
+		"DROP FUNCTION IF EXISTS kb.reject_agentic_service_profile_version_mutation()",
 		"DROP TABLE IF EXISTS kb.agentic_service_profile_versions",
 	} {
 		if !strings.Contains(sql, required) {

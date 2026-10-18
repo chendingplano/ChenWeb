@@ -18,6 +18,19 @@ CREATE TABLE IF NOT EXISTS kb.agentic_service_profile_versions (
     CHECK (BTRIM(created_by) <> '')
 );
 
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kb.reject_agentic_service_profile_version_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'agentic service profile versions are immutable';
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER trg_agentic_service_profile_versions_immutable
+BEFORE UPDATE OR DELETE ON kb.agentic_service_profile_versions
+FOR EACH ROW EXECUTE FUNCTION kb.reject_agentic_service_profile_version_mutation();
+
 CREATE TABLE IF NOT EXISTS kb.agentic_service_profiles (
     service_slug   TEXT PRIMARY KEY,
     active_version TEXT NOT NULL,
@@ -30,4 +43,6 @@ CREATE TABLE IF NOT EXISTS kb.agentic_service_profiles (
 
 -- +goose Down
 DROP TABLE IF EXISTS kb.agentic_service_profiles;
+DROP TRIGGER IF EXISTS trg_agentic_service_profile_versions_immutable ON kb.agentic_service_profile_versions;
+DROP FUNCTION IF EXISTS kb.reject_agentic_service_profile_version_mutation();
 DROP TABLE IF EXISTS kb.agentic_service_profile_versions;
