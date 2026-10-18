@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -158,6 +159,36 @@ func TestMetricScoreSubprocessNoGold(t *testing.T) {
 	}
 }
 
+func TestMetricScoreValidationDiagnostic(t *testing.T) {
+	for _, tc := range []struct {
+		command, stderr string
+		wantDiagnostic  bool
+	}{
+		{"score", "score_io: gold rows accounted for more than once: ['g1']", true},
+		{"score", "score_io: predicted rows not accounted for: ['p1']", true},
+		{"score", "score_io: override field must be one of ['value']", true},
+		{"score", "Traceback: SECRET", false},
+		{"score", "score_io: psql failed: SECRET", false},
+		{"export", "score_io: psql failed: SECRET", false},
+	} {
+		t.Run(tc.command+tc.stderr, func(t *testing.T) {
+			script := filepath.Join(t.TempDir(), "score_io.py")
+			t.Setenv("SCORE_TEST_STDERR", tc.stderr)
+			if err := os.WriteFile(script, []byte("import os,sys\nprint(os.environ['SCORE_TEST_STDERR'],file=sys.stderr)\nsys.exit(1)\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := runMetricScoreScriptAt(context.Background(), script, tc.command)
+			var validation metricScoreValidationError
+			if errors.As(err, &validation) != tc.wantDiagnostic || strings.Contains(err.Error(), "SECRET") {
+				t.Fatalf("unexpected diagnostic: %v %+v", err, validation)
+			}
+			if tc.wantDiagnostic && (validation.Reason != strings.TrimPrefix(tc.stderr, "score_io: ") || metricScoreErrorCode(err) != "INVALID_MATCHES") {
+				t.Fatalf("lost validation detail or stable code: %+v", validation)
+			}
+		})
+	}
+}
+
 func TestMetricScoreScorerParityAndInvalidMatches(t *testing.T) {
 	script, err := metricScoreScriptPath()
 	if err != nil {
@@ -269,14 +300,28 @@ func TestMetricScoreMiddlewareStopsUnauthorizedRequests(t *testing.T) {
 // Exercise the Go export→LLM→authoritative Python scorer bridge without paid model calls
 // or changing production metrics. The fixture exporter replaces only the database reads.
 func TestMetricScoreRunnerEndToEnd(t *testing.T) {
-	for _, incompleteResponses := range []int{0, 1, 2} {
-		t.Run(fmt.Sprintf("incomplete_responses_%d", incompleteResponses), func(t *testing.T) {
-			testMetricScoreRunnerEndToEnd(t, incompleteResponses)
+	omitted := `{"pairs":[],"missed":[{"gold":"g1","note":"missing"}],"false_positives":[],"overrides":[]}`
+	contradictory := `{"pairs":[{"gold":"g1","pred":"p1"}],"missed":[{"gold":"g1","note":"also missed"}],"false_positives":[],"overrides":[]}`
+	badOverride := `{"pairs":[{"gold":"g1","pred":"p1"}],"missed":[],"false_positives":[],"overrides":[{"gold":"g1","field":"kind","correct":true,"reason":"invalid override"}]}`
+	for _, tc := range []struct {
+		name             string
+		invalidResponses int
+		payload          string
+	}{
+		{"complete", 0, ""},
+		{"omitted_then_corrected", 1, omitted},
+		{"omitted_twice", 2, omitted},
+		{"contradictory_then_corrected", 1, contradictory},
+		{"contradictory_twice", 2, contradictory},
+		{"prohibited_override_then_corrected", 1, badOverride},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testMetricScoreRunnerEndToEnd(t, tc.invalidResponses, tc.payload)
 		})
 	}
 }
 
-func testMetricScoreRunnerEndToEnd(t *testing.T, incompleteResponses int) {
+func testMetricScoreRunnerEndToEnd(t *testing.T, incompleteResponses int, invalidPayload string) {
 	projectRoot, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +403,7 @@ else:
 		w.Header().Set("Content-Type", "application/json")
 		content := `{"pairs":[{"gold":"g1","pred":"p1","note":"同一断言"}],"missed":[],"false_positives":[],"overrides":[]}`
 		if calls <= incompleteResponses {
-			content = `{"pairs":[],"missed":[{"gold":"g1","note":"missing"}],"false_positives":[],"overrides":[]}`
+			content = invalidPayload
 		}
 		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}, "finish_reason": "stop"}}})
 	}))
@@ -383,7 +428,7 @@ else:
 	evidence, err := executeMetricScore(context.Background(), db, logger, 93, metricScoreRequest{RecordID: 416, Model: "fixture", Lang: "zh-cn"}, "fixture-user")
 	if incompleteResponses > 0 {
 		previous, readErr := os.ReadFile(filepath.Join(tmp, "metric-score-runs", "93", "evidence", "matches-attempt-1.json"))
-		if readErr != nil || !strings.Contains(string(previous), `"missing"`) {
+		if readErr != nil || !json.Valid(previous) {
 			t.Fatalf("missing first-attempt evidence: %s %v", previous, readErr)
 		}
 	}
@@ -396,7 +441,11 @@ else:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != incompleteResponses+1 || evidence.Model != "scorer-exact-model" || !strings.Contains(evidence.Report, "Score: 90 / 100") {
+	expectedCalls := 1
+	if incompleteResponses > 0 {
+		expectedCalls = 2
+	}
+	if calls != expectedCalls || evidence.Model != "scorer-exact-model" || !strings.Contains(evidence.Report, "Score: 90 / 100") {
 		t.Fatalf("unexpected result model=%s report=%s", evidence.Model, evidence.Report)
 	}
 	var saved map[string]any
@@ -408,25 +457,6 @@ else:
 	}
 	if err = mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestMissingMetricScoreRows(t *testing.T) {
-	var input, payload map[string]any
-	if err := json.Unmarshal([]byte(`{"gold":[{"metric_id":"g1"},{"metric_id":"g2"}],"predictions":[{"metric_id":"p1"},{"metric_id":"p2"}]}`), &input); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(`{"pairs":[{"gold":"g1","pred":"p1"}],"missed":[],"false_positives":[]}`), &payload); err != nil {
-		t.Fatal(err)
-	}
-	missing := missingMetricScoreRows(input, payload)
-	if len(missing) != 2 || len(missing["gold"]) != 1 || missing["gold"][0] != "g2" || len(missing["predictions"]) != 1 || missing["predictions"][0] != "p2" {
-		t.Fatalf("unexpected missing IDs: %v", missing)
-	}
-	payload["missed"] = []any{map[string]any{"gold": "g2"}}
-	payload["false_positives"] = []any{map[string]any{"pred": "p2", "cause": "not_in_gold"}}
-	if missing = missingMetricScoreRows(input, payload); len(missing) != 0 {
-		t.Fatalf("fully accounted rows reported missing: %v", missing)
 	}
 }
 

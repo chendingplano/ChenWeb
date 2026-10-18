@@ -21,6 +21,13 @@ import (
 
 type metricScoreFailure struct{ Code string }
 
+// Only recognized match-validation diagnostics are retained; export/database output and
+// Python tracebacks remain private. The public API continues to return the stable code.
+type metricScoreValidationError struct{ Reason string }
+
+func (e metricScoreValidationError) Error() string { return "INVALID_MATCHES" }
+func (e metricScoreValidationError) Unwrap() error { return metricScoreFailure{"INVALID_MATCHES"} }
+
 func (e metricScoreFailure) Error() string { return e.Code }
 func metricScoreErrorCode(err error) string {
 	if err == nil {
@@ -125,8 +132,9 @@ func runMetricScoreScript(ctx context.Context, args ...string) error {
 func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "python3", append([]string{script}, args...)...)
 	cmd.Env = metricScoreCommandEnv()
-	// No subprocess output is sent to the browser or logs: export diagnostics may include DB details.
-	if err := cmd.Run(); err != nil {
+	// Output captures bounded stderr in ExitError. Export diagnostics may include DB details
+	// and are never forwarded. Only recognized score validation messages are retained below.
+	if _, err := cmd.Output(); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -143,6 +151,17 @@ func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) 
 			return metricScoreFailure{"SCORER_UNAVAILABLE"}
 		}
 		if len(args) > 0 && args[0] == "score" {
+			if exit != nil {
+				line := strings.SplitN(strings.TrimSpace(string(exit.Stderr)), "\n", 2)[0]
+				if strings.HasPrefix(line, "score_io: ") {
+					reason := strings.TrimPrefix(line, "score_io: ")
+					for _, prefix := range []string{"gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "false positive ", "override ", `override "correct"`} {
+						if strings.HasPrefix(reason, prefix) {
+							return metricScoreValidationError{Reason: reason}
+						}
+					}
+				}
+			}
 			return metricScoreFailure{"INVALID_MATCHES"}
 		}
 		return metricScoreFailure{"EXPORT_FAILED"}
@@ -238,35 +257,6 @@ func enforceOneToOnePairs(payload map[string]any) {
 }
 
 func metricScoreDigest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
-
-// missingMetricScoreRows reports omissions without deciding whether a row is a match or a
-// false positive. The authoritative scorer still validates duplicates, unknown IDs and fields.
-func missingMetricScoreRows(input, payload map[string]any) map[string][]string {
-	missing := map[string][]string{}
-	for _, side := range []struct{ input, key, other string }{
-		{"gold", "gold", "missed"}, {"predictions", "pred", "false_positives"},
-	} {
-		seen := map[string]bool{}
-		for _, section := range []string{"pairs", side.other} {
-			rows, _ := payload[section].([]any)
-			for _, row := range rows {
-				if m, ok := row.(map[string]any); ok {
-					id, _ := m[side.key].(string)
-					seen[id] = true
-				}
-			}
-		}
-		rows, _ := input[side.input].([]any)
-		for _, row := range rows {
-			if m, ok := row.(map[string]any); ok {
-				if id, ok := m["metric_id"].(string); ok && !seen[id] {
-					missing[side.input] = append(missing[side.input], id)
-				}
-			}
-		}
-	}
-	return missing
-}
 
 // Freeze both scorer and shared gold helper. The saved implementation can reproduce this run
 // even if the installed skills change while matching is in progress or after completion.
@@ -445,30 +435,29 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 		if err = os.WriteFile(filepath.Join(dir, "matches.json"), e.Matches, 0600); err != nil {
 			return e, err
 		}
-		// Reference matches use ref_id and retain their existing scoring flow.
-		if kind.matchBasis == "metric" {
-			missing := missingMetricScoreRows(input, payload)
-			if len(missing) > 0 {
-				logger.Warn("benchmark matching omitted rows", "run_id", id, "attempt", attempt, "missing_gold", missing["gold"], "missing_predictions", missing["predictions"])
-				if attempt == 2 {
-					return e, metricScoreFailure{"INVALID_MATCHES"}
-				}
-				if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), e.Matches, 0600); err != nil {
-					return e, err
-				}
-				feedback, marshalErr := json.Marshal(map[string]any{"previous_matches": payload, "omitted_ids": missing})
-				if marshalErr != nil {
-					return e, marshalErr
-				}
-				inputText = originalInput + "\nMATCH_REPAIR\n" + string(feedback)
-				continue
+		// Validate every attempt with the frozen authoritative scorer. Do not duplicate
+		// its matching rules in Go or invent classifications for invalid model output.
+		if scoreErr := runMetricScoreScriptAt(ctx, frozen, "score", "--dir", dir, "--scorer-model", cfg.ModelName); scoreErr != nil {
+			var validation metricScoreValidationError
+			if !errors.As(scoreErr, &validation) {
+				return e, scoreErr
 			}
+			logger.Warn("benchmark matching validation failed", "run_id", id, "attempt", attempt, "validation_reason", validation.Reason)
+			// Reference matching retains its existing scoring flow.
+			if kind.matchBasis != "metric" || attempt == 2 {
+				return e, scoreErr
+			}
+			if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), e.Matches, 0600); err != nil {
+				return e, err
+			}
+			feedback, marshalErr := json.Marshal(map[string]any{"previous_matches": payload, "validation_error": validation.Reason})
+			if marshalErr != nil {
+				return e, marshalErr
+			}
+			inputText = originalInput + "\nMATCH_REPAIR\n" + string(feedback)
+			continue
 		}
 		break
-	}
-	// Python refuses missing, duplicate or unknown row IDs and prohibited overrides.
-	if err = runMetricScoreScriptAt(ctx, frozen, "score", "--dir", dir, "--scorer-model", cfg.ModelName); err != nil {
-		return e, err
 	}
 	e.Score, err = os.ReadFile(filepath.Join(dir, "score.json"))
 	if err != nil {

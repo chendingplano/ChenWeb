@@ -19,7 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const metricScorePrompt = "prompt-score-extract-metrics-v3.md"
+const metricScorePrompt = "prompt-score-extract-metrics-v4.md"
 
 // A run stores immutable scoring evidence, independent of later extraction changes.
 type metricScoreRun struct {
@@ -358,7 +358,9 @@ func runMetricScore(db *sql.DB, id int64, req metricScoreRequest, userID string)
 	if err != nil {
 		status = "failed"
 		code = metricScoreErrorCode(err)
-		logger.Error("metric benchmark failed", "run_id", id, "error_code", code)
+		var validation metricScoreValidationError
+		errors.As(err, &validation)
+		logger.Error("metric benchmark failed", "run_id", id, "error_code", code, "validation_reason", validation.Reason)
 	}
 	_, storeErr := db.ExecContext(finishCtx, `UPDATE kb.metric_score_runs SET status=$2,model_name=$3,input_snapshot=$4,matches_snapshot=$5,score_snapshot=$6,report=$7,error_msg=$8,error_code=$8,finished_at=now() WHERE id=$1 AND status='running'`,
 		id, status, evidence.Model, nullableMetricScoreJSON(evidence.Input), nullableMetricScoreJSON(evidence.Matches), nullableMetricScoreJSON(evidence.Score), evidence.Report, code)
