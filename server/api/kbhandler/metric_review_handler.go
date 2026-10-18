@@ -196,6 +196,7 @@ type metricReviewInputMetric struct {
 	SourceLineSpans      json.RawMessage `json:"source_line_spans,omitempty"`
 	MetricName           string          `json:"metric_name,omitempty"`
 	MetricSubject        string          `json:"metric_subject,omitempty"`
+	ValueStructure       json.RawMessage `json:"value_structure,omitempty"`
 	MetricValue          string          `json:"metric_value,omitempty"`
 	MetricUnit           string          `json:"metric_unit,omitempty"`
 	ThresholdOrTarget    string          `json:"threshold_or_target,omitempty"`
@@ -670,7 +671,7 @@ SELECT COALESCE(metric_id, 'id:' || id::text), source_line_spans,
        COALESCE(value_data_type, ''), COALESCE(value_range_type, ''), COALESCE(value_class, ''),
        COALESCE(condition, ''), is_explicit_metric, confidence, COALESCE(location_type, ''),
        COALESCE(measurement_frequency, ''), COALESCE(formula_or_definition, ''),
-       to_char(created_at, 'YYYY-MM-DD')
+       to_char(created_at, 'YYYY-MM-DD'), value_structure
 FROM kb.metrics
 WHERE ref_mention_id IS NULL AND input_record_id = $1
 ORDER BY id`, recordID)
@@ -684,6 +685,7 @@ ORDER BY id`, recordID)
 		var (
 			m                  metricReviewInputMetric
 			spans              []byte
+			structure          []byte
 			valueMin, valueMax sql.NullFloat64
 			explicit           sql.NullBool
 			confidence         sql.NullFloat64
@@ -691,9 +693,10 @@ ORDER BY id`, recordID)
 		if err := rows.Scan(&m.MetricID, &spans, &m.MetricName, &m.MetricSubject, &m.MetricValue,
 			&m.MetricUnit, &m.ThresholdOrTarget, &valueMin, &valueMax, &m.ValueDataType,
 			&m.ValueRangeType, &m.ValueClass, &m.Condition, &explicit, &confidence, &m.LocationType,
-			&m.MeasurementFrequency, &m.FormulaOrDefinition, &m.CreatedDate); err != nil {
+			&m.MeasurementFrequency, &m.FormulaOrDefinition, &m.CreatedDate, &structure); err != nil {
 			return nil, err
 		}
+		m.ValueStructure = json.RawMessage(structure)
 		if len(spans) > 0 {
 			m.SourceLineSpans = json.RawMessage(spans)
 		}

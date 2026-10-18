@@ -16,7 +16,7 @@ import (
 func metricsIdentical(a, b map[string]any) bool {
 	// A resolved concept names the property, not the metric instance: the same property under
 	// another condition is another metric (openspec change extract-metrics-conditions, D2).
-	if !metricConditionsEqual(a, b) || !metricFramesEqual(a, b) {
+	if !metricConditionsEqual(a, b) || !metricFramesEqual(a, b) || !metricValueStructuresEqual(a, b) {
 		return false
 	}
 	conceptA := strings.TrimSpace(asString(a["keyword_concept_id"]))
@@ -59,7 +59,7 @@ func metricLineSpansOverlap(a, b map[string]any) bool {
 // existing row satisfies this predicate, the caller must retain the group for
 // LLM adjudication.
 func metricStaticMatch(candidate, existing map[string]any) bool {
-	if !metricConditionsEqual(candidate, existing) || !metricFramesEqual(candidate, existing) {
+	if !metricConditionsEqual(candidate, existing) || !metricFramesEqual(candidate, existing) || !metricValueStructuresEqual(candidate, existing) {
 		return false
 	}
 	candidateConcept := strings.TrimSpace(asString(candidate["keyword_concept_id"]))
@@ -113,6 +113,9 @@ func metricStaticMatch(candidate, existing map[string]any) bool {
 // adjudication, while preventing unrelated metrics that happen to be printed
 // on the same source line from entering the same pending group.
 func metricCloseEnough(candidate, existing map[string]any) bool {
+	if !metricValueStructuresEqual(candidate, existing) {
+		return false
+	}
 	if candidateConcept := strings.TrimSpace(asString(candidate["keyword_concept_id"])); candidateConcept != "" && candidateConcept == strings.TrimSpace(asString(existing["keyword_concept_id"])) {
 		return true
 	}

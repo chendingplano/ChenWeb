@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	ontologycandidates "github.com/chendingplano/deepdoc/server/api/ontology/candidates"
 	"github.com/chendingplano/deepdoc/server/api/ontology/keywords"
@@ -513,11 +514,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v29.md",
+		"prompt-extract-metric-candidates-v30.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v28.md",
+		"prompt-enrich-metrics-v29.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -533,7 +534,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	)
 	mergeResolvePromptText, mergeResolvePromptRef, mergeResolvePromptPath, mergeResolvePromptErr := loadProductPromptFromEnvKeys(
 		[]string{"METRIC_MERGE_RESOLVE_PROMPT"},
-		"prompt-merge-resolve-metrics-v3.md",
+		"prompt-merge-resolve-metrics-v4.md",
 	)
 	mergeResolveModelRef, mergeResolveModelCfgPath, mergeResolveModelCfg, mergeResolveModelErr := loadModelConfigFromEnvKeys(
 		[]string{"METRIC_MERGE_RESOLVE_MODEL_NAME"},
@@ -1581,6 +1582,7 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 			"unit":                  "string",
 			"unit_en":               "string",
 			"metric_value":          "string",
+			"value_structure":       map[string]any{"kind": "alternatives|required_points|composite|expression|unresolved", "values": []string{"10", "20"}},
 			"value_data_type":       "string",
 			"value_range_type":      "string",
 			"value_class":           "string",
@@ -1620,8 +1622,9 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 				"confidence":        0.0,
 			}},
 		}},
-		"uncertain_metrics":  []any{},
-		"dropped_candidates": []map[string]any{{"candidate_id": "string", "reason": "string"}},
+		"value_review_decisions": []map[string]any{{"candidate_id": "string", "action": "split|keep|unresolved", "reason": "string"}},
+		"uncertain_metrics":      []any{},
+		"dropped_candidates":     []map[string]any{{"candidate_id": "string", "reason": "string"}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
 	// No source-lines section here: the caller sends the full chunk (all of a candidate's
@@ -1655,6 +1658,7 @@ func normalizeMetricList(items []any) []map[string]any {
 			"unit":                  strings.TrimSpace(asString(raw["unit"])),
 			"unit_en":               strings.TrimSpace(asString(raw["unit_en"])),
 			"metric_value":          strings.TrimSpace(asString(raw["metric_value"])),
+			"value_structure":       normalizeMetricValueStructureForValue(raw["value_structure"], asString(raw["metric_value"])),
 			"value_data_type":       strings.TrimSpace(asString(raw["value_data_type"])),
 			"value_range_type":      strings.TrimSpace(asString(raw["value_range_type"])),
 			"value_class":           strings.TrimSpace(asString(raw["value_class"])),
@@ -1946,7 +1950,7 @@ func dedupeFinalMetricRows(metrics []map[string]any) []map[string]any {
 			asString(metric["unit"]),
 			asString(metric["metric_value"]),
 			strings.Join(normalizeSourceLineSpans(metric["source_line_spans"]), ","),
-		) + "|condition=" + metricConditionKey(metric) + "|frame=" + metricFrameIdentityKey(metric)
+		) + "|condition=" + metricConditionKey(metric) + "|frame=" + metricFrameIdentityKey(metric) + "|value_structure=" + metricValueStructureKey(metric)
 		if existing, ok := grouped[key]; ok {
 			mergedSpans := normalizeSourceLineSpans(existing["source_line_spans"])
 			for _, span := range normalizeSourceLineSpans(metric["source_line_spans"]) {
@@ -2864,7 +2868,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-enrich-metrics-v28.md")
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-enrich-metrics-v29.md")
 	}
 
 	paths := make([]string, 0, 8)
@@ -3034,7 +3038,7 @@ SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_sub
        formula_or_definition, threshold_or_target, measurement_frequency,
 	       metric_categories, metric_categories_en, category_paths, category_paths_en,
 	       keyword_concept_id, metric_definition_term_id, subject_concept_id, ext_info,
-	       source_table_rows, condition, condition_en, value_min, value_max, frame
+	       source_table_rows, condition, condition_en, value_min, value_max, frame, value_structure
 FROM kb.metrics
 WHERE input_record_id = $1 AND ref_mention_id IS NULL`
 	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
@@ -3052,7 +3056,7 @@ WHERE input_record_id = $1 AND ref_mention_id IS NULL`
 			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn     sql.NullString
 			keywordConceptID, metricDefinitionTermID, subjectConceptID                   sql.NullString
 			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
-			tableRowsJSON, condition, conditionEn, frameJSON                             sql.NullString
+			tableRowsJSON, condition, conditionEn, frameJSON, structureJSON              sql.NullString
 			valueMin, valueMax                                                           sql.NullFloat64
 		)
 		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,
@@ -3060,7 +3064,7 @@ WHERE input_record_id = $1 AND ref_mention_id IS NULL`
 			&valueDataType, &valueRangeType, &valueClass, &valueClassEn, &formula, &threshold, &freq,
 			&categories, &categoriesEn, &catPaths, &catPathsEn, &keywordConceptID,
 			&metricDefinitionTermID, &subjectConceptID, &extInfoJSON, &tableRowsJSON,
-			&condition, &conditionEn, &valueMin, &valueMax, &frameJSON); err != nil {
+			&condition, &conditionEn, &valueMin, &valueMax, &frameJSON, &structureJSON); err != nil {
 			return nil, err
 		}
 		m := map[string]any{
@@ -3077,6 +3081,7 @@ WHERE input_record_id = $1 AND ref_mention_id IS NULL`
 			"keyword_concept_id":        keywordConceptID.String,
 			"metric_definition_term_id": metricDefinitionTermID.String,
 			"subject_concept_id":        subjectConceptID.String,
+			"value_structure":           normalizeMetricValueStructure(structureJSON.String),
 			"condition":                 condition.String,
 			"condition_en":              conditionEn.String,
 			"value_min":                 nullFloatValue(valueMin),
@@ -3193,11 +3198,12 @@ INSERT INTO kb.metrics (
 	value_min,
 	value_max,
 	frame,
-	provision_id
+	provision_id,
+ value_structure
 )
 VALUES (
 	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40,$41::jsonb,
-	$42,$43,$44,$45,$46::jsonb,$47
+	$42,$43,$44,$45,$46::jsonb,$47,$48::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -3210,6 +3216,13 @@ VALUES (
 
 	var inserted int64
 	for _, metric := range req.Metrics {
+		if err := metricvalue.ValidateForValue(metric["value_structure"], asString(metric["metric_value"])); err != nil {
+			return 0, err
+		}
+		structureSQL, structureErr := metricvalue.SQLValue(metric["value_structure"])
+		if structureErr != nil {
+			return 0, structureErr
+		}
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
@@ -3315,7 +3328,7 @@ VALUES (
 			metricValueBoundSQLValue(metric["value_min"]),
 			metricValueBoundSQLValue(metric["value_max"]),
 			metricFrameSQLValue(metric),
-			metricProvisionIDSQLValue(metric["provision_id"]),
+			metricProvisionIDSQLValue(metric["provision_id"]), structureSQL,
 		)
 		if err != nil {
 			return inserted, err
@@ -3351,11 +3364,11 @@ INSERT INTO kb.metrics (
 	threshold_or_target, measurement_frequency, confidence, is_explicit_metric, table_name_or_section,
 	reasoning_tags, metric_categories, metric_categories_en, category_paths, category_paths_en,
 	search_document, ext_info, keyword_concept_id, metric_definition_term_id, subject_concept_id,
-	source_table_rows, condition, condition_en, value_min, value_max, frame, provision_id
+	source_table_rows, condition, condition_en, value_min, value_max, frame, provision_id, value_structure
 ) VALUES (
 	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,
 	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb,$38,$39,$40,$41::jsonb,
-	$42,$43,$44,$45,$46::jsonb,$47
+	$42,$43,$44,$45,$46::jsonb,$47,$48::jsonb
 )
 ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE SET
 	metric_name = EXCLUDED.metric_name, metric_name_en = EXCLUDED.metric_name_en,
@@ -3377,7 +3390,7 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 	source_table_rows = EXCLUDED.source_table_rows,
 	condition = EXCLUDED.condition, condition_en = EXCLUDED.condition_en,
 	value_min = EXCLUDED.value_min, value_max = EXCLUDED.value_max,
-	frame = EXCLUDED.frame, provision_id = EXCLUDED.provision_id`
+	frame = EXCLUDED.frame, provision_id = EXCLUDED.provision_id, value_structure = EXCLUDED.value_structure`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
 		strings.EqualFold(strings.TrimSpace(req.Language), "english")
@@ -3388,6 +3401,13 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 
 	var affected int64
 	for _, metric := range req.Metrics {
+		if err := metricvalue.ValidateForValue(metric["value_structure"], asString(metric["metric_value"])); err != nil {
+			return 0, err
+		}
+		structureSQL, structureErr := metricvalue.SQLValue(metric["value_structure"])
+		if structureErr != nil {
+			return 0, structureErr
+		}
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
@@ -3453,7 +3473,7 @@ ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE S
 			sourceTableRowsSQLValue(metric["source_table_rows"]),
 			strings.TrimSpace(asString(metric["condition"])), conditionEn,
 			metricValueBoundSQLValue(metric["value_min"]), metricValueBoundSQLValue(metric["value_max"]),
-			metricFrameSQLValue(metric), metricProvisionIDSQLValue(metric["provision_id"]),
+			metricFrameSQLValue(metric), metricProvisionIDSQLValue(metric["provision_id"]), structureSQL,
 		)
 		if err != nil {
 			return affected, err
@@ -3507,7 +3527,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 		       COALESCE(condition, ''),
 		       COALESCE(condition_en, ''),
 		       value_min,
-		       value_max
+		       value_max, value_structure
 		FROM kb.metrics
 		WHERE input_record_id = $1 AND ref_mention_id IS NULL
 		ORDER BY id`, recordID)
@@ -3542,6 +3562,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			sourceTableRowsRaw                        string
 			condition, conditionEn                    string
 			valueMin, valueMax                        sql.NullFloat64
+			structureRaw                              []byte
 		)
 		if err := rows.Scan(
 			&metricID, &metricName, &metricNameEn,
@@ -3564,7 +3585,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			&connectedArtifactsRaw,
 			&sourceTableRowsRaw,
 			&condition, &conditionEn,
-			&valueMin, &valueMax,
+			&valueMin, &valueMax, &structureRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -3607,6 +3628,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			"condition_en":          strings.TrimSpace(conditionEn),
 			"value_min":             nullFloatValue(valueMin),
 			"value_max":             nullFloatValue(valueMax),
+			"value_structure":       normalizeMetricValueStructure(structureRaw),
 		})
 	}
 	return out, rows.Err()
@@ -4133,13 +4155,13 @@ func (p *MetricsProcessor) harvestMetricDefinitionCandidates(ctx context.Context
 }
 
 // mergeResolveDecidedFields lists the fields the Merge Resolution LLM call's
-// winning_metrics response actually returns (prompt-merge-resolve-metrics-v3.md).
+// winning_metrics response actually returns (prompt-merge-resolve-metrics-v4.md).
 // Everything else on a Rule-4 winner must come from the full source row, not
 // this sparse LLM output, or those columns get silently blanked on write.
 var mergeResolveDecidedFields = []string{
 	"metric_name", "metric_subject", "metric_unit", "metric_value",
 	"value_data_type", "value_range_type", "value_class",
-	"threshold_or_target", "condition", "metric_categories", "source_line_spans",
+	"threshold_or_target", "condition", "value_structure", "metric_categories", "source_line_spans",
 }
 
 // metricFieldAliasPairs lists the (raw, canonical) field-name pairs that
@@ -4393,6 +4415,9 @@ func metricNames(metrics []map[string]any) []string {
 // (DR4 dirty-check) — deliberately excludes metric_id, ext_info, and any
 // internal "_merge_source" tag.
 func metricContentEqual(existing, candidate map[string]any) bool {
+	if !metricValueStructuresEqual(existing, candidate) {
+		return false
+	}
 	fields := []string{"metric_name", "metric_subject", "metric_unit", "metric_value",
 		"value_data_type", "value_range_type", "value_class", "threshold_or_target"}
 	for _, f := range fields {

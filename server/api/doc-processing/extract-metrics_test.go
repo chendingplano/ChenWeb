@@ -1522,6 +1522,7 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			nil, // value_max
 			`{"uses":[{"role":"apparatus","name":"声级计"}]}`,
 			nil, // provision_id: not linked
+			nil, // value_structure: scalar
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -1600,7 +1601,7 @@ func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			"适用人群：幼儿", nil, float64(600), float64(1600),
-			`{"method":[{"label":"试验方法","value":"A 法"}]}`, int64(7)).
+			`{"method":[{"label":"试验方法","value":"A 法"}]}`, int64(7), nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
@@ -1665,7 +1666,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
 		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en",
 		"keyword_concept_id", "metric_definition_term_id", "subject_concept_id", "ext_info",
-		"source_table_rows", "condition", "condition_en", "value_min", "value_max", "frame",
+		"source_table_rows", "condition", "condition_en", "value_min", "value_max", "frame", "value_structure",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1677,7 +1678,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"kwc:latency", "mdt:latency", "kwc:api", `{"language":"zh","schema_version":"2"}`,
 		`[{"line":116,"rows":["r1"],"row_hash":{"r1":"3fa1c09b7e22"}}]`,
 		"适用人群：幼儿", "Population: preschool children", nil, nil,
-		`{"uses":[{"role":"agent","name":"葡萄糖注射液","spec":[{"property":"浓度","value":"50","unit":"%"}]}]}`,
+		`{"uses":[{"role":"agent","name":"葡萄糖注射液","spec":[{"property":"浓度","value":"50","unit":"%"}]}]}`, nil,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).

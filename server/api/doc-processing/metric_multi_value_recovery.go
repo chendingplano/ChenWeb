@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// Retry only candidates with combined values, once and using their original evidence.
-// Splitting mixed units or conditions needs document judgement, not string splitting.
+// Review unclassified combined values once against their original evidence.
+// A multi-value assertion may legitimately remain one structured row.
 // Keep the original rows if a retry fails; the existing multi_value_rows log remains
 // the diagnostic for anything the model still cannot split.
 func (p *MetricsProcessor) recoverMultiValueMetricRows(
@@ -18,7 +18,7 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 ) []map[string]any {
 	flagged := make(map[string]bool)
 	for _, m := range metrics {
-		if metricRowHoldsSeveralValues(m) {
+		if metricRowNeedsValueReview(m) {
 			flagged[asString(m["candidate_id"])] = true
 		}
 	}
@@ -45,14 +45,14 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 			if allowed[id] {
 				evidence[id] = append(evidence[id], toStringSlice(m["source_line_spans"])...)
 			}
-			if allowed[asString(m["candidate_id"])] && metricRowHoldsSeveralValues(m) {
+			if allowed[asString(m["candidate_id"])] && metricRowNeedsValueReview(m) {
 				combined = append(combined, m)
 			}
 		}
-		data, _ := json.Marshal(map[string]any{"multi_value_rows_to_split": combined})
+		data, _ := json.Marshal(map[string]any{"multi_value_rows_to_review": combined})
 		start := p.Now()
 		retryID := fmt.Sprintf("%s_split_%d", callID, i+1)
-		p.Logger.Warn("pass2: retrying candidates with combined metric values", "record_id", recordID, "call_id", retryID, "num_rows", len(combined))
+		p.Logger.Info("pass2: reviewing combined metric value semantics", "record_id", recordID, "call_id", retryID, "num_rows", len(combined))
 		payload, err := p.extractMetricPayload(ctx, inputText,
 			p.RelationPromptText+"\n\n"+buildMetricRelationBatchPrompt(batch.candidates)+"\n\n"+string(data),
 			p.RelationModelName, p.RelationModelCfg, p.RelationPromptRef, "enrich_metrics", "MID-26101602", true)
@@ -64,6 +64,7 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 		}
 		raw, _ := payload["metrics"].([]any)
 		retry := normalizeMetricList(raw)
+		decisions := metricValueReviewDecisions(payload["value_review_decisions"])
 		backfillMetricResultCandidateIDs(retry, batch.candidates)
 		byCandidate := make(map[string][]map[string]any)
 		invalid := make(map[string]bool)
@@ -74,32 +75,71 @@ func (p *MetricsProcessor) recoverMultiValueMetricRows(
 			}
 			spans := toStringSlice(m["source_line_spans"])
 			if strings.TrimSpace(asString(m["metric_name"])) == "" || strings.TrimSpace(asString(m["metric_value"])) == "" ||
-				!metricSplitEvidenceWithin(spans, evidence[id]) || metricRowHoldsSeveralValues(m) || metricDropReasonTag(m) != "" {
+				!metricSplitEvidenceWithin(spans, evidence[id]) || metricRowNeedsValueReview(m) || metricDropReasonTag(m) != "" {
 				invalid[id] = true
 			}
 			byCandidate[id] = append(byCandidate[id], m)
 		}
 		for _, c := range batch.candidates {
-			// A combined row must yield multiple rows, not disappear or become just
-			// one of its values. Never accept only the valid half of a retry.
 			rows := dedupeFinalMetricRows(byCandidate[c.CandidateID])
-			if invalid[c.CandidateID] || len(rows) < 2 || !metricSplitKeepsNumbers(combined, rows, c.CandidateID) {
-				p.Logger.Warn("pass2: combined value retry incomplete; keeping original rows", "record_id", recordID, "call_id", retryID, "candidate_id", c.CandidateID)
+			action := decisions[c.CandidateID]
+			valid := !invalid[c.CandidateID] && metricSplitKeepsNumbers(combined, rows, c.CandidateID)
+			switch action {
+			case "split":
+				valid = valid && len(rows) >= 2
+			case "keep":
+				valid = valid && len(rows) == 1 && normalizeMetricValueStructure(rows[0]["value_structure"]) != nil && !metricRowNeedsValueReview(rows[0])
+				// Keep does not reinterpret a value's unit or introduce new numeric
+				// text. With multiple original combined rows, preserve them instead.
+				var originals []map[string]any
+				for _, m := range combined {
+					if asString(m["candidate_id"]) == c.CandidateID {
+						originals = append(originals, m)
+					}
+				}
+				valid = valid && len(originals) == 1
+				if valid {
+					valid = compactMetricValue(asString(rows[0]["metric_value"])) == compactMetricValue(asString(originals[0]["metric_value"])) && metricRowUnit(rows[0]) == metricRowUnit(originals[0])
+					if valid {
+						// Keep classifies the existing assertion; it does not authorize
+						// rewriting its subject, applicability, frame or provenance.
+						kept := cloneMetricMap(originals[0])
+						kept["value_structure"] = rows[0]["value_structure"]
+						kept["value_min"], kept["value_max"] = nil, nil
+						valid = !metricRowNeedsValueReview(kept)
+						var tags []string
+						for _, tag := range toStringSlice(kept["reasoning_tags"]) {
+							if tag != "value_review_unresolved" {
+								tags = append(tags, tag)
+							}
+						}
+						kept["reasoning_tags"] = tags
+						rows = []map[string]any{kept}
+					}
+				}
+			default:
+				valid = false
+			}
+			if !valid {
+				p.Logger.Warn("pass2: value semantics unresolved; keeping original rows", "record_id", recordID, "call_id", retryID, "candidate_id", c.CandidateID)
 				continue
 			}
 			replacements[c.CandidateID] = rows
-			p.Logger.Info("pass2: split combined metric values", "record_id", recordID, "call_id", retryID, "candidate_id", c.CandidateID, "num_rows", len(rows))
+			p.Logger.Info("pass2: resolved combined metric values", "record_id", recordID, "call_id", retryID, "candidate_id", c.CandidateID, "action", action, "num_rows", len(rows))
 		}
 	}
 	var out []map[string]any
 	for _, m := range metrics {
 		id := asString(m["candidate_id"])
-		if rows, ok := replacements[id]; ok && metricRowHoldsSeveralValues(m) {
+		if rows, ok := replacements[id]; ok && metricRowNeedsValueReview(m) {
 			out = append(out, rows...)
 			// Insert replacement rows once even when the candidate had multiple
 			// combined rows. Non-combined siblings remain for final deduplication.
 			replacements[id] = nil
 			continue
+		}
+		if metricRowNeedsValueReview(m) {
+			markMetricValueUnresolved(m)
 		}
 		out = append(out, m)
 	}
@@ -160,4 +200,35 @@ func metricSplitKeepsNumbers(original, replacement []map[string]any, candidateID
 		}
 	}
 	return true
+}
+
+// Requiring an explicit decision avoids interpreting a model's arbitrary row
+// count as proof that the source can be split without losing its relationships.
+func metricValueReviewDecisions(raw any) map[string]string {
+	result := make(map[string]string)
+	seen := make(map[string]bool)
+	rows, _ := raw.([]any)
+	for _, item := range rows {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(asString(row["candidate_id"]))
+		if id == "" {
+			continue
+		}
+		if seen[id] {
+			result[id] = ""
+			continue
+		}
+		seen[id] = true
+		if strings.TrimSpace(asString(row["reason"])) == "" {
+			continue
+		}
+		action := strings.TrimSpace(asString(row["action"]))
+		if action == "split" || action == "keep" || action == "unresolved" {
+			result[id] = action
+		}
+	}
+	return result
 }

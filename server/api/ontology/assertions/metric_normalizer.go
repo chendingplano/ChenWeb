@@ -84,6 +84,7 @@ type metricRow struct {
 	// extract-metrics.go via names.Resolver, scope "metric_subject", the
 	// same way KeywordConceptID already is for metric_name.
 	SubjectConceptID sql.NullString
+	ValueStructure   []byte
 }
 
 // Normalize implements Normalizer.
@@ -100,7 +101,7 @@ SELECT m.id, m.metric_id, m.metric_name, m.metric_unit, m.metric_unit_en, m.form
        m.value_range_type, m.value_class, m.metric_value, m.value_min, m.value_max, m.condition,
        m.event_id, m.model_name, m.prompt_name,
        m.metric_desc, m.keyword_concept_id, m.metric_subject, m.reasoning_tags, m.ext_info,
-       m.metric_categories, m.value_data_type, m.subject_concept_id
+       m.metric_categories, m.value_data_type, m.subject_concept_id, m.value_structure
 FROM kb.metrics m
 LEFT JOIN kb.artifact_objects ao
   ON ao.artifact_type = 'metric' AND ao.artifact_id = m.metric_id AND ao.input_record_id = m.input_record_id
@@ -123,7 +124,7 @@ WHERE m.ref_mention_id IS NULL AND m.input_record_id = $1`
 			&r.ValueRangeType, &r.ValueClass, &r.MetricValue, &r.ValueMin, &r.ValueMax, &r.Condition,
 			&r.EventID, &r.ModelName, &r.PromptName,
 			&r.MetricDesc, &r.KeywordConceptID, &r.MetricSubject, &r.ReasoningTags, &r.ExtInfo,
-			&r.MetricCategories, &r.ValueDataType, &r.SubjectConceptID); err != nil {
+			&r.MetricCategories, &r.ValueDataType, &r.SubjectConceptID, &r.ValueStructure); err != nil {
 			return report, err
 		}
 		report.Examined++
@@ -186,11 +187,20 @@ func metricCandidatePayloadForRow(ctx context.Context, bucketMapper ValueBucketM
 		"metric_name":             r.MetricName.String,
 		"unit":                    unit,
 		"raw_text":                r.ThresholdOrTarget.String,
+		"metric_value":            r.MetricValue.String,
 		"value_form":              parsed.ValueForm,
 		"comparator":              parsed.Comparator,
 		"assertion_kind":          parsed.AssertionKind,
 		"value_range_type_lookup": lookupStatus,
 		"value_range_type_raw":    normalizeValueRangeTypeRaw(r.ValueRangeType.String),
+	}
+	if hasMetricValueStructure(r.ValueStructure) {
+		var structure any
+		if json.Unmarshal(r.ValueStructure, &structure) == nil {
+			payload["value_structure"] = structure
+		} else {
+			payload["value_structure"] = string(r.ValueStructure)
+		}
 	}
 	if r.MetricDefinitionTermID.Valid && strings.TrimSpace(r.MetricDefinitionTermID.String) != "" {
 		payload["metric_definition_term_id"] = strings.TrimSpace(r.MetricDefinitionTermID.String)
@@ -324,22 +334,11 @@ func metricFieldMap(r metricRow, unit string) map[string]any {
 var (
 	reLowerBound = regexp.MustCompile(`(?i)(at least|no less than|not less than|minimum of|>=|≥|不低于|不小于|不得低于|至少)`)
 	reUpperBound = regexp.MustCompile(`(?i)(at most|no more than|not more than|maximum of|<=|≤|不超过|不大于|不高于|不应超过|不得超过)`)
-	// reRangeKeyword matches an explicit range keyword/dash between two
-	// numbers, with optional surrounding whitespace.
-	reRangeKeyword = regexp.MustCompile(`(?i)(-?\d+(?:\.\d+)?)\s*(?:to|~|～|至|―|–|—)\s*(-?\d+(?:\.\d+)?)`)
-	// reRangeHyphen matches a plain ASCII hyphen as a range separator only
-	// when whitespace surrounds it on both sides -- an unspaced hyphen
-	// between two numbers is at least as likely to be part of a standard/
-	// document identifier ("GB 9706.1-2020") as a genuine range, and
-	// reRangeKeyword already covers "10-20"-style ranges via its keyword
-	// forms once a space or Chinese range marker is present.
-	reRangeHyphen = regexp.MustCompile(`(-?\d+(?:\.\d+)?)\s+-\s+(-?\d+(?:\.\d+)?)`)
 	// reWholeRange accepts only a complete, two-endpoint range. Structured
 	// range rows may contain schedules or tiered classifications; extracting a
 	// substring from those compound values would fabricate an interval.
-	reWholeRange = regexp.MustCompile(`^\s*(-?\d+(?:\.\d+)?)\s*(?:to|~|～|至|―|–|—|\s-\s)\s*(-?\d+(?:\.\d+)?)\s*$`)
-	reNumber     = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
-	// reRatioDenominatorOne matches the "N:1" contrast/ratio notation.
+	reWholeRange          = regexp.MustCompile(`^\s*(-?\d+(?:\.\d+)?)\s*(?:to|~|～|至|―|–|—|\s-\s)\s*(-?\d+(?:\.\d+)?)\s*$`)
+	reNumber              = regexp.MustCompile(metricScalarNumber)
 	reRatioDenominatorOne = regexp.MustCompile(`(\d+(?:\.\d+)?):1\b`)
 )
 
@@ -623,10 +622,18 @@ var valueClassAssertionKind = map[string]string{
 // to unparsed below instead. It never fabricates: a structured row with no
 // parseable number produces an honest unparsed, never a value invented from
 // unrelated text.
+func hasMetricValueStructure(raw json.RawMessage) bool {
+	text := strings.TrimSpace(string(raw))
+	return text != "" && text != "null"
+}
+
 func resolveMetricValue(r metricRow, canonicalBucket string) parsedThreshold {
+	if hasMetricValueStructure(r.ValueStructure) {
+		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+	}
 	if strings.TrimSpace(r.ValueRangeType.String) == "" {
 		// Legacy row (pre-structured-schema, or extraction left the enum
-		// unset): fall back to the free-text parser unchanged.
+		// unset): parse a complete supported free-text value expression.
 		return parseThresholdOrTarget(r.ThresholdOrTarget.String)
 	}
 	vrt := canonicalBucket
@@ -640,6 +647,18 @@ func resolveMetricValue(r metricRow, canonicalBucket string) parsedThreshold {
 
 	switch vrt {
 	case "range":
+		// Legacy endpoints cannot certify that a displayed collection or
+		// expression is a continuous interval. Require a supported range shape.
+		rangeText := strings.TrimSpace(r.MetricValue.String)
+		rangeText = strings.NewReplacer("℃", "", "°C", "", "°", "").Replace(rangeText)
+		// Ratio-to-one endpoints are an explicitly supported legacy display
+		// when numeric endpoints were supplied; no bare ratio is made scalar.
+		if r.ValueMin.Valid && r.ValueMax.Valid {
+			rangeText = reRatioDenominatorOne.ReplaceAllString(rangeText, "$1")
+		}
+		if rangeText != "" && !reLegacyWholeRange.MatchString(rangeText) && !reCenteredTolerance.MatchString(rangeText) {
+			break
+		}
 		if r.ValueMin.Valid && r.ValueMax.Valid {
 			lo, hi := r.ValueMin.Float64, r.ValueMax.Float64
 			return parsedThreshold{
@@ -659,7 +678,12 @@ func resolveMetricValue(r metricRow, canonicalBucket string) parsedThreshold {
 			}
 		}
 	case "lower_bound", "upper_bound":
-		if v, ok := firstParseableNumber(r.MetricValue.String); ok {
+		raw := strings.TrimSpace(r.MetricValue.String)
+		// A bare ± deviation is the extractor's supported upper-bound form.
+		if vrt == "upper_bound" {
+			raw = strings.TrimPrefix(raw, "±")
+		}
+		if v, ok := parseCompleteMetricScalar(raw); ok {
 			comparator := ">="
 			if vrt == "upper_bound" {
 				comparator = "<="
@@ -670,13 +694,22 @@ func resolveMetricValue(r metricRow, canonicalBucket string) parsedThreshold {
 			}
 		}
 	case "exact":
+		if match := reCenteredTolerance.FindStringSubmatch(strings.TrimSpace(r.MetricValue.String)); match != nil {
+			center, errCenter := strconv.ParseFloat(match[1], 64)
+			deviation, errDeviation := strconv.ParseFloat(match[2], 64)
+			if errCenter != nil || errDeviation != nil {
+				break
+			}
+			lo, hi := center-deviation, center+deviation
+			return parsedThreshold{ValueForm: "range", Comparator: "between", AssertionKind: kind, LowerValue: &lo, UpperValue: &hi}
+		}
 		// Ratios such as 1:10 are not scalar exact values. Their representation
 		// is not yet modeled as a governed literal, so preserve them as
 		// unparsed rather than silently accepting the numerator as a value.
 		if strings.Contains(strings.TrimSpace(r.MetricValue.String), ":") {
 			break
 		}
-		if v, ok := firstParseableNumber(r.MetricValue.String); ok {
+		if v, ok := parseCompleteMetricScalar(r.MetricValue.String); ok {
 			return parsedThreshold{
 				ValueForm: "single", Comparator: "=", AssertionKind: kind,
 				NumericValue: &v,
@@ -694,100 +727,76 @@ func resolveMetricValue(r metricRow, canonicalBucket string) parsedThreshold {
 	return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
 }
 
-// firstParseableNumber returns the first number in s ("" -> no number), which
-// is what a single numeric metric_value carries. For structured rows this is
-// the trusted source; unlike parseThresholdOrTarget there is no comparator to
-// anchor against, so a non-numeric metric_value is honest unparsed.
-func firstParseableNumber(s string) (float64, bool) {
-	m := reNumber.FindString(strings.TrimSpace(s))
-	if m == "" {
+// Complete supported expressions prevent a list, ratio or composite from being
+// silently reduced to its first member. Units are deliberately conservative;
+// unsupported notation retains its source text through the unparsed path.
+const metricScalarNumber = `[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?`
+const metricScalarUnit = `(?:%|‰|mm|cm|km|m|nm|μm|µm|kg|mg|g|ms|µs|μs|s|min|h|Hz|kHz|MHz|Pa|kPa|MPa|N|kN|V|mV|A|mA|W|kW|J|kJ|K|°C|℃|°|cd/m[2²]|m/s[2²]?|mm[2²3³]|cm[2²3³]|m[2²3³]|degrees? C|毫米|厘米|米|秒|分钟|小时|个|次)`
+
+var reCompleteScalar = regexp.MustCompile(`^\s*(?:>=|<=|≥|≤|=|>|<)?\s*(` + metricScalarNumber + `)\s*(?:` + metricScalarUnit + `)?\s*$`)
+var reCenteredTolerance = regexp.MustCompile(`^\s*(` + metricScalarNumber + `)\s*±\s*(\d+(?:\.\d+)?)\s*(?:` + metricScalarUnit + `)?\s*$`)
+var reLegacyWholeRange = regexp.MustCompile(`^\s*(-?\d+(?:\.\d+)?)\s*(?:to|~|～|至|―|–|—|\s-\s)\s*(-?\d+(?:\.\d+)?)\s*(?:` + metricScalarUnit + `)?\s*$`)
+
+func parseCompleteMetricScalar(s string) (float64, bool) {
+	match := reCompleteScalar.FindStringSubmatch(s)
+	if match == nil {
 		return 0, false
 	}
-	v, err := strconv.ParseFloat(m, 64)
-	if err != nil {
-		return 0, false
-	}
-	return v, true
+	value, err := strconv.ParseFloat(match[1], 64)
+	return value, err == nil
 }
 
-// parseThresholdOrTarget best-effort parses extract_metrics' free-text
-// threshold_or_target into a value form, comparator, and assertion kind. It
-// never fabricates a value: a string with no recognizable number produces
-// value_form='unparsed' with every numeric field left nil, and the original
-// text is preserved unchanged by the caller regardless of parse outcome.
+// parseThresholdOrTarget parses a supported value expression after an explicit
+// comparator (ignoring preceding source conditions), or one bare observation.
+// All other expressions are deferred without creating partial numeric values.
 func parseThresholdOrTarget(raw string) parsedThreshold {
 	text := strings.TrimSpace(raw)
+	unparsed := parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
 	if text == "" {
-		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+		return unparsed
 	}
-	// Contrast-ratio notation ("500:1") is common in the pilot corpus's
-	// display metrics; without this, the ":1" denominator is mistaken for a
-	// second range endpoint (matching "1" instead of "500"). Collapsing it
-	// to the numerator is the parseable reading -- raw_text still preserves
-	// the untouched "500:1" for anyone who needs the literal ratio.
-	text = reRatioDenominatorOne.ReplaceAllString(text, "$1")
-
-	m := reRangeKeyword.FindStringSubmatch(text)
-	if m == nil {
-		m = reRangeHyphen.FindStringSubmatch(text)
-	}
-	if m != nil {
-		lo, errLo := strconv.ParseFloat(m[1], 64)
-		hi, errHi := strconv.ParseFloat(m[2], 64)
-		if errLo == nil && errHi == nil {
-			return parsedThreshold{
-				ValueForm: "range", Comparator: "between", AssertionKind: "interval_requirement",
-				LowerValue: &lo, UpperValue: &hi,
-			}
-		}
-	}
-
-	// Anchor the numeric match to the position right after the matched
-	// comparator keyword rather than the first number anywhere in the
-	// string -- otherwise a leading distance, date, or standard-number
-	// token ("在 1 m 距离处不低于 250", "GB 9706.1-2020 规定不低于 250") is
-	// mistaken for the threshold value itself. A comparator keyword with no
-	// number after it is unparsed, never fabricated from an earlier number.
 	if loc := reLowerBound.FindStringIndex(text); loc != nil {
 		if value, ok := firstNumberAfter(text, loc[1]); ok {
 			return parsedThreshold{ValueForm: "single", Comparator: ">=", AssertionKind: "lower_bound_requirement", NumericValue: &value}
 		}
-		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+		return unparsed
 	}
 	if loc := reUpperBound.FindStringIndex(text); loc != nil {
 		if value, ok := firstNumberAfter(text, loc[1]); ok {
 			return parsedThreshold{ValueForm: "single", Comparator: "<=", AssertionKind: "upper_bound_requirement", NumericValue: &value}
 		}
-		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+		return unparsed
 	}
-
-	// No comparator keyword: a bare number is recorded as an observed value,
-	// not a requirement -- spec §16.3 item 8's distinction between
-	// requirement and observation assertion kinds.
-	numMatch := reNumber.FindString(text)
-	if numMatch == "" {
-		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+	// Descriptive prefixes such as "measured" are allowed, but the entire
+	// expression from its first number onwards must be supported.
+	loc := reNumber.FindStringIndex(text)
+	if loc == nil {
+		return unparsed
 	}
-	value, err := strconv.ParseFloat(numMatch, 64)
-	if err != nil {
-		return parsedThreshold{ValueForm: "unparsed", AssertionKind: "unparsed"}
+	// A prefix cannot hide an operator, ratio or preceding list member.
+	prefix := text[:loc[0]]
+	if strings.ContainsAny(prefix, "±×*/:∕+=,、；;") ||
+		(prefix != "" && strings.TrimRight(prefix, " \t\r\n") == prefix) {
+		return unparsed
 	}
-	return parsedThreshold{ValueForm: "single", Comparator: "=", AssertionKind: "observed_value", NumericValue: &value}
+	expression := text[loc[0]:]
+	if match := reLegacyWholeRange.FindStringSubmatch(expression); match != nil {
+		lo, errLo := strconv.ParseFloat(match[1], 64)
+		hi, errHi := strconv.ParseFloat(match[2], 64)
+		if errLo != nil || errHi != nil {
+			return unparsed
+		}
+		return parsedThreshold{ValueForm: "range", Comparator: "between", AssertionKind: "interval_requirement", LowerValue: &lo, UpperValue: &hi}
+	}
+	if value, ok := parseCompleteMetricScalar(expression); ok {
+		return parsedThreshold{ValueForm: "single", Comparator: "=", AssertionKind: "observed_value", NumericValue: &value}
+	}
+	return unparsed
 }
 
-// firstNumberAfter returns the first parseable number in text at or after
-// byte offset from, and whether one was found.
 func firstNumberAfter(text string, from int) (float64, bool) {
 	if from > len(text) {
 		return 0, false
 	}
-	numMatch := reNumber.FindString(text[from:])
-	if numMatch == "" {
-		return 0, false
-	}
-	value, err := strconv.ParseFloat(numMatch, 64)
-	if err != nil {
-		return 0, false
-	}
-	return value, true
+	return parseCompleteMetricScalar(text[from:])
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -487,6 +488,7 @@ func normalizeExtractedMetrics(items []any) []map[string]any {
 			"metric_unit":           stringVal(raw, "metric_unit", "unit"),
 			"metric_unit_en":        stringVal(raw, "metric_unit_en", "unit_en"),
 			"metric_value":          stringVal(raw, "metric_value"),
+			"value_structure":       raw["value_structure"],
 			"value_data_type":       stringVal(raw, "value_data_type"),
 			"value_range_type":      stringVal(raw, "value_range_type"),
 			"value_class":           stringVal(raw, "value_class"),
@@ -575,11 +577,11 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		value_min, value_max, condition,
 		formula_or_definition, threshold_or_target, measurement_frequency,
 		confidence, is_explicit_metric, table_name_or_section, reasoning_tags,
-		metric_categories, metric_categories_en, category_paths, category_paths_en, ext_info
+		metric_categories, metric_categories_en, category_paths, category_paths_en, ext_info, value_structure
 	) VALUES (
 		$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,
 		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,
-		$35,$36,$37::jsonb,$38::jsonb,$39::jsonb
+		$35,$36,$37::jsonb,$38::jsonb,$39::jsonb,$40::jsonb
 	)`
 
 	extInfo, _ := json.Marshal(map[string]any{
@@ -589,6 +591,13 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 
 	var inserted int64
 	for i, m := range metrics {
+		if err := metricvalue.ValidateForValue(m["value_structure"], anyAsString(m["metric_value"])); err != nil {
+			return inserted, fmt.Errorf("invalid metric value_structure: %w", err)
+		}
+		structureSQL, err := metricvalue.SQLValue(m["value_structure"])
+		if err != nil {
+			return inserted, fmt.Errorf("invalid metric value_structure: %w", err)
+		}
 		spansJSON, _ := json.Marshal(m["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(m["metric_keywords"])
 		reasoningJSON, _ := json.Marshal(m["reasoning_tags"])
@@ -612,7 +621,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		metricCategoriesJSON, _ := json.Marshal(anyAsStringSlice(m["metric_categories"]))
 		metricCategoriesEnJSON, _ := json.Marshal(anyAsStringSlice(m["metric_categories_en"]))
 
-		_, err := db.Exec(stmt,
+		_, err = db.Exec(stmt,
 			"rest-api",
 			inputRecordID,
 			metricID,
@@ -651,7 +660,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			string(metricCategoriesEnJSON),
 			string(categoryPathsJSON),
 			categoryPathsEnVal,
-			string(extInfo),
+			string(extInfo), structureSQL,
 		)
 		if err != nil {
 			return inserted, err

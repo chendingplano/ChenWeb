@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -29,17 +30,18 @@ var errRelatedMetricNotFound = errors.New("metric not found")
 
 // relatedMetricRow is one row of the related-metrics response (design D2).
 type relatedMetricRow struct {
-	MetricID           string  `json:"metric_id"`
-	MetricName         string  `json:"metric_name"`
-	MetricNameEn       string  `json:"metric_name_en"`
-	InputRecordID      int64   `json:"input_record_id"`
-	ClassTermID        string  `json:"class_term_id"`
-	ClassLabel         string  `json:"class_label"`
-	MetricValue        string  `json:"metric_value,omitempty"`
-	MetricUnit         string  `json:"metric_unit,omitempty"`
-	SourceFilename     string  `json:"source_filename,omitempty"`
-	Score              float64 `json:"score,omitempty"`
-	MatchedClassTermID string  `json:"matched_class_term_id,omitempty"`
+	MetricID           string          `json:"metric_id"`
+	MetricName         string          `json:"metric_name"`
+	MetricNameEn       string          `json:"metric_name_en"`
+	InputRecordID      int64           `json:"input_record_id"`
+	ClassTermID        string          `json:"class_term_id"`
+	ClassLabel         string          `json:"class_label"`
+	ValueStructure     json.RawMessage `json:"value_structure,omitempty"`
+	MetricValue        string          `json:"metric_value,omitempty"`
+	MetricUnit         string          `json:"metric_unit,omitempty"`
+	SourceFilename     string          `json:"source_filename,omitempty"`
+	Score              float64         `json:"score,omitempty"`
+	MatchedClassTermID string          `json:"matched_class_term_id,omitempty"`
 }
 
 type relatedMetricsStore struct {
@@ -92,7 +94,7 @@ SELECT m.metric_id,
        m.input_record_id,
        COALESCE(m.metric_value, ''),
        COALESCE(m.metric_unit, ''),
-       COALESCE(i.staging_filename, '')
+       COALESCE(i.staging_filename, ''), m.value_structure
 FROM kb.semantic_assertions a
 JOIN kb.semantic_decision_candidates dc
      ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
@@ -101,7 +103,7 @@ LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE a.instance_of_term_id = $1
   AND m.metric_id <> $2
 GROUP BY m.metric_id, m.metric_name, m.metric_name_en, m.input_record_id,
-         m.metric_value, m.metric_unit, i.staging_filename
+         m.metric_value, m.metric_unit, i.staging_filename, m.value_structure
 ORDER BY m.input_record_id, m.metric_id
 LIMIT $3`, classTermID, excludeMetricID, limit)
 	if err != nil {
@@ -111,10 +113,12 @@ LIMIT $3`, classTermID, excludeMetricID, limit)
 	var out []relatedMetricRow
 	for rows.Next() {
 		var r relatedMetricRow
+		var structure []byte
 		if err := rows.Scan(&r.MetricID, &r.MetricName, &r.MetricNameEn, &r.InputRecordID,
-			&r.MetricValue, &r.MetricUnit, &r.SourceFilename); err != nil {
+			&r.MetricValue, &r.MetricUnit, &r.SourceFilename, &structure); err != nil {
 			return nil, err
 		}
+		r.ValueStructure = json.RawMessage(structure)
 		r.ClassTermID = classTermID
 		r.ClassLabel = classTermID
 		out = append(out, r)
@@ -147,7 +151,7 @@ func (s relatedMetricsStore) similarClass(ctx context.Context, classTermID, excl
 	}
 
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT cls, metric_id, metric_name, metric_name_en, input_record_id, metric_value, metric_unit, source_filename
+SELECT cls, metric_id, metric_name, metric_name_en, input_record_id, metric_value, metric_unit, source_filename, value_structure
 FROM (
     SELECT d.*, ROW_NUMBER() OVER (PARTITION BY d.cls ORDER BY d.input_record_id, d.metric_id) AS rn
     FROM (
@@ -159,7 +163,7 @@ FROM (
             m.input_record_id,
             COALESCE(m.metric_value, '')   AS metric_value,
             COALESCE(m.metric_unit, '')    AS metric_unit,
-            COALESCE(i.staging_filename, '') AS source_filename
+            COALESCE(i.staging_filename, '') AS source_filename, m.value_structure
         FROM kb.semantic_assertions a
         JOIN kb.semantic_decision_candidates dc
              ON dc.resulting_assertion_id = a.id AND dc.source_artifact_type = 'metric'
@@ -182,10 +186,12 @@ ORDER BY cls, input_record_id, metric_id`,
 	for rows.Next() {
 		var cls string
 		var r relatedMetricRow
+		var structure []byte
 		if err := rows.Scan(&cls, &r.MetricID, &r.MetricName, &r.MetricNameEn, &r.InputRecordID,
-			&r.MetricValue, &r.MetricUnit, &r.SourceFilename); err != nil {
+			&r.MetricValue, &r.MetricUnit, &r.SourceFilename, &structure); err != nil {
 			return nil, err
 		}
+		r.ValueStructure = json.RawMessage(structure)
 		r.ClassTermID = cls
 		r.ClassLabel = cls
 		r.MatchedClassTermID = cls

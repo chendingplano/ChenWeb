@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -42,6 +43,7 @@ type metricRecord struct {
 	LocationType        *string         `json:"location_type,omitempty"`
 	MetricUnit          *string         `json:"metric_unit,omitempty"`
 	MetricUnitEn        *string         `json:"metric_unit_en,omitempty"`
+	ValueStructure      json.RawMessage `json:"value_structure,omitempty"`
 	MetricValue         *string         `json:"metric_value,omitempty"`
 	ValueDataType       *string         `json:"value_data_type,omitempty"`
 	ValueRangeType      *string         `json:"value_range_type,omitempty"`
@@ -199,7 +201,7 @@ SELECT
     NULL::text AS keyword_concept_id, NULL::text AS metric_definition_term_id, NULL::text AS value_range_type_error,
     m.source_table_rows, NULL::bigint AS provision_id,
     NULL::bigint AS ref_mention_id, NULL::bigint AS ref_input_record_id, NULL::text AS ref_metric_id,
-    m.condition, m.condition_en, m.frame
+    m.condition, m.condition_en, m.frame, m.value_structure
 FROM testbed.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id = $1
@@ -257,7 +259,7 @@ SELECT
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
     m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
-    m.condition, m.condition_en, m.frame
+    m.condition, m.condition_en, m.frame, m.value_structure
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -316,15 +318,16 @@ ORDER BY m.id ASC
 	out := make([]metricRecord, 0)
 	for rows.Next() {
 		var (
-			r               metricRecord
-			spansBytes      []byte
-			keywordsBytes   []byte
-			keywordsEnBytes []byte
-			reasoningBytes  []byte
-			tableRowsBytes  []byte
-			frameBytes      []byte
-			confidence      sql.NullFloat64
-			isExplicit      sql.NullBool
+			r                   metricRecord
+			valueStructureBytes []byte
+			spansBytes          []byte
+			keywordsBytes       []byte
+			keywordsEnBytes     []byte
+			reasoningBytes      []byte
+			tableRowsBytes      []byte
+			frameBytes          []byte
+			confidence          sql.NullFloat64
+			isExplicit          sql.NullBool
 		)
 		if err := rows.Scan(
 			&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
@@ -338,7 +341,7 @@ ORDER BY m.id ASC
 			&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 			&tableRowsBytes, &r.ProvisionID,
 			&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
-			&r.Condition, &r.ConditionEn, &frameBytes,
+			&r.Condition, &r.ConditionEn, &frameBytes, &valueStructureBytes,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -346,6 +349,7 @@ ORDER BY m.id ASC
 				ErrorMsg: "failed to scan kb metrics (CWB_KB_M_021)",
 			})
 		}
+		r.ValueStructure = json.RawMessage(valueStructureBytes)
 		if len(spansBytes) > 0 {
 			r.SourceLineSpans = json.RawMessage(spansBytes)
 		}
@@ -464,7 +468,7 @@ SELECT
     m.keyword_concept_id, m.metric_definition_term_id, m.value_range_type_error,
     m.source_table_rows, m.provision_id,
     m.ref_mention_id, m.ref_input_record_id, m.ref_metric_id,
-    m.condition, m.condition_en, m.frame
+    m.condition, m.condition_en, m.frame, m.value_structure
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 LEFT JOIN LATERAL (
@@ -481,15 +485,16 @@ LEFT JOIN LATERAL (
 WHERE m.id = $1
 `
 	var (
-		r               metricRecord
-		spansBytes      []byte
-		keywordsBytes   []byte
-		keywordsEnBytes []byte
-		reasoningBytes  []byte
-		tableRowsBytes  []byte
-		frameBytes      []byte
-		confidence      sql.NullFloat64
-		isExplicit      sql.NullBool
+		r                   metricRecord
+		valueStructureBytes []byte
+		spansBytes          []byte
+		keywordsBytes       []byte
+		keywordsEnBytes     []byte
+		reasoningBytes      []byte
+		tableRowsBytes      []byte
+		frameBytes          []byte
+		confidence          sql.NullFloat64
+		isExplicit          sql.NullBool
 	)
 	err := db.QueryRow(query, id).Scan(
 		&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
@@ -503,7 +508,7 @@ WHERE m.id = $1
 		&r.KeywordConceptID, &r.MetricDefinitionTermID, &r.ValueRangeTypeError,
 		&tableRowsBytes, &r.ProvisionID,
 		&r.RefMentionID, &r.RefInputRecordID, &r.RefMetricID,
-		&r.Condition, &r.ConditionEn, &frameBytes,
+		&r.Condition, &r.ConditionEn, &frameBytes, &valueStructureBytes,
 	)
 	if err != nil {
 		return metricRecord{}, err
@@ -514,6 +519,7 @@ WHERE m.id = $1
 	if len(tableRowsBytes) > 0 {
 		r.SourceTableRows = json.RawMessage(tableRowsBytes)
 	}
+	r.ValueStructure = json.RawMessage(valueStructureBytes)
 	if len(spansBytes) > 0 {
 		r.SourceLineSpans = json.RawMessage(spansBytes)
 	}
@@ -1049,6 +1055,52 @@ func UpdateMetric(c echo.Context) error {
 		})
 	}
 
+	// A partial edit must validate against the retained counterpart, so changing
+	// display text cannot silently leave a contradictory collection behind.
+	if rawStructure, hasStructure := payload["value_structure"]; hasStructure || payload["metric_value"] != nil {
+		var structure any
+		display := ""
+		rawDisplay, hasDisplay := payload["metric_value"]
+		if hasStructure {
+			if err := json.Unmarshal(rawStructure, &structure); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid value_structure JSON"})
+			}
+			if _, err := metricvalue.NormalizeStructure(structure); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid value_structure: " + err.Error()})
+			}
+		}
+		if hasDisplay {
+			decoded, err := decodeStringValue(rawDisplay, false)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid metric_value"})
+			}
+			if decoded != nil {
+				display = *decoded
+			}
+		}
+		if !hasStructure || !hasDisplay {
+			var retainedDisplay sql.NullString
+			var retainedStructure []byte
+			err := ApiTypes.ProjectDBHandle.QueryRow("SELECT metric_value, value_structure FROM kb.metrics WHERE id = $1", id).Scan(&retainedDisplay, &retainedStructure)
+			if err == sql.ErrNoRows {
+				return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "metric not found"})
+			}
+			if err != nil {
+				logger.Error("read metric value before update failed", "err", err)
+				return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read metric value"})
+			}
+			if !hasDisplay {
+				display = retainedDisplay.String
+			}
+			if !hasStructure && len(retainedStructure) > 0 {
+				structure = json.RawMessage(retainedStructure)
+			}
+		}
+		if err := metricvalue.ValidateForValue(structure, display); err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid value_structure: " + err.Error()})
+		}
+	}
+
 	db := ApiTypes.ProjectDBHandle
 	sets := make([]string, 0, len(payload))
 	args := make([]any, 0, len(payload)+1)
@@ -1084,6 +1136,17 @@ func UpdateMetric(c echo.Context) error {
 			} else {
 				addSet(field, *value)
 			}
+
+		case "value_structure":
+			var value any
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid value_structure JSON"})
+			}
+			normalized, err := metricvalue.SQLValue(value)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid value_structure: " + err.Error()})
+			}
+			addSet(field, normalized)
 
 		case "source_line_spans", "metric_keywords", "metric_keywords_en", "reasoning_tags":
 			if strings.TrimSpace(string(raw)) == "null" {

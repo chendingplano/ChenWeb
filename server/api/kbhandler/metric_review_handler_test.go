@@ -1,7 +1,9 @@
 package kbhandler
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/DATA-DOG/go-sqlmock"
 	"os"
 	"path/filepath"
 	"strings"
@@ -317,5 +319,40 @@ func TestFinalizeMetricReview_MissedMetricTableRows(t *testing.T) {
 	raw, _ := json.Marshal(report)
 	if strings.Contains(string(raw), "\"table_rows\"") || strings.Contains(string(raw), "table_context") {
 		t.Errorf("stored report carries LLM/read-time fields: %s", raw)
+	}
+}
+
+func TestMetricReviewSQLInputPreservesCollection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT.*value_structure.*FROM kb.metrics").WithArgs(int64(416)).WillReturnRows(sqlmock.NewRows([]string{
+		"metric_id", "source_line_spans", "metric_name", "metric_subject", "metric_value", "metric_unit", "threshold_or_target", "value_min", "value_max", "value_data_type", "value_range_type", "value_class", "condition", "is_explicit_metric", "confidence", "location_type", "measurement_frequency", "formula_or_definition", "created_date", "value_structure",
+	}).AddRow("416_mtc_1", `["50"]`, "Diameter", "Pipe", "10, 20 or 30", "mm", "", nil, nil, "number", "exact", "requirement", "", true, 0.9, "paragraph", "", "", "2026-10-18", `{"kind":"alternatives","values":["10","20","30"]}`))
+	metrics, err := loadMetricReviewInputMetrics(context.Background(), db, 416)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := buildMetricReviewInput(metricReviewDocHeader{RecordID: 416}, "en", nil, metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "METRICS\n"
+	_, metricJSON, found := strings.Cut(text, marker)
+	if !found {
+		t.Fatal("missing metrics JSON")
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal([]byte(metricJSON), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	structure, ok := decoded[0]["value_structure"].(map[string]any)
+	if !ok || structure["kind"] != "alternatives" || len(structure["values"].([]any)) != 3 || decoded[0]["metric_value"] != "10, 20 or 30" {
+		t.Fatalf("LLM review input lost relationship or display: %s", text)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

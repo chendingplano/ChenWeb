@@ -149,8 +149,8 @@ func TestGetRelatedMetricsSameClass(t *testing.T) {
 	mock.ExpectQuery(`GROUP BY m\.metric_id`).
 		WithArgs("measurement:collection_frequency_x", "416_mtc_1", relatedMetricsDefaultSameClass).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"metric_id", "metric_name", "metric_name_en", "input_record_id", "metric_value", "metric_unit", "staging_filename",
-		}).AddRow("812_mtc_3", "收运频次", "collection frequency", int64(812), "2", "times/day", "std_1503937.pdf"))
+			"metric_id", "metric_name", "metric_name_en", "input_record_id", "metric_value", "metric_unit", "staging_filename", "value_structure",
+		}).AddRow("812_mtc_3", "收运频次", "collection frequency", int64(812), "2", "times/day", "std_1503937.pdf", nil))
 
 	c, rec := newRelatedMetricsContext(t, "416_mtc_1", "scope=same_class")
 	if err := GetRelatedMetrics(c); err != nil {
@@ -202,10 +202,10 @@ func TestGetRelatedMetricsSimilarClassRanksByMatchedClassScore(t *testing.T) {
 	mock.ExpectQuery(`WHERE rn <= \$4\s+ORDER BY cls`).
 		WithArgs(sqlmock.AnyArg(), "measurement:collection_frequency_x", "416_mtc_1", relatedMetricsDefaultSimilar).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"cls", "metric_id", "metric_name", "metric_name_en", "input_record_id", "metric_value", "metric_unit", "source_filename",
+			"cls", "metric_id", "metric_name", "metric_name_en", "input_record_id", "metric_value", "metric_unit", "source_filename", "value_structure",
 		}).
-			AddRow("measurement:route_cadence_lo", "900_mtc_1", "间隔", "cadence", int64(900), "7", "day", "b.pdf").
-			AddRow("measurement:pickup_interval_hi", "800_mtc_1", "间隔", "interval", int64(800), "3", "day", "a.pdf"))
+			AddRow("measurement:route_cadence_lo", "900_mtc_1", "间隔", "cadence", int64(900), "7", "day", "b.pdf", nil).
+			AddRow("measurement:pickup_interval_hi", "800_mtc_1", "间隔", "interval", int64(800), "3", "day", "a.pdf", nil))
 
 	c, rec := newRelatedMetricsContext(t, "416_mtc_1", "scope=similar_class")
 	if err := GetRelatedMetrics(c); err != nil {

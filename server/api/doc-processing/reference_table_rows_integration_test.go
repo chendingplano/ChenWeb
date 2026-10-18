@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func TestReferenceTableRowsSQLRoundTrip(t *testing.T) {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	if _, err = db.Exec(`CREATE SCHEMA kb`); err != nil {
+	if _, err = db.Exec(`CREATE SCHEMA kb; CREATE SCHEMA testbed; CREATE TABLE testbed.metrics(id BIGINT)`); err != nil {
 		t.Fatal(err)
 	}
 	// Minimal metric table with the columns used by insertResolvedMetricRow. Reference
@@ -54,7 +55,7 @@ func TestReferenceTableRowsSQLRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, file := range []string{"20261011000001_create_kb_reference_tables.sql", "20261011000004_add_reference_source_table_rows.sql"} {
+	for _, file := range []string{"20261011000001_create_kb_reference_tables.sql", "20261011000004_add_reference_source_table_rows.sql", "20261018000003_add_metric_value_structure.sql"} {
 		body, err := os.ReadFile(filepath.Join("../../../project_migrations", file))
 		if err != nil {
 			t.Fatal(err)
@@ -92,7 +93,7 @@ func TestReferenceTableRowsSQLRoundTrip(t *testing.T) {
 		t.Fatalf("round trip lost table/prose provenance: %+v", loaded)
 	}
 	var targetID int64
-	if err = db.QueryRow(`INSERT INTO kb.metrics (input_record_id, metric_id, metric_value) VALUES (999,'target_metric','10') RETURNING id`).Scan(&targetID); err != nil {
+	if err = db.QueryRow(`INSERT INTO kb.metrics (input_record_id, metric_id, metric_value, value_structure) VALUES (999,'target_metric','10, 20 or 30','{"kind":"alternatives","values":["10","20","30"]}') RETURNING id`).Scan(&targetID); err != nil {
 		t.Fatal(err)
 	}
 	tx, err = db.BeginTx(ctx, nil)
@@ -106,12 +107,22 @@ func TestReferenceTableRowsSQLRoundTrip(t *testing.T) {
 	if err = tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	var stored, value, evidence string
-	if err = db.QueryRow(`SELECT source_table_rows::text,metric_value,metric_context FROM kb.metrics WHERE metric_id='753_rfm_1'`).Scan(&stored, &value, &evidence); err != nil {
+	var stored, value, evidence, structure string
+	if err = db.QueryRow(`SELECT source_table_rows::text,metric_value,metric_context,value_structure::text FROM kb.metrics WHERE metric_id='753_rfm_1'`).Scan(&stored, &value, &evidence, &structure); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(parseTableRowRefs(stored), refs) || value != "10" || evidence != loaded[0].Evidence {
+	if !reflect.DeepEqual(parseTableRowRefs(stored), refs) || value != "10, 20 or 30" || evidence != loaded[0].Evidence {
 		t.Fatalf("resolved metric lost source rows/value/evidence: %s %s %s", stored, value, evidence)
+	}
+	var collection struct {
+		Kind   string   `json:"kind"`
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(structure), &collection); err != nil {
+		t.Fatal(err)
+	}
+	if collection.Kind != "alternatives" || !reflect.DeepEqual(collection.Values, []string{"10", "20", "30"}) {
+		t.Fatalf("reference clone lost collection relationship: %s", structure)
 	}
 	if err = goose.Down(db, dir); err != nil {
 		t.Fatal(err)

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 )
 
 // resolveMergeAmbiguities sends one pending Metric Group (DR2 Rule-4) to the
@@ -26,6 +28,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 			"metric_subject":      m["metric_subject"],
 			"metric_unit":         m["metric_unit"],
 			"metric_value":        m["metric_value"],
+			"value_structure":     m["value_structure"],
 			"value_data_type":     m["value_data_type"],
 			"value_range_type":    m["value_range_type"],
 			"value_class":         m["value_class"],
@@ -39,7 +42,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 
 	winners, err = p.callMergeResolve(ctx, recordID, candidates, p.MergeResolveModelName, p.MergeResolveModelCfg)
 	if err == nil {
-		if valErr := validateMergeResolveWinners(winners, inputIDs); valErr == nil {
+		if valErr := validateMergeResolveResponse(winners, inputIDs, candidates); valErr == nil {
 			return winners, candidates, p.MergeResolveModelName, nil
 		} else {
 			err = valErr
@@ -61,7 +64,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 	if fbErr != nil {
 		return nil, candidates, fallbackModelName, fmt.Errorf("(MID_26071103) primary merge resolve failed: %w; fallback failed: %v", err, fbErr)
 	}
-	if valErr := validateMergeResolveWinners(winners, inputIDs); valErr != nil {
+	if valErr := validateMergeResolveResponse(winners, inputIDs, candidates); valErr != nil {
 		return nil, candidates, fallbackModelName, fmt.Errorf("(MID_26071104) fallback merge resolve returned invalid partition: %w", valErr)
 	}
 	return winners, candidates, fallbackModelName, nil
@@ -87,6 +90,47 @@ func (p *MetricsProcessor) callMergeResolve(ctx context.Context, recordID int64,
 		}
 	}
 	return winners, nil
+}
+
+// A correct ID partition cannot justify changing the relationships of the
+// underlying assertions. Preserve omitted structure from the winning source;
+// reject explicit erasure, incompatible absorption and contradictory display text.
+func validateMergeResolveResponse(winners []map[string]any, inputIDs map[string]bool, candidates []map[string]any) error {
+	if err := validateMergeResolveWinners(winners, inputIDs); err != nil {
+		return err
+	}
+	byID := make(map[string]map[string]any, len(candidates))
+	for _, candidate := range candidates {
+		byID[asString(candidate["metric_id"])] = candidate
+	}
+	for _, winner := range winners {
+		id := asString(winner["metric_id"])
+		source := byID[id]
+		if _, exists := winner["value_structure"]; !exists {
+			winner["value_structure"] = source["value_structure"]
+		}
+		if _, exists := winner["metric_value"]; !exists {
+			winner["metric_value"] = source["metric_value"]
+		}
+		if !metricValueStructuresEqual(winner, source) {
+			return fmt.Errorf("merge winner %q changed its source value relationship", id)
+		}
+		if absorbed, ok := winner["absorbed_metric_ids"].([]any); ok {
+			for _, rawID := range absorbed {
+				if !metricValueStructuresEqual(winner, byID[asString(rawID)]) {
+					return fmt.Errorf("merge winner %q absorbed an incompatible value relationship from %q", id, asString(rawID))
+				}
+			}
+		}
+		display, exists := winner["metric_value"]
+		if !exists {
+			display = source["metric_value"]
+		}
+		if err := metricvalue.ValidateForValue(winner["value_structure"], asString(display)); err != nil {
+			return fmt.Errorf("merge winner %q has inconsistent structured value: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // validateMergeResolveWinners checks every input metric_id appears exactly

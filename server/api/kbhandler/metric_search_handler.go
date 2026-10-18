@@ -32,21 +32,22 @@ func (f metricSearchFilters) hasAny() bool {
 }
 
 type metricSearchResult struct {
-	ArtifactID      string `json:"artifact_id"`
-	ID              int64  `json:"id"`
-	MetricID        string `json:"metric_id,omitempty"`
-	InputRecordID   int64  `json:"input_record_id"`
-	InputFilename   string `json:"input_filename,omitempty"`
-	MetricName      string `json:"metric_name,omitempty"`
-	MetricNameEn    string `json:"metric_name_en,omitempty"`
-	MetricSubject   string `json:"metric_subject,omitempty"`
-	MetricSubjectEn string `json:"metric_subject_en,omitempty"`
-	MetricValue     string `json:"metric_value,omitempty"`
-	MetricUnit      string `json:"metric_unit,omitempty"`
-	MetricUnitEn    string `json:"metric_unit_en,omitempty"`
-	ValueClass      string `json:"value_class,omitempty"`
-	ValueClassEn    string `json:"value_class_en,omitempty"`
-	ValueDataType   string `json:"value_data_type,omitempty"`
+	ArtifactID      string          `json:"artifact_id"`
+	ID              int64           `json:"id"`
+	MetricID        string          `json:"metric_id,omitempty"`
+	InputRecordID   int64           `json:"input_record_id"`
+	InputFilename   string          `json:"input_filename,omitempty"`
+	MetricName      string          `json:"metric_name,omitempty"`
+	MetricNameEn    string          `json:"metric_name_en,omitempty"`
+	MetricSubject   string          `json:"metric_subject,omitempty"`
+	MetricSubjectEn string          `json:"metric_subject_en,omitempty"`
+	ValueStructure  json.RawMessage `json:"value_structure,omitempty"`
+	MetricValue     string          `json:"metric_value,omitempty"`
+	MetricUnit      string          `json:"metric_unit,omitempty"`
+	MetricUnitEn    string          `json:"metric_unit_en,omitempty"`
+	ValueClass      string          `json:"value_class,omitempty"`
+	ValueClassEn    string          `json:"value_class_en,omitempty"`
+	ValueDataType   string          `json:"value_data_type,omitempty"`
 	// ValueRangeType, FormulaOrDefinition and ReasoningTags let clients classify
 	// the row's statement kind (ADR 2026100603 DR3).
 	ValueRangeType      string          `json:"value_range_type,omitempty"`
@@ -293,7 +294,7 @@ ranked AS (
         COALESCE(m.source_line_spans, '[]'::jsonb) AS source_line_spans,
         COALESCE(m.value_range_type, '') AS value_range_type,
         COALESCE(m.formula_or_definition, '') AS formula_or_definition,
-        COALESCE(m.reasoning_tags, '[]'::jsonb) AS reasoning_tags,
+        COALESCE(m.reasoning_tags, '[]'::jsonb) AS reasoning_tags, m.value_structure,
         %s AS score,
         ts_headline(
             '%s',
@@ -315,7 +316,7 @@ SELECT
     metric_subject, metric_subject_en, metric_value, metric_unit, metric_unit_en,
     value_class, value_class_en, value_data_type, is_explicit_metric, table_name_or_section,
     metric_keywords, metric_keywords_en, source_line_spans, score, snippet,
-    value_range_type, formula_or_definition, reasoning_tags
+    value_range_type, formula_or_definition, reasoning_tags, value_structure
 FROM scored
 ORDER BY score DESC, id ASC
 LIMIT $%d OFFSET $%d
@@ -330,12 +331,13 @@ LIMIT $%d OFFSET $%d
 	results := make([]metricSearchResult, 0)
 	for rows.Next() {
 		var (
-			record           metricSearchResult
-			metricKeywords   []byte
-			metricKeywordsEn []byte
-			sourceLineSpans  []byte
-			reasoningTags    []byte
-			isExplicitMetric sql.NullBool
+			record              metricSearchResult
+			valueStructureBytes []byte
+			metricKeywords      []byte
+			metricKeywordsEn    []byte
+			sourceLineSpans     []byte
+			reasoningTags       []byte
+			isExplicitMetric    sql.NullBool
 		)
 		if err := rows.Scan(
 			&record.ID, &record.MetricID, &record.InputRecordID, &record.InputFilename,
@@ -344,10 +346,11 @@ LIMIT $%d OFFSET $%d
 			&record.ValueClass, &record.ValueClassEn, &record.ValueDataType,
 			&isExplicitMetric, &record.TableNameOrSection, &metricKeywords, &metricKeywordsEn,
 			&sourceLineSpans, &record.Score, &record.Snippet,
-			&record.ValueRangeType, &record.FormulaOrDefinition, &reasoningTags,
+			&record.ValueRangeType, &record.FormulaOrDefinition, &reasoningTags, &valueStructureBytes,
 		); err != nil {
 			return nil, err
 		}
+		record.ValueStructure = json.RawMessage(valueStructureBytes)
 		if isExplicitMetric.Valid {
 			v := isExplicitMetric.Bool
 			record.IsExplicitMetric = &v

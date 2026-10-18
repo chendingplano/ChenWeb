@@ -185,6 +185,7 @@ func droppedMetricRecord(id, recordID int64, dropID, stage, reason string, decis
 		MetricUnit:          str("unit"),
 		MetricUnitEn:        str("unit_en"),
 		MetricValue:         str("metric_value"),
+		ValueStructure:      raw("value_structure"),
 		ValueDataType:       str("value_data_type"),
 		ValueRangeType:      str("value_range_type"),
 		ValueClass:          str("value_class"),

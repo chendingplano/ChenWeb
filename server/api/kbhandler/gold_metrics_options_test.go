@@ -56,8 +56,8 @@ func TestListMetricsTestbedFiltersBySkillVersionAndModel(t *testing.T) {
 					AddRow("extract-metrics-benchmark", tc.wantVersion, "selected-model", "20261010_055329"))
 			goldRows := sqlmock.NewRows([]string{"id"})
 			if tc.query["include_dropped"] == "true" {
-				columns := make([]string, 48)
-				values := make([]driver.Value, 48)
+				columns := make([]string, 49)
+				values := make([]driver.Value, 49)
 				for i := range columns {
 					columns[i] = strconv.Itoa(i)
 				}

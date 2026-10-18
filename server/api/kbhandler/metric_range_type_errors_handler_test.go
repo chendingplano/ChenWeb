@@ -36,7 +36,7 @@ var rangeTypeErrorColumns = []string{
 	"value_range_type", "value_class", "value_class_en", "formula_or_definition",
 	"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 	"document_title", "document_doc_no", "table_name_or_section", "reasoning_tags", "created_at",
-	"value_range_type_error",
+	"value_range_type_error", "value_structure",
 }
 
 func addRangeTypeErrorRow(rows *sqlmock.Rows, id int64, valueRangeType, errMsg string) *sqlmock.Rows {
@@ -46,7 +46,7 @@ func addRangeTypeErrorRow(rows *sqlmock.Rows, id int64, valueRangeType, errMsg s
 		"desc", "desc", "context", "context", `[]`, `[]`, "model", "paragraph", "mmHg", "mmHg",
 		"250", "number", valueRangeType, "requirement", "requirement",
 		"", "", "", 0.95, true, "title", "doc-no", "section", `[]`, "2026-08-14T10:00:00+00:00",
-		errMsg,
+		errMsg, nil,
 	)
 }
 
@@ -76,7 +76,7 @@ SELECT
     NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
-    m.value_range_type_error
+    m.value_range_type_error, m.value_structure
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.ref_mention_id IS NULL AND m.value_range_type_error IS NOT NULL

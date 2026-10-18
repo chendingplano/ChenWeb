@@ -375,6 +375,7 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 			sqlmock.AnyArg(),
 			nil,
 			sqlmock.AnyArg(),
+			nil, // value_structure is nullable for legacy scalar metrics
 		).
 		WillReturnResult(sqlmock.NewResult(101, 1))
 
@@ -489,6 +490,7 @@ func TestSaveExtractedMetricsPersistsRangeValueMinMaxCondition(t *testing.T) {
 			sqlmock.AnyArg(),
 			nil,
 			sqlmock.AnyArg(),
+			nil, // value_structure is nullable for legacy scalar metrics
 		).
 		WillReturnResult(sqlmock.NewResult(102, 1))
 

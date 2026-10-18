@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 	"golang.org/x/text/width"
 )
 
@@ -379,7 +380,7 @@ var (
 	metricNumberRe       = regexp.MustCompile(`\d+(?:\.\d+)?`)
 	metricSingleNumberRe = regexp.MustCompile(`^` + metricNumberPattern + `$`)
 	metricFractionRe     = regexp.MustCompile(`^\d+/\d+$`)
-	metricListSepRe      = regexp.MustCompile(`[、；;，]`) // not "/": it is part of units such as 次/min
+	metricListSepRe      = regexp.MustCompile(`(?i)[、；;，,]|\b(?:and|or)\b|或|和|及`) // not "/": it is part of units such as 次/min
 )
 
 // metricLeadingComparators maps a leading comparator to its range type and strictness. Longer
@@ -488,6 +489,10 @@ func normalizeMetricValueNotation(metrics []map[string]any) {
 	dropConditionPropertyRepeats(metrics)
 	for _, m := range metrics {
 		value := strings.TrimSpace(asString(m["metric_value"]))
+		if metricvalue.IsNonScalar(m["value_structure"]) {
+			m["value_min"], m["value_max"] = nil, nil
+			continue
+		}
 		if value == "" {
 			continue
 		}
@@ -559,7 +564,7 @@ func metricValueHoldsSeveralValues(value string) bool {
 	if len(metricNumberRe.FindAllString(v, -1)) < 2 || metricFractionRe.MatchString(v) {
 		return false
 	}
-	return metricListSepRe.MatchString(v) || (strings.Contains(v, "男") && strings.Contains(v, "女"))
+	return metricListSepRe.MatchString(value) || (strings.Contains(v, "男") && strings.Contains(v, "女"))
 }
 
 var metricPairedNotationRe = regexp.MustCompile(`^[≥≤<>=]*(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)$`)
@@ -590,11 +595,12 @@ func metricRowHoldsSeveralValues(m map[string]any) bool {
 func multiValueMetricRows(metrics []map[string]any) []map[string]any {
 	var out []map[string]any
 	for _, m := range metrics {
-		if metricRowHoldsSeveralValues(m) {
+		if metricRowNeedsValueReview(m) {
 			out = append(out, map[string]any{
 				"candidate_id":      m["candidate_id"],
 				"metric_name":       m["metric_name"],
 				"metric_value":      m["metric_value"],
+				"value_structure":   m["value_structure"],
 				"source_line_spans": m["source_line_spans"],
 			})
 		}
@@ -610,7 +616,7 @@ func (p *MetricsProcessor) logMultiValueMetricRows(ctx context.Context, recordID
 	if len(rows) == 0 {
 		return
 	}
-	p.Logger.Warn("metric rows hold several values", "record_id", recordID, "num_rows", len(rows))
+	p.Logger.Warn("metric value semantics remain unresolved", "record_id", recordID, "num_rows", len(rows))
 	artifactBytes, _ := json.Marshal(map[string]any{"multi_value_rows": rows})
 	artifactStr := string(artifactBytes)
 	extraBytes, _ := json.Marshal(map[string]any{"num_rows": len(rows)})

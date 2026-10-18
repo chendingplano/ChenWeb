@@ -10,11 +10,11 @@ import (
 )
 
 func TestMetricEnrichmentPromptSeparatesPositionsFromCounts(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v28.md"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", "prompt-enrich-metrics-v29.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"multi_value_rows_to_split", "20%、80%", "2~3", "percentage positions", "point count"} {
+	for _, want := range []string{"multi_value_rows_to_review", "20%、80%", "2~3", "percentage positions", "point count"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("prompt missing mixed-unit splitting guidance: %q", want)
 		}
@@ -31,12 +31,14 @@ func timingPointRow(id, value, unit string) map[string]any {
 }
 
 func TestEnrichMetricCandidatesSplitsMixedUnits(t *testing.T) {
+	positions := timingPointRow("7_12", "20、80", "%")
+	positions["value_structure"] = map[string]any{"kind": "required_points", "values": []string{"20", "80"}}
 	count := timingPointRow("7_12", "2~3", "个")
 	count["metric_name"], count["value_range_type"] = "中间区段取值点个数", "range"
 	count["condition"], count["condition_en"] = "取值区段：量程中间区段", "Region: middle of range"
 	ext := &fakeJSONExtractor{outs: []map[string]any{
 		{"metrics": []any{timingPointRow("7_12", "20%、80%及中间区段任意2~3个", "个"), timingPointRow("7_13", "3", "次")}},
-		{"metrics": []any{timingPointRow("7_12", "20", "%"), timingPointRow("7_12", "80", "%"), count,
+		{"value_review_decisions": valueDecision("split"), "metrics": []any{positions, count,
 			timingPointRow("unrequested", "99", "%")}},
 	}}
 	p := makeTestMetricsProcessor(ext, 1)
@@ -44,17 +46,17 @@ func TestEnrichMetricCandidatesSplitsMixedUnits(t *testing.T) {
 	metrics, _, _, err := p.enrichMetricCandidates(context.Background(), 371,
 		[]metricCandidate{{CandidateID: "7_12", ChunkIndex: 7}, {CandidateID: "7_13", ChunkIndex: 7}},
 		metricsBlocksToChunks([]Block{makeMetricsBlock(7, 2)}), "")
-	if err != nil || ext.structuredCalledCount != 2 || len(metrics) != 4 {
-		t.Fatalf("rows=%v err=%v calls=%d, want four rows after one retry", metrics, err, ext.structuredCalledCount)
+	if err != nil || ext.structuredCalledCount != 2 || len(metrics) != 3 {
+		t.Fatalf("rows=%v err=%v calls=%d, want collection, count and sibling after one retry", metrics, err, ext.structuredCalledCount)
 	}
 	values := map[string]map[string]any{}
 	for _, m := range metrics {
 		values[asString(m["metric_value"])+metricRowUnit(m)] = m
-		if asString(m["candidate_id"]) == "unrequested" || metricValueHoldsSeveralValues(asString(m["metric_value"])) {
+		if asString(m["candidate_id"]) == "unrequested" || metricRowNeedsValueReview(m) {
 			t.Fatalf("invalid replacement: %v", m)
 		}
 	}
-	for _, key := range []string{"20%", "80%", "2~3个", "3次"} {
+	for _, key := range []string{"20、80%", "2~3个", "3次"} {
 		if values[key] == nil {
 			t.Fatalf("missing %s: %v", key, metrics)
 		}
@@ -105,7 +107,7 @@ func TestMultiValueRecoveryKeepsNonCombinedSiblingAndAllCombinedEvidence(t *test
 			if complete {
 				retry = append(retry, timingPointRow("7_12", "2", "个"), timingPointRow("7_12", "3", "个"))
 			}
-			ext := &fakeJSONExtractor{out: map[string]any{"metrics": retry}}
+			ext := &fakeJSONExtractor{out: map[string]any{"value_review_decisions": valueDecision("split"), "metrics": retry}}
 			p := makeTestMetricsProcessor(ext, 1)
 			got := p.recoverMultiValueMetricRows(context.Background(), 371, "call", 7, 1, "source",
 				[]metricCandidate{{CandidateID: "7_12", ChunkIndex: 7}}, []map[string]any{first, second, sibling})
@@ -129,7 +131,7 @@ func TestMultiValueRecoveryPreservesSigns(t *testing.T) {
 		if changedSign {
 			first, second = "20", "80"
 		}
-		ext := &fakeJSONExtractor{out: map[string]any{"metrics": []any{timingPointRow("7_12", first, "℃"), timingPointRow("7_12", second, "℃")}}}
+		ext := &fakeJSONExtractor{out: map[string]any{"value_review_decisions": valueDecision("split"), "metrics": []any{timingPointRow("7_12", first, "℃"), timingPointRow("7_12", second, "℃")}}}
 		p := makeTestMetricsProcessor(ext, 1)
 		got := p.recoverMultiValueMetricRows(context.Background(), 371, "call", 7, 1, "source",
 			[]metricCandidate{{CandidateID: "7_12", ChunkIndex: 7}}, []map[string]any{timingPointRow("7_12", "-20、-80", "℃")})
@@ -151,7 +153,7 @@ func TestEnrichMetricCandidatesSplitsPairedBloodPressure(t *testing.T) {
 	}
 	ext := &fakeJSONExtractor{outs: []map[string]any{
 		{"metrics": []any{bp("降压目标血压", "180/110")}},
-		{"metrics": []any{bp("降压目标收缩压", "180"), bp("降压目标舒张压", "110")}},
+		{"value_review_decisions": []any{map[string]any{"candidate_id": "14_4", "action": "split", "reason": "Separate systolic and diastolic properties."}}, "metrics": []any{bp("降压目标收缩压", "180"), bp("降压目标舒张压", "110")}},
 	}}
 	p := makeTestMetricsProcessor(ext, 1)
 	p.MetricEnrichGroupSize = 12

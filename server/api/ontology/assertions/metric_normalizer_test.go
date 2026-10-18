@@ -3,6 +3,7 @@ package assertions
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"reflect"
 	"regexp"
@@ -84,13 +85,10 @@ func TestParseThresholdOrTargetChineseUpperBound(t *testing.T) {
 	}
 }
 
-func TestParseThresholdOrTargetChineseRange(t *testing.T) {
+func TestParseThresholdOrTargetRatioRangeRemainsUnparsed(t *testing.T) {
 	p := parseThresholdOrTarget("500:1 至 2000:1")
-	if p.AssertionKind != "interval_requirement" || p.ValueForm != "range" {
-		t.Fatalf("unexpected parse: %+v", p)
-	}
-	if p.LowerValue == nil || *p.LowerValue != 500 || p.UpperValue == nil || *p.UpperValue != 2000 {
-		t.Fatalf("unexpected bounds: lower=%v upper=%v", p.LowerValue, p.UpperValue)
+	if p.ValueForm != "unparsed" || p.NumericValue != nil || p.LowerValue != nil {
+		t.Fatalf("unsupported ratio range must not collapse: %+v", p)
 	}
 }
 
@@ -921,5 +919,113 @@ func TestInvalidateValueRangeTypeMapCacheClearsDefaultCache(t *testing.T) {
 	defaultValueRangeTypeMapCache.mu.RUnlock()
 	if entries != nil {
 		t.Fatalf("expected defaultValueRangeTypeMapCache.entries to be nil after invalidate, got %+v", entries)
+	}
+}
+
+func TestMetricValuesNeverCollapseCompoundText(t *testing.T) {
+	for _, raw := range []string{"10, 20 or 30 mm", "10、20、30", "250×200", "10 + 20", "1/2", "500:1", "10 to 20 or 30 mm", "10 and 20 mm", "10 或 20 mm", "10mm、20mm", "10-20", "10 mm / 20 mm", "10mm至20mm、30mm", "100±10 or 200±20", "age+70", "x=70", "NaHCO3", "age + 70", "x = 70"} {
+		t.Run(raw, func(t *testing.T) {
+			r := metricRowFixture()
+			r.ValueRangeType, r.MetricValue = ns("exact"), ns(raw)
+			p := resolveMetricValueLegacy(r)
+			if p.ValueForm != "unparsed" || p.NumericValue != nil {
+				t.Fatalf("structured %q collapsed: %+v", raw, p)
+			}
+			for _, prefix := range []string{"", "at least "} {
+				p = parseThresholdOrTarget(prefix + raw)
+				if p.ValueForm != "unparsed" || p.NumericValue != nil || p.LowerValue != nil {
+					t.Fatalf("legacy %q collapsed: %+v", prefix+raw, p)
+				}
+			}
+		})
+	}
+}
+
+func TestLegacyCompoundRangeCannotUseNumericEndpoints(t *testing.T) {
+	for _, raw := range []string{"10、20、30", "250×200", "70+age*2"} {
+		r := metricRowFixture()
+		r.ValueRangeType, r.MetricValue = ns("range"), ns(raw)
+		r.ValueMin, r.ValueMax = sql.NullFloat64{Float64: 10, Valid: true}, sql.NullFloat64{Float64: 30, Valid: true}
+		p := resolveMetricValueLegacy(r)
+		if p.ValueForm != "unparsed" || p.LowerValue != nil || p.UpperValue != nil {
+			t.Fatalf("compound %q became interval: %+v", raw, p)
+		}
+	}
+}
+
+func TestMetricValueStructureDefersAllNumericInterpretation(t *testing.T) {
+	for _, structure := range []string{
+		`{"kind":"alternatives","values":["10","20","30"]}`,
+		`{"kind":"required_points","values":["10","20","30"]}`,
+		`{"kind":"composite","values":["250","200"]}`,
+		`{"kind":"expression"}`, `{"kind":"unresolved"}`, `{}`, `[]`, `"invalid"`, `{invalid`,
+	} {
+		for _, bucket := range []string{"exact", "range", "qualitative", ""} {
+			r := metricRowFixture()
+			r.ValueStructure = json.RawMessage(structure)
+			r.ValueRangeType, r.MetricValue, r.ThresholdOrTarget = ns(bucket), ns("10"), ns("at least 10")
+			r.ValueMin, r.ValueMax = nf(10), nf(30)
+			p := resolveMetricValue(r, bucket)
+			if p.ValueForm != "unparsed" || p.NumericValue != nil || p.LowerValue != nil || p.UpperValue != nil {
+				t.Fatalf("structure %q bucket %q fabricated: %+v", structure, bucket, p)
+			}
+			payload := metricCandidatePayloadForRowLegacy(t, r)
+			if _, ok := payload["value_structure"]; !ok {
+				t.Fatalf("structure lost from payload: %q", structure)
+			}
+			if _, err := json.Marshal(payload); err != nil {
+				t.Fatalf("invalid structure broke payload: %v", err)
+			}
+		}
+	}
+}
+
+func TestMetricScalarNullStructureAndTolerance(t *testing.T) {
+	for _, tc := range []struct {
+		raw, bucket, form string
+		number, lo, hi    float64
+	}{
+		{"10", "exact", "single", 10, 0, 0},
+		{"1.5e2", "exact", "single", 150, 0, 0},
+		{".5", "exact", "single", .5, 0, 0},
+		{"±10", "upper_bound", "single", 10, 0, 0},
+		{"100±10", "exact", "range", 0, 90, 110},
+	} {
+		r := metricRowFixture()
+		r.ValueStructure = json.RawMessage(`null`)
+		r.ValueRangeType, r.MetricValue = ns(tc.bucket), ns(tc.raw)
+		p := resolveMetricValue(r, tc.bucket)
+		if p.ValueForm != tc.form {
+			t.Fatalf("%q: %+v", tc.raw, p)
+		}
+		if tc.form == "single" && (p.NumericValue == nil || *p.NumericValue != tc.number) {
+			t.Fatalf("%q: %+v", tc.raw, p)
+		}
+		if tc.form == "range" && (p.LowerValue == nil || *p.LowerValue != tc.lo || p.UpperValue == nil || *p.UpperValue != tc.hi) {
+			t.Fatalf("%q: %+v", tc.raw, p)
+		}
+	}
+}
+
+func TestMetricNormalizerReadsValueStructureColumn(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	columns := []string{"id", "metric_id", "metric_name", "metric_unit", "metric_unit_en", "formula_or_definition", "metric_definition_term_id", "threshold_or_target", "measurement_frequency", "confidence", "source_line_spans", "object_id", "value_range_type", "value_class", "metric_value", "value_min", "value_max", "condition", "event_id", "model_name", "prompt_name", "metric_desc", "keyword_concept_id", "metric_subject", "reasoning_tags", "ext_info", "metric_categories", "value_data_type", "subject_concept_id", "value_structure"}
+	values := make([]driver.Value, len(columns))
+	values[10], values[24], values[25] = []byte(`[]`), []byte(`[]`), []byte(`{}`)
+	values[0], values[1], values[len(values)-1] = int64(1), "", []byte(`{"kind":"alternatives","values":["10","20"]}`)
+	mock.ExpectQuery(`SELECT m.id,.*m.value_structure`).WithArgs(int64(66)).WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
+	report, err := (MetricNormalizer{}).Normalize(context.Background(), db, 66)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Examined != 1 || report.Skipped != 1 {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

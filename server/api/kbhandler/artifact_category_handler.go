@@ -28,6 +28,7 @@ type artifactCategoryItem struct {
 	// Metric-specific extended fields
 	CategoryPaths       []string        `json:"category_paths,omitempty"`
 	CategoryPathsEn     []string        `json:"category_paths_en,omitempty"`
+	ValueStructure      json.RawMessage `json:"value_structure,omitempty"`
 	Value               *string         `json:"value,omitempty"`
 	Desc                *string         `json:"desc,omitempty"`
 	DescEn              *string         `json:"desc_en,omitempty"`
@@ -259,7 +260,7 @@ SELECT m.metric_id, m.input_record_id,
        m.value_data_type,
        m.value_range_type,
        m.metric_value,
-       m.formula_or_definition
+       m.formula_or_definition, m.value_structure
 FROM kb.metrics m
 WHERE m.ref_mention_id IS NULL AND m.metric_id IN (%s)
 ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
@@ -293,6 +294,7 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 			valueDataType            sql.NullString
 			valueRangeType           sql.NullString
 			metricValue              sql.NullString
+			valueStructureBytes      []byte
 			formulaOrDefinition      sql.NullString
 		)
 		if scanErr := rows.Scan(
@@ -315,7 +317,7 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 			&valueDataType,
 			&valueRangeType,
 			&metricValue,
-			&formulaOrDefinition,
+			&formulaOrDefinition, &valueStructureBytes,
 		); scanErr != nil {
 			return nil, scanErr
 		}
@@ -345,6 +347,7 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 		if paths := decodeCategoryPaths(catPathsEn); len(paths) > 0 {
 			item.CategoryPathsEn = paths
 		}
+		item.ValueStructure = json.RawMessage(valueStructureBytes)
 		if metricValue.Valid && metricValue.String != "" {
 			item.Value = &metricValue.String
 		}

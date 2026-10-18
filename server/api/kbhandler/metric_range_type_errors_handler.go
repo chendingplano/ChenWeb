@@ -76,7 +76,7 @@ SELECT
     NULLIF(BTRIM(COALESCE(i.doc_metadata->>'doc_no', i.doc_no, '')), '') AS document_doc_no,
     m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at,
-    m.value_range_type_error
+    m.value_range_type_error, m.value_structure
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.ref_mention_id IS NULL AND %s
@@ -97,13 +97,14 @@ LIMIT 500
 	out := make([]metricRecord, 0)
 	for rows.Next() {
 		var (
-			r               metricRecord
-			spansBytes      []byte
-			keywordsBytes   []byte
-			keywordsEnBytes []byte
-			reasoningBytes  []byte
-			confidence      sql.NullFloat64
-			isExplicit      sql.NullBool
+			r                   metricRecord
+			valueStructureBytes []byte
+			spansBytes          []byte
+			keywordsBytes       []byte
+			keywordsEnBytes     []byte
+			reasoningBytes      []byte
+			confidence          sql.NullFloat64
+			isExplicit          sql.NullBool
 		)
 		if err := rows.Scan(
 			&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
@@ -114,13 +115,14 @@ LIMIT 500
 			&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 			&confidence, &isExplicit, &r.DocumentTitle, &r.DocumentDocNo,
 			&r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
-			&r.ValueRangeTypeError,
+			&r.ValueRangeTypeError, &valueStructureBytes,
 		); err != nil {
 			logger.Error("scan kb.metrics range-type error row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
 				Status: false, ErrorMsg: "failed to scan metric range-type errors (CWB_KB_RTE_021)",
 			})
 		}
+		r.ValueStructure = json.RawMessage(valueStructureBytes)
 		if len(spansBytes) > 0 {
 			r.SourceLineSpans = json.RawMessage(spansBytes)
 		}
