@@ -64,3 +64,39 @@ func TestAgenticRunGuardMigrationPreventsConcurrentAttempts(t *testing.T) {
 		t.Fatal("migration does not prevent two running attempts")
 	}
 }
+
+func TestPiAgentProfileVersionsMigrationPreservesImmutableSnapshots(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not resolve test path")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(file), "../../../project_migrations/20261018000002_create_pi_agent_profile_versions.sql"))
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(body)
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS kb.agentic_service_profile_versions",
+		"PRIMARY KEY (service_slug, version)",
+		"profile_json JSONB NOT NULL",
+		"prompt_ref TEXT NOT NULL",
+		"prompt_hash TEXT NOT NULL",
+		"prompt_snapshot TEXT NOT NULL",
+		"created_by TEXT NOT NULL",
+		"created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+		"CREATE TABLE IF NOT EXISTS kb.agentic_service_profiles",
+		"active_version TEXT NOT NULL",
+		"PRIMARY KEY (service_slug)",
+		"FOREIGN KEY (service_slug, active_version)",
+		"REFERENCES kb.agentic_service_profile_versions(service_slug, version)",
+		"-- +goose Up",
+		"-- +goose Down",
+		"DROP TABLE IF EXISTS kb.agentic_service_profiles",
+		"DROP TABLE IF EXISTS kb.agentic_service_profile_versions",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("profile versions migration missing %q", required)
+		}
+	}
+}
