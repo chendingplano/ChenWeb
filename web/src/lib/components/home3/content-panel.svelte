@@ -51,6 +51,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import RoleManagementView from '$lib/components/home3/role-management-view.svelte';
 	import AccessControlsView from '$lib/components/home3/access-controls-view.svelte';
 	import BenchmarkSetupView from '$lib/components/home3/benchmark-setup-view.svelte';
+	import PiHarnessAdminView from '$lib/components/home3/pi-harness-admin-view.svelte';
 	import PageConfigAdminView from '$lib/components/home3/page-config-admin-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
@@ -287,6 +288,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<LLMActivitiesView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-search-lab'}
 			<KbSearchLabView {darkMode} />
+		{:else if activeMenu?.childId === 'coding-harness-pi'}
+			<PiHarnessAdminView {darkMode} />
 		{:else if activeMenu?.childId === 'flow'}
 			<Canvas01
 				{darkMode}

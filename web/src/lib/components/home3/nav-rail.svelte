@@ -77,6 +77,7 @@
 		onWidthDragStart: (e: MouseEvent) => void;
 		onHoverChange: (hovered: boolean) => void;
 	} = $props();
+	let piAdminAccess = $state(false);
 
 	// --- Layout constants ---
 	const RAIL_WIDTH_COLLAPSED = 56; // collapsed icon-rail width in px
@@ -450,7 +451,18 @@
 		pageKey === 'resources'
 			? resourcesNav
 			: pageKey === 'development'
-				? [...mainNav, ...developmentNav]
+				? [
+						...mainNav.map((item) => item.id === 'coding' && piAdminAccess
+							? {
+								...item,
+								children: [
+									...(item.children ?? []),
+									{ id: 'coding-harnesses', label: m.nav_coding_harnesses(), children: [{ id: 'coding-harness-pi', label: m.nav_coding_harness_pi() }] }
+								]
+							}
+							: item),
+						...developmentNav
+					]
 				: mainNav
 	);
 
@@ -470,6 +482,11 @@
 			.catch(() => {
 				// Keep the full menu with default labels on failure.
 			});
+		if (pageKey === 'development') {
+			fetch('/api/v1/system-admin/pi-harness', { credentials: 'same-origin', cache: 'no-store' })
+				.then((response) => { piAdminAccess = response.ok; })
+				.catch(() => { piAdminAccess = false; });
+		}
 	});
 
 	type UserProfile = { name: string; email: string };
@@ -514,7 +531,7 @@
 	// Fail open before load / on error: everything visible with default labels.
 	// Once loaded, an id is hidden only if the resolver put it in `hidden`; its
 	// label comes from the resolved override, else the hardcoded default.
-	const isVisible = (id: string) => pageConfig === null || !pageConfig.hidden.has(id);
+	const isVisible = (id: string) => (id !== 'coding-harnesses' && id !== 'coding-harness-pi' || piAdminAccess) && (pageConfig === null || !pageConfig.hidden.has(id));
 	const labelFor = (id: string, fallback: string) => pageConfig?.overrides[id]?.label ?? fallback;
 
 	// Prune the tree by visibility and apply label overrides, preserving the
