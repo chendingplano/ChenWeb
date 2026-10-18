@@ -556,6 +556,7 @@ func newOpenAIJSONClientForStructureModel(cfg structureModelConfig, embeddingDim
 		timeoutSec = 60
 	}
 	return &llmclients.OpenAIJSONClient{
+		Host:                strings.TrimSpace(cfg.Host),
 		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
 		ModelName:           strings.TrimSpace(cfg.ModelName),
 		APIKey:              strings.TrimSpace(cfg.APIKey),

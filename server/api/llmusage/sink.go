@@ -71,7 +71,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		}
 	}
 
-	if record.AccountID == "" || record.ProfileID == "" {
+	if (record.AccountID == "" || record.ProfileID == "") && !isLocalModelHost(record.Metadata["host"]) {
 		sinkLogger.Warn("(MID-20260708-01) llm usage event account/profile not fully resolved; event will be logged with available linkage",
 			"account_id", record.AccountID,
 			"profile_id", record.ProfileID,
@@ -191,6 +191,11 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		s.alarmForMissingUserID(ctx, record)
 	}
 	return eventID, nil
+}
+
+func isLocalModelHost(host any) bool {
+	value, ok := host.(string)
+	return ok && strings.TrimSpace(value) != "" && !strings.EqualFold(strings.TrimSpace(value), "cloud")
 }
 
 // alarmForMissingUserID raises an operator alarm (alarms_errors, surfaced

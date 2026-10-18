@@ -2767,21 +2767,6 @@
 	.header[hidden] {
 		display: none;
 	}
-	.header-fold-toggle {
-		grid-column: 1 / -1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		padding: 4px 8px;
-		border: 1px solid var(--ink-line);
-		border-radius: 4px;
-		background: var(--brass-faint);
-		color: var(--brass);
-		font-family: var(--font-sans);
-		font-size: 12px;
-		cursor: pointer;
-	}
 	.header::after {
 		content: '';
 		position: absolute;

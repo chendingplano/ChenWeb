@@ -18,7 +18,7 @@
 	let text = $derived(darkMode ? '#E2E8F0' : '#111827');
 	let muted = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let accent = $derived(darkMode ? '#A5B4FC' : '#4F46E5');
-	let state = $state<PiHarnessAdminState | null>(null);
+	let adminState = $state<PiHarnessAdminState | null>(null);
 	let selectedSlug = $state('');
 	let draft = $state<PiProfile | null>(null);
 	let loading = $state(true);
@@ -50,8 +50,8 @@
 		loading = true;
 		error = '';
 		try {
-			state = await getPiHarnessAdminState();
-			const preferred = state.profiles.find((p) => p.slug === selectedSlug) ?? state.profiles[0];
+			adminState = await getPiHarnessAdminState();
+			const preferred = adminState.profiles.find((p) => p.slug === selectedSlug) ?? adminState.profiles[0];
 			if (preferred) {
 				selectedSlug = preferred.slug;
 				loadDraft(preferred);
@@ -67,7 +67,7 @@
 
 	function selectProfile(slug: string) {
 		selectedSlug = slug;
-		const profile = state?.profiles.find((item) => item.slug === slug);
+		const profile = adminState?.profiles.find((item) => item.slug === slug);
 		if (profile) loadDraft(profile);
 		error = '';
 		notice = '';
@@ -78,7 +78,7 @@
 	}
 
 	async function save() {
-		if (!draft || !state?.initialized) return;
+		if (!draft || !adminState?.initialized) return;
 		saving = true;
 		error = '';
 		notice = '';
@@ -100,7 +100,7 @@
 		};
 		try {
 			const result = await updatePiProfile(draft.slug, candidate);
-			state = { ...state, profiles: state.profiles.map((p) => p.slug === result.profile.slug ? result.profile : p) };
+			adminState = { ...adminState, profiles: adminState.profiles.map((p) => p.slug === result.profile.slug ? result.profile : p) };
 			loadDraft(result.profile);
 			notice = m.pi_harness_profile_saved({ version: result.profile.version });
 		} catch (e) {
@@ -158,7 +158,7 @@
 				<div>
 					<h2 class="font-semibold">{m.pi_harness_gateway_heading()}</h2>
 					<p class="mt-1 text-sm" style="color:{muted};">{m.pi_harness_gateway_help()}</p>
-					<p class="mt-3 font-mono text-sm">{state?.gateway_url || m.pi_harness_gateway_unconfigured()}</p>
+					<p class="mt-3 font-mono text-sm">{adminState?.gateway_url || m.pi_harness_gateway_unconfigured()}</p>
 				</div>
 				<button class="rounded-md px-4 py-2 text-sm font-medium" style="background:{accent}; color:#111827;" disabled={checking} onclick={checkGateway}>
 					{checking ? m.pi_harness_checking() : m.pi_harness_check_connection()}
@@ -176,7 +176,7 @@
 
 		{#if loading}
 			<div class="rounded-xl border p-6 text-sm" style="background:{card}; border-color:{border}; color:{muted};">{m.pi_harness_loading()}</div>
-		{:else if state && !state.initialized}
+		{:else if adminState && !adminState.initialized}
 			<section class="rounded-xl border p-5" style="background:{card}; border-color:{border};">
 				<h2 class="font-semibold">{m.pi_harness_initialization_required()}</h2>
 				<p class="mt-2 text-sm" style="color:{muted};">{m.pi_harness_initialization_help()}</p>
@@ -184,7 +184,7 @@
 					{initializing ? m.pi_harness_initializing() : m.pi_harness_retry_initialization()}
 				</button>
 			</section>
-		{:else if draft && state}
+		{:else if draft && adminState}
 			<section class="rounded-xl border p-5" style="background:{card}; border-color:{border};">
 				<div class="flex flex-wrap items-end justify-between gap-4 border-b pb-4" style="border-color:{border};">
 					<div>
@@ -193,7 +193,7 @@
 					</div>
 					<label class="flex flex-col gap-1 text-sm"><span style="color:{muted};">{m.pi_harness_service()}</span>
 						<select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" value={selectedSlug} onchange={(e) => selectProfile(e.currentTarget.value)}>
-							{#each state.profiles as profile (profile.slug)}<option value={profile.slug}>{profile.friendly_name}</option>{/each}
+							{#each adminState.profiles as profile (profile.slug)}<option value={profile.slug}>{profile.friendly_name}</option>{/each}
 						</select>
 					</label>
 				</div>
@@ -203,7 +203,7 @@
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_provider()}</span><input class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.provider} /></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_model()}</span><input class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.model} /></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_thinking()}</span><select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.thinking_level}><option value="off">{m.pi_harness_thinking_off()}</option><option value="minimal">{m.pi_harness_thinking_minimal()}</option><option value="low">{m.pi_harness_thinking_low()}</option><option value="medium">{m.pi_harness_thinking_medium()}</option><option value="high">{m.pi_harness_thinking_high()}</option><option value="xhigh">{m.pi_harness_thinking_xhigh()}</option></select></label>
-					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_prompt()}</span><select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.prompt_file}>{#each state.prompt_choices[draft.slug] ?? [] as prompt}<option value={prompt}>{prompt}</option>{/each}</select></label>
+					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_prompt()}</span><select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.prompt_file}>{#each adminState.prompt_choices[draft.slug] ?? [] as prompt}<option value={prompt}>{prompt}</option>{/each}</select></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_knowledge_stores()}</span><input class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={storesText} /></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_document_groups()}</span><input class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={groupsText} /></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_permission()}</span><select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.permission_default}><option value="ask">{m.pi_harness_permission_ask()}</option><option value="auto">{m.pi_harness_permission_auto()}</option></select></label>

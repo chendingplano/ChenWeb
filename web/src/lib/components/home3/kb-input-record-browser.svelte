@@ -936,16 +936,6 @@
 	.record-subtitle, .card-desc, .record-meta, .record-card p, .card-foot { color: var(--rb-muted); }
 	.card-desc { margin-top: 0.4rem; font-size: 0.84rem; }
 	.card-foot { margin-top: 0.75rem; }
-	.chip {
-		display: inline-flex;
-		align-items: center;
-		padding: 0.24rem 0.48rem;
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 0.72rem;
-		border: 1px solid var(--rb-line-soft);
-		background: var(--rb-panel);
-		color: var(--rb-muted);
-	}
 	.record-card {
 		border: 1px solid var(--rb-line-soft);
 		background: var(--rb-panel-alt);

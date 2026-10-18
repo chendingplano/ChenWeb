@@ -279,7 +279,7 @@ func profileAdminAuth(c echo.Context, loc string) (ApiTypes.RequestContext, bool
 	user := rc.IsAuthenticated()
 	if user == nil {
 		_ = c.JSON(http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-		_ = rc.Close()
+		rc.Close()
 		return rc, false
 	}
 	admin := user.Admin || user.IsOwner
@@ -294,7 +294,7 @@ func profileAdminAuth(c echo.Context, loc string) (ApiTypes.RequestContext, bool
 	}
 	if !admin {
 		_ = c.JSON(http.StatusForbidden, map[string]string{"error": "admin access required"})
-		_ = rc.Close()
+		rc.Close()
 		return rc, false
 	}
 	return rc, true

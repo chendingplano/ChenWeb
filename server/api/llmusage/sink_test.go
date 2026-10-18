@@ -11,6 +11,25 @@ import (
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
 )
 
+func TestIsLocalModelHost(t *testing.T) {
+	for _, tc := range []struct {
+		host string
+		want bool
+	}{
+		{host: "llama.cpp", want: true},
+		{host: "local", want: true},
+		{host: "cloud", want: false},
+		{host: " CLOUD ", want: false},
+		{host: "", want: false},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			if got := isLocalModelHost(tc.host); got != tc.want {
+				t.Fatalf("isLocalModelHost(%q) = %v, want %v", tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

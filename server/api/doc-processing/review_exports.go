@@ -96,6 +96,7 @@ func BuildReviewerLLMClient(modelRef string) (client LLMJSONExtractor, modelName
 		timeoutSec = 100
 	}
 	c, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
+		Host:         cfg.Host,
 		ModelName:    cfg.ModelName,
 		APIKey:       cfg.APIKey,
 		BaseURL:      cfg.BaseURL,
