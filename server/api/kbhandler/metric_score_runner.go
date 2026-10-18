@@ -239,6 +239,35 @@ func enforceOneToOnePairs(payload map[string]any) {
 
 func metricScoreDigest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
 
+// missingMetricScoreRows reports omissions without deciding whether a row is a match or a
+// false positive. The authoritative scorer still validates duplicates, unknown IDs and fields.
+func missingMetricScoreRows(input, payload map[string]any) map[string][]string {
+	missing := map[string][]string{}
+	for _, side := range []struct{ input, key, other string }{
+		{"gold", "gold", "missed"}, {"predictions", "pred", "false_positives"},
+	} {
+		seen := map[string]bool{}
+		for _, section := range []string{"pairs", side.other} {
+			rows, _ := payload[section].([]any)
+			for _, row := range rows {
+				if m, ok := row.(map[string]any); ok {
+					id, _ := m[side.key].(string)
+					seen[id] = true
+				}
+			}
+		}
+		rows, _ := input[side.input].([]any)
+		for _, row := range rows {
+			if m, ok := row.(map[string]any); ok {
+				if id, ok := m["metric_id"].(string); ok && !seen[id] {
+					missing[side.input] = append(missing[side.input], id)
+				}
+			}
+		}
+	}
+	return missing
+}
+
 // Freeze both scorer and shared gold helper. The saved implementation can reproduce this run
 // even if the installed skills change while matching is in progress or after completion.
 func freezeMetricScoreTools(root, script string) (string, map[string]string, error) {
@@ -394,25 +423,48 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		client.ThinkingType = "disabled"
 	}
-	logger.Info("calling LLM for benchmark matching", "scorer", kind.scoreSkill, "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText))
-	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		UserID: userID, PromptName: kind.prompt, PromptText: string(prompt), ModelName: cfg.ModelName,
-		InputText: inputText, RecordID: req.RecordID, RunID: id, CallReason: kind.callReason, CallLoc: kind.callLoc,
-	})
-	if err != nil {
-		if ctx.Err() != nil {
-			return e, ctx.Err()
+	originalInput := inputText
+	for attempt := 1; attempt <= 2; attempt++ {
+		logger.Info("calling LLM for benchmark matching", "scorer", kind.scoreSkill, "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText), "attempt", attempt)
+		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+			UserID: userID, PromptName: kind.prompt, PromptText: string(prompt), ModelName: cfg.ModelName,
+			InputText: inputText, RecordID: req.RecordID, RunID: id, CallReason: kind.callReason, CallLoc: kind.callLoc,
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return e, ctx.Err()
+			}
+			return e, metricScoreFailure{"LLM_FAILED"}
 		}
-		return e, metricScoreFailure{"LLM_FAILED"}
-	}
-	dropEmptyPairsAlsoMissed(payload)
-	enforceOneToOnePairs(payload)
-	e.Matches, err = json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return e, err
-	}
-	if err = os.WriteFile(filepath.Join(dir, "matches.json"), e.Matches, 0600); err != nil {
-		return e, err
+		dropEmptyPairsAlsoMissed(payload)
+		enforceOneToOnePairs(payload)
+		e.Matches, err = json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return e, err
+		}
+		if err = os.WriteFile(filepath.Join(dir, "matches.json"), e.Matches, 0600); err != nil {
+			return e, err
+		}
+		// Reference matches use ref_id and retain their existing scoring flow.
+		if kind.matchBasis == "metric" {
+			missing := missingMetricScoreRows(input, payload)
+			if len(missing) > 0 {
+				logger.Warn("benchmark matching omitted rows", "run_id", id, "attempt", attempt, "missing_gold", missing["gold"], "missing_predictions", missing["predictions"])
+				if attempt == 2 {
+					return e, metricScoreFailure{"INVALID_MATCHES"}
+				}
+				if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), e.Matches, 0600); err != nil {
+					return e, err
+				}
+				feedback, marshalErr := json.Marshal(map[string]any{"previous_matches": payload, "omitted_ids": missing})
+				if marshalErr != nil {
+					return e, marshalErr
+				}
+				inputText = originalInput + "\nMATCH_REPAIR\n" + string(feedback)
+				continue
+			}
+		}
+		break
 	}
 	// Python refuses missing, duplicate or unknown row IDs and prohibited overrides.
 	if err = runMetricScoreScriptAt(ctx, frozen, "score", "--dir", dir, "--scorer-model", cfg.ModelName); err != nil {

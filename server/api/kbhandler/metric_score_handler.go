@@ -19,7 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const metricScorePrompt = "prompt-score-extract-metrics-v2.md"
+const metricScorePrompt = "prompt-score-extract-metrics-v3.md"
 
 // A run stores immutable scoring evidence, independent of later extraction changes.
 type metricScoreRun struct {
