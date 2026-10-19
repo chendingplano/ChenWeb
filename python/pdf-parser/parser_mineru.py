@@ -44,6 +44,23 @@ def _processing_pages(line: str) -> tuple[int, int] | None:
     return (done, total) if total > 0 else None
 
 
+def _iter_output_records(stream):
+    """Yield subprocess output at either tqdm's carriage returns or newlines.
+
+    MinerU uses carriage returns to refresh progress bars. ``readline()`` waits
+    for a newline, so iterating the pipe by line hides those updates until each
+    phase has finished.
+    """
+    chars: list[str] = []
+    while char := stream.read(1):
+        chars.append(char)
+        if char in "\r\n":
+            yield "".join(chars)
+            chars.clear()
+    if chars:
+        yield "".join(chars)
+
+
 class PhaseTracker:
     """Turn MinerU 4 tqdm updates into ordered phase snapshots."""
 
@@ -323,7 +340,7 @@ class MineruParser(ParserBackend):
                 heartbeat_thread.start()
 
                 assert proc.stdout is not None
-                for raw_line in proc.stdout:
+                for raw_line in _iter_output_records(proc.stdout):
                     # tqdm uses \r to overwrite the current line; take the last
                     # non-empty segment so log output is clean.
                     segments = [s for s in raw_line.rstrip('\n').split('\r') if s.strip()]

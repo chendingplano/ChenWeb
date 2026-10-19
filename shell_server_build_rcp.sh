@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Usage: ./shell_server_build_rcp.sh "build_name" "target_machine" "os_info" "description"
 
 set -euo pipefail
 
