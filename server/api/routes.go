@@ -23,6 +23,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/agentservicehandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
+	"github.com/chendingplano/deepdoc/server/api/buildinfohandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/calendarhandler"
 	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
@@ -399,6 +400,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/peak-hours/:name/is-active", peakhourshandler.IsActive)
 
 	// Release notes admin (System Admin > System > Releases).
+	apiGroup.GET("/system-admin/build-info", buildinfohandler.List)
 	apiGroup.GET("/releases", releaseshandler.ListReleases)
 	apiGroup.POST("/releases", releaseshandler.CreateRelease)
 	apiGroup.PUT("/releases/:id", releaseshandler.UpdateRelease)

@@ -374,6 +374,7 @@
 					id: 'sysadmin-system',
 					label: m.nav_sysadmin_system(),
 					children: [
+						{ id: 'sysadmin-system-build-info', label: m.nav_sysadmin_system_build_info() },
 						{ id: 'sysadmin-system-calendar', label: m.nav_sysadmin_system_calendar() },
 						{ id: 'sysadmin-system-peak-hours', label: m.nav_sysadmin_system_peak_hours() },
 						{ id: 'sysadmin-system-releases', label: m.nav_sysadmin_system_releases() },

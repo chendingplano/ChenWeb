@@ -2,6 +2,7 @@
 import type { Snippet } from 'svelte';
 import type { KbReferenceDetails } from '$lib/services/kbService';
 	import { m } from '$lib/paraglide/messages.js';
+	import BuildInfoView from '$lib/components/home3/build-info-view.svelte';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import DocProcessorDashboardView from '$lib/components/home3/doc-processor-dashboard-view.svelte';
@@ -427,6 +428,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<KeywordRewriteRulesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-system-calendar'}
 			<CalendarAdminView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-system-build-info'}
+			<BuildInfoView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-system-peak-hours'}
 			<PeakHoursView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-system-releases'}
