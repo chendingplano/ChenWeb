@@ -5597,7 +5597,7 @@
 	"kb_import_are_you_sure_you_want_2": "Are you sure you want to delete",
 	"kb_import_records": "{deleteConfirmRecordsCount} records",
 	"kb_import_this_action_cannot_be_undone": "This action cannot be undone.",
-	"kb_import_also_delete_the_physical_file": "Also delete the physical file and generated artifacts",
+	"kb_import_also_delete_the_physical_file": "Also archive the PDF and delete the backup and generated artifacts",
 	"kb_import_deleting": "Deleting…",
 	"kb_import_process_parsed": "Process Parsed",
 	"kb_import_restart_pipeline": "Restart pipeline",

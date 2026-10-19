@@ -583,6 +583,9 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 	for _, spec := range inputRelatedDeleteSpecs {
 		expectInputRelatedColumnCheck(mock, spec, true)
 		stmt := "DELETE FROM " + spec.Table + " WHERE " + spec.Column + " = $1"
+		if spec.Table == "kb.doc_proc_logs" {
+			stmt += " AND entry_type <> 'delete_input'"
+		}
 		mock.ExpectExec(regexp.QuoteMeta(stmt)).
 			WithArgs(int64(430)).
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -591,56 +594,9 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.inputs WHERE id = $1`)).
 		WithArgs(int64(430)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectInputDeletePendingAudit(mock, 430)
 	mock.ExpectCommit()
-	logInsertQuery := regexp.QuoteMeta(`
-INSERT INTO kb.doc_proc_logs (
-    call_reason,
-    doc_proc_name,
-    model_names,
-    prompt_name,
-    record_id,
-    proc_progress,
-    entry_type,
-    pass,
-    llm_call_id,
-    activity_name,
-    artifact,
-    errors,
-    extra_info,
-    ms_used,
-    log_loc,
-    prompt_cache_hit_tokens,
-    prompt_cache_miss_tokens,
-    run_id,
-    create_time
-) VALUES (
-    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
-    $11::jsonb, $12, $13::jsonb,
-    $14, $15, $16, $17, $18, NOW()
-)`)
-	recordID := int64(430)
-	mock.ExpectExec(logInsertQuery).
-		WithArgs(
-			strPtrValue("delete_input"),
-			"delete_input",
-			"{}",
-			nil,
-			int64PtrValue(recordID),
-			nil,
-			"delete_input",
-			nil,
-			nil,
-			nil,
-			nil,
-			nil,
-			jsonWithFieldMatcher{field: "operation", want: "delete_input"},
-			nil,
-			deleteInputDocProcLogLoc,
-			nil,
-			nil,
-			nil,
-		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	expectInputDeleteFinalAudit(mock, jsonWithFieldMatcher{field: "cleanup_status", want: "completed"})
 
 	c, rec := newDeleteInputContext(t, "430")
 	if err := DeleteInput(c); err != nil {
@@ -709,11 +665,21 @@ func TestDeleteInputFilesResolvesRelativePathsWithSpaces(t *testing.T) {
 		}
 	}
 
-	deleteInputFiles(nil, inputDeleteAssets{
+	t.Setenv("ARTIFACT_DIR", filepath.Join(dataHome, "Artifacts"))
+	plan, err := planInputDeletePaths(656, inputDeleteAssets{
 		FileName:       "Artifacts/0/656/GBT 45821-2025.pdf",
 		BackupFileName: "Backup/GBT 45821-2025.pdf",
 		ResultFileName: "Artifacts/0/656/GBT 45821-2025_mineru.json",
 	})
+	if err != nil {
+		t.Fatalf("planInputDeletePaths returned error: %v", err)
+	}
+	report := newInputDeleteReport()
+	deleteInputFiles(plan.filesWithPDF(), &report)
+	deleteInputArtifactDirs(plan.Dirs, &report)
+	if len(report.Failures) > 0 {
+		t.Fatalf("expected no failures, got %v", report.Failures)
+	}
 
 	for _, path := range []string{dataFile, backupFile, resultFile} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

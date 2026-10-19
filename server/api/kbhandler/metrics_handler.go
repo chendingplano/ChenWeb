@@ -1629,6 +1629,9 @@ func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
 		}
 
 		stmt := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", spec.Table, spec.Column)
+		if spec.Table == "kb.doc_proc_logs" {
+			stmt += " AND entry_type <> 'delete_input'"
+		}
 		if _, err := tx.Exec(stmt, id); err != nil {
 			return fmt.Errorf("delete %s where %s: %w", spec.Table, spec.Column, err)
 		}
@@ -1663,61 +1666,11 @@ func deleteInputReferenceRows(tx *sql.Tx, id int64) error {
 	return nil
 }
 
-func deleteInputFiles(logger ApiTypes.JimoLogger, assets inputDeleteAssets) {
-	seen := make(map[string]struct{}, 3)
-	for _, path := range []string{
-		pathutil.ResolveDataHomePath(assets.FileName),
-		pathutil.ResolveBackupPath(assets.BackupFileName),
-		pathutil.ResolveDataHomePath(assets.ResultFileName),
-	} {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			logger.Warn("delete kb input file failed", "path", path, "err", err)
-		}
-	}
-}
-
-func deleteInputArtifactDirs(logger ApiTypes.JimoLogger, recordID int64, assets inputDeleteAssets) {
-	seen := make(map[string]struct{}, 3)
-	addCandidate := func(path string) {
-		path = filepath.Clean(strings.TrimSpace(path))
-		if path == "" || path == "." || path == string(filepath.Separator) {
-			return
-		}
-		if _, ok := seen[path]; ok {
-			return
-		}
-		seen[path] = struct{}{}
-		if err := os.RemoveAll(path); err != nil {
-			logger.Warn("delete kb input artifact dir failed", "record_id", recordID, "path", path, "err", err)
-		}
-	}
-
-	if resolved := pathutil.ResolveDataHomePath(strings.TrimSpace(assets.ResultFileName)); resolved != "" {
-		addCandidate(filepath.Dir(resolved))
-	}
-
-	artifactRoot := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
-	if artifactRoot == "" {
-		return
-	}
-	groupID := strconv.FormatInt(recordID/1000, 10)
-	recordKey := strconv.FormatInt(recordID, 10)
-	addCandidate(filepath.Join(artifactRoot, groupID, recordKey))
-	addCandidate(filepath.Join(artifactRoot, "Artifacts", groupID, recordKey))
-}
-
 type artifactWebCleanupStats struct {
-	FilesScanned int `json:"files_scanned"`
-	FilesChanged int `json:"files_changed"`
-	LinesRemoved int `json:"lines_removed"`
+	FilesScanned int      `json:"files_scanned"`
+	FilesChanged int      `json:"files_changed"`
+	LinesRemoved int      `json:"lines_removed"`
+	DeletedFiles []string `json:"deleted_files"`
 }
 
 const deleteInputDocProcLogLoc = "CWB_KB_M_416"
@@ -1773,7 +1726,9 @@ func removeArtifactWebTreeRecord(treeRootDir string, recordID int64) (artifactWe
 		stats.FilesChanged++
 		stats.LinesRemoved += removed
 		if len(rows) == 0 {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			if err := os.Remove(path); err == nil {
+				stats.DeletedFiles = append(stats.DeletedFiles, path)
+			} else if !os.IsNotExist(err) {
 				return err
 			}
 			return nil
@@ -1805,11 +1760,12 @@ func pruneMetadataOnlyArtifactWebDirs(root string) error {
 	if root == "" || root == "." {
 		return nil
 	}
-	_, err := pruneMetadataOnlyDir(root, root)
+	report := newInputDeleteReport()
+	_, err := pruneMetadataOnlyDir(root, root, &report)
 	return err
 }
 
-func pruneMetadataOnlyDir(path string, root string) (bool, error) {
+func pruneMetadataOnlyDir(path string, root string, report *inputDeleteReport) (bool, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1826,7 +1782,7 @@ func pruneMetadataOnlyDir(path string, root string) (bool, error) {
 			}
 			continue
 		}
-		removed, err := pruneMetadataOnlyDir(filepath.Join(path, entry.Name()), root)
+		removed, err := pruneMetadataOnlyDir(filepath.Join(path, entry.Name()), root, report)
 		if err != nil {
 			return false, err
 		}
@@ -1837,7 +1793,13 @@ func pruneMetadataOnlyDir(path string, root string) (bool, error) {
 	if keep || path == root {
 		return false, nil
 	}
-	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+	metadata := filepath.Join(path, "metadata.txt")
+	if err := os.Remove(metadata); err == nil {
+		report.DeletedFiles = append(report.DeletedFiles, metadata)
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return false, err
 	}
 	return true, nil
@@ -1858,42 +1820,26 @@ func artifactWebCleanupRoots() []string {
 	return []string{artifactWebDir}
 }
 
-func cleanupInputArtifactWeb(logger ApiTypes.JimoLogger, recordID int64) artifactWebCleanupStats {
+func cleanupInputArtifactWeb(recordID int64) (artifactWebCleanupStats, []string) {
 	var total artifactWebCleanupStats
+	var failures []string
 	for _, root := range artifactWebCleanupRoots() {
 		stats, err := removeArtifactWebTreeRecord(root, recordID)
 		total.FilesScanned += stats.FilesScanned
 		total.FilesChanged += stats.FilesChanged
 		total.LinesRemoved += stats.LinesRemoved
+		total.DeletedFiles = append(total.DeletedFiles, stats.DeletedFiles...)
 		if err != nil {
-			logger.Warn("delete artifact web entries failed", "record_id", recordID, "dir", root, "err", err)
+			failures = append(failures, fmt.Sprintf("artifact web cleanup %s: %v", root, err))
 			continue
 		}
-		if err := pruneMetadataOnlyArtifactWebDirs(root); err != nil {
-			logger.Warn("prune artifact web dirs failed", "record_id", recordID, "dir", root, "err", err)
+		report := newInputDeleteReport()
+		if _, err := pruneMetadataOnlyDir(root, root, &report); err != nil {
+			failures = append(failures, fmt.Sprintf("prune artifact web dirs %s: %v", root, err))
 		}
+		total.DeletedFiles = append(total.DeletedFiles, report.DeletedFiles...)
 	}
-	return total
-}
-
-func writeDeleteInputDocProcLog(recordID int64, webStats artifactWebCleanupStats) error {
-	recordIDCopy := recordID
-	extraInfo := map[string]any{
-		"operation":            "delete_input",
-		"artifact_web_cleanup": webStats,
-	}
-	extraJSON, err := json.Marshal(extraInfo)
-	if err != nil {
-		return err
-	}
-	logger := docprocessing.DocProcLogger{DB: ApiTypes.ProjectDBHandle}
-	extraJSONString := string(extraJSON)
-	return logger.LogSummary(context.Background(), docprocessing.EntryTypeDeleteInput, docprocessing.DocProcLogRecord{
-		CallReason:    "delete_input",
-		DocProcName:   "delete_input",
-		RecordID:      &recordIDCopy,
-		ExtraInfoJSON: &extraJSONString,
-	}, deleteInputDocProcLogLoc)
+	return total, failures
 }
 
 func shouldDeleteInputFiles(c echo.Context) bool {
@@ -1901,6 +1847,11 @@ func shouldDeleteInputFiles(c echo.Context) bool {
 }
 
 // DeleteInput handles DELETE /api/v1/kb/inputs/:id
+//
+// With delete_file=true the uploaded PDF is archived to ARCHIVE_DIR, and the record's backup,
+// result file and artifact folder are removed. Every planned location is checked before anything
+// changes. If the database delete cannot finish, the PDF is moved back. Any file that could not
+// be removed makes the response an error, and the audit log in kb.doc_proc_logs lists what was done.
 func DeleteInput(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_400")
 	defer rc.Close()
@@ -1911,6 +1862,15 @@ func DeleteInput(c echo.Context) error {
 	if err != nil || id <= 0 {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status: false, ErrorMsg: "invalid id (CWB_KB_M_401)",
+		})
+	}
+
+	deleteFiles := shouldDeleteInputFiles(c)
+	archiveRoot := strings.TrimSpace(os.Getenv("ARCHIVE_DIR"))
+	if deleteFiles && archiveRoot == "" {
+		logger.Error("delete kb input refused: ARCHIVE_DIR is not set", "id", id)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "ARCHIVE_DIR is not set, so the PDF cannot be archived; nothing was deleted (CWB_KB_M_421)",
 		})
 	}
 
@@ -1945,47 +1905,90 @@ func DeleteInput(c echo.Context) error {
 		})
 	}
 
+	report := newInputDeleteReport()
+	var plan inputDeletePlan
+	if deleteFiles {
+		plan, err = planInputDeletePaths(id, assets)
+		if err != nil {
+			logger.Error("plan kb input file delete failed", "id", id, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status: false, ErrorMsg: fmt.Sprintf("refused to delete kb input: %v; nothing was deleted (CWB_KB_M_420)", err),
+			})
+		}
+		archived, missing, err := archiveInputPDF(archiveRoot, id, plan.PDFPath)
+		if err != nil {
+			logger.Error("archive kb input pdf failed", "id", id, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status: false, ErrorMsg: fmt.Sprintf("failed to archive the PDF: %v; nothing was deleted (CWB_KB_M_422)", err),
+			})
+		}
+		report.ArchivedFile = archived
+		if missing {
+			report.MissingFiles = append(report.MissingFiles, plan.PDFPath)
+		}
+	}
+
+	// abort ends the request with an error and moves an archived PDF back, so the record is
+	// left as it was when the database delete does not finish.
+	abort := func(status int, errorMsg string, cause error) error {
+		logger.Error("delete kb input failed", "id", id, "err", cause)
+		if report.ArchivedFile != "" {
+			if restoreErr := restoreArchivedPDF(report.ArchivedFile, plan.PDFPath); restoreErr != nil {
+				logger.Error("restore archived kb input pdf failed", "id", id, "archived", report.ArchivedFile, "path", plan.PDFPath, "err", restoreErr)
+				errorMsg += fmt.Sprintf("; the PDF could not be restored from %s: %v", report.ArchivedFile, restoreErr)
+			} else {
+				errorMsg += "; the PDF was restored"
+			}
+		}
+		return c.JSON(status, errorResponse{Status: false, ErrorMsg: errorMsg})
+	}
+
 	if err := deleteInputRelatedRows(tx, id); err != nil {
-		logger.Error("delete kb input related rows failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
-		})
+		return abort(http.StatusInternalServerError, "failed to delete kb input (CWB_KB_M_403)", err)
 	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", inputTable)
 	result, err := tx.Exec(query, id)
 	if err != nil {
-		logger.Error("delete kb input failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
-		})
+		return abort(http.StatusInternalServerError, "failed to delete kb input (CWB_KB_M_403)", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		logger.Error("rows affected delete kb input failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status: false, ErrorMsg: "failed to verify kb input delete (CWB_KB_M_404)",
-		})
+		return abort(http.StatusInternalServerError, "failed to verify kb input delete (CWB_KB_M_404)", err)
 	}
 	if affected == 0 {
-		return c.JSON(http.StatusNotFound, errorResponse{
-			Status: false, ErrorMsg: "record not found (CWB_KB_M_405)",
-		})
+		return abort(http.StatusNotFound, "record not found (CWB_KB_M_405)", nil)
+	}
+	deleted, err := readInputDeletedTables(tx)
+	if err != nil {
+		return abort(http.StatusInternalServerError, "failed to audit deleted tables (CWB_KB_M_426)", err)
+	}
+	auditID, err := startInputDeleteAudit(tx, id, deleteFiles, plan, report, deleted)
+	if err != nil {
+		return abort(http.StatusInternalServerError, "failed to create delete audit; nothing was deleted (CWB_KB_M_427)", err)
 	}
 	if err := tx.Commit(); err != nil {
-		logger.Error("commit delete kb input failed", "id", id, "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
-		})
+		return abort(http.StatusInternalServerError, "failed to delete kb input (CWB_KB_M_403)", err)
 	}
 
-	if shouldDeleteInputFiles(c) {
-		deleteInputFiles(logger, assets)
-		deleteInputArtifactDirs(logger, id, assets)
+	if deleteFiles {
+		deleteInputFiles(plan.Files, &report)
+		deleteInputArtifactDirs(plan.Dirs, &report)
 	}
-	webStats := cleanupInputArtifactWeb(logger, id)
-	if err := writeDeleteInputDocProcLog(id, webStats); err != nil {
-		logger.Warn("write delete input doc proc log failed", "record_id", id, "err", err)
+	webStats, webFailures := cleanupInputArtifactWeb(id)
+	report.Failures = append(report.Failures, webFailures...)
+	report.DeletedFiles = append(report.DeletedFiles, webStats.DeletedFiles...)
+	if err := finishInputDeleteAudit(db, auditID, deleteFiles, report, deleted, webStats); err != nil {
+		report.Failures = append(report.Failures, fmt.Sprintf("finalize audit log %d (cleanup remains pending): %v", auditID, err))
+		logger.Error("finalize input delete audit failed", "audit_id", auditID, "report", report, "deleted_tables", deleted, "err", err)
+	}
+	if len(report.Failures) > 0 {
+		logger.Error("delete kb input left files behind", "id", id, "failures", report.Failures)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false,
+			ErrorMsg: fmt.Sprintf("kb input %d was removed from the database, but not everything was deleted: %s (CWB_KB_M_423)",
+				id, strings.Join(report.Failures, "; ")),
+		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"status": true})
@@ -1998,6 +2001,7 @@ type cleanInputArtifactsRequest struct {
 // CleanInputArtifacts handles POST /api/v1/admin/db/kb-input-artifacts/clean.
 // It performs the same cleanup as DeleteInput, but tolerates an already-missing
 // kb.inputs row so orphaned ArtifactWeb index entries can be cleaned repeatedly.
+// It does not archive the PDF; a failed removal is returned as an error.
 func CleanInputArtifacts(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_410")
 	defer rc.Close()
@@ -2042,6 +2046,14 @@ func CleanInputArtifacts(c echo.Context) error {
 		})
 	}
 
+	plan, err := planInputDeletePaths(id, assets)
+	if err != nil {
+		logger.Error("plan clean kb input artifacts failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: fmt.Sprintf("refused to clean kb input artifacts: %v; nothing was deleted (CWB_KB_M_424)", err),
+		})
+	}
+
 	if err := deleteInputRelatedRows(tx, id); err != nil {
 		logger.Error("clean kb input related rows failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -2075,11 +2087,21 @@ func CleanInputArtifacts(c echo.Context) error {
 		})
 	}
 
+	report := newInputDeleteReport()
 	if found {
-		deleteInputFiles(logger, assets)
+		deleteInputFiles(plan.filesWithPDF(), &report)
 	}
-	deleteInputArtifactDirs(logger, id, assets)
-	webStats := cleanupInputArtifactWeb(logger, id)
+	deleteInputArtifactDirs(plan.Dirs, &report)
+	webStats, webFailures := cleanupInputArtifactWeb(id)
+	report.Failures = append(report.Failures, webFailures...)
+	if len(report.Failures) > 0 {
+		logger.Error("clean kb input artifacts left files behind", "id", id, "failures", report.Failures)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false,
+			ErrorMsg: fmt.Sprintf("kb input artifacts for record %d were not fully removed: %s (CWB_KB_M_425)",
+				id, strings.Join(report.Failures, "; ")),
+		})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":               true,

@@ -5597,7 +5597,7 @@
 	"kb_import_are_you_sure_you_want_2": "确定要删除",
 	"kb_import_records": "{deleteConfirmRecordsCount} 条记录",
 	"kb_import_this_action_cannot_be_undone": "此操作无法撤销。",
-	"kb_import_also_delete_the_physical_file": "同时删除物理文件和生成的产物",
+	"kb_import_also_delete_the_physical_file": "同时归档 PDF，并删除备份和生成的产物",
 	"kb_import_deleting": "删除中…",
 	"kb_import_process_parsed": "处理已解析",
 	"kb_import_restart_pipeline": "重启流水线",
