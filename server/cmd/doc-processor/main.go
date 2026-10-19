@@ -28,8 +28,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-var buildMetadataBase64 string
-
 type chunkPhaseService interface {
 	HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
 }
@@ -239,11 +237,11 @@ func main() {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
 	}
-	metadata, buildErr := buildinfo.RecordStartup(ctx, ApiTypes.ProjectDBHandle, "doc-processor", buildMetadataBase64)
-	logger.Info("build metadata", "build_number", metadata.BuildNumber, "build_name", metadata.BuildName,
-		"target_machine", metadata.TargetMachine, "os_info", metadata.OSInfo, "description", metadata.Description)
-	if buildErr != nil {
-		logger.Error("failed to record build activity", "executable", "doc-processor", "error", buildErr)
+	stopBuildInfo, buildInfoErr := buildinfo.StartResponder("doc-processor")
+	if buildInfoErr != nil {
+		logger.Warn("build-info responder unavailable", "executable", "doc-processor", "error", buildInfoErr)
+	} else {
+		defer stopBuildInfo()
 	}
 	warnings, err := seed.EnsureCuratedModules(ctx, ApiTypes.ProjectDBHandle)
 	if err != nil {

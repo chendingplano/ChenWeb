@@ -20,8 +20,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var buildMetadataBase64 string
-
 func envOrDefault(key, fallback string) string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v != "" {
@@ -72,11 +70,11 @@ func main() {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
 	}
-	metadata, buildErr := buildinfo.RecordStartup(ctx, ApiTypes.ProjectDBHandle, "parser-result-converter", buildMetadataBase64)
-	logger.Info("build metadata", "build_number", metadata.BuildNumber, "build_name", metadata.BuildName,
-		"target_machine", metadata.TargetMachine, "os_info", metadata.OSInfo, "description", metadata.Description)
-	if buildErr != nil {
-		logger.Error("failed to record build activity", "executable", "parser-result-converter", "error", buildErr)
+	stopBuildInfo, buildInfoErr := buildinfo.StartResponder("parser-result-converter")
+	if buildInfoErr != nil {
+		logger.Warn("build-info responder unavailable", "executable", "parser-result-converter", "error", buildInfoErr)
+	} else {
+		defer stopBuildInfo()
 	}
 
 	natsURL := envOrDefault("NATS_URL", "nats://127.0.0.1:4222")

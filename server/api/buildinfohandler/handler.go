@@ -27,7 +27,15 @@ func List(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]any{"status": false, "error_msg": "admin access required"})
 	}
 
-	processes := buildinfo.ListProcesses([]string{"server", "doc-processor", "parser-result-converter", "doc-service"})
+	ctx := c.Request().Context()
+	serverProcess, err := buildinfo.CurrentProcess("server")
+	processes := make([]buildinfo.Process, 0, 4)
+	if err == nil {
+		processes = append(processes, serverProcess)
+	} else {
+		processes = append(processes, buildinfo.Process{Executable: "server", Status: "unreported"})
+	}
+	processes = append(processes, buildinfo.ListProcesses(ctx, []string{"doc-processor", "parser-result-converter", "doc-service"})...)
 	running := 0
 	for _, process := range processes {
 		if process.Status == "running" {

@@ -21,7 +21,6 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
-	"github.com/chendingplano/deepdoc/server/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -36,8 +35,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
-
-var buildMetadataBase64 string
 
 func ExitApp() {
 	databaseutil.CloseDatabase(ApiTypes.CommonConfig)
@@ -200,13 +197,6 @@ func main() {
 		logger.Error("failed to run migrations. System exit!!!!", "error", err)
 		os.Exit(1)
 	}
-	metadata, buildErr := buildinfo.RecordStartup(migrationCtx, ApiTypes.ProjectDBHandle, "server", buildMetadataBase64)
-	logger.Info("build metadata", "build_number", metadata.BuildNumber, "build_name", metadata.BuildName,
-		"target_machine", metadata.TargetMachine, "os_info", metadata.OSInfo, "description", metadata.Description)
-	if buildErr != nil {
-		logger.Error("failed to record build activity", "executable", "server", "error", buildErr)
-	}
-
 	logger.Info("migrations completed successfully")
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer bootstrapCancel()

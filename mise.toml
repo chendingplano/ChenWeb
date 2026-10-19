@@ -105,6 +105,33 @@ OS_INFO="${OS_INFO:-linux/amd64}"
 BUILD_DESCRIPTION="${BUILD_DESCRIPTION:-}"
 BUILD_METADATA_B64="$(BUILD_NUMBER="$BUILD_NUMBER" BUILD_NAME="$BUILD_NAME" TARGET_MACHINE="$TARGET_MACHINE" OS_INFO="$OS_INFO" BUILD_DESCRIPTION="$BUILD_DESCRIPTION" python3 -c 'import base64, json, os; print(base64.b64encode(json.dumps({"build_number":os.environ["BUILD_NUMBER"],"build_name":os.environ["BUILD_NAME"],"target_machine":os.environ["TARGET_MACHINE"],"os_info":os.environ["OS_INFO"],"description":os.environ["BUILD_DESCRIPTION"]}, separators=(",", ":")).encode()).decode())')"
 
+: "${PG_DB_NAME:?set PG_DB_NAME to the database containing kb.build_activities}"
+: "${PG_PASSWORD:?set PG_PASSWORD for the build activity database}"
+POSTGRES_USER="$(printf '%s' "${PG_USER_NAME:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+if [ -z "$POSTGRES_USER" ]; then
+  POSTGRES_USER="$(printf '%s' "${PG_USER:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+fi
+POSTGRES_USER="${POSTGRES_USER:-cding}"
+log_build_activity() {
+  PGPASSWORD="$PG_PASSWORD" psql \
+    -h "${PG_HOST:-/tmp}" -p "${PG_PORT:-5432}" \
+    -U "$POSTGRES_USER" -d "$PG_DB_NAME" \
+    -v ON_ERROR_STOP=1 \
+    -v build_number="$BUILD_NUMBER" \
+    -v build_name="$BUILD_NAME" \
+    -v executable="$1" \
+    -v target_machine="$TARGET_MACHINE" \
+    -v os_info="$OS_INFO" \
+    -v description="$BUILD_DESCRIPTION" <<'SQL'
+INSERT INTO kb.build_activities (
+  build_number, build_name, executable, target_machine, os_info, description, activity
+) VALUES (
+  :'build_number', :'build_name', :'executable', :'target_machine',
+  :'os_info', :'description', 'built'
+);
+SQL
+}
+
 # binary name -> cmd package
 ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin"
 SELECT="${BINS:-}"   # e.g. BINS="server,doc-processor"
@@ -146,12 +173,17 @@ for pair in $SELECTED; do
   ldflags="-s -w"
   case "$name" in
     server|doc-processor|parser-result-converter|doc-service)
-      ldflags="$ldflags -X main.buildMetadataBase64=$BUILD_METADATA_B64"
+      ldflags="$ldflags -X github.com/chendingplano/deepdoc/server/buildinfo.EmbeddedMetadataBase64=$BUILD_METADATA_B64"
       ;;
   esac
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -buildvcs=false -ldflags "$ldflags" \
     -o "$OUT/$name-linux" "$pkg"
+  case "$name" in
+    server|doc-processor|parser-result-converter|doc-service)
+      log_build_activity "$name"
+      ;;
+  esac
   ( cd "$OUT" && shasum -a 256 "$name-linux" > "$name-linux.sha256" )
   built="$built $name-linux"
 done

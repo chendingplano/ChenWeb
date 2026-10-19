@@ -32,8 +32,6 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
-var buildMetadataBase64 string
-
 const (
 	stagingWatchDebounce    = 500 * time.Millisecond
 	stagingFallbackInterval = 10 * time.Second
@@ -397,11 +395,11 @@ func main() {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
 	}
-	metadata, buildErr := buildinfo.RecordStartup(ctx, ApiTypes.ProjectDBHandle, "doc-service", buildMetadataBase64)
-	logger.Info("build metadata", "build_number", metadata.BuildNumber, "build_name", metadata.BuildName,
-		"target_machine", metadata.TargetMachine, "os_info", metadata.OSInfo, "description", metadata.Description)
-	if buildErr != nil {
-		logger.Error("failed to record build activity", "executable", "doc-service", "error", buildErr)
+	stopBuildInfo, buildInfoErr := buildinfo.StartResponder("doc-service")
+	if buildInfoErr != nil {
+		logger.Warn("build-info responder unavailable", "executable", "doc-service", "error", buildInfoErr)
+	} else {
+		defer stopBuildInfo()
 	}
 
 	if err := verifyResultFilenameColumn(ctx); err != nil {
