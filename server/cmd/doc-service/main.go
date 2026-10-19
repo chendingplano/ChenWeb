@@ -21,7 +21,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
-	"github.com/chendingplano/deepdoc/server/cmd/buildinfo"
+	"github.com/chendingplano/deepdoc/server/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"

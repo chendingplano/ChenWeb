@@ -21,7 +21,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
-	"github.com/chendingplano/deepdoc/server/cmd/buildinfo"
+	"github.com/chendingplano/deepdoc/server/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
