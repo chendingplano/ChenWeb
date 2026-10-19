@@ -161,12 +161,12 @@ esac
 
 built=""
 DOC_PROMPT_REFS=/tmp/chenweb-doc-processor-prompt-refs.txt
+DOC_PROMPT_PREFIXES=/tmp/chenweb-excluded-prompt-prefixes.txt
 rm -f "$DOC_PROMPT_REFS"
-case " $SELECTED " in
-  *" doc-processor:"*)
-    python3 "$REPO/scripts/generate-doc-processor-prompt-defaults.py" --refs-out "$DOC_PROMPT_REFS"
-    ;;
-esac
+rm -f "$DOC_PROMPT_PREFIXES"
+python3 "$REPO/scripts/generate-doc-processor-prompt-defaults.py" \
+  --refs-out "$DOC_PROMPT_REFS" \
+  --exclude-prefixes-out "$DOC_PROMPT_PREFIXES"
 for pair in $SELECTED; do
   name="${pair%%:*}"; pkg="${pair##*:}"
   echo "==> building $name-linux  ($pkg)"
@@ -221,9 +221,19 @@ if [ -d "$REPO/prompts" ]; then
       [ -n "$prompt_name" ] && rm -f "$OUT/prompts/$prompt_name"
     done < "$DOC_PROMPT_REFS"
   fi
+  while IFS= read -r prefix; do
+    [ -n "$prefix" ] || continue
+    for prompt_path in "$OUT"/prompts/*; do
+      [ -f "$prompt_path" ] || continue
+      prompt_name="${prompt_path##*/}"
+      case "$prompt_name" in
+        "$prefix"*) rm -f "$prompt_path" ;;
+      esac
+    done
+  done < "$DOC_PROMPT_PREFIXES"
   prompt_count=$(ls -1 "$OUT/prompts" | wc -l | tr -d " ")
   if [ -f "$DOC_PROMPT_REFS" ]; then
-    echo "==> staged runtime prompts ($prompt_count files; configured doc-processor prompts excluded)"
+    echo "==> staged runtime prompts ($prompt_count files; configured prompt prefixes excluded)"
   else
     echo "==> staged runtime prompts ($prompt_count files)"
   fi

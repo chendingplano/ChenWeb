@@ -153,7 +153,7 @@
 	.lede{margin:5px 0 0;color:var(--build-muted);font-size:13px}
 	.refresh{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid var(--build-border);border-radius:9px;background:var(--build-card);color:var(--build-text);font-size:12px;font-family:inherit;font-weight:600;cursor:pointer}
 	.refresh:disabled{opacity:.65;cursor:default}
-	.spinning{animation:spin 1s linear infinite}
+	:global(.spinning){animation:spin 1s linear infinite}
 	.activity-panel,.state-panel{max-width:1440px;margin:0 auto 18px;border:1px solid var(--build-border);border-radius:14px;background:var(--build-card)}
 	.activity-panel{overflow:hidden}
 	.consistency{display:flex;align-items:center;gap:12px;max-width:1440px;margin:0 auto 18px;padding:15px 18px;border:1px solid var(--build-border);border-radius:12px}

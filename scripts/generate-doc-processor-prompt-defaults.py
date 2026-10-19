@@ -16,10 +16,16 @@ GENERATED = ROOT / "server/api/doc-processing/prompt_defaults_generated.go"
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--refs-out", required=True)
+    parser.add_argument("--exclude-prefixes-out", required=True)
     args = parser.parse_args()
 
     local_config = ROOT / "mise.local.toml"
     configured = tomllib.loads(local_config.read_text()).get("env", {}) if local_config.exists() else {}
+    app_local_config = ROOT / "config.local.toml"
+    app_local = tomllib.loads(app_local_config.read_text()) if app_local_config.exists() else {}
+    excluded_prefixes = app_local.get("frontend", {}).get("exclude_prompt_prefixes", [])
+    if not isinstance(excluded_prefixes, list) or any(not isinstance(prefix, str) or not prefix for prefix in excluded_prefixes):
+        raise ValueError("[frontend].exclude_prompt_prefixes must be a list of non-empty strings")
     prompt_dir = pathlib.Path(os.environ.get("PROMPT_DIR", configured.get("PROMPT_DIR", str(ROOT / "prompts"))))
     rows: list[tuple[str, str, str]] = []
     keys = set(configured) | {key for key in os.environ if key.endswith("_PROMPT")}
@@ -52,7 +58,10 @@ def main() -> None:
 
     refs = sorted({pathlib.Path(ref).name for _, ref, _ in rows})
     pathlib.Path(args.refs_out).write_text("\n".join(refs) + ("\n" if refs else ""))
+    prefixes_out = pathlib.Path(args.exclude_prefixes_out)
+    prefixes_out.write_text("\n".join(excluded_prefixes) + ("\n" if excluded_prefixes else ""))
     print(f"==> embedded {len(rows)} configured doc-processor prompt defaults")
+    print(f"==> excluding {len(excluded_prefixes)} prompt prefixes from config.local.toml")
 
 
 if __name__ == "__main__":
