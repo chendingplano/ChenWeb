@@ -11,6 +11,7 @@ import (
 	"time"
 
 	fileconverters "github.com/chendingplano/deepdoc/server/api/file-converters"
+	"github.com/chendingplano/deepdoc/server/cmd/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -18,6 +19,8 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/joho/godotenv"
 )
+
+var buildMetadataBase64 string
 
 func envOrDefault(key, fallback string) string {
 	v := strings.TrimSpace(os.Getenv(key))
@@ -68,6 +71,12 @@ func main() {
 	if err := config.RunMigrations(ctx, logger); err != nil {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
+	}
+	metadata, buildErr := buildinfo.RecordStartup(ctx, ApiTypes.ProjectDBHandle, "parser-result-converter", buildMetadataBase64)
+	logger.Info("build metadata", "build_number", metadata.BuildNumber, "build_name", metadata.BuildName,
+		"target_machine", metadata.TargetMachine, "os_info", metadata.OSInfo, "description", metadata.Description)
+	if buildErr != nil {
+		logger.Error("failed to record build activity", "executable", "parser-result-converter", "error", buildErr)
 	}
 
 	natsURL := envOrDefault("NATS_URL", "nats://127.0.0.1:4222")

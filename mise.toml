@@ -98,6 +98,13 @@ OUT=/tmp/chenweb-deploy
 REPO="$(git rev-parse --show-toplevel)"
 cd "$REPO"
 
+BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M%S)}"
+BUILD_NAME="${BUILD_NAME:-chenweb}"
+TARGET_MACHINE="${TARGET_MACHINE:-unknown}"
+OS_INFO="${OS_INFO:-linux/amd64}"
+BUILD_DESCRIPTION="${BUILD_DESCRIPTION:-}"
+BUILD_METADATA_B64="$(BUILD_NUMBER="$BUILD_NUMBER" BUILD_NAME="$BUILD_NAME" TARGET_MACHINE="$TARGET_MACHINE" OS_INFO="$OS_INFO" BUILD_DESCRIPTION="$BUILD_DESCRIPTION" python3 -c 'import base64, json, os; print(base64.b64encode(json.dumps({"build_number":os.environ["BUILD_NUMBER"],"build_name":os.environ["BUILD_NAME"],"target_machine":os.environ["TARGET_MACHINE"],"os_info":os.environ["OS_INFO"],"description":os.environ["BUILD_DESCRIPTION"]}, separators=(",", ":")).encode()).decode())')"
+
 # binary name -> cmd package
 ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin"
 SELECT="${BINS:-}"   # e.g. BINS="server,doc-processor"
@@ -136,8 +143,14 @@ esac
 for pair in $SELECTED; do
   name="${pair%%:*}"; pkg="${pair##*:}"
   echo "==> building $name-linux  ($pkg)"
+  ldflags="-s -w"
+  case "$name" in
+    server|doc-processor|parser-result-converter|doc-service)
+      ldflags="$ldflags -X main.buildMetadataBase64=$BUILD_METADATA_B64"
+      ;;
+  esac
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -buildvcs=false -ldflags "-s -w" \
+    go build -trimpath -buildvcs=false -ldflags "$ldflags" \
     -o "$OUT/$name-linux" "$pkg"
   ( cd "$OUT" && shasum -a 256 "$name-linux" > "$name-linux.sha256" )
   built="$built $name-linux"
@@ -248,6 +261,11 @@ else
 fi
 
 {
+  echo "build_number: $BUILD_NUMBER"
+  echo "build_name:  $BUILD_NAME"
+  echo "target_machine: $TARGET_MACHINE"
+  echo "os_info:     $OS_INFO"
+  echo "description: $BUILD_DESCRIPTION"
   echo "git_rev:   $(git rev-parse HEAD)"
   echo "git_short: $(git rev-parse --short HEAD)"
   echo "git_dirty: $([ -n "$(git status --porcelain)" ] && echo yes || echo no)"

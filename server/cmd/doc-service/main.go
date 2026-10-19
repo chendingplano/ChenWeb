@@ -21,6 +21,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/cmd/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -30,6 +31,8 @@ import (
 	"github.com/joho/godotenv"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
+
+var buildMetadataBase64 string
 
 const (
 	stagingWatchDebounce    = 500 * time.Millisecond
@@ -393,6 +396,12 @@ func main() {
 	if err := config.RunMigrations(ctx, logger); err != nil {
 		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
+	}
+	metadata, buildErr := buildinfo.RecordStartup(ctx, ApiTypes.ProjectDBHandle, "doc-service", buildMetadataBase64)
+	logger.Info("build metadata", "build_number", metadata.BuildNumber, "build_name", metadata.BuildName,
+		"target_machine", metadata.TargetMachine, "os_info", metadata.OSInfo, "description", metadata.Description)
+	if buildErr != nil {
+		logger.Error("failed to record build activity", "executable", "doc-service", "error", buildErr)
 	}
 
 	if err := verifyResultFilenameColumn(ctx); err != nil {

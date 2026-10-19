@@ -5,6 +5,16 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
 
+if [ "$#" -gt 4 ]; then
+  echo "usage: $0 [build_name [target_machine [os_info [description]]]" >&2
+  exit 2
+fi
+
+export BUILD_NAME="${1:-chenweb}"
+export TARGET_MACHINE="${2:-unknown}"
+export OS_INFO="${3:-linux/amd64}"
+export BUILD_DESCRIPTION="${4:-}"
+
 mise run build-server-linux
 
 timestamp=$(date +%Y%m%d-%H%M)
