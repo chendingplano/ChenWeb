@@ -36,9 +36,10 @@ All routes require `Authorization: Bearer $CLAUDE_CODE_GATEWAY_SECRET`.
 | Route | Purpose |
 | --- | --- |
 | `GET /health` | Liveness and workspace folder |
+| `GET /v1/models` | Models Claude Code offers this account, as its `/model` picker lists them (cached 10 minutes; no message is sent) |
 | `GET /v1/sessions?limit&offset` | Claude Code's sessions in the workspace |
 | `GET /v1/sessions/:id/messages?limit&offset` | A session's history from Claude Code's transcript (thinking omitted) |
-| `POST /v1/turns` `{sessionId?, message, permissionMode?}` | Runs a turn; NDJSON events: `session`, `text`, `tool_use`, `tool_result`, `permission_request`, `status`, `result`, `error` |
+| `POST /v1/turns` `{sessionId?, message, permissionMode?, model?}` | Runs a turn; NDJSON events: `session`, `text`, `tool_use`, `tool_result`, `permission_request`, `status`, `result`, `error` |
 | `POST /v1/sessions/:id/interrupt` | Interrupts the running turn |
 | `POST /v1/sessions/:id/permissions/:requestId` `{behavior, updatedInput?, message?}` | Answers a permission request |
 

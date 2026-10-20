@@ -5,7 +5,9 @@
 export const PERMISSION_MODES = ["default", "acceptEdits", "plan"] as const;
 export type FrontendPermissionMode = typeof PERMISSION_MODES[number];
 
-export interface TurnRequest { sessionId?: string; message: string; permissionMode?: FrontendPermissionMode }
+export interface TurnRequest { sessionId?: string; message: string; permissionMode?: FrontendPermissionMode; model?: string }
+/** A model the harness offers, as its own model picker shows it. */
+export interface ModelOption { value: string; resolvedModel?: string; displayName: string; description: string }
 export interface Decision { behavior: "allow" | "deny"; updatedInput?: Record<string, unknown>; message?: string }
 
 /** One event of a turn, written to ChenWeb as a line of NDJSON. */
@@ -31,6 +33,7 @@ export type Block =
 export interface HistoryMessage { uuid: string; role: "user" | "assistant"; parentToolUseId: string | null; blocks: Block[] }
 
 export const MAX_TOOL_RESULT_TEXT = 8 * 1024;
+const MODEL = /^[A-Za-z0-9._:\[\]-]{1,128}$/;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isSessionId = (value: unknown): value is string => typeof value === "string" && SESSION_ID.test(value);
 
@@ -39,7 +42,8 @@ export function validateTurnRequest(value: unknown): TurnRequest {
   if (typeof r !== "object" || typeof r.message !== "string" || !r.message.trim() || r.message.length > 100_000) throw new Error("invalid turn request");
   if (r.sessionId !== undefined && !isSessionId(r.sessionId)) throw new Error("invalid session id");
   if (r.permissionMode !== undefined && !PERMISSION_MODES.includes(r.permissionMode)) throw new Error("invalid permission mode");
-  return { sessionId: r.sessionId, message: r.message, permissionMode: r.permissionMode };
+  if (r.model !== undefined && (typeof r.model !== "string" || !MODEL.test(r.model))) throw new Error("invalid model");
+  return { sessionId: r.sessionId, message: r.message, permissionMode: r.permissionMode, model: r.model };
 }
 
 export function validateDecision(value: unknown): Decision {

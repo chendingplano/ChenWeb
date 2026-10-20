@@ -1615,6 +1615,8 @@
 	"chatter_01_start_chatting_type_to_use": "Start chatting. Type `/` to use slash commands.",
 	"chatter_01_ask_anything_use_for_commands": "Ask anything... Use '/' for commands.",
 	"chatter_01_select_ai_assistant": "Select AI Assistant",
+	"chatter_01_models_loading": "Loading models…",
+	"chatter_01_models_unavailable": "Models unavailable",
 	"chatter_01_select_model": "Select Model",
 	"chatter_01_add_attatchments": "Add attatchments",
 	"chatter_01_attach": "Attach",

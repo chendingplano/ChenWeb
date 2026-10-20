@@ -104,3 +104,27 @@ func TestLiveTurnsThroughChenWeb(t *testing.T) {
 	}
 	_ = os.Remove(target)
 }
+
+func TestLiveModelsThroughChenWeb(t *testing.T) {
+	url, secret := os.Getenv("HARNESS_GATEWAY_URL"), os.Getenv("HARNESS_GATEWAY_SECRET")
+	if url == "" || secret == "" {
+		t.Skip("HARNESS_GATEWAY_URL and HARNESS_GATEWAY_SECRET are required")
+	}
+	withUser(t, &ApiTypes.UserInfo{UserId: "admin", Roles: []string{"admin"}})
+	registry := NewRegistry()
+	_ = registry.Add(NewHost("claude-code", url, secret, nil))
+	e := echo.New()
+	RegisterRoutes(e.Group("/api/v1/harness-frontend"), NewHandler(registry))
+	rec := request(e, http.MethodGet, "/api/v1/harness-frontend/claude-code/models", "")
+	var body struct {
+		Models []struct {
+			Value, DisplayName string
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); rec.Code != http.StatusOK || err != nil || len(body.Models) == 0 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, model := range body.Models {
+		t.Logf("%s (%s)", model.DisplayName, model.Value)
+	}
+}

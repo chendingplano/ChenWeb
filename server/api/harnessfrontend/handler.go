@@ -18,6 +18,7 @@ import (
 var (
 	sessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	modelPattern     = regexp.MustCompile(`^[A-Za-z0-9._:\[\]-]{1,128}$`)
 	permissionModes  = []string{"default", "acceptEdits", "plan"}
 	// eventTypes are the protocol-v1 turn events relayed to the browser.
 	eventTypes = []string{"session", "text", "tool_use", "tool_result", "permission_request", "status", "result", "error"}
@@ -34,6 +35,7 @@ func NewHandler(registry *Registry) *Handler { return &Handler{registry: registr
 // such as Claude Code has shell and file access as the server's OS user.
 func RegisterRoutes(group *echo.Group, h *Handler) {
 	group.GET("", h.ListHarnesses)
+	group.GET("/:harness/models", h.Models)
 	group.GET("/:harness/sessions", h.ListSessions)
 	group.GET("/:harness/sessions/:sessionId/messages", h.SessionMessages)
 	group.POST("/:harness/turns", h.Turn)
@@ -105,6 +107,19 @@ func (h *Handler) passThrough(c echo.Context, rc ApiTypes.RequestContext, host *
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "harness unavailable"})
 	}
 	return c.JSONBlob(response.Status, response.Body)
+}
+
+// Models relays the harness's own model list. Each harness decides which
+// models it offers: Claude Code lists Anthropic models for the signed-in
+// account.
+func (h *Handler) Models(c echo.Context) error {
+	rc, host, ok := h.host(c, "20261020-618")
+	if !ok {
+		return nil
+	}
+	defer rc.Close()
+	response, err := host.Models(c.Request().Context())
+	return h.passThrough(c, rc, host, "models", response, err)
 }
 
 func (h *Handler) ListSessions(c echo.Context) error {
@@ -190,16 +205,18 @@ func (h *Handler) Turn(c echo.Context) error {
 		SessionID      string `json:"session_id"`
 		Message        string `json:"message"`
 		PermissionMode string `json:"permission_mode"`
+		Model          string `json:"model"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 512*1024))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.Message) == "" || len(body.Message) > 100_000 ||
 		(body.SessionID != "" && !sessionIDPattern.MatchString(body.SessionID)) ||
-		(body.PermissionMode != "" && !slices.Contains(permissionModes, body.PermissionMode)) {
+		(body.PermissionMode != "" && !slices.Contains(permissionModes, body.PermissionMode)) ||
+		(body.Model != "" && !modelPattern.MatchString(body.Model)) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid turn request"})
 	}
 	ctx := c.Request().Context()
-	stream, refused, err := host.Turn(ctx, TurnRequest{SessionID: body.SessionID, Message: body.Message, PermissionMode: body.PermissionMode})
+	stream, refused, err := host.Turn(ctx, TurnRequest{SessionID: body.SessionID, Message: body.Message, PermissionMode: body.PermissionMode, Model: body.Model})
 	if err != nil {
 		logger.Error("harness turn start failed", "harness", host.Name(), "session_id", body.SessionID, "error", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "harness unavailable"})
@@ -208,7 +225,7 @@ func (h *Handler) Turn(c echo.Context) error {
 		return c.JSONBlob(refused.Status, refused.Body)
 	}
 	defer stream.Close()
-	logger.Info("harness turn started", "harness", host.Name(), "session_id", body.SessionID)
+	logger.Info("harness turn started", "harness", host.Name(), "session_id", body.SessionID, "model", body.Model)
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream; charset=utf-8")
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	c.Response().Header().Set("X-Accel-Buffering", "no")

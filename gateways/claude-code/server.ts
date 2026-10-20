@@ -1,6 +1,7 @@
 import { getSessionInfo, getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
-import { toHistoryMessage, isSessionId, validateDecision, validateTurnRequest, type HarnessEvent } from "./protocol.ts";
-import { LiveSession, SessionBusyError, type SessionEnvironment } from "./session.ts";
+import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { toHistoryMessage, isSessionId, validateDecision, validateTurnRequest, type HarnessEvent, type ModelOption } from "./protocol.ts";
+import { LiveSession, SessionBusyError, claudeCodeOptions, type SessionEnvironment } from "./session.ts";
 
 // Harness front-end protocol v1 for Claude Code. ChenWeb is the only client;
 // every route requires the gateway secret.
@@ -9,7 +10,25 @@ export interface SessionStoreApi {
   getSessionInfo: typeof getSessionInfo;
   getSessionMessages: typeof getSessionMessages;
 }
-export interface GatewayOptions { secret: string; environment: SessionEnvironment; sessions?: SessionStoreApi }
+export interface GatewayOptions { secret: string; environment: SessionEnvironment; sessions?: SessionStoreApi; models?: () => Promise<ModelOption[]> }
+
+/**
+ * The models Claude Code offers this account, as its /model picker lists them.
+ * It starts Claude Code, asks, and stops it again; no message is sent.
+ */
+export async function claudeCodeModels(env: SessionEnvironment): Promise<ModelOption[]> {
+  const abort = new AbortController();
+  async function* idle(): AsyncGenerator<SDKUserMessage> { await new Promise((resolve) => abort.signal.addEventListener("abort", resolve)); }
+  const probe = env.query({ prompt: idle(), options: { ...claudeCodeOptions(env), abortController: abort } });
+  try {
+    const models = await probe.supportedModels();
+    return models.map((m) => ({ value: m.value, resolvedModel: m.resolvedModel, displayName: m.displayName, description: m.description }));
+  } finally {
+    abort.abort();
+  }
+}
+
+const MODELS_TTL_MS = 10 * 60_000;
 
 const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 const intParam = (url: URL, name: string, fallback: number, max: number) => {
@@ -21,13 +40,15 @@ export function createGatewayHandler(options: GatewayOptions): (request: Request
   const env = options.environment;
   const store = options.sessions ?? { listSessions, getSessionInfo, getSessionMessages };
   const live = new Map<string, LiveSession>();
+  const listModels = options.models ?? (() => claudeCodeModels(env));
+  let models: { list: ModelOption[]; expires: number } | undefined;
 
   // Only sessions Claude Code lists for the workspace folder can be read or resumed.
   const known = async (id: string) => isSessionId(id) && (live.has(id) || (await store.getSessionInfo(id, { dir: env.cwd })) !== undefined);
 
-  const openSession = (resume: string | undefined, permissionMode: "default" | "acceptEdits" | "plan") => {
+  const openSession = (resume: string | undefined, permissionMode: "default" | "acceptEdits" | "plan", model: string | undefined) => {
     const session: LiveSession = new LiveSession(env, {
-      resume, permissionMode,
+      resume, permissionMode, model,
       onId: (id) => live.set(id, session),
       onClose: () => { for (const [id, s] of live) if (s === session) live.delete(id); },
     });
@@ -40,6 +61,13 @@ export function createGatewayHandler(options: GatewayOptions): (request: Request
     const url = new URL(request.url);
     const path = url.pathname;
     if (request.method === "GET" && path === "/health") return json(200, { status: "ok", harness: "claude-code", cwd: env.cwd });
+
+    if (request.method === "GET" && path === "/v1/models") {
+      if (!models || models.expires < Date.now()) {
+        try { models = { list: await listModels(), expires: Date.now() + MODELS_TTL_MS }; } catch { return json(502, { error: "Claude Code did not list its models" }); }
+      }
+      return json(200, { models: models.list });
+    }
 
     if (request.method === "GET" && path === "/v1/sessions") {
       const sessions = await store.listSessions({ dir: env.cwd, limit: intParam(url, "limit", 50, 200), offset: intParam(url, "offset", 0, 100_000) });
@@ -72,9 +100,9 @@ export function createGatewayHandler(options: GatewayOptions): (request: Request
     let session = turn.sessionId ? live.get(turn.sessionId) : undefined;
     if (turn.sessionId && !session) {
       if (!(await known(turn.sessionId))) return json(404, { error: "session not found" });
-      session = openSession(turn.sessionId, turn.permissionMode ?? "default");
+      session = openSession(turn.sessionId, turn.permissionMode ?? "default", turn.model);
     }
-    session ??= openSession(undefined, turn.permissionMode ?? "default");
+    session ??= openSession(undefined, turn.permissionMode ?? "default", turn.model);
     if (session.busy) return json(409, { error: "a turn is already running in this session" });
 
     const encoder = new TextEncoder();
@@ -86,7 +114,7 @@ export function createGatewayHandler(options: GatewayOptions): (request: Request
       cancel() { void activeSession.interrupt(); },
     });
     const emit = (event: HarnessEvent) => { try { controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); } catch { /* disconnected client */ } };
-    activeSession.runTurn(turn.message, turn.permissionMode, emit)
+    activeSession.runTurn(turn.message, turn.permissionMode, turn.model, emit)
       .catch((error) => emit({ type: "error", message: error instanceof SessionBusyError ? "A turn is already running." : "The turn could not start." }))
       .finally(() => { try { controller.close(); } catch { /* already closed */ } });
     return new Response(stream, { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" } });

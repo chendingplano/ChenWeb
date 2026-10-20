@@ -35,6 +35,17 @@ When the harness asks to use a tool, the turn SHALL emit `permission_request` an
 - **WHEN** Claude Code calls `AskUserQuestion`
 - **THEN** a `permission_request` with the questions is emitted, and an allow decision whose `updatedInput` carries the answers is passed to Claude Code
 
+### Requirement: The harness lists its own models
+The gateway SHALL list the models the harness offers the signed-in account, as the harness's own model picker does (for Claude Code, `supportedModels()`: aliases such as `default`, `opus`, `sonnet`, plus pinned IDs), without sending a message. A turn MAY name a model from that list. A new session SHALL start on it, and a live session on another model SHALL switch to it as `/model` does. The chat page's model menu SHALL show this list when the selected agent is harness-backed, and keep the configured list for other agents.
+
+#### Scenario: Claude Code selected
+- **WHEN** the user selects Claude Code in the chat page's agent menu
+- **THEN** the model menu lists the Anthropic models Claude Code offers, labelled with its display names
+
+#### Scenario: Switching model mid-session
+- **WHEN** a turn names `sonnet` on a live session that was on `opus`
+- **THEN** the session continues on `sonnet` with its history intact
+
 ### Requirement: Admin-only front-end routes
 The ChenWeb routes under `/api/v1/harness-frontend` SHALL require an admin or root user, and SHALL relay turn events as SSE without storing them.
 

@@ -7,6 +7,7 @@
 		type ChatterSettings
 	} from '$lib/services/chatterService';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+	import { HARNESS_BY_AGENT, listHarnessModels } from '$lib/services/harnessFrontendService';
 
 	import BotIcon from '@lucide/svelte/icons/bot';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -16,6 +17,8 @@
 	import SendHorizontalIcon from '@lucide/svelte/icons/send-horizontal';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+
+	type ModelChoice = { value: string; label: string; description?: string };
 
 	type ChatSession = {
 		id: string;
@@ -47,6 +50,19 @@
 	let selectedModel = $state(defaultSettings.models[0]);
 	let selectedResult = $state(defaultSettings.resultOptions[0]);
 	let selectedSkill = $state(defaultSettings.skills[1]);
+
+	// Each harness decides which models it offers, so a harness-backed agent
+	// lists the harness's own models (Claude Code: the Anthropic models of the
+	// signed-in account). Other agents keep the configured list.
+	let harnessModels = $state<Record<string, ModelChoice[]>>({});
+	let modelsStatus = $state<'ready' | 'loading' | 'error'>('ready');
+	let modelsRequest = 0;
+	const selectedHarness = $derived(HARNESS_BY_AGENT[selectedAgent]);
+	const modelChoices = $derived<ModelChoice[]>(
+		selectedHarness
+			? (harnessModels[selectedHarness] ?? [])
+			: settings.models.map((model) => ({ value: model, label: model }))
+	);
 
 	let infoWidth = $state(360);
 	const infoMin = 280;
@@ -131,11 +147,44 @@
 				...res.settings
 			};
 			selectedAgent = settings.agents[0] ?? selectedAgent;
-			selectedModel = settings.models[0] ?? selectedModel;
 			selectedResult = settings.resultOptions[0] ?? selectedResult;
 			selectedSkill = settings.skills[0] ?? selectedSkill;
 		} catch {
 			settings = defaultSettings;
+		}
+		await loadModels();
+	}
+
+	function selectAgent(agent: string) {
+		selectedAgent = agent;
+		void loadModels();
+	}
+
+	// Fills the model menu for the selected agent and keeps the selection valid.
+	async function loadModels() {
+		const harness = HARNESS_BY_AGENT[selectedAgent];
+		const request = ++modelsRequest;
+		if (harness && !harnessModels[harness]) {
+			modelsStatus = 'loading';
+			try {
+				const models = await listHarnessModels(harness);
+				harnessModels = {
+					...harnessModels,
+					[harness]: models.map((model) => ({
+						value: model.value,
+						label: model.displayName,
+						description: model.description
+					}))
+				};
+			} catch {
+				if (request === modelsRequest) modelsStatus = 'error';
+				return;
+			}
+		}
+		if (request !== modelsRequest) return;
+		modelsStatus = 'ready';
+		if (!modelChoices.some((choice) => choice.value === selectedModel)) {
+			selectedModel = modelChoices[0]?.value ?? '';
 		}
 	}
 
@@ -398,7 +447,7 @@
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content>
 						{#each settings.agents as agent}
-							<DropdownMenu.Item onclick={() => (selectedAgent = agent)}>{agent}</DropdownMenu.Item>
+							<DropdownMenu.Item onclick={() => selectAgent(agent)}>{agent}</DropdownMenu.Item>
 						{/each}
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
@@ -409,9 +458,15 @@
 					style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
 					title={m.chatter_01_select_model()}
 				>
-					{#each settings.models as model}
-						<option value={model}>{model}</option>
-					{/each}
+					{#if modelsStatus === 'loading'}
+						<option value={selectedModel} disabled>{m.chatter_01_models_loading()}</option>
+					{:else if modelsStatus === 'error'}
+						<option value={selectedModel} disabled>{m.chatter_01_models_unavailable()}</option>
+					{:else}
+						{#each modelChoices as choice (choice.value)}
+							<option value={choice.value} title={choice.description}>{choice.label}</option>
+						{/each}
+					{/if}
 				</select>
 
 				<DropdownMenu.Root>

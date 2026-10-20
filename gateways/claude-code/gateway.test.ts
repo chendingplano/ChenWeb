@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { CanUseTool, Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { claudeCodeEnv, createGatewayHandler, type SessionStoreApi } from "./server.ts";
 import type { QueryFn } from "./session.ts";
+import type { ModelOption } from "./protocol.ts";
 
 const SECRET = "gateway-secret";
 const SESSION = "11111111-2222-3333-4444-555555555555";
@@ -14,6 +15,7 @@ function fakeClaude(step: Step) {
   const calls: Options[] = [];
   const received: string[] = [];
   const modes: string[] = [];
+  const models: string[] = [];
   let interrupted = false;
   const query = ((params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
     calls.push(params.options);
@@ -32,9 +34,10 @@ function fakeClaude(step: Step) {
     return Object.assign(iterator, {
       interrupt: async () => { interrupted = true; return undefined; },
       setPermissionMode: async (mode: string) => { modes.push(mode); },
+      setModel: async (model: string) => { models.push(model); },
     });
   }) as unknown as QueryFn;
-  return { query, calls, received, modes, wasInterrupted: () => interrupted };
+  return { query, calls, received, modes, models, wasInterrupted: () => interrupted };
 }
 
 const result = (status = "success", extra: Record<string, unknown> = {}) => ({ type: "result", subtype: status, is_error: status !== "success", session_id: SESSION, duration_ms: 12, num_turns: 1, total_cost_usd: 0.01, result: "done", usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, ...extra }) as unknown as SDKMessage;
@@ -50,9 +53,9 @@ const store = (sessions: string[] = [SESSION]): SessionStoreApi => ({
   ]) as unknown as SessionStoreApi["getSessionMessages"],
 });
 
-function gateway(step: Step, options: { sessions?: string[]; idleMs?: number } = {}) {
+function gateway(step: Step, options: { sessions?: string[]; idleMs?: number; models?: () => Promise<ModelOption[]> } = {}) {
   const claude = fakeClaude(step);
-  const handler = createGatewayHandler({ secret: SECRET, sessions: store(options.sessions), environment: { query: claude.query, cwd: "/work", env: { PATH: "/bin" }, idleMs: options.idleMs ?? 60_000 } });
+  const handler = createGatewayHandler({ secret: SECRET, sessions: store(options.sessions), models: options.models, environment: { query: claude.query, cwd: "/work", env: { PATH: "/bin" }, idleMs: options.idleMs ?? 60_000 } });
   const call = (method: string, path: string, body?: unknown, secret = SECRET) =>
     handler(new Request(`http://gateway.test${path}`, { method, headers: { authorization: `Bearer ${secret}` }, body: body === undefined ? undefined : JSON.stringify(body) }));
   const events = async (response: Response) => (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
@@ -157,6 +160,33 @@ describe("turns", () => {
     await events(await call("POST", "/v1/turns", { sessionId: SESSION, message: "later" }));
     expect(claude.calls).toHaveLength(2);
     expect(claude.calls[1]!.resume).toBe(SESSION);
+  });
+});
+
+describe("models", () => {
+  test("lists Claude Code's own models and caches them", async () => {
+    let asked = 0;
+    const list: ModelOption[] = [{ value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5" }, { value: "sonnet", resolvedModel: "claude-sonnet-5-5", displayName: "Sonnet 5.5", description: "Efficient" }];
+    const { call } = gateway(answer, { models: async () => { asked += 1; return list; } });
+    expect(await (await call("GET", "/v1/models")).json()).toEqual({ models: list });
+    await call("GET", "/v1/models");
+    expect(asked).toBe(1);
+  });
+
+  test("reports a failed model listing", async () => {
+    const { call } = gateway(answer, { models: async () => { throw new Error("no login"); } });
+    expect((await call("GET", "/v1/models")).status).toBe(502);
+  });
+
+  test("a turn starts on the chosen model and a later turn switches it like /model", async () => {
+    const { claude, call, events } = gateway(answer);
+    await events(await call("POST", "/v1/turns", { message: "first", model: "sonnet" }));
+    expect(claude.calls[0]!.model).toBe("sonnet");
+    await events(await call("POST", "/v1/turns", { sessionId: SESSION, message: "same model", model: "sonnet" }));
+    expect(claude.models).toEqual([]);
+    await events(await call("POST", "/v1/turns", { sessionId: SESSION, message: "switch", model: "claude-opus-4-8" }));
+    expect(claude.models).toEqual(["claude-opus-4-8"]);
+    expect((await call("POST", "/v1/turns", { message: "x", model: "bad model!" })).status).toBe(400);
   });
 });
 

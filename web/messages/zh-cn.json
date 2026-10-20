@@ -1615,6 +1615,8 @@
 	"chatter_01_start_chatting_type_to_use": "开始聊天。输入 `/` 使用斜杠命令。",
 	"chatter_01_ask_anything_use_for_commands": "随便问… 输入“/”使用命令。",
 	"chatter_01_select_ai_assistant": "选择 AI 助手",
+	"chatter_01_models_loading": "正在加载模型…",
+	"chatter_01_models_unavailable": "模型列表不可用",
 	"chatter_01_select_model": "选择模型",
 	"chatter_01_add_attatchments": "添加附件",
 	"chatter_01_attach": "附件",

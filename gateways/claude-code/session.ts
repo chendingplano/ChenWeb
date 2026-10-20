@@ -14,6 +14,17 @@ export interface SessionEnvironment {
   idleMs: number;
 }
 
+/** Claude Code's own options for a session, as a terminal or IDE would start it. */
+export function claudeCodeOptions(env: SessionEnvironment) {
+  return {
+    cwd: env.cwd,
+    env: env.env,
+    systemPrompt: { type: "preset", preset: "claude_code" } as const,
+    tools: { type: "preset", preset: "claude_code" } as const,
+    settingSources: ["user", "project", "local"] as ("user" | "project" | "local")[],
+  };
+}
+
 export class SessionBusyError extends Error {}
 export class SessionClosedError extends Error {}
 
@@ -51,26 +62,25 @@ export class LiveSession {
   #turn?: Turn;
   #pending = new Map<string, { input: Record<string, unknown>; resolve: (result: PermissionResult) => void }>();
   #mode: FrontendPermissionMode;
+  #model?: string;
   #idle?: ReturnType<typeof setTimeout>;
   #closed = false;
   #onId: (id: string) => void;
   #onClose: () => void;
 
-  constructor(env: SessionEnvironment, options: { resume?: string; permissionMode: FrontendPermissionMode; onId: (id: string) => void; onClose: () => void }) {
+  constructor(env: SessionEnvironment, options: { resume?: string; permissionMode: FrontendPermissionMode; model?: string; onId: (id: string) => void; onClose: () => void }) {
     this.#env = env;
     this.#mode = options.permissionMode;
+    this.#model = options.model;
     this.#onId = options.onId;
     this.#onClose = options.onClose;
     this.id = options.resume;
     this.#query = env.query({ prompt: this.#input, options: {
-      cwd: env.cwd,
-      env: env.env,
-      abortController: this.#abort,
       // Claude Code as it runs in a terminal or IDE: its own prompt, tools and settings.
-      systemPrompt: { type: "preset", preset: "claude_code" },
-      tools: { type: "preset", preset: "claude_code" },
-      settingSources: ["user", "project", "local"],
+      ...claudeCodeOptions(env),
+      abortController: this.#abort,
       permissionMode: options.permissionMode,
+      ...(options.model ? { model: options.model } : {}),
       canUseTool: this.#canUseTool,
       includePartialMessages: true,
       ...(options.resume ? { resume: options.resume } : {}),
@@ -82,7 +92,7 @@ export class LiveSession {
   get closed(): boolean { return this.#closed; }
 
   /** Sends one message; resolves when Claude Code reports the turn's result. */
-  async runTurn(message: string, permissionMode: FrontendPermissionMode | undefined, emit: Emit): Promise<void> {
+  async runTurn(message: string, permissionMode: FrontendPermissionMode | undefined, model: string | undefined, emit: Emit): Promise<void> {
     if (this.#closed) throw new SessionClosedError("session is closed");
     if (this.#turn) throw new SessionBusyError("a turn is already running");
     clearTimeout(this.#idle);
@@ -90,6 +100,11 @@ export class LiveSession {
     if (permissionMode && permissionMode !== this.#mode) {
       this.#mode = permissionMode;
       await this.#query.setPermissionMode(permissionMode);
+    }
+    // Like /model in a terminal: the session continues on the chosen model.
+    if (model && model !== this.#model) {
+      this.#model = model;
+      await this.#query.setModel(model);
     }
     this.#input.push(message);
     return done;

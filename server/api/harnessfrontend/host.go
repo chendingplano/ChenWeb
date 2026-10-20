@@ -44,6 +44,9 @@ type TurnRequest struct {
 	SessionID      string `json:"sessionId,omitempty"`
 	Message        string `json:"message"`
 	PermissionMode string `json:"permissionMode,omitempty"`
+	// Model is a value from the harness's own model list; empty keeps the
+	// harness's default (or the session's current model).
+	Model string `json:"model,omitempty"`
 }
 
 // Decision answers a permission request. UpdatedInput carries changed tool
@@ -100,6 +103,11 @@ func (h *Host) relay(ctx context.Context, method, path string, body any) (Respon
 		return Response{}, fmt.Errorf("harness %s reply is too large", h.name)
 	}
 	return Response{Status: response.StatusCode, Body: data}, nil
+}
+
+// Models lists the models the harness offers, as its own model picker does.
+func (h *Host) Models(ctx context.Context) (Response, error) {
+	return h.relay(ctx, http.MethodGet, "/v1/models", nil)
 }
 
 func (h *Host) ListSessions(ctx context.Context, limit, offset int) (Response, error) {

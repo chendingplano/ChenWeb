@@ -45,6 +45,8 @@ func fakeGateway(t *testing.T) (*echo.Echo, *[]gatewayCall) {
 			_, _ = io.WriteString(w, `{"type":"text","text":"Hello"}`+"\n")
 			_, _ = io.WriteString(w, `{"type":"future_event","x":1}`+"\n")
 			_, _ = io.WriteString(w, `{"type":"result","status":"completed","sessionId":"`+session+`"}`+"\n")
+		case r.URL.Path == "/v1/models":
+			_, _ = io.WriteString(w, `{"models":[{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5","description":"Efficient"}]}`)
 		case r.URL.Path == "/v1/sessions":
 			_, _ = io.WriteString(w, `{"sessions":[{"sessionId":"`+session+`","title":"Fix the build"}]}`)
 		default:
@@ -87,7 +89,7 @@ func TestRoutesAreAdminOnly(t *testing.T) {
 func TestTurnRelaysHarnessEventsAsSSE(t *testing.T) {
 	e, calls := fakeGateway(t)
 	withUser(t, &ApiTypes.UserInfo{UserId: "admin", Roles: []string{"admin"}})
-	rec := request(e, http.MethodPost, "/api/v1/harness-frontend/claude-code/turns", `{"message":"hi","session_id":"`+session+`","permission_mode":"acceptEdits"}`)
+	rec := request(e, http.MethodPost, "/api/v1/harness-frontend/claude-code/turns", `{"message":"hi","session_id":"`+session+`","permission_mode":"acceptEdits","model":"sonnet"}`)
 	if rec.Code != http.StatusOK || rec.Header().Get(echo.HeaderContentType) != "text/event-stream; charset=utf-8" {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -101,7 +103,7 @@ func TestTurnRelaysHarnessEventsAsSSE(t *testing.T) {
 		t.Fatal("unknown event type relayed")
 	}
 	call := (*calls)[0]
-	if call.path != "/v1/turns" || call.auth != "Bearer gateway-secret" || call.body["message"] != "hi" || call.body["sessionId"] != session || call.body["permissionMode"] != "acceptEdits" {
+	if call.path != "/v1/turns" || call.auth != "Bearer gateway-secret" || call.body["message"] != "hi" || call.body["sessionId"] != session || call.body["permissionMode"] != "acceptEdits" || call.body["model"] != "sonnet" {
 		t.Fatalf("gateway call %+v", call)
 	}
 }
@@ -109,7 +111,7 @@ func TestTurnRelaysHarnessEventsAsSSE(t *testing.T) {
 func TestTurnValidatesInputAndRelaysGatewayRefusal(t *testing.T) {
 	e, calls := fakeGateway(t)
 	withUser(t, &ApiTypes.UserInfo{UserId: "admin", IsOwner: true})
-	for _, body := range []string{`{"message":""}`, `{"message":"hi","session_id":"../x"}`, `{"message":"hi","permission_mode":"bypassPermissions"}`, `{"message":"hi","extra":1}`} {
+	for _, body := range []string{`{"message":""}`, `{"message":"hi","session_id":"../x"}`, `{"message":"hi","permission_mode":"bypassPermissions"}`, `{"message":"hi","extra":1}`, `{"message":"hi","model":"bad model!"}`} {
 		if rec := request(e, http.MethodPost, "/api/v1/harness-frontend/claude-code/turns", body); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s status=%d", body, rec.Code)
 		}
@@ -129,6 +131,9 @@ func TestTurnValidatesInputAndRelaysGatewayRefusal(t *testing.T) {
 func TestSessionsInterruptAndDecisionsReachTheGateway(t *testing.T) {
 	e, calls := fakeGateway(t)
 	withUser(t, &ApiTypes.UserInfo{UserId: "admin", Admin: true})
+	if rec := request(e, http.MethodGet, "/api/v1/harness-frontend/claude-code/models", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sonnet 5.5") {
+		t.Fatalf("models status=%d body=%s", rec.Code, rec.Body.String())
+	}
 	if rec := request(e, http.MethodGet, "/api/v1/harness-frontend/claude-code/sessions?limit=5", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Fix the build") {
 		t.Fatalf("sessions status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -149,7 +154,7 @@ func TestSessionsInterruptAndDecisionsReachTheGateway(t *testing.T) {
 	for _, call := range *calls {
 		paths = append(paths, call.method+" "+call.path)
 	}
-	want := "GET /v1/sessions?limit=5&offset=0,GET /v1/sessions/" + session + "/messages?limit=200&offset=0,POST /v1/sessions/" + session + "/interrupt,POST /v1/sessions/" + session + "/permissions/toolu_q1"
+	want := "GET /v1/models,GET /v1/sessions?limit=5&offset=0,GET /v1/sessions/" + session + "/messages?limit=200&offset=0,POST /v1/sessions/" + session + "/interrupt,POST /v1/sessions/" + session + "/permissions/toolu_q1"
 	if strings.Join(paths, ",") != want {
 		t.Fatalf("gateway paths\n got %s\nwant %s", strings.Join(paths, ","), want)
 	}
