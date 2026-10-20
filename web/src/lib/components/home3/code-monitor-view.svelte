@@ -4,12 +4,12 @@
 	import type { EChartsOption } from 'echarts';
 	import { init, use } from 'echarts/core';
 	import { BarChart } from 'echarts/charts';
-	import { AriaComponent, GridComponent, TooltipComponent } from 'echarts/components';
+	import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import { m } from '$lib/paraglide/messages.js';
 	import { createLatestCodeMonitorLoader, type CodeMonitorProject, type CodeMonitorRange } from './code-monitor-client';
 
-	use([BarChart, AriaComponent, GridComponent, TooltipComponent, CanvasRenderer]);
+	use([BarChart, AriaComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 	const ranges: { value: CodeMonitorRange; label: () => string }[] = [
@@ -47,32 +47,29 @@
 		loading = false;
 	}
 
-	function chartOption(project: CodeMonitorProject, metric: 'total_lines' | 'frontend_lines_delta' | 'backend_lines_delta', name: string): EChartsOption {
+	type Metric = 'total_lines' | 'frontend_lines' | 'backend_lines';
+	type DeltaMetric = 'total_lines_delta' | 'frontend_lines_delta' | 'backend_lines_delta';
+
+	function chartOption(project: CodeMonitorProject, metric: Metric, deltaMetric: DeltaMetric, name: string): EChartsOption {
 		const rows = [...project.rows].sort((a, b) => a.collection_date.localeCompare(b.collection_date));
 		const dates = rows.map((row) => row.collection_date);
-		const values = rows.map((row) => row[metric]);
+		const totals = rows.map((row) => row[metric]);
+		const deltas = rows.map((row) => row[deltaMetric]);
 		return {
 			backgroundColor: 'transparent',
 			aria: { enabled: true, label: { description: m.code_monitor_chart_description({ metric: name, project: project.project_path }) } },
 			textStyle: { color: colors.muted },
 			tooltip: { trigger: 'axis' },
-			grid: { left: 48, right: 16, top: 36, bottom: 36 },
+			legend: { data: [m.code_monitor_total(), m.code_monitor_delta()], textStyle: { color: colors.muted }, top: 0 },
+			grid: { left: 48, right: 48, top: 42, bottom: 36 },
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
-			yAxis: { type: 'value', position: 'left', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+			yAxis: [
+				{ type: 'value', position: 'left', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+				{ type: 'value', position: 'right', axisLabel: { color: colors.muted }, splitLine: { show: false } }
+			],
 			series: [
-				{
-					name,
-					type: 'bar',
-					data: values,
-					itemStyle: {
-						color: metric === 'total_lines'
-							? colors.accent
-							: metric === 'frontend_lines_delta'
-								? darkMode ? '#34D399' : '#059669'
-								: darkMode ? '#FBBF24' : '#D97706',
-						opacity: 0.8
-					}
-				}
+				{ name: m.code_monitor_total(), type: 'bar', yAxisIndex: 0, data: totals, itemStyle: { color: colors.accent, opacity: 0.8 } },
+				{ name: m.code_monitor_delta(), type: 'bar', yAxisIndex: 1, data: deltas, itemStyle: { color: darkMode ? '#34D399' : '#059669', opacity: 0.85 } }
 			]
 		};
 	}
@@ -107,15 +104,15 @@
 					<div class="charts">
 						<article>
 							<h3>{m.code_monitor_total_lines()}</h3>
-							<Chart {init} options={chartOption(project, 'total_lines', m.code_monitor_total_lines())} style="height:260px;width:100%" />
+							<Chart {init} options={chartOption(project, 'total_lines', 'total_lines_delta', m.code_monitor_total_lines())} style="height:260px;width:100%" />
 						</article>
 						<article>
 							<h3>{m.code_monitor_frontend_delta()}</h3>
-							<Chart {init} options={chartOption(project, 'frontend_lines_delta', m.code_monitor_frontend_delta())} style="height:260px;width:100%" />
+							<Chart {init} options={chartOption(project, 'frontend_lines', 'frontend_lines_delta', m.code_monitor_frontend_delta())} style="height:260px;width:100%" />
 						</article>
 						<article>
 							<h3>{m.code_monitor_backend_delta()}</h3>
-							<Chart {init} options={chartOption(project, 'backend_lines_delta', m.code_monitor_backend_delta())} style="height:260px;width:100%" />
+							<Chart {init} options={chartOption(project, 'backend_lines', 'backend_lines_delta', m.code_monitor_backend_delta())} style="height:260px;width:100%" />
 						</article>
 					</div>
 				</section>

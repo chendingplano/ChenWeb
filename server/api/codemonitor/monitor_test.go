@@ -101,9 +101,9 @@ func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T)
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = old }()
 
-	mock.ExpectQuery(`(?s)WITH.*LAG\(frontend_lines\).*WHERE.*collection_date BETWEEN`).
-		WillReturnRows(sqlmock.NewRows([]string{"collection_date", "total_lines", "frontend_lines_delta", "backend_lines_delta"}).
-			AddRow(time.Now().Format("2006-01-02"), 150, 2, -1))
+	mock.ExpectQuery(`(?s)WITH.*LAG\(total_lines\).*LAG\(frontend_lines\).*WHERE.*collection_date BETWEEN`).
+		WillReturnRows(sqlmock.NewRows([]string{"collection_date", "total_lines", "total_lines_delta", "frontend_lines", "frontend_lines_delta", "backend_lines", "backend_lines_delta"}).
+			AddRow(time.Now().Format("2006-01-02"), 150, 3, 50, 2, 100, -1))
 	e := echo.New()
 	req := httptest.NewRequest("GET", "/code-monitor?range=today", nil)
 	rec := httptest.NewRecorder()
@@ -120,7 +120,10 @@ func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T)
 			ProjectPath string `json:"project_path"`
 			Rows        []struct {
 				TotalLines         int `json:"total_lines"`
+				TotalLinesDelta    int `json:"total_lines_delta"`
+				FrontendLines      int `json:"frontend_lines"`
 				FrontendLinesDelta int `json:"frontend_lines_delta"`
+				BackendLines       int `json:"backend_lines"`
 				BackendLinesDelta  int `json:"backend_lines_delta"`
 			} `json:"rows"`
 		} `json:"projects"`
@@ -131,7 +134,7 @@ func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T)
 	if len(got.Projects) != 1 || got.Projects[0].ProjectPath != "server" {
 		t.Fatalf("projects = %s", rec.Body.String())
 	}
-	if len(got.Projects[0].Rows) != 1 || got.Projects[0].Rows[0].TotalLines != 150 || got.Projects[0].Rows[0].FrontendLinesDelta != 2 || got.Projects[0].Rows[0].BackendLinesDelta != -1 {
+	if len(got.Projects[0].Rows) != 1 || got.Projects[0].Rows[0].TotalLines != 150 || got.Projects[0].Rows[0].TotalLinesDelta != 3 || got.Projects[0].Rows[0].FrontendLines != 50 || got.Projects[0].Rows[0].FrontendLinesDelta != 2 || got.Projects[0].Rows[0].BackendLines != 100 || got.Projects[0].Rows[0].BackendLinesDelta != -1 {
 		t.Fatalf("deltas = %s", rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

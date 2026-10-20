@@ -204,7 +204,10 @@ func Start(ctx context.Context, store Store, workspaceRoot string, projects []st
 type row struct {
 	Date               string `json:"collection_date"`
 	TotalLines         int    `json:"total_lines"`
+	TotalLinesDelta    int    `json:"total_lines_delta"`
+	FrontendLines      int    `json:"frontend_lines"`
 	FrontendLinesDelta int    `json:"frontend_lines_delta"`
+	BackendLines       int    `json:"backend_lines"`
 	BackendLinesDelta  int    `json:"backend_lines_delta"`
 }
 type projectRows struct {
@@ -265,18 +268,19 @@ func Handler(projects []string, loc *time.Location) echo.HandlerFunc {
 			p := projectRows{ProjectPath: project, Rows: []row{}}
 			rows, err := db.QueryContext(c.Request().Context(), `WITH history AS (
     SELECT collection_date,total_lines,frontend_lines,backend_lines,
+           total_lines-LAG(total_lines) OVER (PARTITION BY project_path ORDER BY collection_date) AS total_lines_delta,
            frontend_lines-LAG(frontend_lines) OVER (PARTITION BY project_path ORDER BY collection_date) AS frontend_lines_delta,
            backend_lines-LAG(backend_lines) OVER (PARTITION BY project_path ORDER BY collection_date) AS backend_lines_delta
     FROM kb.code_monitor WHERE project_path=$1
 )
-SELECT collection_date::text,total_lines,COALESCE(frontend_lines_delta,0),COALESCE(backend_lines_delta,0)
+SELECT collection_date::text,total_lines,COALESCE(total_lines_delta,0),frontend_lines,COALESCE(frontend_lines_delta,0),backend_lines,COALESCE(backend_lines_delta,0)
 FROM history WHERE collection_date BETWEEN $2 AND $3 ORDER BY collection_date`, project, start.Format("2006-01-02"), end.Format("2006-01-02"))
 			if err != nil {
 				return err
 			}
 			for rows.Next() {
 				var v row
-				if err := rows.Scan(&v.Date, &v.TotalLines, &v.FrontendLinesDelta, &v.BackendLinesDelta); err != nil {
+				if err := rows.Scan(&v.Date, &v.TotalLines, &v.TotalLinesDelta, &v.FrontendLines, &v.FrontendLinesDelta, &v.BackendLines, &v.BackendLinesDelta); err != nil {
 					rows.Close()
 					return err
 				}

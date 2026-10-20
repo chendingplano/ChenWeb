@@ -49,7 +49,7 @@ The authenticated `GET /api/v1/code-monitor?range=<range>` endpoint SHALL return
 
 ### Requirement: Code Monitor page and charts
 
-The system SHALL provide a bilingual Code Monitor page under Development → System Admin → System → Code Monitor. For each configured project, it SHALL show three charts on the same row: total project lines, frontend daily line deltas, and backend daily line deltas. Each chart SHALL show its metric independently over the selected collection dates.
+The system SHALL provide a bilingual Code Monitor page under Development → System Admin → System → Code Monitor. For each configured project, it SHALL show three charts on the same row: project total, frontend, and backend. Each chart SHALL show paired bars for the metric total and its daily delta over the selected collection dates. The total and delta bars SHALL use separate value axes. A project's first recorded delta SHALL be zero.
 
 #### Scenario: Choose a chart range
 

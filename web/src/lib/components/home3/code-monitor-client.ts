@@ -9,7 +9,10 @@ export type CodeMonitorRange =
 export type CodeMonitorRow = {
 	collection_date: string;
 	total_lines: number;
+	total_lines_delta: number;
+	frontend_lines: number;
 	frontend_lines_delta: number;
+	backend_lines: number;
 	backend_lines_delta: number;
 };
 
