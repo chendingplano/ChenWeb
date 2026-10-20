@@ -15,7 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func TestCollectPackageSkipsTrackedFileDeletedFromWorkingTree(t *testing.T) {
+func TestCollectProjectSkipsTrackedFileDeletedFromWorkingTree(t *testing.T) {
 	root := t.TempDir()
 	gitRun := func(args ...string) {
 		t.Helper()
@@ -40,12 +40,54 @@ func TestCollectPackageSkipsTrackedFileDeletedFromWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snapshot, err := collectPackage(root, "server")
+	snapshot, err := collectProject(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snapshot != (Snapshot{TotalLines: 1, BackendFiles: 1}) {
 		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestCollectProjectCountsOnlyFrontendAndBackendDirectories(t *testing.T) {
+	workspace := t.TempDir()
+	projectRoot := filepath.Join(workspace, "ChenWeb")
+	files := map[string]string{
+		"web/src/app.ts":    "one\ntwo\n",
+		"web/src/view.go":   "front\n",
+		"server/main.go":    "one\ntwo\nthree\n",
+		"server/assets.css": "body {}\n",
+		"web/outside.ts":    "ignored\n",
+		"docs/readme.md":    "ignored\n",
+		"tools/extra.go":    "ignored\n",
+	}
+	for path, content := range files {
+		fullPath := filepath.Join(projectRoot, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = projectRoot
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	gitRun("init", "-q")
+	gitRun("add", ".")
+
+	snapshot, err := collectProject(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Snapshot{TotalLines: 7, FrontendFiles: 2, BackendFiles: 2}
+	if snapshot != want {
+		t.Fatalf("snapshot = %+v, want %+v", snapshot, want)
 	}
 }
 
@@ -104,19 +146,20 @@ func TestInitializeCollectsImmediatelyAtSyntheticLocalTwoAMWhenEmpty(t *testing.
 	}
 	defer db.Close()
 	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, "server"), 0700); err != nil {
+	projectRoot := filepath.Join(root, "ChenWeb")
+	if err := os.MkdirAll(filepath.Join(projectRoot, "server"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "server", "code.go"), []byte("package test\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(projectRoot, "server", "code.go"), []byte("package test\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	gitRun := exec.Command("git", "init", "-q")
-	gitRun.Dir = root
+	gitRun.Dir = projectRoot
 	if out, err := gitRun.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	gitRun = exec.Command("git", "add", "server/code.go")
-	gitRun.Dir = root
+	gitRun.Dir = projectRoot
 	if out, err := gitRun.CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v %s", err, out)
 	}
@@ -124,9 +167,9 @@ func TestInitializeCollectsImmediatelyAtSyntheticLocalTwoAMWhenEmpty(t *testing.
 	now := time.Date(2026, 10, 20, 10, 15, 0, 0, local)
 	mock.ExpectQuery(`SELECT EXISTS`).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectExec(`INSERT INTO kb\.code_monitor`).
-		WithArgs("server", "2026-10-20", 1, 0, 1, time.Date(2026, 10, 20, 2, 0, 0, 0, local)).
+		WithArgs("ChenWeb", "2026-10-20", 1, 0, 1, time.Date(2026, 10, 20, 2, 0, 0, 0, local)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := (Store{DB: db}).Initialize(context.Background(), root, []string{"server"}, now, local); err != nil {
+	if err := (Store{DB: db}).Initialize(context.Background(), root, []string{"ChenWeb"}, now, local); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -173,10 +216,10 @@ func TestCountPhysicalLines(t *testing.T) {
 	}
 }
 
-func TestClassifyExtension(t *testing.T) {
-	for ext, want := range map[string]fileKind{".svelte": frontendFile, ".ts": frontendFile, ".go": backendFile, ".sql": backendFile, ".md": ignoredFile} {
-		if got := classifyExtension(ext); got != want {
-			t.Errorf("classifyExtension(%q) = %v, want %v", ext, got, want)
+func TestIsCountedExtension(t *testing.T) {
+	for ext, want := range map[string]bool{".svelte": true, ".ts": true, ".go": true, ".sql": true, ".md": false} {
+		if got := isCountedExtension(ext); got != want {
+			t.Errorf("isCountedExtension(%q) = %v, want %v", ext, got, want)
 		}
 	}
 }

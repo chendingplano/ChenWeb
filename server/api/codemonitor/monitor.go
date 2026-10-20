@@ -24,16 +24,14 @@ const (
 	backendFile
 )
 
-// Frontend: .js .jsx .ts .tsx .svelte .css .scss .html .vue .json.
-// Backend: .go .py .rs .java .kt .php .rb .sql .sh .yaml .yml .toml.
-func classifyExtension(ext string) fileKind {
+// Countable source extensions shared by the fixed frontend and backend directories.
+func isCountedExtension(ext string) bool {
 	switch strings.ToLower(ext) {
-	case ".js", ".jsx", ".ts", ".tsx", ".svelte", ".css", ".scss", ".html", ".vue", ".json":
-		return frontendFile
-	case ".go", ".py", ".rs", ".java", ".kt", ".php", ".rb", ".sql", ".sh", ".yaml", ".yml", ".toml":
-		return backendFile
+	case ".js", ".jsx", ".ts", ".tsx", ".svelte", ".css", ".scss", ".html", ".vue", ".json",
+		".go", ".py", ".rs", ".java", ".kt", ".php", ".rb", ".sql", ".sh", ".yaml", ".yml", ".toml":
+		return true
 	default:
-		return ignoredFile
+		return false
 	}
 }
 
@@ -73,23 +71,28 @@ type Snapshot struct {
 	BackendFiles  int `json:"backend_files"`
 }
 
-func collectPackage(root, packagePath string) (Snapshot, error) {
+func collectProject(projectRoot string) (Snapshot, error) {
 	var out Snapshot
-	cmd := exec.Command("git", "ls-files", "-z", "--", packagePath)
-	cmd.Dir = root
+	cmd := exec.Command("git", "ls-files", "-z", "--", "web/src", "server")
+	cmd.Dir = projectRoot
 	data, err := cmd.Output()
 	if err != nil {
-		return out, fmt.Errorf("git ls-files %s: %w", packagePath, err)
+		return out, fmt.Errorf("git ls-files web/src server in %s: %w", projectRoot, err)
 	}
 	for _, rel := range strings.Split(string(data), "\x00") {
 		if rel == "" {
 			continue
 		}
-		kind := classifyExtension(filepath.Ext(rel))
-		if kind == ignoredFile {
+		kind := ignoredFile
+		if strings.HasPrefix(rel, "web/src/") {
+			kind = frontendFile
+		} else if strings.HasPrefix(rel, "server/") {
+			kind = backendFile
+		}
+		if kind == ignoredFile || !isCountedExtension(filepath.Ext(rel)) {
 			continue
 		}
-		lines, err := countLines(filepath.Join(root, filepath.FromSlash(rel)))
+		lines, err := countLines(filepath.Join(projectRoot, filepath.FromSlash(rel)))
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -118,15 +121,15 @@ VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (project_path, collection_date) DO UPDATE
 	return err
 }
 
-func (s Store) Collect(ctx context.Context, root string, projects []string, now time.Time) error {
-	return s.collectAt(ctx, root, projects, now, now)
+func (s Store) Collect(ctx context.Context, workspaceRoot string, projects []string, now time.Time) error {
+	return s.collectAt(ctx, workspaceRoot, projects, now, now)
 }
 
-func (s Store) collectAt(ctx context.Context, root string, projects []string, now, collectedAt time.Time) error {
+func (s Store) collectAt(ctx context.Context, workspaceRoot string, projects []string, now, collectedAt time.Time) error {
 	date := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	var failures []string
 	for _, projectPath := range projects {
-		snap, err := collectPackage(root, projectPath)
+		snap, err := collectProject(filepath.Join(workspaceRoot, filepath.FromSlash(projectPath)))
 		if err == nil {
 			err = s.UpsertAt(ctx, projectPath, date, snap, collectedAt)
 		}
@@ -142,7 +145,7 @@ func (s Store) collectAt(ctx context.Context, root string, projects []string, no
 
 // Initialize seeds an empty monitor table immediately. The synthetic timestamp
 // makes this first snapshot line up with the regular local 02:00 collection.
-func (s Store) Initialize(ctx context.Context, root string, projects []string, now time.Time, loc *time.Location) error {
+func (s Store) Initialize(ctx context.Context, workspaceRoot string, projects []string, now time.Time, loc *time.Location) error {
 	var hasRows bool
 	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.code_monitor)`).Scan(&hasRows); err != nil {
 		return fmt.Errorf("check code monitor history: %w", err)
@@ -153,7 +156,7 @@ func (s Store) Initialize(ctx context.Context, root string, projects []string, n
 	localNow := now.In(loc)
 	collectionDate := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, loc)
 	syntheticCollectionTime := scheduledTime(localNow.Year(), localNow.Month(), localNow.Day(), loc)
-	return s.collectAt(ctx, root, projects, collectionDate, syntheticCollectionTime)
+	return s.collectAt(ctx, workspaceRoot, projects, collectionDate, syntheticCollectionTime)
 }
 
 func nextRun(now time.Time, loc *time.Location) time.Time {
@@ -182,7 +185,7 @@ func scheduledTime(year int, month time.Month, day int, loc *time.Location) time
 	return next
 }
 
-func Start(ctx context.Context, store Store, root string, packages []string, loc *time.Location, logger ApiTypes.JimoLogger) {
+func Start(ctx context.Context, store Store, workspaceRoot string, projects []string, loc *time.Location, logger ApiTypes.JimoLogger) {
 	go func() {
 		for {
 			delay := time.Until(nextRun(time.Now(), loc))
@@ -193,7 +196,7 @@ func Start(ctx context.Context, store Store, root string, packages []string, loc
 				return
 			case <-timer.C:
 			}
-			if err := store.Collect(ctx, root, packages, time.Now().In(loc)); err != nil {
+			if err := store.Collect(ctx, workspaceRoot, projects, time.Now().In(loc)); err != nil {
 				logger.Error("code monitor collection failed", "error", err)
 			}
 		}

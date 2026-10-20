@@ -6,7 +6,7 @@ Add a bilingual System Admin page at `development → System Admin → System �
 
 ## Configuration and collection
 
-Add `frontend.projects-to-monitor` to the Go frontend configuration. Each value is a repository-relative project directory path and is also the project group key shown on the page. The collector resolves paths from ChenWeb's repository root and enumerates Git-tracked files in each path so untracked build output and local dependencies do not affect the metric.
+Add `frontend.projects-to-monitor` to the Go frontend configuration. Each value is a workspace-relative project directory name and is also the project group key shown on the page. For each project, the collector counts Git-tracked source files under `web/src` as frontend and under `server` as backend; files elsewhere in the project do not contribute.
 
 At 2:00 am in the configured workspace timezone, a wall-clock daily job collects one snapshot per project and local calendar date. If `kb.code_monitor` is empty on startup, collect an initial snapshot using today's local date and a synthetic collection timestamp of 2:00 am. The collector counts physical lines across recognized frontend and backend source files: blank lines count, a final line without a newline counts, and an empty file has zero lines. Frontend and backend extensions are explicitly classified in the collector; other tracked files are excluded. A uniqueness constraint on project and collection date makes retries idempotent. The persistent table is `kb.code_monitor` and stores the project path, local collection date, total lines, frontend file count, backend file count, and collection timestamp.
 

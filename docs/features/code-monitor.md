@@ -4,13 +4,13 @@ Code Monitor tracks daily source size for each configured project path. The deve
 
 ## Configuration and collection
 
-In `config.local.toml`, set repo-relative project paths under `[frontend]`:
+In `config.local.toml`, set project directory names relative to the workspace root under `[frontend]`:
 
 ```toml
-projects-to-monitor = ["web/src", "server"]
+projects-to-monitor = ["ChenWeb"]
 ```
 
-The collector uses Git-tracked files in each directory. It counts physical lines in recognized source files, including blank lines and a last line without a newline; an empty file has zero lines. Frontend extensions are `.js`, `.jsx`, `.ts`, `.tsx`, `.svelte`, `.css`, `.scss`, `.html`, `.vue`, and `.json`. Backend extensions are `.go`, `.py`, `.rs`, `.java`, `.kt`, `.php`, `.rb`, `.sql`, `.sh`, `.yaml`, `.yml`, and `.toml`. Other extensions are ignored.
+For each project, the collector uses Git-tracked files under `web/src` for frontend metrics and under `server` for backend metrics. It counts physical lines in recognized source files, including blank lines and a last line without a newline; an empty file has zero lines. Recognized extensions are `.js`, `.jsx`, `.ts`, `.tsx`, `.svelte`, `.css`, `.scss`, `.html`, `.vue`, `.json`, `.go`, `.py`, `.rs`, `.java`, `.kt`, `.php`, `.rb`, `.sql`, `.sh`, `.yaml`, `.yml`, and `.toml`. Other extensions and files outside those two directories are ignored.
 
 One snapshot per project is collected at 2:00 am in the configured workspace timezone. If the table is empty during startup, the server immediately records an initial snapshot for the current local date with `collected_at` set to that date's 2:00 am. Later collections run daily at 2:00 am. In a timezone that skips 2:00 am for the spring daylight-saving transition, that day's scheduled collection runs at the first valid time after the missing hour. Project/date uniqueness makes each daily write idempotent.
 

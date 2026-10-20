@@ -140,7 +140,7 @@
 - Modify: `server/cmd/config/config.go`, `config.local.toml`, `server/api/codemonitor/monitor.go`, `server/api/codemonitor/monitor_test.go`, `server/api/routes.go`, `server/cmd/deepdoc/main.go`
 - Create: next Goose migration to rename `kb.code_monitor.package_path` to `project_path`
 
-- [x] Replace `frontend.code-packages-to-monitor` with `frontend.projects-to-monitor`, treating each configured repo-relative path as a project group.
+- [x] Replace `frontend.code-packages-to-monitor` with `frontend.projects-to-monitor`, treating each workspace-relative project directory name as a project group. Count frontend source files under that project's `web/src` and backend source files under its `server` directory.
 - [x] Add delta fields to each API row; each delta is the current value minus the previous recorded row for that project, with zero for the first recorded row, including previous rows outside the selected range.
 - [x] If the table has no rows at startup, collect once using today's workspace-local date and a synthetic 2:00 am collection timestamp.
 - [x] Keep scheduled subsequent collections at 2:00 am and preserve the existing date ranges.
@@ -161,5 +161,5 @@
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-20-code-monitor-design.md`, `docs/features/code-monitor.md`, and the Code Monitor KnowledgeStore devdoc.
 
-- [x] Record the revised config key, grouping, delta definition, dual-axis charts, and empty-table initial snapshot behavior.
+- [x] Record the revised config key, workspace-relative project naming, fixed frontend/backend directories, grouping, delta definition, dual-axis charts, and empty-table initial snapshot behavior.
 - [x] Run focused backend and frontend checks; review the final diff and commit only feature files.

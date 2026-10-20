@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -204,10 +205,11 @@ func main() {
 	}
 	monitorStore := codemonitor.Store{DB: project_db}
 	monitorProjects := config.AppConfig.Frontend.ProjectsToMonitor
-	if err := monitorStore.Initialize(context.Background(), config.GetConfigDir(), monitorProjects, time.Now(), monitorLoc); err != nil {
+	monitorWorkspaceRoot := filepath.Dir(config.GetConfigDir())
+	if err := monitorStore.Initialize(context.Background(), monitorWorkspaceRoot, monitorProjects, time.Now(), monitorLoc); err != nil {
 		logger.Error("initial code monitor collection failed", "error", err)
 	}
-	codemonitor.Start(context.Background(), monitorStore, config.GetConfigDir(), monitorProjects, monitorLoc, loggerutil.CreateDefaultLogger("20261020-672"))
+	codemonitor.Start(context.Background(), monitorStore, monitorWorkspaceRoot, monitorProjects, monitorLoc, loggerutil.CreateDefaultLogger("20261020-672"))
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer bootstrapCancel()
 	warnings, err := seed.EnsureCuratedModules(bootstrapCtx, project_db)
