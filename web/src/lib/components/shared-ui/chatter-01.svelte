@@ -52,7 +52,7 @@
 	};
 
 	const defaultSettings: ChatterSettings = {
-		agents: ['OpenClaw', 'Claude Code', 'Codex', 'Qwen Code', 'OpenCode', 'pi'],
+		agents: ['OpenClaw', 'Claude Code', 'Codex', 'DeepSeek Harness', 'Qwen Code', 'OpenCode', 'pi'],
 		models: ['ChatGPT 5.4', 'Claude Sonnet 4.6', 'GPT-4o', 'Gemini Pro 2.5', 'Qwen3-Coder'],
 		attachments: [
 			m.chatter_01_photos_and_files(),
@@ -177,6 +177,9 @@
 				...defaultSettings,
 				...res.settings
 			};
+			// Gateway-served harnesses stay in the menu even if a saved list predates them.
+			const missing = Object.keys(HARNESS_BY_AGENT).filter((a) => !settings.agents.includes(a));
+			if (missing.length) settings = { ...settings, agents: [...settings.agents, ...missing] };
 			selectedAgent = settings.agents[0] ?? selectedAgent;
 			selectedResult = settings.resultOptions[0] ?? selectedResult;
 			selectedSkill = settings.skills[0] ?? selectedSkill;

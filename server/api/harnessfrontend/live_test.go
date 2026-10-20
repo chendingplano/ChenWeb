@@ -5,7 +5,8 @@
 //	HARNESS_GATEWAY_URL=http://127.0.0.1:4318 HARNESS_GATEWAY_SECRET=... go test -tags live -run TestLive -v ./api/harnessfrontend/
 //
 // HARNESS_NAME selects the harness (default claude-code; codex for the Codex
-// gateway on port 4319), and HARNESS_MODEL the model for the first turn.
+// gateway on port 4319; deepseek-harness for the DeepSeek Harness gateway on
+// port 4320), and HARNESS_MODEL the model for the first turn.
 package harnessfrontend
 
 import (
@@ -80,8 +81,13 @@ func TestLiveTurnsThroughChenWeb(t *testing.T) {
 			case "tool_use":
 				t.Logf("tool_use %s", event.Name)
 			case "permission_request":
-				t.Logf("permission_request %s %s -> allow", event.ToolName, event.Input)
-				decision, _ := http.Post(base+"/sessions/"+sessionID+"/permissions/"+event.RequestID, "application/json", strings.NewReader(`{"behavior":"allow"}`))
+				// Approve only the probe write, as a user clicking Allow would; deny anything else.
+				behavior := "deny"
+				if strings.Contains(string(event.Input), target) {
+					behavior = "allow"
+				}
+				t.Logf("permission_request %s %s -> %s", event.ToolName, event.Input, behavior)
+				decision, _ := http.Post(base+"/sessions/"+sessionID+"/permissions/"+event.RequestID, "application/json", strings.NewReader(`{"behavior":"`+behavior+`"}`))
 				if decision == nil || decision.StatusCode != http.StatusOK {
 					t.Fatalf("decision failed: %v", decision)
 				}
@@ -96,7 +102,7 @@ func TestLiveTurnsThroughChenWeb(t *testing.T) {
 	if m := os.Getenv("HARNESS_MODEL"); m != "" {
 		model = `,"model":"` + m + `"`
 	}
-	answer, events := turn(`{"message":"Remember the codeword OTTER-7. Then create the file ` + target + ` containing the single word hello. Reply in one short line."` + model + `}`)
+	answer, events := turn(`{"message":"Remember the codeword OTTER-7. Then create the file ` + target + ` containing the single word hello. If a sandbox refuses the write, retry once asking for my approval. Reply in one short line."` + model + `}`)
 	sessionID := ""
 	for _, event := range events {
 		if event.Type == "session" {
