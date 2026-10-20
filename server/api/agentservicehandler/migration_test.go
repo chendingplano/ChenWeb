@@ -75,7 +75,8 @@ func TestPiAgentProfileVersionsMigrationPreservesImmutableSnapshots(t *testing.T
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
-	sql := string(body)
+	// Column definitions are aligned with runs of spaces; compare on single spaces.
+	sql := strings.Join(strings.Fields(string(body)), " ")
 	for _, required := range []string{
 		"CREATE TABLE IF NOT EXISTS kb.agentic_service_profile_versions",
 		"PRIMARY KEY (service_slug, version)",
@@ -90,7 +91,7 @@ func TestPiAgentProfileVersionsMigrationPreservesImmutableSnapshots(t *testing.T
 		"BEFORE UPDATE OR DELETE ON kb.agentic_service_profile_versions",
 		"CREATE TABLE IF NOT EXISTS kb.agentic_service_profiles",
 		"active_version TEXT NOT NULL",
-		"PRIMARY KEY (service_slug)",
+		"service_slug TEXT PRIMARY KEY",
 		"FOREIGN KEY (service_slug, active_version)",
 		"REFERENCES kb.agentic_service_profile_versions(service_slug, version)",
 		"-- +goose Up",
