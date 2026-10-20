@@ -14,7 +14,7 @@ It uses the Claude Agent SDK only as the connection to Claude Code. The SDK star
 
 Claude Code signs in exactly as it does in a terminal or VS Code, using this machine's Claude Code login. The gateway removes these variables before starting Claude Code:
 - `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`, which would otherwise take precedence over the login. Set `CLAUDE_CODE_GATEWAY_USE_API_KEY=1` to keep them.
-- variables whose names contain `SECRET`, `PASSWORD` or `API_KEY`, so ChenWeb's own secrets (present when started through mise) do not reach the agent;
+- variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN`, so ChenWeb's own secrets (present when started through mise) do not reach the agent;
 - the gateway secret.
 
 ## Sessions

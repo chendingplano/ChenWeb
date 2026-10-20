@@ -86,7 +86,8 @@ const answer: Script = ({ text, notify, complete }) => {
 
 describe("Codex environment", () => {
   test("uses the Codex login and keeps ChenWeb secrets out", () => {
-    const env = codexEnv({ PATH: "/bin", HOME: "/Users/me", OPENAI_API_KEY: "k", CODEX_API_KEY: "c", CODEX_GATEWAY_SECRET: "s", PG_PASSWORD: "p", CLAUDE_CODE_GATEWAY_SECRET: "x" });
+    const env = codexEnv({ PATH: "/bin", HOME: "/Users/me", OPENAI_API_KEY: "k", CODEX_API_KEY: "c", CODEX_GATEWAY_SECRET: "s", PG_PASSWORD: "p", CLAUDE_CODE_GATEWAY_SECRET: "x",
+      OPENMETADATA_ADMIN_TOKEN: "m", PROMPT_OPTIMIZER_ENCRYPTION_KEY: "e", TEST_DATABASE_URL: "postgres://u:p@h/db" });
     expect(env).toEqual({ PATH: "/bin", HOME: "/Users/me" });
   });
 });

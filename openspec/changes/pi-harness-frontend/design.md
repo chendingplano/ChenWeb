@@ -43,7 +43,7 @@ Thinking (`thinking_*` deltas and blocks) is never relayed. Compaction and queue
 
 **Workspace confinement.** A session may be read or resumed only if its file is in Pi's folder for the workspace (resolved with `realpath` at start) and its header records the workspace as `cwd` and the requested id.
 
-**Environment.** The gateway's own variables (`PI_HARNESS_*`) and variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN`, are removed, so Pi uses its stored login (`~/.pi/agent/auth.json`) and does not see ChenWeb's secrets. This filter is wider than the other gateways' (`SECRET|PASSWORD|API_KEY`), which let `OPENMETADATA_ADMIN_TOKEN`, `PROMPT_OPTIMIZER_ENCRYPTION_KEY` and `TEST_DATABASE_URL` from ChenWeb's mise environment through. Because Pi's own configuration can name environment keys (`models.json` names `DASHSCOPE_API_KEY` for `qwen`), `PI_HARNESS_PASS_ENV` lists variables let through anyway.
+**Environment.** The gateway's own variables (`PI_HARNESS_*`) and variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN`, are removed, so Pi uses its stored login (`~/.pi/agent/auth.json`) and does not see ChenWeb's secrets. The other gateways now use the same filter; their earlier one (`SECRET|PASSWORD|API_KEY`) let `OPENMETADATA_ADMIN_TOKEN`, `PROMPT_OPTIMIZER_ENCRYPTION_KEY` and `TEST_DATABASE_URL` from ChenWeb's mise environment through. Because Pi's own configuration can name environment keys (`models.json` names `DASHSCOPE_API_KEY` for `qwen`), `PI_HARNESS_PASS_ENV` lists variables let through anyway.
 
 ## Not done here
 

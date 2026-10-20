@@ -37,7 +37,7 @@ Thoughts (`agent_thought_chunk`) are never relayed. `usage_update` (context-wind
 
 **Workspace confinement.** A session may be read or resumed only if its log's header names the workspace folder (resolved with `realpath` at start) as `cwd` and it is a root session (`delegationDepth` 0). `session/resume` checks the folder again on dsh's side.
 
-**Environment.** As for the other gateways: the gateway's own variables and every variable whose name contains `SECRET`, `PASSWORD` or `API_KEY` (which includes `DEEPSEEK_API_KEY`) are removed, so dsh uses its own login: `~/.dsh/.credentials.yaml`, then `~/.dsh/.env`. Variables named `DEEPSEEK_HARNESS_*` are removed too, so ChenWeb's settings do not appear among dsh's `DSH_*` environment facts.
+**Environment.** As for the other gateways: the gateway's own variables and every variable whose name contains `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN` (which includes `DEEPSEEK_API_KEY`) are removed, so dsh uses its own login: `~/.dsh/.credentials.yaml`, then `~/.dsh/.env`. Variables named `DEEPSEEK_HARNESS_*` are removed too, so ChenWeb's settings do not appear among dsh's `DSH_*` environment facts.
 
 ## Not done here
 

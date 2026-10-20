@@ -93,13 +93,15 @@ async function readJSON(request: Request, maximum: number): Promise<unknown> {
   return JSON.parse(text);
 }
 
+const SENSITIVE = /SECRET|PASSWORD|API_KEY|TOKEN|ENCRYPTION|CREDENTIAL|DATABASE_URL|_DSN$|_KEY$/i;
+
 // Codex signs in the way it does in a terminal or IDE (~/.codex/auth.json).
 // API keys would bypass that login, and ChenWeb's own secrets (present when
 // the gateway is started through mise) are none of the agent's business.
 export function codexEnv(source: Record<string, string | undefined>): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(source)) {
-    if (name === "CODEX_GATEWAY_SECRET" || /SECRET|PASSWORD|API_KEY/i.test(name)) continue;
+    if (name === "CODEX_GATEWAY_SECRET" || SENSITIVE.test(name)) continue;
     env[name] = value;
   }
   return env;

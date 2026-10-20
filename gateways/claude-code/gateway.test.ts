@@ -71,7 +71,8 @@ async function* answer({ text: message }: { text: string }) {
 
 describe("Claude Code environment", () => {
   test("uses the Claude Code login and keeps ChenWeb secrets out", () => {
-    const env = claudeCodeEnv({ PATH: "/bin", HOME: "/Users/me", ANTHROPIC_API_KEY: "k", ANTHROPIC_AUTH_TOKEN: "t", CLAUDE_CODE_GATEWAY_SECRET: "s", PG_PASSWORD: "p", PI_RUN_CAPABILITY_SECRET: "c", OPENAI_API_KEY: "o" }, false);
+    const env = claudeCodeEnv({ PATH: "/bin", HOME: "/Users/me", ANTHROPIC_API_KEY: "k", ANTHROPIC_AUTH_TOKEN: "t", CLAUDE_CODE_GATEWAY_SECRET: "s", PG_PASSWORD: "p", PI_RUN_CAPABILITY_SECRET: "c", OPENAI_API_KEY: "o",
+      OPENMETADATA_ADMIN_TOKEN: "m", PROMPT_OPTIMIZER_ENCRYPTION_KEY: "e", TEST_DATABASE_URL: "postgres://u:p@h/db" }, false);
     expect(env).toEqual({ PATH: "/bin", HOME: "/Users/me", CLAUDE_AGENT_SDK_CLIENT_APP: "chenweb-harness-frontend/0.1.0" });
     expect(claudeCodeEnv({ ANTHROPIC_API_KEY: "k" }, true).ANTHROPIC_API_KEY).toBe("k");
   });

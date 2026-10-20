@@ -12,7 +12,7 @@ ChenWeb SHALL serve Codex as harness `codex` through a gateway that speaks harne
 - **THEN** the gateway sends only the new message, and Codex supplies the earlier context
 
 ### Requirement: Codex uses the machine's Codex login
-The Codex gateway SHALL start Codex without the gateway secret and without variables whose names contain `SECRET`, `PASSWORD` or `API_KEY`.
+The Codex gateway SHALL start Codex without the gateway secret and without variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL` or end in `_KEY` or `_DSN`.
 
 #### Scenario: OpenAI key in the gateway's environment
 - **WHEN** the gateway runs with `OPENAI_API_KEY` set by the ChenWeb environment

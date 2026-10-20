@@ -27,7 +27,7 @@ Reasoning items are never relayed. Permission request IDs are the gateway's own 
 
 **Workspace confinement.** A thread may be read or resumed only if `thread/read` reports its `cwd` as the workspace folder (resolved with `realpath` at start). Listing filters by the same folder and by source kinds `cli`, `vscode` and `appServer`.
 
-**Environment.** As for Claude Code: the gateway secret and every variable whose name contains `SECRET`, `PASSWORD` or `API_KEY` are removed, so Codex uses its own login.
+**Environment.** As for Claude Code: the gateway secret and every variable whose name contains `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN` are removed, so Codex uses its own login.
 
 ## Not done here
 

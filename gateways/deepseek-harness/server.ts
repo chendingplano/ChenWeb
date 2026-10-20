@@ -96,6 +96,8 @@ async function readJSON(request: Request, maximum: number): Promise<unknown> {
   return JSON.parse(text);
 }
 
+const SENSITIVE = /SECRET|PASSWORD|API_KEY|TOKEN|ENCRYPTION|CREDENTIAL|DATABASE_URL|_DSN$|_KEY$/i;
+
 // dsh signs in with its own stored login (~/.dsh/.credentials.yaml, then
 // ~/.dsh/.env). Keys in the environment would override that login, ChenWeb's
 // own secrets (present when the gateway is started through mise) are none of
@@ -103,7 +105,7 @@ async function readJSON(request: Request, maximum: number): Promise<unknown> {
 export function dshEnv(source: Record<string, string | undefined>): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(source)) {
-    if (name.startsWith("DEEPSEEK_HARNESS_") || /SECRET|PASSWORD|API_KEY/i.test(name)) continue;
+    if (name.startsWith("DEEPSEEK_HARNESS_") || SENSITIVE.test(name)) continue;
     env[name] = value;
   }
   return env;

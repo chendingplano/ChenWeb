@@ -13,7 +13,7 @@ It connects to Codex through `codex app-server`, the JSON-RPC interface the Code
 
 Codex signs in exactly as it does in a terminal or VS Code, using this machine's Codex login (`~/.codex/auth.json`). The gateway removes these variables before starting Codex:
 - the gateway secret;
-- variables whose names contain `SECRET`, `PASSWORD` or `API_KEY` (which includes `OPENAI_API_KEY` and `CODEX_API_KEY`), so ChenWeb's own secrets (present when started through mise) do not reach the agent.
+- variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN` (which includes `OPENAI_API_KEY` and `CODEX_API_KEY`), so ChenWeb's own secrets (present when started through mise) do not reach the agent.
 
 ## Sessions
 

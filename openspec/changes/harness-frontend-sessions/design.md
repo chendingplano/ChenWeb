@@ -14,7 +14,7 @@ The gateway runs on loopback with a bearer secret. It is the only harness-specif
 **Process environment.** Claude Code inherits the gateway's environment, minus:
 - the gateway secret;
 - `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`, so the Claude Code login is used, as in VS Code (`CLAUDE_CODE_GATEWAY_USE_API_KEY=1` keeps them);
-- variables whose names contain `SECRET`, `PASSWORD` or `API_KEY`, so ChenWeb's own secrets (when started through mise) do not reach the agent.
+- variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN`, so ChenWeb's own secrets (when started through mise) do not reach the agent.
 
 **Sessions.**
 - A session is one long-lived `query()` with streaming input: the gateway pushes each user message into it, as typing into a terminal would.

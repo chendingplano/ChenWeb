@@ -13,7 +13,7 @@ It connects to dsh through `dsh --profile acp`, dsh's [Agent Client Protocol](ht
 
 dsh signs in with its own stored login: `~/.dsh/.credentials.yaml` (keys saved in dsh's settings), then `~/.dsh/.env`. On this machine that is `~/.dsh/.env` with `DEEPSEEK_API_KEY` (mode 600). The gateway removes these variables before starting dsh:
 - its own settings (`DEEPSEEK_HARNESS_*`);
-- variables whose names contain `SECRET`, `PASSWORD` or `API_KEY` (which includes `DEEPSEEK_API_KEY`), so ChenWeb's own secrets (present when started through mise) do not reach the agent.
+- variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL`, or end in `_KEY` or `_DSN` (which includes `DEEPSEEK_API_KEY`), so ChenWeb's own secrets (present when started through mise) do not reach the agent.
 
 dsh also reads `<workspace>/.env` if one exists; keep the workspace free of one.
 

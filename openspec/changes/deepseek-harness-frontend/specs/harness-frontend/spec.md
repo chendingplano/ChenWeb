@@ -16,7 +16,7 @@ ChenWeb SHALL serve DeepSeek Harness as harness `deepseek-harness` through a gat
 - **THEN** the agent menu still offers DeepSeek Harness
 
 ### Requirement: DeepSeek Harness uses its own login
-The DeepSeek Harness gateway SHALL start dsh without the gateway's own variables and without variables whose names contain `SECRET`, `PASSWORD` or `API_KEY`.
+The DeepSeek Harness gateway SHALL start dsh without the gateway's own variables and without variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL` or end in `_KEY` or `_DSN`.
 
 #### Scenario: DeepSeek key in the gateway's environment
 - **WHEN** the gateway runs with `DEEPSEEK_API_KEY` set

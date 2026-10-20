@@ -8,7 +8,7 @@ A front-end turn SHALL run on the harness's own system prompt, tools, settings, 
 - **THEN** the gateway sends only the new message to that session, and the harness supplies the earlier context
 
 ### Requirement: Claude Code uses the machine's Claude Code login
-The Claude Code gateway SHALL start Claude Code without `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` unless `CLAUDE_CODE_GATEWAY_USE_API_KEY=1`. It SHALL NOT pass the gateway secret, or variables whose names contain `SECRET`, `PASSWORD` or `API_KEY`, to Claude Code.
+The Claude Code gateway SHALL start Claude Code without `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` unless `CLAUDE_CODE_GATEWAY_USE_API_KEY=1`. It SHALL NOT pass the gateway secret, or variables whose names contain `SECRET`, `PASSWORD`, `API_KEY`, `TOKEN`, `ENCRYPTION`, `CREDENTIAL` or `DATABASE_URL` or end in `_KEY` or `_DSN`, to Claude Code.
 
 #### Scenario: API key in the gateway's environment
 - **WHEN** the gateway runs with `ANTHROPIC_API_KEY` set by the ChenWeb environment

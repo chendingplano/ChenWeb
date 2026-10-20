@@ -286,7 +286,8 @@ describe("deepseek harness gateway", () => {
 
 describe("dsh environment", () => {
   test("drops keys, secrets and the gateway's own settings", () => {
-    expect(dshEnv({ PATH: "/bin", DEEPSEEK_API_KEY: "k", DB_PASSWORD: "p", DEEPSEEK_HARNESS_GATEWAY_SECRET: "s", DEEPSEEK_HARNESS_WORKSPACE: "/w", DSH_HOME: "/h" }))
+    expect(dshEnv({ PATH: "/bin", DEEPSEEK_API_KEY: "k", DB_PASSWORD: "p", DEEPSEEK_HARNESS_GATEWAY_SECRET: "s", DEEPSEEK_HARNESS_WORKSPACE: "/w", DSH_HOME: "/h",
+      OPENMETADATA_ADMIN_TOKEN: "m", PROMPT_OPTIMIZER_ENCRYPTION_KEY: "e", TEST_DATABASE_URL: "postgres://u:p@h/db" }))
       .toEqual({ PATH: "/bin", DSH_HOME: "/h" });
   });
 });

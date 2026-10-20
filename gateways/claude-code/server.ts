@@ -127,6 +127,8 @@ async function readJSON(request: Request, maximum: number): Promise<unknown> {
   return JSON.parse(text);
 }
 
+const SENSITIVE = /SECRET|PASSWORD|API_KEY|TOKEN|ENCRYPTION|CREDENTIAL|DATABASE_URL|_DSN$|_KEY$/i;
+
 // Claude Code signs in the way it does in a terminal or IDE. Model API keys
 // would take precedence over that login, and ChenWeb's own secrets (present
 // when the gateway is started through mise) are none of the agent's business.
@@ -135,7 +137,7 @@ export function claudeCodeEnv(source: Record<string, string | undefined>, useApi
   for (const [name, value] of Object.entries(source)) {
     if (name === "CLAUDE_CODE_GATEWAY_SECRET" || name === "CLAUDE_CODE_GATEWAY_USE_API_KEY") continue;
     const modelKey = name === "ANTHROPIC_API_KEY" || name === "ANTHROPIC_AUTH_TOKEN";
-    if (modelKey ? !useApiKey : /SECRET|PASSWORD|API_KEY/i.test(name)) continue;
+    if (modelKey ? !useApiKey : SENSITIVE.test(name)) continue;
     env[name] = value;
   }
   env.CLAUDE_AGENT_SDK_CLIENT_APP = "chenweb-harness-frontend/0.1.0";
