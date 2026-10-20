@@ -61,7 +61,7 @@
 			textStyle: { color: colors.muted },
 			tooltip: { trigger: 'axis' },
 			legend: { data: [m.code_monitor_total(), m.code_monitor_delta()], textStyle: { color: colors.muted }, top: 0 },
-			grid: { left: 48, right: 48, top: 42, bottom: 36 },
+			grid: { left: 84, right: 64, top: 42, bottom: 36, containLabel: true },
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
 			yAxis: [
 				{ type: 'value', position: 'left', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
