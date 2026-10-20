@@ -6,7 +6,8 @@
 //
 // HARNESS_NAME selects the harness (default claude-code; codex for the Codex
 // gateway on port 4319; deepseek-harness for the DeepSeek Harness gateway on
-// port 4320), and HARNESS_MODEL the model for the first turn.
+// port 4320; pi for the Pi gateway on port 4321, where nothing asks first
+// unless a Pi extension does), and HARNESS_MODEL the model for the first turn.
 package harnessfrontend
 
 import (

@@ -19,7 +19,8 @@ export type HarnessModel = {
 export const HARNESS_BY_AGENT: Record<string, string> = {
 	'Claude Code': 'claude-code',
 	Codex: 'codex',
-	'DeepSeek Harness': 'deepseek-harness'
+	'DeepSeek Harness': 'deepseek-harness',
+	pi: 'pi'
 };
 
 export async function listHarnessModels(

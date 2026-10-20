@@ -334,13 +334,14 @@ func RegisterRoutes(e *echo.Echo) error {
 		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")).
 			WithHarnesses(harnesses))
 	// ChenWeb as a front end to external agent harnesses (Claude Code, Codex,
-	// DeepSeek Harness).
+	// DeepSeek Harness, Pi).
 	// A harness is available only when its private gateway is configured.
 	harnessFrontends := harnessfrontend.NewRegistry()
 	for _, gateway := range []struct{ name, label, prefix string }{
 		{"claude-code", "Claude Code", "CLAUDE_CODE"},
 		{"codex", "Codex", "CODEX"},
 		{"deepseek-harness", "DeepSeek Harness", "DEEPSEEK_HARNESS"},
+		{"pi", "Pi", "PI_HARNESS"},
 	} {
 		url, secret := os.Getenv(gateway.prefix+"_GATEWAY_URL"), os.Getenv(gateway.prefix+"_GATEWAY_SECRET")
 		if url == "" || secret == "" {
