@@ -1,0 +1,22 @@
+{
+  "name": "@chenweb/claude-code-gateway",
+  "version": "0.1.0",
+  "description": "Private gateway that lets ChenWeb act as a front end to the Claude Code harness",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "check": "tsc --noEmit",
+    "gateway": "bun run server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.304",
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "typescript": "^7.0.2"
+  }
+}

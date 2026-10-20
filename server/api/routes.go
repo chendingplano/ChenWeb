@@ -40,6 +40,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
+	"github.com/chendingplano/deepdoc/server/api/harnessfrontend"
 	"github.com/chendingplano/deepdoc/server/api/imagehandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
@@ -332,6 +333,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	agentservicehandler.RegisterProfileAdminRoutes(apiGroup.Group("/system-admin/pi-harness"),
 		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")).
 			WithHarnesses(harnesses))
+	// ChenWeb as a front end to external agent harnesses (Claude Code first).
+	// A harness is available only when its private gateway is configured.
+	harnessFrontends := harnessfrontend.NewRegistry()
+	if url, secret := os.Getenv("CLAUDE_CODE_GATEWAY_URL"), os.Getenv("CLAUDE_CODE_GATEWAY_SECRET"); url != "" && secret != "" {
+		if err := harnessFrontends.Add(harnessfrontend.NewHost("claude-code", url, secret, nil)); err != nil {
+			return fmt.Errorf("register Claude Code harness front end: %w", err)
+		}
+	}
+	harnessfrontend.RegisterRoutes(apiGroup.Group("/harness-frontend"), harnessfrontend.NewHandler(harnessFrontends))
 	agentServiceGroup := apiGroup.Group("/agent-services")
 	agentservicehandler.RegisterConversationRoutes(agentServiceGroup,
 		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources).WithHarnesses(harnesses))
