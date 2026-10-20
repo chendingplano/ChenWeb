@@ -32,9 +32,6 @@ type ProfileCandidate struct {
 	Limits                 ProfileLimits `json:"limits"`
 	Enabled                bool          `json:"enabled"`
 	PilotUsers             []string      `json:"pilot_users"`
-	// Harness names the adapter to run the service on; empty means
-	// DefaultHarness. Whether it is registered is checked at activation.
-	Harness string `json:"harness"`
 }
 
 type ValidatedProfile struct {
@@ -53,10 +50,6 @@ func ValidateProfileCandidate(promptDir string, candidate ProfileCandidate) (Val
 	candidate.Slug = strings.TrimSpace(candidate.Slug)
 	if _, ok := profileSlugSet[candidate.Slug]; !ok {
 		return invalid("unsupported service slug %q", candidate.Slug)
-	}
-	candidate.Harness = harnessName(candidate.Harness)
-	if len(candidate.Harness) > 32 || strings.Trim(candidate.Harness, "abcdefghijklmnopqrstuvwxyz0123456789-") != "" {
-		return invalid("harness %q is not a valid harness name", candidate.Harness)
 	}
 	candidate.Provider = strings.TrimSpace(candidate.Provider)
 	candidate.Model = strings.TrimSpace(candidate.Model)
@@ -128,7 +121,7 @@ func ValidateProfileCandidate(promptDir string, candidate ProfileCandidate) (Val
 		AllowedTools: append([]string(nil), knowledgeToolNames...), AllowedKnowledgeStores: candidate.AllowedKnowledgeStores,
 		AllowedDocumentGroups: candidate.AllowedDocumentGroups, PermissionDefault: candidate.PermissionDefault,
 		Limits: candidate.Limits, Enabled: candidate.Enabled, PilotUsers: candidate.PilotUsers,
-		SaveAndResumeConversations: true, Harness: candidate.Harness,
+		SaveAndResumeConversations: true, Harness: DefaultHarness,
 	}
 	return ValidatedProfile{Profile: profile, PromptRef: ref, PromptHash: hex.EncodeToString(hash[:])}, nil
 }

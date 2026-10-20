@@ -302,8 +302,7 @@ func RegisterRoutes(e *echo.Echo) error {
 		}
 	}
 	var toolAccess agentservicehandler.KnowledgeAccessChecker = agentservicehandler.ActiveKnowledgeAccessChecker{DB: ApiTypes.ProjectDBHandle}
-	claudeCodeGatewaySecret := os.Getenv("CLAUDE_CODE_GATEWAY_SECRET")
-	if capabilitySigner != nil && (os.Getenv("PI_GATEWAY_SECRET") != "" || claudeCodeGatewaySecret != "") {
+	if capabilitySigner != nil && os.Getenv("PI_GATEWAY_SECRET") != "" {
 		toolAccess = agentservicehandler.ProfileAccessChecker{Registry: profileRegistry, Next: toolAccess}
 	}
 	toolService := agentservicehandler.NewKnowledgeToolService(
@@ -312,7 +311,6 @@ func RegisterRoutes(e *echo.Echo) error {
 	agentSources := &agentservicehandler.CurrentSourceAccessChecker{DB: ApiTypes.ProjectDBHandle}
 	agentservicehandler.RegisterInternalToolRoutes(e,
 		agentservicehandler.NewInternalToolHandler(os.Getenv("PI_GATEWAY_SECRET"), capabilitySigner, toolService).
-			WithGatewaySecret(claudeCodeGatewaySecret).
 			WithToolResults(agentStore, profileRegistry, agentSources))
 
 	// Create the routing group '/api/v1'
@@ -327,13 +325,6 @@ func RegisterRoutes(e *echo.Echo) error {
 	harnesses := agentservicehandler.NewHarnessRegistry()
 	if err := harnesses.Register(agentservicehandler.NewPiHarnessAdapter(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil)); err != nil {
 		return fmt.Errorf("register Pi harness adapter: %w", err)
-	}
-	// The Claude Code gateway is optional: services can select it only when
-	// its URL and secret are configured.
-	if claudeCodeURL := os.Getenv("CLAUDE_CODE_GATEWAY_URL"); claudeCodeURL != "" && claudeCodeGatewaySecret != "" {
-		if err := harnesses.Register(agentservicehandler.NewClaudeCodeHarnessAdapter(claudeCodeURL, claudeCodeGatewaySecret, nil)); err != nil {
-			return fmt.Errorf("register Claude Code harness adapter: %w", err)
-		}
 	}
 	for _, problem := range agentservicehandler.CheckActiveProfiles(context.Background(), profileRegistry, harnesses) {
 		logger.Error("agent service unavailable on its harness", "error", problem)

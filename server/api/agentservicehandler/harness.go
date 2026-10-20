@@ -32,16 +32,10 @@ const DefaultHarness = "pi"
 const defaultMaxRequestBytes = 480 * 1024
 
 var (
-	ErrHarnessNotRegistered     = errors.New("agent harness is not registered")
-	ErrHarnessCapabilityMissing = errors.New("agent harness lacks a required capability")
-	ErrHarnessProfileInvalid    = errors.New("agent harness cannot run this profile")
+	ErrHarnessNotRegistered       = errors.New("agent harness is not registered")
+	ErrHarnessCapabilityMissing   = errors.New("agent harness lacks a required capability")
+	ErrHarnessApprovalUnsupported = errors.New("agent harness does not support interactive approval")
 )
-
-// HarnessProfileValidator is implemented by adapters that accept only some
-// profile settings, such as a single model provider.
-type HarnessProfileValidator interface {
-	ValidateProfile(AgentServiceProfile) error
-}
 
 // HarnessDescriptor is what an adapter declares about itself.
 type HarnessDescriptor struct {
@@ -133,11 +127,6 @@ func (r *HarnessRegistry) AdapterFor(profile AgentServiceProfile) (HarnessAdapte
 	if !ok {
 		return nil, fmt.Errorf("%w: service %q uses harness %q", ErrHarnessNotRegistered, profile.Slug, name)
 	}
-	if validator, ok := adapter.(HarnessProfileValidator); ok {
-		if err := validator.ValidateProfile(profile); err != nil {
-			return nil, fmt.Errorf("%w: service %q: %v", ErrHarnessProfileInvalid, profile.Slug, err)
-		}
-	}
 	descriptor := adapter.Describe()
 	var missing []string
 	for _, capability := range RequiredHarnessCapabilities(profile) {
@@ -169,6 +158,10 @@ func RequiredHarnessCapabilities(profile AgentServiceProfile) []HarnessCapabilit
 		required = append(required, CapabilityHistoryReplay)
 	}
 	return required
+}
+
+func isHarnessAvailabilityError(err error) bool {
+	return errors.Is(err, ErrHarnessNotRegistered) || errors.Is(err, ErrHarnessCapabilityMissing)
 }
 
 func harnessName(name string) string {

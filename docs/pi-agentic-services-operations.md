@@ -24,10 +24,6 @@ The page's gateway check sends an authenticated request from ChenWeb to the conf
 
 Every run also gets a knowledge context, rendered from `prompts/prompt-agent-knowledge-context-v1.md` and appended to the profile's system prompt. It lists the store IDs and names the user is granted for that service. If `[frontend].default_knowledge_store` names exactly one of those granted stores, that store is marked as the default, and the gateway uses it whenever Pi leaves `knowledge_store_id` out of a tool call. A configured default that the user is not granted is ignored; it never widens access. A user with no granted store can still hold a conversation, but the run has no knowledge tools and the context tells Pi that knowledge access has not been granted. The page tells users which model provider receives messages and retrieved evidence; verify that disclosure matches the actual deployment.
 
-## Run a service on Claude Code instead of Pi
-
-A service can run on the Claude Agent SDK instead of Pi. Start the gateway in `gateways/claude-code` (`mise dev-claude-code-gateway`; see its README) with its own `CLAUDE_CODE_GATEWAY_SECRET` and an Anthropic credential. Set `CLAUDE_CODE_GATEWAY_URL` and the same `CLAUDE_CODE_GATEWAY_SECRET` in ChenWeb and restart it. On the admin page, choose **Claude Code (Agent SDK)** as the service's agent harness and save. This creates a new profile version. New conversations use it, and existing conversations keep the harness of their pinned version. ChenWeb refuses to activate the version if the gateway is not configured or the provider is not `anthropic`. Each run records the harness that executed it in `kb.agentic_response_attempts.harness`.
-
 ## Grant and revoke knowledge access
 
 Granting is an explicit operator action for this pilot; a service being visible does **not** itself grant knowledge access. First verify the signed-in user ID, the exact numeric `kb.knowledge_store.id`, its tenant, and whether the intended grant is store-wide or for one `kb.inputs.id`. Do not grant by store name alone when names may occur in multiple tenants.

@@ -26,7 +26,6 @@ export type PiProfile = {
 	limits: PiProfileLimits;
 	enabled: boolean;
 	pilot_users: string[];
-	harness: string;
 };
 
 export type PiHarnessAdminState = {
@@ -34,8 +33,6 @@ export type PiHarnessAdminState = {
 	initialized: boolean;
 	profiles: PiProfile[];
 	prompt_choices: Record<string, string[]>;
-	/** Registered harness adapters a service can run on. */
-	harnesses: string[];
 };
 
 export type PiProfileCandidate = Omit<PiProfile, 'version' | 'provider_disclosure' | 'allowed_tools'> & {

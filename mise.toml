@@ -45,10 +45,6 @@ run = "cd web && bun run dev"
 description = "Run the private Pi gateway for the ChenWeb agent-services pilot."
 run = 'cd "${PI_GATEWAY_DIR:?set PI_GATEWAY_DIR to ThirdParty/pi}" && bun run gateway'
 
-[tasks.dev-claude-code-gateway]
-description = "Run the private Claude Code (Agent SDK) gateway for agent services."
-run = 'cd gateways/claude-code && bun install --frozen-lockfile && bun run gateway'
-
 [tasks.dev-agent-services]
 description = "Start ChenWeb API, web UI, and the loopback-only Pi gateway together."
 run = '''

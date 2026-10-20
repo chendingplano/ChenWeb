@@ -49,10 +49,9 @@ type KnowledgeAccessRequest struct {
 }
 
 type InternalToolHandler struct {
-	// gatewaySecrets holds one secret per configured harness gateway.
-	gatewaySecrets []string
-	signer         *CapabilitySigner
-	service        *KnowledgeToolService
+	gatewaySecret string
+	signer        *CapabilitySigner
+	service       *KnowledgeToolService
 	// results, profiles and documents are optional: without them tool calls
 	// are not stored and get_saved_tool_result is unavailable.
 	results   ToolResultStore
@@ -73,27 +72,7 @@ type DocumentAccessChecker interface {
 }
 
 func NewInternalToolHandler(gatewaySecret string, signer *CapabilitySigner, service *KnowledgeToolService) *InternalToolHandler {
-	handler := &InternalToolHandler{signer: signer, service: service, now: time.Now}
-	return handler.WithGatewaySecret(gatewaySecret)
-}
-
-// WithGatewaySecret accepts tool calls from another harness gateway. Each
-// gateway has its own secret; the run capability still authorizes the call.
-func (h *InternalToolHandler) WithGatewaySecret(secret string) *InternalToolHandler {
-	if secret != "" {
-		h.gatewaySecrets = append(h.gatewaySecrets, secret)
-	}
-	return h
-}
-
-func (h *InternalToolHandler) knownGateway(token string) bool {
-	known := false
-	for _, secret := range h.gatewaySecrets {
-		if constantTimeStringEqual(token, secret) {
-			known = true
-		}
-	}
-	return known
+	return &InternalToolHandler{gatewaySecret: gatewaySecret, signer: signer, service: service, now: time.Now}
 }
 
 // WithToolResults stores tool calls and enables get_saved_tool_result.
@@ -115,7 +94,7 @@ func RegisterInternalToolRoutes(e *echo.Echo, handler *InternalToolHandler) {
 func (h *InternalToolHandler) authorize(c echo.Context, tool string) (RunCapabilityClaims, int, string) {
 	authorization := c.Request().Header.Get(echo.HeaderAuthorization)
 	if !strings.HasPrefix(authorization, "Bearer ") || strings.Count(authorization, " ") != 1 ||
-		!h.knownGateway(strings.TrimPrefix(authorization, "Bearer ")) {
+		!constantTimeStringEqual(strings.TrimPrefix(authorization, "Bearer "), h.gatewaySecret) {
 		return RunCapabilityClaims{}, http.StatusUnauthorized, "unauthorized"
 	}
 	claims, err := h.signer.Verify(c.Request().Header.Get(HeaderRunCapability), c.Request().Header.Get(HeaderRunID), tool)
@@ -146,7 +125,7 @@ func errorBody(message string) []byte {
 }
 
 func (h *InternalToolHandler) execute(c echo.Context, tool string) error {
-	if h == nil || h.signer == nil || h.service == nil || len(h.gatewaySecrets) == 0 {
+	if h == nil || h.signer == nil || h.service == nil || h.gatewaySecret == "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "internal knowledge tools unavailable"})
 	}
 	claims, status, message := h.authorize(c, tool)
@@ -191,7 +170,7 @@ func (h *InternalToolHandler) execute(c echo.Context, tool string) error {
 // snapshot period is withheld if it references a document the user can no
 // longer access.
 func (h *InternalToolHandler) executeSavedResult(c echo.Context) error {
-	if h == nil || h.signer == nil || len(h.gatewaySecrets) == 0 || h.results == nil || h.profiles == nil || h.documents == nil {
+	if h == nil || h.signer == nil || h.gatewaySecret == "" || h.results == nil || h.profiles == nil || h.documents == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "saved tool results unavailable"})
 	}
 	claims, status, message := h.authorize(c, savedToolResultTool)
