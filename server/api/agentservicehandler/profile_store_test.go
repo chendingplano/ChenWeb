@@ -35,6 +35,14 @@ func profileRegistryFixture(t *testing.T) *ProfileRegistry {
 	return registry
 }
 
+func TestProfileStoreEnsureSeededRejectsNilDatabase(t *testing.T) {
+	store := NewSQLProfileVersionStore(nil)
+	err := store.EnsureSeeded(context.Background(), profileRegistryFixture(t))
+	if err == nil {
+		t.Fatal("EnsureSeeded() error = nil, want unavailable database error")
+	}
+}
+
 func TestProfileStoreEnsureSeededStoresBothResolvedPromptSnapshots(t *testing.T) {
 	store, mock := profileStoreFixture(t)
 	registry := profileRegistryFixture(t)

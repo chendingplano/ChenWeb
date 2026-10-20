@@ -35,6 +35,9 @@ func (s *SQLProfileVersionStore) EnsureSeeded(ctx context.Context, registry *Pro
 	if registry == nil {
 		return errors.New("profile registry is required")
 	}
+	if s == nil || s.db == nil {
+		return errors.New("profile version database is unavailable")
+	}
 	profiles := make([]AgentServiceProfile, 0, 2)
 	for _, slug := range []string{"knowledge-guide", "problem-diagnostics"} {
 		version := registry.active[slug]

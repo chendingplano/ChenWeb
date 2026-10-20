@@ -133,12 +133,6 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	logger.Info("Register api Routes", "loc", "CWB_DDM_052")
-	err = api.RegisterRoutes(e)
-	if err != nil {
-		panic(err)
-	}
-
 	logger.Info("To Init DB", "loc", "CWB_DDM_095")
 	db_type := ApiTypes.CommonConfig.AppInfo.DatabaseType
 	if err := databaseutil.InitDB(new_ctx, ApiTypes.CommonConfig); err != nil {
@@ -199,6 +193,15 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("migrations completed successfully")
+
+	// Register routes only after the database and its tables are ready. Route
+	// registration seeds the SQL-backed profile registry during initialization.
+	logger.Info("Register api Routes", "loc", "CWB_DDM_052")
+	if err := api.RegisterRoutes(e); err != nil {
+		logger.Error("failed to register API routes", "error", err)
+		os.Exit(1)
+	}
+
 	monitorLoc, err := time.LoadLocation(config.GetLLMConfig().WorkspaceTimezone)
 	if err != nil {
 		logger.Error("failed to load code monitor timezone", "error", err)
