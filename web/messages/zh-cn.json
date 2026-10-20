@@ -6881,10 +6881,9 @@
 	"code_monitor_total_lines": "代码总行数",
 	"code_monitor_frontend_delta": "前端每日变化",
 	"code_monitor_backend_delta": "后端每日变化",
-	"code_monitor_daily_line_delta": "每日行数变化",
 	"code_monitor_loading": "正在加载代码历史记录…",
 	"code_monitor_load_error": "无法加载代码历史记录。",
 	"code_monitor_retry": "重试",
 	"code_monitor_empty": "尚未配置受监控的项目。",
-	"code_monitor_chart_description": "按采集日期显示项目 {project} 的代码总行数及前后端每日行数变化。变化量与上一条记录的快照进行比较。"
+	"code_monitor_chart_description": "按采集日期显示项目 {project} 的每日{metric}。前后端变化量与上一条记录的快照进行比较。"
 }

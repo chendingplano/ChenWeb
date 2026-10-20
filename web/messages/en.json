@@ -6881,10 +6881,9 @@
 	"code_monitor_total_lines": "Total lines",
 	"code_monitor_frontend_delta": "Frontend daily change",
 	"code_monitor_backend_delta": "Backend daily change",
-	"code_monitor_daily_line_delta": "Daily line change",
 	"code_monitor_loading": "Loading code history…",
 	"code_monitor_load_error": "Unable to load code history.",
 	"code_monitor_retry": "Retry",
 	"code_monitor_empty": "No monitored projects are configured.",
-	"code_monitor_chart_description": "Daily total project lines and frontend/backend line changes for project {project}. Changes compare with the previous recorded snapshot."
+	"code_monitor_chart_description": "Daily {metric} for project {project} by collection date. Frontend and backend changes compare with the previous recorded snapshot."
 }

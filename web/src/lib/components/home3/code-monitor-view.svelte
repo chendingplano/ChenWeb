@@ -47,28 +47,32 @@
 		loading = false;
 	}
 
-	function chartOption(project: CodeMonitorProject): EChartsOption {
+	function chartOption(project: CodeMonitorProject, metric: 'total_lines' | 'frontend_lines_delta' | 'backend_lines_delta', name: string): EChartsOption {
 		const rows = [...project.rows].sort((a, b) => a.collection_date.localeCompare(b.collection_date));
 		const dates = rows.map((row) => row.collection_date);
-		const totals = rows.map((row) => row.total_lines);
-		const frontendDeltas = rows.map((row) => row.frontend_lines_delta);
-		const backendDeltas = rows.map((row) => row.backend_lines_delta);
+		const values = rows.map((row) => row[metric]);
 		return {
 			backgroundColor: 'transparent',
-			aria: { enabled: true, label: { description: m.code_monitor_chart_description({ project: project.project_path }) } },
+			aria: { enabled: true, label: { description: m.code_monitor_chart_description({ metric: name, project: project.project_path }) } },
 			textStyle: { color: colors.muted },
 			tooltip: { trigger: 'axis' },
-			legend: { data: [m.code_monitor_total_lines(), m.code_monitor_frontend_delta(), m.code_monitor_backend_delta()], textStyle: { color: colors.muted } },
-			grid: { left: 48, right: 48, top: 36, bottom: 36 },
+			grid: { left: 48, right: 16, top: 36, bottom: 36 },
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
-			yAxis: [
-				{ type: 'value', position: 'left', name: m.code_monitor_total_lines(), axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
-				{ type: 'value', position: 'right', name: m.code_monitor_daily_line_delta(), axisLabel: { color: colors.muted }, splitLine: { show: false } }
-			],
+			yAxis: { type: 'value', position: 'left', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
 			series: [
-				{ name: m.code_monitor_total_lines(), type: 'bar', yAxisIndex: 0, data: totals, itemStyle: { color: colors.accent, opacity: 0.72 } },
-				{ name: m.code_monitor_frontend_delta(), type: 'bar', yAxisIndex: 1, data: frontendDeltas, itemStyle: { color: darkMode ? '#34D399' : '#059669', opacity: 0.8 } },
-				{ name: m.code_monitor_backend_delta(), type: 'bar', yAxisIndex: 1, data: backendDeltas, itemStyle: { color: darkMode ? '#FBBF24' : '#D97706', opacity: 0.8 } }
+				{
+					name,
+					type: 'bar',
+					data: values,
+					itemStyle: {
+						color: metric === 'total_lines'
+							? colors.accent
+							: metric === 'frontend_lines_delta'
+								? darkMode ? '#34D399' : '#059669'
+								: darkMode ? '#FBBF24' : '#D97706',
+						opacity: 0.8
+					}
+				}
 			]
 		};
 	}
@@ -100,7 +104,20 @@
 			{#each projects as project (project.project_path)}
 				<section class="project" style={`background:${colors.card};border-color:${colors.border}`}>
 					<h2>{project.project_path}</h2>
-					<Chart {init} options={chartOption(project)} style="height:320px;width:100%" />
+					<div class="charts">
+						<article>
+							<h3>{m.code_monitor_total_lines()}</h3>
+							<Chart {init} options={chartOption(project, 'total_lines', m.code_monitor_total_lines())} style="height:260px;width:100%" />
+						</article>
+						<article>
+							<h3>{m.code_monitor_frontend_delta()}</h3>
+							<Chart {init} options={chartOption(project, 'frontend_lines_delta', m.code_monitor_frontend_delta())} style="height:260px;width:100%" />
+						</article>
+						<article>
+							<h3>{m.code_monitor_backend_delta()}</h3>
+							<Chart {init} options={chartOption(project, 'backend_lines_delta', m.code_monitor_backend_delta())} style="height:260px;width:100%" />
+						</article>
+					</div>
 				</section>
 			{/each}
 		</div>
@@ -122,5 +139,9 @@
 	.state.error button { margin-left: 8px; }
 	.projects { display: flex; flex-direction: column; gap: 18px; }
 	h2 { margin-bottom: 18px; font-size: 1.05rem; overflow-wrap: anywhere; }
+	.charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+	article { min-width: 0; }
+	h3 { margin: 0 0 8px; font-size: .95rem; font-weight: 600; }
+	@media (max-width: 760px) { .charts { grid-template-columns: 1fr; } }
 	@media (max-width: 640px) { .page { padding: 14px; } .header { align-items: flex-start; } }
 </style>

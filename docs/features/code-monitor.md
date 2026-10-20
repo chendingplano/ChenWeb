@@ -1,6 +1,6 @@
 # Code Monitor
 
-Code Monitor tracks daily source size for every configured project. Each project chart shows the project's total source lines and the frontend and backend line changes since the previous recorded snapshot.
+Code Monitor tracks daily source size for every configured project. For each project, three charts show total source lines, frontend line changes, and backend line changes since the previous recorded snapshot.
 
 ## Configuration and collection
 
@@ -18,4 +18,4 @@ Snapshots in `kb.code_monitor` store total project lines and absolute frontend/b
 
 ## Page
 
-Open **Development → System Admin → System → Code Monitor**. Each project has one ECharts bar chart with total lines on the left y-axis and signed frontend/backend line changes on the right y-axis. The page supports English and Chinese through Paraglide.
+Open **Development → System Admin → System → Code Monitor**. Each project has three ECharts bar charts arranged on the same row: total lines, signed frontend line changes, and signed backend line changes. The page supports English and Chinese through Paraglide.
