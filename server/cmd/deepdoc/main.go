@@ -37,11 +37,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-func ExitApp() {
-	databaseutil.CloseDatabase(ApiTypes.CommonConfig)
-	libmanager.ExitLib()
-}
-
 func main() {
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -92,7 +87,7 @@ func main() {
 	// load libconfig.toml
 	// libmanager.LoadLibConfig(new_ctx, "../Shared/libconfig.toml")
 
-	defer ExitApp()
+	defer databaseutil.CloseDatabase(ApiTypes.CommonConfig)
 
 	logger.Info("Starting server",
 		"loc", "CWB_DDM_020)",
@@ -377,6 +372,7 @@ func main() {
 	// Init the library
 	logger.Info("InitLib")
 	libmanager.InitLib(new_ctx, "../Shared/libconfig.toml", "CWB_MAN_157")
+	defer libmanager.ExitLib()
 
 	logger.Info("Register Shared Routes (CWB_DDM_055)")
 	shared_api.RegisterRoutes(e)
