@@ -15,14 +15,14 @@ The system SHALL read project directory names from `frontend.projects-to-monitor
 - **WHEN** the local configuration lists `ChenWeb`
 - **THEN** the system collects the project rooted at the workspace's `ChenWeb` directory and groups its history under `ChenWeb`
 
-### Requirement: Frontend and backend source metrics
+### Requirement: Project-wide source line metrics
 
-For each project, the system SHALL count recognized Git-tracked source files under `web/src` as frontend files and under `server` as backend files. The total line count SHALL sum physical lines from both directories. Blank lines and a final line without a newline SHALL count; empty files SHALL contribute zero lines. Files outside these directories and files with unrecognized extensions SHALL be ignored. A tracked file missing from the worktree SHALL be skipped.
+For each configured project, the system SHALL count recognized Git-tracked source files throughout the project. The total line count SHALL include both frontend and backend source. Files under `web/src`, `svelte/src`, `frontend/src`, or `client/src` SHALL count as frontend; other recognized source files SHALL count as backend. Blank lines and a final line without a newline SHALL count; empty files SHALL contribute zero lines. Files with unrecognized extensions SHALL be ignored. A tracked file missing from the worktree SHALL be skipped.
 
-#### Scenario: Project directories determine category
+#### Scenario: Project-wide totals include frontend and backend
 
-- **WHEN** a recognized source file is under `web/src` or `server`
-- **THEN** it contributes to the total lines and its file count is determined by its directory
+- **WHEN** a recognized source file is tracked anywhere in a configured project
+- **THEN** its physical lines contribute to the project total and its lines are assigned to the frontend or backend component
 
 ### Requirement: Daily snapshots
 
@@ -35,21 +35,21 @@ The system SHALL store one row per `(project_path, collection_date)` in `kb.code
 
 ### Requirement: Project history API and deltas
 
-The authenticated `GET /api/v1/code-monitor?range=<range>` endpoint SHALL return daily rows grouped by project. Each row SHALL include total and delta values for total lines, frontend files, and backend files. A delta SHALL equal the current value minus the preceding recorded snapshot for the same project, even if that snapshot is outside the selected range. The first snapshot SHALL have a zero delta.
+The authenticated `GET /api/v1/code-monitor?range=<range>` endpoint SHALL return daily rows grouped by project. Each row SHALL include the project's total source lines, frontend line delta, and backend line delta. Component deltas SHALL equal the current component line total minus the preceding recorded snapshot for the same project, even if that snapshot is outside the selected range. The first snapshot SHALL have zero component deltas. Total lines SHALL equal frontend plus backend line totals for that snapshot.
 
 #### Scenario: Prior snapshot outside requested range
 
 - **WHEN** the selected range contains a snapshot with an earlier recorded snapshot outside that range
 - **THEN** the returned delta SHALL compare with that earlier snapshot
 
-#### Scenario: First snapshot
+#### Scenario: First snapshot has zero component deltas
 
 - **WHEN** a project has only one recorded snapshot
-- **THEN** its three delta values SHALL be zero
+- **THEN** its frontend and backend line deltas SHALL be zero
 
 ### Requirement: Code Monitor page and charts
 
-The system SHALL provide a bilingual Code Monitor page under Development → System Admin → System → Code Monitor. It SHALL group three charts under each configured project: total lines, frontend files, and backend files. Each chart SHALL show Total and Delta as bar series, with Total on the left y-axis and Delta on the right y-axis.
+The system SHALL provide a bilingual Code Monitor page under Development → System Admin → System → Code Monitor. It SHALL show one chart for each configured project, with total project lines and frontend/backend daily line deltas as bar series. Total lines SHALL use the left y-axis; signed component deltas SHALL use the right y-axis.
 
 #### Scenario: Choose a chart range
 

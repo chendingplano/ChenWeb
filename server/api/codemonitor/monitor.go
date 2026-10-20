@@ -19,12 +19,11 @@ import (
 type fileKind int
 
 const (
-	ignoredFile fileKind = iota
-	frontendFile
+	frontendFile fileKind = iota
 	backendFile
 )
 
-// Countable source extensions shared by the fixed frontend and backend directories.
+// Countable source extensions included in project-wide code totals.
 func isCountedExtension(ext string) bool {
 	switch strings.ToLower(ext) {
 	case ".js", ".jsx", ".ts", ".tsx", ".svelte", ".css", ".scss", ".html", ".vue", ".json",
@@ -67,13 +66,13 @@ func countLines(path string) (int, error) {
 
 type Snapshot struct {
 	TotalLines    int `json:"total_lines"`
-	FrontendFiles int `json:"frontend_files"`
-	BackendFiles  int `json:"backend_files"`
+	FrontendLines int `json:"frontend_lines"`
+	BackendLines  int `json:"backend_lines"`
 }
 
 func collectProject(projectRoot string) (Snapshot, error) {
 	var out Snapshot
-	cmd := exec.Command("git", "ls-files", "-z", "--", "web/src", "server")
+	cmd := exec.Command("git", "ls-files", "-z")
 	cmd.Dir = projectRoot
 	data, err := cmd.Output()
 	if err != nil {
@@ -83,14 +82,13 @@ func collectProject(projectRoot string) (Snapshot, error) {
 		if rel == "" {
 			continue
 		}
-		kind := ignoredFile
-		if strings.HasPrefix(rel, "web/src/") {
-			kind = frontendFile
-		} else if strings.HasPrefix(rel, "server/") {
-			kind = backendFile
-		}
-		if kind == ignoredFile || !isCountedExtension(filepath.Ext(rel)) {
+		if !isCountedExtension(filepath.Ext(rel)) {
 			continue
+		}
+		kind := backendFile
+		if strings.HasPrefix(rel, "web/src/") || strings.HasPrefix(rel, "svelte/src/") ||
+			strings.HasPrefix(rel, "frontend/src/") || strings.HasPrefix(rel, "client/src/") {
+			kind = frontendFile
 		}
 		lines, err := countLines(filepath.Join(projectRoot, filepath.FromSlash(rel)))
 		if err != nil {
@@ -101,9 +99,9 @@ func collectProject(projectRoot string) (Snapshot, error) {
 		}
 		out.TotalLines += lines
 		if kind == frontendFile {
-			out.FrontendFiles++
+			out.FrontendLines += lines
 		} else {
-			out.BackendFiles++
+			out.BackendLines += lines
 		}
 	}
 	return out, nil
@@ -116,8 +114,8 @@ func (s Store) Upsert(ctx context.Context, projectPath string, date time.Time, s
 }
 
 func (s Store) UpsertAt(ctx context.Context, projectPath string, date time.Time, snap Snapshot, collectedAt time.Time) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO kb.code_monitor(project_path, collection_date, total_lines, frontend_files, backend_files, collected_at)
-VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (project_path, collection_date) DO UPDATE SET total_lines=EXCLUDED.total_lines, frontend_files=EXCLUDED.frontend_files, backend_files=EXCLUDED.backend_files, collected_at=EXCLUDED.collected_at`, projectPath, date.Format("2006-01-02"), snap.TotalLines, snap.FrontendFiles, snap.BackendFiles, collectedAt)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO kb.code_monitor(project_path, collection_date, total_lines, frontend_lines, backend_lines, collected_at)
+VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (project_path, collection_date) DO UPDATE SET total_lines=EXCLUDED.total_lines, frontend_lines=EXCLUDED.frontend_lines, backend_lines=EXCLUDED.backend_lines, collected_at=EXCLUDED.collected_at`, projectPath, date.Format("2006-01-02"), snap.TotalLines, snap.FrontendLines, snap.BackendLines, collectedAt)
 	return err
 }
 
@@ -206,11 +204,8 @@ func Start(ctx context.Context, store Store, workspaceRoot string, projects []st
 type row struct {
 	Date               string `json:"collection_date"`
 	TotalLines         int    `json:"total_lines"`
-	TotalLinesDelta    int    `json:"total_lines_delta"`
-	FrontendFiles      int    `json:"frontend_files"`
-	FrontendFilesDelta int    `json:"frontend_files_delta"`
-	BackendFiles       int    `json:"backend_files"`
-	BackendFilesDelta  int    `json:"backend_files_delta"`
+	FrontendLinesDelta int    `json:"frontend_lines_delta"`
+	BackendLinesDelta  int    `json:"backend_lines_delta"`
 }
 type projectRows struct {
 	ProjectPath string `json:"project_path"`
@@ -269,20 +264,19 @@ func Handler(projects []string, loc *time.Location) echo.HandlerFunc {
 		for _, project := range projects {
 			p := projectRows{ProjectPath: project, Rows: []row{}}
 			rows, err := db.QueryContext(c.Request().Context(), `WITH history AS (
-    SELECT collection_date,total_lines,frontend_files,backend_files,
-           total_lines-LAG(total_lines) OVER (PARTITION BY project_path ORDER BY collection_date) AS total_lines_delta,
-           frontend_files-LAG(frontend_files) OVER (PARTITION BY project_path ORDER BY collection_date) AS frontend_files_delta,
-           backend_files-LAG(backend_files) OVER (PARTITION BY project_path ORDER BY collection_date) AS backend_files_delta
+    SELECT collection_date,total_lines,frontend_lines,backend_lines,
+           frontend_lines-LAG(frontend_lines) OVER (PARTITION BY project_path ORDER BY collection_date) AS frontend_lines_delta,
+           backend_lines-LAG(backend_lines) OVER (PARTITION BY project_path ORDER BY collection_date) AS backend_lines_delta
     FROM kb.code_monitor WHERE project_path=$1
 )
-SELECT collection_date::text,total_lines,COALESCE(total_lines_delta,0),frontend_files,COALESCE(frontend_files_delta,0),backend_files,COALESCE(backend_files_delta,0)
+SELECT collection_date::text,total_lines,COALESCE(frontend_lines_delta,0),COALESCE(backend_lines_delta,0)
 FROM history WHERE collection_date BETWEEN $2 AND $3 ORDER BY collection_date`, project, start.Format("2006-01-02"), end.Format("2006-01-02"))
 			if err != nil {
 				return err
 			}
 			for rows.Next() {
 				var v row
-				if err := rows.Scan(&v.Date, &v.TotalLines, &v.TotalLinesDelta, &v.FrontendFiles, &v.FrontendFilesDelta, &v.BackendFiles, &v.BackendFilesDelta); err != nil {
+				if err := rows.Scan(&v.Date, &v.TotalLines, &v.FrontendLinesDelta, &v.BackendLinesDelta); err != nil {
 					rows.Close()
 					return err
 				}

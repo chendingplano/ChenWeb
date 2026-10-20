@@ -17,11 +17,8 @@ describe('getCodeMonitor', () => {
 							{
 								collection_date: '2026-10-20',
 								total_lines: 120,
-								total_lines_delta: 8,
-								frontend_files: 3,
-								frontend_files_delta: 1,
-								backend_files: 5,
-								backend_files_delta: 0
+								frontend_lines_delta: 1,
+								backend_lines_delta: 0
 							}
 						]
 					}
@@ -34,7 +31,7 @@ describe('getCodeMonitor', () => {
 			expect(requestUrl).toBe('/api/v1/code-monitor?range=last_7_days');
 			expect(credentials).toBe('same-origin');
 			expect(response.projects[0].project_path).toBe('shared/go');
-			expect(response.projects[0].rows[0]).toMatchObject({ total_lines: 120, total_lines_delta: 8, frontend_files_delta: 1, backend_files_delta: 0 });
+		expect(response.projects[0].rows[0]).toMatchObject({ total_lines: 120, frontend_lines_delta: 1, backend_lines_delta: 0 });
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

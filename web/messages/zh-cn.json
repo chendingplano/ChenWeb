@@ -6870,7 +6870,7 @@
 	"build_info_unreported_status": "未上报",
 	"nav_sysadmin_system_code_monitor": "代码监控",
 	"code_monitor_title": "代码监控",
-	"code_monitor_description": "按项目查看每日代码规模和文件数量。",
+	"code_monitor_description": "按项目查看每日代码总行数以及前后端行数变化。",
 	"code_monitor_date_range": "日期范围",
 	"code_monitor_today": "今天",
 	"code_monitor_yesterday": "昨天",
@@ -6879,13 +6879,12 @@
 	"code_monitor_last_6_months": "最近 6 个月",
 	"code_monitor_last_12_months": "最近 12 个月",
 	"code_monitor_total_lines": "代码总行数",
-	"code_monitor_frontend_files": "前端文件数",
-	"code_monitor_backend_files": "后端文件数",
+	"code_monitor_frontend_delta": "前端每日变化",
+	"code_monitor_backend_delta": "后端每日变化",
+	"code_monitor_daily_line_delta": "每日行数变化",
 	"code_monitor_loading": "正在加载代码历史记录…",
 	"code_monitor_load_error": "无法加载代码历史记录。",
 	"code_monitor_retry": "重试",
 	"code_monitor_empty": "尚未配置受监控的项目。",
-	"code_monitor_total": "总量",
-	"code_monitor_delta": "变化量",
-	"code_monitor_chart_description": "按采集日期显示项目 {project} 的每日{metric}。总量柱形表示记录值，变化量柱形表示与上一条快照相比的变化。"
+	"code_monitor_chart_description": "按采集日期显示项目 {project} 的代码总行数及前后端每日行数变化。变化量与上一条记录的快照进行比较。"
 }

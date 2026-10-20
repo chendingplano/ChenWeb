@@ -44,12 +44,12 @@ func TestCollectProjectSkipsTrackedFileDeletedFromWorkingTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot != (Snapshot{TotalLines: 1, BackendFiles: 1}) {
+	if snapshot != (Snapshot{TotalLines: 1, BackendLines: 1}) {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 
-func TestCollectProjectCountsOnlyFrontendAndBackendDirectories(t *testing.T) {
+func TestCollectProjectCountsTrackedProjectLinesAndSeparatesFrontend(t *testing.T) {
 	workspace := t.TempDir()
 	projectRoot := filepath.Join(workspace, "ChenWeb")
 	files := map[string]string{
@@ -57,9 +57,9 @@ func TestCollectProjectCountsOnlyFrontendAndBackendDirectories(t *testing.T) {
 		"web/src/view.go":   "front\n",
 		"server/main.go":    "one\ntwo\nthree\n",
 		"server/assets.css": "body {}\n",
-		"web/outside.ts":    "ignored\n",
+		"web/outside.ts":    "backend\n",
 		"docs/readme.md":    "ignored\n",
-		"tools/extra.go":    "ignored\n",
+		"tools/extra.go":    "backend\n",
 	}
 	for path, content := range files {
 		fullPath := filepath.Join(projectRoot, filepath.FromSlash(path))
@@ -85,7 +85,7 @@ func TestCollectProjectCountsOnlyFrontendAndBackendDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Snapshot{TotalLines: 7, FrontendFiles: 2, BackendFiles: 2}
+	want := Snapshot{TotalLines: 9, FrontendLines: 3, BackendLines: 6}
 	if snapshot != want {
 		t.Fatalf("snapshot = %+v, want %+v", snapshot, want)
 	}
@@ -101,9 +101,9 @@ func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T)
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = old }()
 
-	mock.ExpectQuery(`(?s)WITH.*LAG\(total_lines\).*WHERE.*collection_date BETWEEN`).
-		WillReturnRows(sqlmock.NewRows([]string{"collection_date", "total_lines", "total_lines_delta", "frontend_files", "frontend_files_delta", "backend_files", "backend_files_delta"}).
-			AddRow(time.Now().Format("2006-01-02"), 150, 20, 8, 2, 5, -1))
+	mock.ExpectQuery(`(?s)WITH.*LAG\(frontend_lines\).*WHERE.*collection_date BETWEEN`).
+		WillReturnRows(sqlmock.NewRows([]string{"collection_date", "total_lines", "frontend_lines_delta", "backend_lines_delta"}).
+			AddRow(time.Now().Format("2006-01-02"), 150, 2, -1))
 	e := echo.New()
 	req := httptest.NewRequest("GET", "/code-monitor?range=today", nil)
 	rec := httptest.NewRecorder()
@@ -119,9 +119,9 @@ func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T)
 		Projects []struct {
 			ProjectPath string `json:"project_path"`
 			Rows        []struct {
-				TotalLinesDelta    int `json:"total_lines_delta"`
-				FrontendFilesDelta int `json:"frontend_files_delta"`
-				BackendFilesDelta  int `json:"backend_files_delta"`
+				TotalLines         int `json:"total_lines"`
+				FrontendLinesDelta int `json:"frontend_lines_delta"`
+				BackendLinesDelta  int `json:"backend_lines_delta"`
 			} `json:"rows"`
 		} `json:"projects"`
 	}
@@ -131,7 +131,7 @@ func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T)
 	if len(got.Projects) != 1 || got.Projects[0].ProjectPath != "server" {
 		t.Fatalf("projects = %s", rec.Body.String())
 	}
-	if len(got.Projects[0].Rows) != 1 || got.Projects[0].Rows[0].TotalLinesDelta != 20 || got.Projects[0].Rows[0].FrontendFilesDelta != 2 || got.Projects[0].Rows[0].BackendFilesDelta != -1 {
+	if len(got.Projects[0].Rows) != 1 || got.Projects[0].Rows[0].TotalLines != 150 || got.Projects[0].Rows[0].FrontendLinesDelta != 2 || got.Projects[0].Rows[0].BackendLinesDelta != -1 {
 		t.Fatalf("deltas = %s", rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
