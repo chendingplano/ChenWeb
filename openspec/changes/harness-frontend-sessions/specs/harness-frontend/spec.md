@@ -46,6 +46,13 @@ The gateway SHALL list the models the harness offers the signed-in account, as t
 - **WHEN** a turn names `sonnet` on a live session that was on `opus`
 - **THEN** the session continues on `sonnet` with its history intact
 
+### Requirement: The chat page is a front end to the harness
+When a harness-backed agent is selected, the chat page SHALL send each message to the harness and stream its reply. It SHALL show tool calls (collapsed, with input and result), approval requests with allow and deny (and option buttons for the harness's questions), and stop the running turn on request. Its Sessions menu SHALL list the harness's stored sessions and open one with the history the harness returns. Answer text SHALL be rendered as Markdown with raw HTML escaped and only http(s) and mailto links kept.
+
+#### Scenario: Approving a tool from the page
+- **WHEN** Claude Code asks to use `Write` during a turn
+- **THEN** the page shows an approval card, and clicking Allow lets Claude Code write the file and finish the turn
+
 ### Requirement: Admin-only front-end routes
 The ChenWeb routes under `/api/v1/harness-frontend` SHALL require an admin or root user, and SHALL relay turn events as SSE without storing them.
 

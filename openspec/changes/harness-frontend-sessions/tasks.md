@@ -20,6 +20,14 @@
 - [x] 2a.3 Chat page: model menu follows the selected agent (`HARNESS_BY_AGENT`), loading/unavailable states, en/zh messages
 - [x] 2a.4 Tests (gateway, Go, service); live check of the models route
 
+## 2b. Chat page conversation
+
+- [x] 2b.1 `harnessFrontendService.ts`: sessions, history, streamed turns (SSE over POST), permission decisions, interrupt
+- [x] 2b.2 `harness-conversation.ts`: events/history to display items, tool summaries, AskUserQuestion answers, safe Markdown
+- [x] 2b.3 `harness-dialog.svelte`: answers, tool calls, approval cards (questions as option buttons), notices
+- [x] 2b.4 `chatter-01.svelte`: harness tabs, Send/Stop, Sessions menu opening stored sessions, side panel; page allows text selection
+- [x] 2b.5 Browser check against the real Claude Code: approval card, file written, follow-up recalled, stored session reopened
+
 ## 3. Docs
 
 - [x] 3.1 Gateway README, `mise dev-claude-code-gateway`

@@ -7,7 +7,24 @@
 		type ChatterSettings
 	} from '$lib/services/chatterService';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
-	import { HARNESS_BY_AGENT, listHarnessModels } from '$lib/services/harnessFrontendService';
+	import {
+		HARNESS_BY_AGENT,
+		decideHarnessPermission,
+		getHarnessMessages,
+		interruptHarnessTurn,
+		listHarnessModels,
+		listHarnessSessions,
+		streamHarnessTurn,
+		type HarnessDecision,
+		type HarnessSession
+	} from '$lib/services/harnessFrontendService';
+	import HarnessDialog from './harness-dialog.svelte';
+	import {
+		applyEvent,
+		itemsFromHistory,
+		withDecision,
+		type HarnessItem
+	} from './harness-conversation';
 
 	import BotIcon from '@lucide/svelte/icons/bot';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -17,6 +34,8 @@
 	import SendHorizontalIcon from '@lucide/svelte/icons/send-horizontal';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import HistoryIcon from '@lucide/svelte/icons/history';
+	import SquareIcon from '@lucide/svelte/icons/square';
 
 	type ModelChoice = { value: string; label: string; description?: string };
 
@@ -24,6 +43,12 @@
 		id: string;
 		title: string;
 		dialogs: ChatterDialogItem[];
+		// Set for a tab whose conversation lives in a harness (Claude Code):
+		// the harness keeps the history; the tab only shows it.
+		harness?: string;
+		harnessSessionId?: string;
+		items?: HarnessItem[];
+		running?: boolean;
 	};
 
 	const defaultSettings: ChatterSettings = {
@@ -92,9 +117,15 @@
 	const textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	const textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
-	const activeSession = $derived(
-		sessions.find((session) => session.id === activeSessionId) ?? sessions[0]
+	// Tabs of the selected agent: harness tabs for a harness-backed agent,
+	// the configured chat sessions otherwise.
+	const visibleSessions = $derived(
+		sessions.filter((session) => (session.harness ?? '') === (selectedHarness ?? ''))
 	);
+	const activeSession = $derived(
+		visibleSessions.find((session) => session.id === activeSessionId) ?? visibleSessions[0]
+	);
+	let harnessSessionList = $state<HarnessSession[]>([]);
 
 	const filteredPrompts = $derived(
 		[...prompts]
@@ -152,12 +183,151 @@
 		} catch {
 			settings = defaultSettings;
 		}
+		ensureActiveTab();
 		await loadModels();
 	}
 
 	function selectAgent(agent: string) {
 		selectedAgent = agent;
+		ensureActiveTab();
 		void loadModels();
+	}
+
+	function updateSession(id: string, change: (session: ChatSession) => ChatSession) {
+		sessions = sessions.map((session) => (session.id === id ? change(session) : session));
+	}
+
+	function addNotice(id: string, detail: string) {
+		updateSession(id, (session) => ({
+			...session,
+			items: [
+				...(session.items ?? []),
+				{ kind: 'notice', id: `notice-${Date.now()}`, code: 'error', detail }
+			]
+		}));
+	}
+
+	function newHarnessTab(harness: string, existing?: { sessionId: string; title: string }): string {
+		const id = `harness-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+		sessions = [
+			...sessions,
+			{
+				id,
+				title: existing?.title || m.chatter_01_new_session(),
+				dialogs: [],
+				harness,
+				harnessSessionId: existing?.sessionId,
+				items: []
+			}
+		];
+		activeSessionId = id;
+		return id;
+	}
+
+	// Keeps a tab of the selected agent active; a harness always has one.
+	function ensureActiveTab() {
+		if (visibleSessions.some((session) => session.id === activeSessionId)) return;
+		if (visibleSessions.length) {
+			activeSessionId = visibleSessions[0].id;
+		} else if (selectedHarness) {
+			newHarnessTab(selectedHarness);
+		}
+	}
+
+	async function loadHarnessSessions() {
+		if (!selectedHarness) return;
+		try {
+			harnessSessionList = await listHarnessSessions(selectedHarness);
+		} catch {
+			harnessSessionList = [];
+		}
+	}
+
+	// Opens a session the harness keeps (from this page, a terminal or an IDE)
+	// and shows its history as the harness stored it.
+	async function openHarnessSession(entry: HarnessSession) {
+		const harness = selectedHarness;
+		if (!harness) return;
+		const open = sessions.find(
+			(session) => session.harness === harness && session.harnessSessionId === entry.sessionId
+		);
+		if (open) {
+			activeSessionId = open.id;
+			return;
+		}
+		const id = newHarnessTab(harness, {
+			sessionId: entry.sessionId,
+			title: entry.title || entry.firstPrompt || ''
+		});
+		try {
+			const messages = await getHarnessMessages(harness, entry.sessionId);
+			updateSession(id, (session) => ({ ...session, items: itemsFromHistory(messages) }));
+		} catch (error) {
+			addNotice(id, error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	async function sendHarnessMessage(input: string) {
+		const tab = activeSession;
+		if (!tab?.harness || tab.running) return;
+		const { id, harness } = tab;
+		updateSession(id, (session) => ({
+			...session,
+			running: true,
+			title: session.harnessSessionId || session.items?.length ? session.title : input.slice(0, 40),
+			items: [...(session.items ?? []), { kind: 'user', id: `user-${Date.now()}`, text: input }]
+		}));
+		// Send a model only when it comes from this harness's own list.
+		const model = modelChoices.some((choice) => choice.value === selectedModel)
+			? selectedModel
+			: undefined;
+		try {
+			await streamHarnessTurn(
+				harness,
+				{ session_id: tab.harnessSessionId, message: input, model },
+				(event) => {
+					updateSession(id, (session) => ({
+						...session,
+						harnessSessionId: event.type === 'session' ? event.sessionId : session.harnessSessionId,
+						items: applyEvent(session.items ?? [], event)
+					}));
+				}
+			);
+		} catch (error) {
+			addNotice(
+				id,
+				m.chatter_01_harness_unavailable({
+					agent: selectedAgent,
+					detail: error instanceof Error ? error.message : String(error)
+				})
+			);
+		} finally {
+			updateSession(id, (session) => ({ ...session, running: false }));
+		}
+	}
+
+	async function stopHarnessTurn() {
+		const tab = activeSession;
+		if (!tab?.harness || !tab.harnessSessionId) return;
+		try {
+			await interruptHarnessTurn(tab.harness, tab.harnessSessionId);
+		} catch (error) {
+			addNotice(tab.id, error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	async function decideHarness(requestId: string, decision: HarnessDecision) {
+		const tab = activeSession;
+		if (!tab?.harness || !tab.harnessSessionId) return;
+		try {
+			await decideHarnessPermission(tab.harness, tab.harnessSessionId, requestId, decision);
+			updateSession(tab.id, (session) => ({
+				...session,
+				items: withDecision(session.items ?? [], requestId, decision.behavior === 'allow')
+			}));
+		} catch (error) {
+			addNotice(tab.id, error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	// Fills the model menu for the selected agent and keeps the selection valid.
@@ -250,6 +420,10 @@
 	}
 
 	async function newSession() {
+		if (selectedHarness) {
+			newHarnessTab(selectedHarness);
+			return;
+		}
 		try {
 			const res = await chatterService.createSession();
 			const next = {
@@ -272,12 +446,11 @@
 	}
 
 	function closeSession(sessionId: string) {
-		if (sessions.length <= 1) return;
-		const nextSessions = sessions.filter((session) => session.id !== sessionId);
-		sessions = nextSessions;
-		if (activeSessionId === sessionId) {
-			activeSessionId = nextSessions[0].id;
-		}
+		// A harness tab can always close (its session stays in the harness);
+		// the configured chat keeps at least one tab.
+		if (!selectedHarness && visibleSessions.length <= 1) return;
+		sessions = sessions.filter((session) => session.id !== sessionId);
+		ensureActiveTab();
 	}
 
 	function addDialogItem(dialog: ChatterDialogItem) {
@@ -291,6 +464,12 @@
 	async function sendMessage() {
 		const input = draft.trim();
 		if (!input || !activeSession) return;
+
+		if (activeSession.harness) {
+			draft = '';
+			await sendHarnessMessage(input);
+			return;
+		}
 
 		addDialogItem({
 			id: `user-${Date.now()}`,
@@ -333,7 +512,7 @@
 	}
 </script>
 
-<div class="relative flex h-full min-h-0" style="background:{chatBg}; color:{textPrimary};">
+<div class="relative flex h-full min-h-0 select-text" style="background:{chatBg}; color:{textPrimary};">
 	<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
 		<div
 			class="flex flex-wrap items-center gap-2 border-b px-4 py-3"
@@ -353,13 +532,36 @@
 					{/each}
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
+			{#if selectedHarness}
+				<DropdownMenu.Root onOpenChange={(open) => open && loadHarnessSessions()}>
+					<DropdownMenu.Trigger
+						class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
+						style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
+					>
+						<HistoryIcon class="mr-1 inline h-3.5 w-3.5" />
+						{m.chatter_01_sessions()}
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content class="max-h-96 overflow-y-auto">
+						{#each harnessSessionList as entry (entry.sessionId)}
+							<DropdownMenu.Item onclick={() => openHarnessSession(entry)}>
+								<div class="flex max-w-[360px] flex-col">
+									<span class="truncate">{entry.title || entry.firstPrompt || entry.sessionId}</span>
+									<span class="text-[10px] opacity-60">{new Date(entry.lastModified).toLocaleString()}</span>
+								</div>
+							</DropdownMenu.Item>
+						{:else}
+							<DropdownMenu.Item disabled>{m.chatter_01_no_sessions()}</DropdownMenu.Item>
+						{/each}
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+			{/if}
 		</div>
 
 		<div
 			class="flex items-center gap-1 overflow-x-auto border-b px-3 py-2"
 			style="border-color:{borderColor};"
 		>
-			{#each sessions as session (session.id)}
+			{#each visibleSessions as session (session.id)}
 				<button
 					class="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 text-xs"
 					style="background:{activeSessionId === session.id
@@ -369,7 +571,7 @@
 						: textSecondary};"
 					onclick={() => {
 						activeSessionId = session.id;
-						loadDialogs(session.id);
+						if (!session.harness) loadDialogs(session.id);
 					}}
 				>
 					<span class="max-w-[140px] truncate">{session.title}</span>
@@ -385,7 +587,14 @@
 		</div>
 
 		<div class="flex-1 overflow-y-auto px-4 py-4" style="scrollbar-width:thin;">
-			{#if activeSession?.dialogs?.length}
+			{#if activeSession?.harness && (activeSession.items?.length || activeSession.running)}
+				<HarnessDialog
+					items={activeSession.items ?? []}
+					running={activeSession.running}
+					colors={{ cardBg, surface2, borderColor, accent, accentTint, textPrimary, textSecondary, textMuted }}
+					onDecide={decideHarness}
+				/>
+			{:else if !activeSession?.harness && activeSession?.dialogs?.length}
 				<div class="space-y-3">
 					{#each activeSession.dialogs as dialog (dialog.id)}
 						<div class={dialog.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
@@ -540,14 +749,25 @@
 				</button>
 
 				<div class="ml-auto">
-					<button
-						class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
-						style="background:{accent}; color:white; border:1px solid {accent};"
-						onclick={sendMessage}
-					>
-						<SendHorizontalIcon class="mr-1 inline h-3.5 w-3.5" />
-						{m.chatter_01_send()}
-					</button>
+					{#if activeSession?.running}
+						<button
+							class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
+							style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};"
+							onclick={stopHarnessTurn}
+						>
+							<SquareIcon class="mr-1 inline h-3.5 w-3.5" />
+							{m.chatter_01_stop()}
+						</button>
+					{:else}
+						<button
+							class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold"
+							style="background:{accent}; color:white; border:1px solid {accent};"
+							onclick={sendMessage}
+						>
+							<SendHorizontalIcon class="mr-1 inline h-3.5 w-3.5" />
+							{m.chatter_01_send()}
+						</button>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -591,7 +811,25 @@
 
 		{#if infoTab === 'dialog'}
 			<div class="flex-1 overflow-y-auto p-3" style="scrollbar-width:thin;">
-				{#if activeSession?.dialogs?.length}
+				{#if activeSession?.harness}
+					<div class="space-y-2">
+						{#each (activeSession.items ?? []).filter((item) => item.kind === 'user' || item.kind === 'assistant' || item.kind === 'tool') as item (item.id)}
+							<div
+								class="rounded-lg px-3 py-2 text-xs"
+								style="background:{surface2}; border:1px solid {borderColor};"
+							>
+								<div class="mb-1 font-semibold tracking-wide uppercase" style="color:{textMuted};">
+									{item.kind === 'tool' ? item.name : item.kind}
+								</div>
+								{#if item.kind !== 'tool'}
+									<div class="line-clamp-3" style="color:{textSecondary};">{item.text}</div>
+								{/if}
+							</div>
+						{:else}
+							<div class="text-xs" style="color:{textMuted};">{m.chatter_01_no_dialog_history_yet()}</div>
+						{/each}
+					</div>
+				{:else if activeSession?.dialogs?.length}
 					<div class="space-y-2">
 						{#each activeSession.dialogs as dialog (dialog.id)}
 							<div
