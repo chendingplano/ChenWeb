@@ -204,7 +204,12 @@ func main() {
 		logger.Error("failed to load code monitor timezone", "error", err)
 		os.Exit(1)
 	}
-	codemonitor.Start(context.Background(), codemonitor.Store{DB: project_db}, config.GetConfigDir(), config.AppConfig.Frontend.CodePackagesToMonitor, monitorLoc, loggerutil.CreateDefaultLogger("20261020-672"))
+	monitorStore := codemonitor.Store{DB: project_db}
+	monitorProjects := config.AppConfig.Frontend.ProjectsToMonitor
+	if err := monitorStore.Initialize(context.Background(), config.GetConfigDir(), monitorProjects, time.Now(), monitorLoc); err != nil {
+		logger.Error("initial code monitor collection failed", "error", err)
+	}
+	codemonitor.Start(context.Background(), monitorStore, config.GetConfigDir(), monitorProjects, monitorLoc, loggerutil.CreateDefaultLogger("20261020-672"))
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer bootstrapCancel()
 	warnings, err := seed.EnsureCuratedModules(bootstrapCtx, project_db)

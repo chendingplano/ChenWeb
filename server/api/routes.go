@@ -320,7 +320,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	if err != nil {
 		return fmt.Errorf("load code monitor timezone: %w", err)
 	}
-	apiGroup.GET("/code-monitor", codemonitor.Handler(appconfig.AppConfig.Frontend.CodePackagesToMonitor, monitorLoc))
+	apiGroup.GET("/code-monitor", codemonitor.Handler(appconfig.AppConfig.Frontend.ProjectsToMonitor, monitorLoc))
 	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
 	agentservicehandler.RegisterProfileAdminRoutes(apiGroup.Group("/system-admin/pi-harness"),
 		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")))

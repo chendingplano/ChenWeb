@@ -9,16 +9,19 @@ export type CodeMonitorRange =
 export type CodeMonitorRow = {
 	collection_date: string;
 	total_lines: number;
+	total_lines_delta: number;
 	frontend_files: number;
+	frontend_files_delta: number;
 	backend_files: number;
+	backend_files_delta: number;
 };
 
-export type CodeMonitorPackage = {
-	package_path: string;
+export type CodeMonitorProject = {
+	project_path: string;
 	rows: CodeMonitorRow[];
 };
 
-export type CodeMonitorResponse = { packages: CodeMonitorPackage[] };
+export type CodeMonitorResponse = { projects: CodeMonitorProject[] };
 
 export type LatestCodeMonitorResult =
 	| { status: 'success'; response: CodeMonitorResponse }

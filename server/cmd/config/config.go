@@ -130,7 +130,7 @@ type LanguagesConfig struct {
 }
 
 type FrontendConfigSection struct {
-	CodePackagesToMonitor []string `mapstructure:"code-packages-to-monitor"`
+	ProjectsToMonitor []string `mapstructure:"projects-to-monitor"`
 	// ImageGenerationModels controls the model choices shown by image-generation
 	// forms. An unset or empty value uses the built-in Qwen/OpenAI choices.
 	ImageGenerationModels []string `mapstructure:"image_generation_models"`

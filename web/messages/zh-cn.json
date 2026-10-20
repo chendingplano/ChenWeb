@@ -6870,7 +6870,7 @@
 	"build_info_unreported_status": "未上报",
 	"nav_sysadmin_system_code_monitor": "代码监控",
 	"code_monitor_title": "代码监控",
-	"code_monitor_description": "按软件包查看每日代码规模和文件数量。",
+	"code_monitor_description": "按项目查看每日代码规模和文件数量。",
 	"code_monitor_date_range": "日期范围",
 	"code_monitor_today": "今天",
 	"code_monitor_yesterday": "昨天",
@@ -6884,6 +6884,8 @@
 	"code_monitor_loading": "正在加载代码历史记录…",
 	"code_monitor_load_error": "无法加载代码历史记录。",
 	"code_monitor_retry": "重试",
-	"code_monitor_empty": "尚未配置受监控的软件包。",
-	"code_monitor_chart_description": "按采集日期显示软件包 {package} 的每日{metric}。柱形和折线表示相同的每日数值。"
+	"code_monitor_empty": "尚未配置受监控的项目。",
+	"code_monitor_total": "总量",
+	"code_monitor_delta": "变化量",
+	"code_monitor_chart_description": "按采集日期显示项目 {project} 的每日{metric}。总量柱形表示记录值，变化量柱形表示与上一条快照相比的变化。"
 }

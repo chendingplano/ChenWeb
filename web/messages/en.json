@@ -6870,7 +6870,7 @@
 	"build_info_unreported_status": "Unreported",
 	"nav_sysadmin_system_code_monitor": "Code Monitor",
 	"code_monitor_title": "Code Monitor",
-	"code_monitor_description": "Daily code size and file counts by package.",
+	"code_monitor_description": "Daily code size and file counts by project.",
 	"code_monitor_date_range": "Date range",
 	"code_monitor_today": "Today",
 	"code_monitor_yesterday": "Yesterday",
@@ -6884,6 +6884,8 @@
 	"code_monitor_loading": "Loading code history…",
 	"code_monitor_load_error": "Unable to load code history.",
 	"code_monitor_retry": "Retry",
-	"code_monitor_empty": "No monitored packages are configured.",
-	"code_monitor_chart_description": "Daily {metric} for {package} by collection date. Bars and the line show the same daily values."
+	"code_monitor_empty": "No monitored projects are configured.",
+	"code_monitor_total": "Total",
+	"code_monitor_delta": "Delta",
+	"code_monitor_chart_description": "Daily {metric} for project {project} by collection date. The Total bars show the recorded values and the Delta bars show the change from the previous snapshot."
 }

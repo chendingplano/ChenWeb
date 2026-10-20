@@ -3,13 +3,13 @@
 	import { Chart } from 'svelte-echarts';
 	import type { EChartsOption } from 'echarts';
 	import { init, use } from 'echarts/core';
-	import { BarChart, LineChart } from 'echarts/charts';
+	import { BarChart } from 'echarts/charts';
 	import { AriaComponent, GridComponent, TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import { m } from '$lib/paraglide/messages.js';
-	import { createLatestCodeMonitorLoader, type CodeMonitorPackage, type CodeMonitorRange } from './code-monitor-client';
+	import { createLatestCodeMonitorLoader, type CodeMonitorProject, type CodeMonitorRange } from './code-monitor-client';
 
-	use([BarChart, LineChart, AriaComponent, GridComponent, TooltipComponent, CanvasRenderer]);
+	use([BarChart, AriaComponent, GridComponent, TooltipComponent, CanvasRenderer]);
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 	const ranges: { value: CodeMonitorRange; label: () => string }[] = [
@@ -21,7 +21,7 @@
 		{ value: 'last_12_months', label: m.code_monitor_last_12_months }
 	];
 	let range = $state<CodeMonitorRange>('last_7_days');
-	let packages = $state<CodeMonitorPackage[]>([]);
+	let projects = $state<CodeMonitorProject[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	const loader = createLatestCodeMonitorLoader();
@@ -40,28 +40,33 @@
 		const result = await loader.load(range);
 		if (result.status === 'stale') return;
 		if (result.status === 'success') {
-			packages = result.response.packages;
+			projects = result.response.projects;
 		} else {
 			error = m.code_monitor_load_error();
 		}
 		loading = false;
 	}
 
-	function chartOption(pkg: CodeMonitorPackage, metric: 'total_lines' | 'frontend_files' | 'backend_files', name: string): EChartsOption {
-		const rows = [...pkg.rows].sort((a, b) => a.collection_date.localeCompare(b.collection_date));
+	function chartOption(project: CodeMonitorProject, metric: 'total_lines' | 'frontend_files' | 'backend_files', name: string): EChartsOption {
+		const rows = [...project.rows].sort((a, b) => a.collection_date.localeCompare(b.collection_date));
 		const dates = rows.map((row) => row.collection_date);
-		const values = rows.map((row) => row[metric]);
+		const totals = rows.map((row) => row[metric]);
+		const deltas = rows.map((row) => row[`${metric}_delta`]);
 		return {
 			backgroundColor: 'transparent',
-			aria: { enabled: true, label: { description: m.code_monitor_chart_description({ metric: name, package: pkg.package_path }) } },
+			aria: { enabled: true, label: { description: m.code_monitor_chart_description({ metric: name, project: project.project_path }) } },
 			textStyle: { color: colors.muted },
 			tooltip: { trigger: 'axis' },
-			grid: { left: 48, right: 18, top: 24, bottom: 36 },
+			legend: { data: [m.code_monitor_total(), m.code_monitor_delta()], textStyle: { color: colors.muted } },
+			grid: { left: 48, right: 48, top: 36, bottom: 36 },
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
-			yAxis: { type: 'value', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+			yAxis: [
+				{ type: 'value', position: 'left', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+				{ type: 'value', position: 'right', axisLabel: { color: colors.muted }, splitLine: { show: false } }
+			],
 			series: [
-				{ name, type: 'bar', data: values, itemStyle: { color: colors.accent, opacity: 0.62 } },
-				{ name, type: 'line', data: values, smooth: false, symbol: 'circle', symbolSize: 5, lineStyle: { color: colors.accent, width: 2 }, itemStyle: { color: colors.accent } }
+				{ name: m.code_monitor_total(), type: 'bar', yAxisIndex: 0, data: totals, itemStyle: { color: colors.accent, opacity: 0.72 } },
+				{ name: m.code_monitor_delta(), type: 'bar', yAxisIndex: 1, data: deltas, itemStyle: { color: darkMode ? '#34D399' : '#059669', opacity: 0.8 } }
 			]
 		};
 	}
@@ -86,17 +91,17 @@
 		<div class="state" style={`color:${colors.muted}`}>{m.code_monitor_loading()}</div>
 	{:else if error}
 		<div class="state error">{error} <button onclick={load}>{m.code_monitor_retry()}</button></div>
-	{:else if packages.length === 0}
+	{:else if projects.length === 0}
 		<div class="state" style={`color:${colors.muted}`}>{m.code_monitor_empty()}</div>
 	{:else}
-		<div class="packages">
-			{#each packages as pkg (pkg.package_path)}
-				<section class="package" style={`background:${colors.card};border-color:${colors.border}`}>
-					<h2>{pkg.package_path}</h2>
+		<div class="projects">
+			{#each projects as project (project.project_path)}
+				<section class="project" style={`background:${colors.card};border-color:${colors.border}`}>
+					<h2>{project.project_path}</h2>
 					<div class="charts">
-						<article><h3>{m.code_monitor_total_lines()}</h3><Chart {init} options={chartOption(pkg, 'total_lines', m.code_monitor_total_lines())} style="height:260px;width:100%" /></article>
-						<article><h3>{m.code_monitor_frontend_files()}</h3><Chart {init} options={chartOption(pkg, 'frontend_files', m.code_monitor_frontend_files())} style="height:260px;width:100%" /></article>
-						<article><h3>{m.code_monitor_backend_files()}</h3><Chart {init} options={chartOption(pkg, 'backend_files', m.code_monitor_backend_files())} style="height:260px;width:100%" /></article>
+						<article><h3>{m.code_monitor_total_lines()}</h3><Chart {init} options={chartOption(project, 'total_lines', m.code_monitor_total_lines())} style="height:260px;width:100%" /></article>
+						<article><h3>{m.code_monitor_frontend_files()}</h3><Chart {init} options={chartOption(project, 'frontend_files', m.code_monitor_frontend_files())} style="height:260px;width:100%" /></article>
+						<article><h3>{m.code_monitor_backend_files()}</h3><Chart {init} options={chartOption(project, 'backend_files', m.code_monitor_backend_files())} style="height:260px;width:100%" /></article>
 					</div>
 				</section>
 			{/each}
@@ -117,7 +122,7 @@
 	.state { padding: 32px; text-align: center; }
 	.state.error { color: #F87171; }
 	.state.error button { margin-left: 8px; }
-	.packages { display: flex; flex-direction: column; gap: 18px; }
+	.projects { display: flex; flex-direction: column; gap: 18px; }
 	h2 { margin-bottom: 18px; font-size: 1.05rem; overflow-wrap: anywhere; }
 	.charts { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,320px),1fr)); gap: 16px; }
 	article { min-width: 0; }

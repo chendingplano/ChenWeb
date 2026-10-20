@@ -1,11 +1,18 @@
 package codemonitor
 
 import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/labstack/echo/v4"
 )
 
 func TestCollectPackageSkipsTrackedFileDeletedFromWorkingTree(t *testing.T) {
@@ -39,6 +46,107 @@ func TestCollectPackageSkipsTrackedFileDeletedFromWorkingTree(t *testing.T) {
 	}
 	if snapshot != (Snapshot{TotalLines: 1, BackendFiles: 1}) {
 		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestHandlerReturnsProjectDeltasIncludingPreviousOutOfRangeRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	old := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = old }()
+
+	mock.ExpectQuery(`(?s)WITH.*LAG\(total_lines\).*WHERE.*collection_date BETWEEN`).
+		WillReturnRows(sqlmock.NewRows([]string{"collection_date", "total_lines", "total_lines_delta", "frontend_files", "frontend_files_delta", "backend_files", "backend_files_delta"}).
+			AddRow(time.Now().Format("2006-01-02"), 150, 20, 8, 2, 5, -1))
+	e := echo.New()
+	req := httptest.NewRequest("GET", "/code-monitor?range=today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	loc, _ := time.LoadLocation("America/Chicago")
+	if err := Handler([]string{"server"}, loc)(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Projects []struct {
+			ProjectPath string `json:"project_path"`
+			Rows        []struct {
+				TotalLinesDelta    int `json:"total_lines_delta"`
+				FrontendFilesDelta int `json:"frontend_files_delta"`
+				BackendFilesDelta  int `json:"backend_files_delta"`
+			} `json:"rows"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Projects) != 1 || got.Projects[0].ProjectPath != "server" {
+		t.Fatalf("projects = %s", rec.Body.String())
+	}
+	if len(got.Projects[0].Rows) != 1 || got.Projects[0].Rows[0].TotalLinesDelta != 20 || got.Projects[0].Rows[0].FrontendFilesDelta != 2 || got.Projects[0].Rows[0].BackendFilesDelta != -1 {
+		t.Fatalf("deltas = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitializeCollectsImmediatelyAtSyntheticLocalTwoAMWhenEmpty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "server"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "server", "code.go"), []byte("package test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun := exec.Command("git", "init", "-q")
+	gitRun.Dir = root
+	if out, err := gitRun.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	gitRun = exec.Command("git", "add", "server/code.go")
+	gitRun.Dir = root
+	if out, err := gitRun.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v %s", err, out)
+	}
+	local, _ := time.LoadLocation("America/Chicago")
+	now := time.Date(2026, 10, 20, 10, 15, 0, 0, local)
+	mock.ExpectQuery(`SELECT EXISTS`).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(`INSERT INTO kb\.code_monitor`).
+		WithArgs("server", "2026-10-20", 1, 0, 1, time.Date(2026, 10, 20, 2, 0, 0, 0, local)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := (Store{DB: db}).Initialize(context.Background(), root, []string{"server"}, now, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitializeLeavesExistingHistoryForScheduledCollection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`SELECT EXISTS`).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	local, _ := time.LoadLocation("America/Chicago")
+	if err := (Store{DB: db}).Initialize(context.Background(), t.TempDir(), []string{"server"}, time.Now(), local); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

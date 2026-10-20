@@ -131,3 +131,35 @@
 - [x] Run focused Go tests: `cd ChenWeb/server && go test ./api/codemonitor -count=1`.
 - [x] Run targeted frontend client tests and `cd ChenWeb/web && bun run check`.
 - [x] Review the complete diff, ensure the pre-existing metrics-handler edits are untouched and excluded from commits, and verify `jj log` has only expected linear feature commits.
+
+## User-requested revision: projects and deltas
+
+### Task 9: Project model, deltas, and empty-table initialization
+
+**Files:**
+- Modify: `server/cmd/config/config.go`, `config.local.toml`, `server/api/codemonitor/monitor.go`, `server/api/codemonitor/monitor_test.go`, `server/api/routes.go`, `server/cmd/deepdoc/main.go`
+- Create: next Goose migration to rename `kb.code_monitor.package_path` to `project_path`
+
+- [x] Replace `frontend.code-packages-to-monitor` with `frontend.projects-to-monitor`, treating each configured repo-relative path as a project group.
+- [x] Add delta fields to each API row; each delta is the current value minus the previous recorded row for that project, with zero for the first recorded row, including previous rows outside the selected range.
+- [x] If the table has no rows at startup, collect once using today's workspace-local date and a synthetic 2:00 am collection timestamp.
+- [x] Keep scheduled subsequent collections at 2:00 am and preserve the existing date ranges.
+- [x] Write focused tests before code, verify the failing behavior, implement, and verify green.
+
+### Task 10: Project charts with total and delta bars
+
+**Files:**
+- Modify: `web/src/lib/components/home3/code-monitor-client.ts`, `.test.ts`, `code-monitor-view.svelte`, `web/messages/en.json`, `web/messages/zh-cn.json`
+
+- [x] Change the response model and page grouping from packages to projects.
+- [x] Render two bar series in each metric chart, Total on the left axis and Delta on the right axis.
+- [x] Add localized Total/Delta labels and update chart accessibility descriptions.
+- [x] Verify client tests and `bun run check`.
+
+### Task 11: Updated documentation and final review
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-10-20-code-monitor-design.md`, `docs/features/code-monitor.md`, and the Code Monitor KnowledgeStore devdoc.
+
+- [x] Record the revised config key, grouping, delta definition, dual-axis charts, and empty-table initial snapshot behavior.
+- [x] Run focused backend and frontend checks; review the final diff and commit only feature files.
