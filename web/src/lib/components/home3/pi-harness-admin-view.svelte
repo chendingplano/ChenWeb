@@ -77,6 +77,20 @@
 		return value.split(',').map((part) => part.trim()).filter(Boolean);
 	}
 
+	// The profile's own harness stays listed even when its gateway is not
+	// configured, so saving never changes it silently.
+	function harnessChoices(registered: string[] | undefined, current: string): string[] {
+		const choices = [...(registered ?? [])];
+		if (current && !choices.includes(current)) choices.push(current);
+		return choices;
+	}
+
+	function harnessLabel(harness: string): string {
+		if (harness === 'pi') return m.pi_harness_runtime_pi();
+		if (harness === 'claude-code') return m.pi_harness_runtime_claude_code();
+		return harness;
+	}
+
 	async function save() {
 		if (!draft || !adminState?.initialized) return;
 		saving = true;
@@ -96,6 +110,7 @@
 			limits: { ...draft.limits, max_elapsed: elapsedSeconds },
 			enabled: draft.enabled,
 			pilot_users: csv(pilotUsersText),
+			harness: draft.harness,
 			expected_active_version: draft.version
 		};
 		try {
@@ -200,6 +215,7 @@
 
 				<p class="my-4 rounded-lg px-3 py-2 text-sm" style="background:{darkMode ? '#252A3A' : '#F3F4F6'}; color:{muted};">{m.pi_harness_provider_disclosure()}</p>
 				<div class="grid gap-4 md:grid-cols-2">
+					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_runtime()}</span><select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.harness}>{#each harnessChoices(adminState.harnesses, draft.harness) as harness}<option value={harness}>{harnessLabel(harness)}</option>{/each}</select></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_provider()}</span><input class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.provider} /></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_model()}</span><input class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.model} /></label>
 					<label class="flex flex-col gap-1 text-sm"><span>{m.pi_harness_thinking()}</span><select class={inputClass} style="background:{card}; border-color:{border}; color:{text};" bind:value={draft.thinking_level}><option value="off">{m.pi_harness_thinking_off()}</option><option value="minimal">{m.pi_harness_thinking_minimal()}</option><option value="low">{m.pi_harness_thinking_low()}</option><option value="medium">{m.pi_harness_thinking_medium()}</option><option value="high">{m.pi_harness_thinking_high()}</option><option value="xhigh">{m.pi_harness_thinking_xhigh()}</option></select></label>

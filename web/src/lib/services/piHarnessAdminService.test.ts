@@ -7,7 +7,7 @@ describe('Pi harness admin service', () => {
 		const fetchFn: typeof fetch = async (input, init) => {
 			requested = String(input);
 			expect(init?.credentials).toBe('same-origin');
-			return Response.json({ gateway_url: 'http://localhost:4317', initialized: true, profiles: [], prompt_choices: {} });
+			return Response.json({ gateway_url: 'http://localhost:4317', initialized: true, profiles: [], prompt_choices: {}, harnesses: ['pi'] });
 		};
 		const result = await getPiHarnessAdminState(fetchFn);
 		expect(requested).toBe('/api/v1/system-admin/pi-harness');

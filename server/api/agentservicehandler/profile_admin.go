@@ -86,8 +86,12 @@ func (h *ProfileAdminHandler) GetState(c echo.Context) error {
 			}
 		}
 	}
+	harnesses := []string{DefaultHarness}
+	if h.harnesses != nil {
+		harnesses = h.harnesses.Names()
+	}
 	return c.JSON(http.StatusOK, map[string]any{
-		"gateway_url": safeGatewayURL(h.gatewayURL), "initialized": !degraded, "profiles": profiles,
+		"gateway_url": safeGatewayURL(h.gatewayURL), "initialized": !degraded, "profiles": profiles, "harnesses": harnesses,
 		"prompt_choices": map[string][]string{
 			"knowledge-guide":     {"prompt-agent-knowledge-guide-v1.md"},
 			"problem-diagnostics": {"prompt-agent-problem-diagnosis-v1.md"},
@@ -120,6 +124,7 @@ type profileUpdateRequest struct {
 	Enabled                bool               `json:"enabled"`
 	PilotUsers             []string           `json:"pilot_users"`
 	ExpectedActiveVersion  string             `json:"expected_active_version"`
+	Harness                string             `json:"harness"`
 	Limits                 profileAdminLimits `json:"limits"`
 }
 
@@ -166,6 +171,7 @@ func (h *ProfileAdminHandler) UpdateProfile(c echo.Context) error {
 		ThinkingLevel: request.ThinkingLevel, PromptFile: request.PromptFile,
 		AllowedKnowledgeStores: request.AllowedKnowledgeStores, AllowedDocumentGroups: request.AllowedDocumentGroups,
 		PermissionDefault: request.PermissionDefault, Enabled: request.Enabled, PilotUsers: request.PilotUsers,
+		Harness: request.Harness,
 	}
 	maxElapsed, err := profileElapsedDuration(request.Limits.MaxElapsed)
 	if err != nil {
