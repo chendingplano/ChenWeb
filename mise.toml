@@ -49,6 +49,10 @@ run = 'cd "${PI_GATEWAY_DIR:?set PI_GATEWAY_DIR to ThirdParty/pi}" && bun run ga
 description = "Run the private gateway that lets ChenWeb front Claude Code (uses this machine's Claude Code login)."
 run = 'cd gateways/claude-code && bun install --frozen-lockfile && bun run gateway'
 
+[tasks.dev-codex-gateway]
+description = "Run the private gateway that lets ChenWeb front Codex (uses this machine's Codex login)."
+run = 'cd gateways/codex && bun install --frozen-lockfile && bun run gateway'
+
 [tasks.dev-agent-services]
 description = "Start ChenWeb API, web UI, and the loopback-only Pi gateway together."
 run = '''

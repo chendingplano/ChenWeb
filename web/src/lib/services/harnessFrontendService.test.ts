@@ -12,6 +12,15 @@ describe('harnessFrontendService', () => {
 		expect(models).toEqual([{ value: 'sonnet', displayName: 'Sonnet 5.5', description: 'Efficient' }]);
 	});
 
+	test('Codex in the agent menu is served by the codex gateway', async () => {
+		let url = '';
+		await listHarnessModels(HARNESS_BY_AGENT['Codex'], (async (input: RequestInfo | URL) => {
+			url = String(input);
+			return Response.json({ models: [] });
+		}) as typeof fetch);
+		expect(url).toBe('/api/v1/harness-frontend/codex/models');
+	});
+
 	test('reports an unavailable harness', async () => {
 		const failing = (async () => new Response('{}', { status: 502 })) as unknown as typeof fetch;
 		await expect(listHarnessModels('claude-code', failing)).rejects.toThrow('502');

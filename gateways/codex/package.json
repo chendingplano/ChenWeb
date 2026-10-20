@@ -1,0 +1,16 @@
+{
+  "name": "@chenweb/codex-gateway",
+  "version": "0.1.0",
+  "description": "Private gateway that lets ChenWeb act as a front end to the Codex harness",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "check": "tsc --noEmit",
+    "gateway": "bun run server.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "typescript": "^7.0.2"
+  }
+}

@@ -3,6 +3,9 @@
 // Live end-to-end check through a running gateway and the real harness:
 //
 //	HARNESS_GATEWAY_URL=http://127.0.0.1:4318 HARNESS_GATEWAY_SECRET=... go test -tags live -run TestLive -v ./api/harnessfrontend/
+//
+// HARNESS_NAME selects the harness (default claude-code; codex for the Codex
+// gateway on port 4319), and HARNESS_MODEL the model for the first turn.
 package harnessfrontend
 
 import (
@@ -34,15 +37,18 @@ func TestLiveTurnsThroughChenWeb(t *testing.T) {
 	if url == "" || secret == "" {
 		t.Skip("HARNESS_GATEWAY_URL and HARNESS_GATEWAY_SECRET are required")
 	}
+	name := liveHarness()
 	withUser(t, &ApiTypes.UserInfo{UserId: "admin", Roles: []string{"admin"}})
 	registry := NewRegistry()
-	_ = registry.Add(NewHost("claude-code", url, secret, nil))
+	_ = registry.Add(NewHost(name, url, secret, nil))
 	e := echo.New()
 	RegisterRoutes(e.Group("/api/v1/harness-frontend"), NewHandler(registry))
 	server := httptest.NewServer(e)
 	defer server.Close()
-	base := server.URL + "/api/v1/harness-frontend/claude-code"
-	target := "/tmp/chenweb-harness-e2e.txt"
+	base := server.URL + "/api/v1/harness-frontend/" + name
+	// Outside the workspace and outside Codex's writable temp folders, so the harness asks first.
+	home, _ := os.UserHomeDir()
+	target := home + "/chenweb-harness-e2e.txt"
 	_ = os.Remove(target)
 
 	turn := func(body string) (string, []liveEvent) {
@@ -86,7 +92,11 @@ func TestLiveTurnsThroughChenWeb(t *testing.T) {
 		return answer.String(), events
 	}
 
-	answer, events := turn(`{"message":"Remember the codeword OTTER-7. Then use the Write tool to create ` + target + ` containing the single word hello. Reply in one short line."}`)
+	model := ""
+	if m := os.Getenv("HARNESS_MODEL"); m != "" {
+		model = `,"model":"` + m + `"`
+	}
+	answer, events := turn(`{"message":"Remember the codeword OTTER-7. Then create the file ` + target + ` containing the single word hello. Reply in one short line."` + model + `}`)
 	sessionID := ""
 	for _, event := range events {
 		if event.Type == "session" {
@@ -112,10 +122,10 @@ func TestLiveModelsThroughChenWeb(t *testing.T) {
 	}
 	withUser(t, &ApiTypes.UserInfo{UserId: "admin", Roles: []string{"admin"}})
 	registry := NewRegistry()
-	_ = registry.Add(NewHost("claude-code", url, secret, nil))
+	_ = registry.Add(NewHost(liveHarness(), url, secret, nil))
 	e := echo.New()
 	RegisterRoutes(e.Group("/api/v1/harness-frontend"), NewHandler(registry))
-	rec := request(e, http.MethodGet, "/api/v1/harness-frontend/claude-code/models", "")
+	rec := request(e, http.MethodGet, "/api/v1/harness-frontend/"+liveHarness()+"/models", "")
 	var body struct {
 		Models []struct {
 			Value, DisplayName string
@@ -127,4 +137,11 @@ func TestLiveModelsThroughChenWeb(t *testing.T) {
 	for _, model := range body.Models {
 		t.Logf("%s (%s)", model.DisplayName, model.Value)
 	}
+}
+
+func liveHarness() string {
+	if name := os.Getenv("HARNESS_NAME"); name != "" {
+		return name
+	}
+	return "claude-code"
 }

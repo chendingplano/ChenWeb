@@ -333,12 +333,19 @@ func RegisterRoutes(e *echo.Echo) error {
 	agentservicehandler.RegisterProfileAdminRoutes(apiGroup.Group("/system-admin/pi-harness"),
 		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")).
 			WithHarnesses(harnesses))
-	// ChenWeb as a front end to external agent harnesses (Claude Code first).
+	// ChenWeb as a front end to external agent harnesses (Claude Code, Codex).
 	// A harness is available only when its private gateway is configured.
 	harnessFrontends := harnessfrontend.NewRegistry()
-	if url, secret := os.Getenv("CLAUDE_CODE_GATEWAY_URL"), os.Getenv("CLAUDE_CODE_GATEWAY_SECRET"); url != "" && secret != "" {
-		if err := harnessFrontends.Add(harnessfrontend.NewHost("claude-code", url, secret, nil)); err != nil {
-			return fmt.Errorf("register Claude Code harness front end: %w", err)
+	for _, gateway := range []struct{ name, label, prefix string }{
+		{"claude-code", "Claude Code", "CLAUDE_CODE"},
+		{"codex", "Codex", "CODEX"},
+	} {
+		url, secret := os.Getenv(gateway.prefix+"_GATEWAY_URL"), os.Getenv(gateway.prefix+"_GATEWAY_SECRET")
+		if url == "" || secret == "" {
+			continue
+		}
+		if err := harnessFrontends.Add(harnessfrontend.NewHost(gateway.name, url, secret, nil)); err != nil {
+			return fmt.Errorf("register %s harness front end: %w", gateway.label, err)
 		}
 	}
 	harnessfrontend.RegisterRoutes(apiGroup.Group("/harness-frontend"), harnessfrontend.NewHandler(harnessFrontends))
