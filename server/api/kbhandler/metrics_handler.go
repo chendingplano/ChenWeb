@@ -1612,8 +1612,36 @@ func deleteDocProcLogsForInputRuns(tx *sql.Tx, id int64) error {
 	return nil
 }
 
+// deleteMetricsDroppedForInput removes the rows extract_metrics set aside for this record. Their
+// run_id references kb.doc_process_runs, so they must go before those runs are deleted.
+func deleteMetricsDroppedForInput(tx *sql.Tx, id int64) error {
+	required := []inputRelatedDeleteSpec{
+		{Table: "kb.metrics_dropped", Column: "run_id"},
+		{Table: "kb.doc_process_runs", Column: "id"},
+		{Table: "kb.doc_process_runs", Column: "record_id"},
+	}
+	for _, spec := range required {
+		exists, err := inputRelatedColumnExists(tx, spec.Table, spec.Column)
+		if err != nil {
+			return fmt.Errorf("inspect metrics dropped cleanup %s.%s: %w", spec.Table, spec.Column, err)
+		}
+		if !exists {
+			return nil
+		}
+	}
+
+	stmt := `DELETE FROM kb.metrics_dropped WHERE input_record_id = $1 OR run_id IN (SELECT id FROM kb.doc_process_runs WHERE record_id = $1)`
+	if _, err := tx.Exec(stmt, id); err != nil {
+		return fmt.Errorf("delete kb.metrics_dropped for input and its doc process runs: %w", err)
+	}
+	return nil
+}
+
 func deleteInputRelatedRows(tx *sql.Tx, id int64) error {
 	if err := deleteDocProcLogsForInputRuns(tx, id); err != nil {
+		return err
+	}
+	if err := deleteMetricsDroppedForInput(tx, id); err != nil {
 		return err
 	}
 	if err := deleteInputReferenceRows(tx, id); err != nil {

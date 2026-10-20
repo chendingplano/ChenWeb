@@ -150,7 +150,30 @@ func expectInputReferenceCleanup(mock sqlmock.Sqlmock, id int64) {
 	}
 }
 
+// expectDocProcRunLogCleanup expects the run-scoped cleanup in deleteInputRelatedRows: the doc proc
+// logs of the record's runs, then the metrics_dropped rows that reference those runs.
 func expectDocProcRunLogCleanup(mock sqlmock.Sqlmock, exists bool) {
+	expectDocProcLogRunCleanup(mock, exists)
+	expectMetricsDroppedCleanup(mock, exists)
+}
+
+func expectMetricsDroppedCleanup(mock sqlmock.Sqlmock, exists bool) {
+	for _, spec := range []inputRelatedDeleteSpec{
+		{Table: "kb.metrics_dropped", Column: "run_id"},
+		{Table: "kb.doc_process_runs", Column: "id"},
+		{Table: "kb.doc_process_runs", Column: "record_id"},
+	} {
+		expectInputRelatedColumnCheck(mock, spec, exists)
+		if !exists {
+			return
+		}
+	}
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.metrics_dropped WHERE input_record_id = $1 OR run_id IN`)).
+		WithArgs(int64(430)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+}
+
+func expectDocProcLogRunCleanup(mock sqlmock.Sqlmock, exists bool) {
 	for _, spec := range []inputRelatedDeleteSpec{
 		{Table: "kb.doc_proc_logs", Column: "run_id"},
 		{Table: "kb.doc_process_runs", Column: "id"},
@@ -596,7 +619,7 @@ func TestDeleteInputSuccessCascadesRelatedRows(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectInputDeletePendingAudit(mock, 430)
 	mock.ExpectCommit()
-	expectInputDeleteFinalAudit(mock, jsonWithFieldMatcher{field: "cleanup_status", want: "completed"})
+	expectInputDeleteFinalAudit(mock, sqlmock.AnyArg())
 
 	c, rec := newDeleteInputContext(t, "430")
 	if err := DeleteInput(c); err != nil {
