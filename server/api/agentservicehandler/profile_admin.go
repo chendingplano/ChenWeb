@@ -26,6 +26,15 @@ type ProfileAdminHandler struct {
 	gatewaySecret string
 	httpClient    *http.Client
 	now           func() time.Time
+	// harnesses, when set, rejects versions their harness cannot run.
+	harnesses *HarnessRegistry
+}
+
+// WithHarnesses makes activation check each new version against the
+// registered harness adapters.
+func (h *ProfileAdminHandler) WithHarnesses(harnesses *HarnessRegistry) *ProfileAdminHandler {
+	h.harnesses = harnesses
+	return h
 }
 
 func NewProfileAdminHandler(registry *ProfileRegistry, store ProfileVersionStore, promptDir, gatewayURL, gatewaySecret string) *ProfileAdminHandler {
@@ -174,6 +183,11 @@ func (h *ProfileAdminHandler) UpdateProfile(c echo.Context) error {
 	validated, err := ValidateProfileCandidate(h.promptDir, candidate)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	if h.harnesses != nil {
+		if err := h.harnesses.CheckProfile(validated.Profile); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
 	}
 	user := rc.IsAuthenticated()
 	if user == nil || strings.TrimSpace(user.UserId) == "" {

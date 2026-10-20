@@ -322,14 +322,21 @@ func RegisterRoutes(e *echo.Echo) error {
 	}
 	apiGroup.GET("/code-monitor", codemonitor.Handler(appconfig.AppConfig.Frontend.ProjectsToMonitor, monitorLoc))
 	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
+	harnesses := agentservicehandler.NewHarnessRegistry()
+	if err := harnesses.Register(agentservicehandler.NewPiHarnessAdapter(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil)); err != nil {
+		return fmt.Errorf("register Pi harness adapter: %w", err)
+	}
+	for _, problem := range agentservicehandler.CheckActiveProfiles(context.Background(), profileRegistry, harnesses) {
+		logger.Error("agent service unavailable on its harness", "error", problem)
+	}
 	agentservicehandler.RegisterProfileAdminRoutes(apiGroup.Group("/system-admin/pi-harness"),
-		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")))
+		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")).
+			WithHarnesses(harnesses))
 	agentServiceGroup := apiGroup.Group("/agent-services")
 	agentservicehandler.RegisterConversationRoutes(agentServiceGroup,
-		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources))
+		agentservicehandler.NewConversationHandler(agentStore, profileRegistry, agentSources).WithHarnesses(harnesses))
 	agentservicehandler.RegisterRunRoutes(agentServiceGroup,
-		agentservicehandler.NewRunHandler(agentStore, profileRegistry, agentSources,
-			agentservicehandler.NewPiHarnessAdapter(piGatewayURL, os.Getenv("PI_GATEWAY_SECRET"), nil), capabilitySigner).
+		agentservicehandler.NewRunHandler(agentStore, profileRegistry, agentSources, harnesses, capabilitySigner).
 			SetDefaultKnowledgeStoreName(appconfig.GetDefaultKnowledgeStoreName))
 	chadSessionsHandler, err := chadsessionshandler.NewDefault()
 	if err != nil {

@@ -67,6 +67,9 @@ type AgentServiceProfile struct {
 	Enabled                    bool          `json:"enabled"`
 	PilotUsers                 []string      `json:"-"`
 	SaveAndResumeConversations bool          `json:"save_and_resume_conversations"`
+	// Harness names the adapter that runs this service. It is server-owned;
+	// versions stored before it existed are read as DefaultHarness.
+	Harness string `json:"harness,omitempty"`
 }
 
 type ProfileRegistry struct {
@@ -292,7 +295,7 @@ func loadProfile(promptDir string, definition profileDefinition) (AgentServicePr
 		PermissionDefault:     permission,
 		Limits:                ProfileLimits{MaxToolCalls: maxToolCalls, MaxElapsed: time.Duration(maxElapsedSeconds) * time.Second, MaxOutputTokens: maxOutputTokens, MaxEvidenceBytes: maxEvidenceBytes, MaxHistoryTokens: maxHistoryTokens, MaxHistoryToolResultBytes: maxHistoryToolResultBytes},
 		Enabled:               enabled, PilotUsers: envCSV(definition.envPrefix+"_PILOT_USERS", nil),
-		SaveAndResumeConversations: true,
+		SaveAndResumeConversations: true, Harness: DefaultHarness,
 	}, nil
 }
 

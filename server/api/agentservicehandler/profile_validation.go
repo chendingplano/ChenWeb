@@ -121,7 +121,7 @@ func ValidateProfileCandidate(promptDir string, candidate ProfileCandidate) (Val
 		AllowedTools: append([]string(nil), knowledgeToolNames...), AllowedKnowledgeStores: candidate.AllowedKnowledgeStores,
 		AllowedDocumentGroups: candidate.AllowedDocumentGroups, PermissionDefault: candidate.PermissionDefault,
 		Limits: candidate.Limits, Enabled: candidate.Enabled, PilotUsers: candidate.PilotUsers,
-		SaveAndResumeConversations: true,
+		SaveAndResumeConversations: true, Harness: DefaultHarness,
 	}
 	return ValidatedProfile{Profile: profile, PromptRef: ref, PromptHash: hex.EncodeToString(hash[:])}, nil
 }

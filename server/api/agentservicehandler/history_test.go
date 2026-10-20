@@ -199,7 +199,7 @@ func runHistoryTurn(t *testing.T, store *fakeRunStore, gateway *fakeHarnessAdapt
 	registry := testAgentProfileRegistry()
 	registry.historySummaryPrompt = "Summarize."
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, registry, allowRunSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, registry, allowRunSources{}, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"New question","idempotency_key":"key-1","permission_mode":"auto"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run status=%d body=%s", rec.Code, rec.Body.String())
@@ -275,7 +275,7 @@ func TestRunKeepsSummaryAndAnswersAfterOldRevocation(t *testing.T) {
 	gateway := &fakeHarnessAdapter{window: 200000, stream: `{"type":"answer_delta","text":"Answer."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), revokedDocumentSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), revokedDocumentSources{}, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"New question","idempotency_key":"key-1","permission_mode":"auto"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run status=%d", rec.Code)

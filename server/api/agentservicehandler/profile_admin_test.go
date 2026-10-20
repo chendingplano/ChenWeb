@@ -149,6 +149,19 @@ func TestProfileAdminUpdateCreatesNewVersionAndReturnsStaleConflict(t *testing.T
 		t.Fatalf("update status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
+	// The body asks for permission_default "ask"; a harness without
+	// interactive approval cannot run it, so activation is refused.
+	limitedStore := &adminProfileStoreStub{previous: "v1"}
+	limited := testHarnesses(&fakeHarnessAdapter{capabilities: []HarnessCapability{CapabilityStreaming, CapabilityCancellation, CapabilityHistoryReplay}})
+	handler = NewProfileAdminHandler(newRegistry(limitedStore), limitedStore, promptDir, "", "").WithHarnesses(limited)
+	c, rec = profileAdminContext(http.MethodPut, "/profiles/knowledge-guide", string(body))
+	c.SetParamNames("slug")
+	c.SetParamValues("knowledge-guide")
+	_ = handler.UpdateProfile(c)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "interactive_tool_approval") {
+		t.Fatalf("incompatible update status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
 	conflictStore := &adminProfileStoreStub{previous: "v2", activateErr: ErrProfileVersionConflict}
 	handler = NewProfileAdminHandler(newRegistry(conflictStore), conflictStore, promptDir, "", "")
 	c, rec = profileAdminContext(http.MethodPut, "/profiles/knowledge-guide", string(body))

@@ -40,6 +40,7 @@ func attemptRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "conversation_id", "idempotency_key", "status", "error_code",
 		"error_message", "input_tokens", "output_tokens", "created_at", "updated_at",
+		"harness", "adapter_version", "model_name",
 	})
 }
 
@@ -171,7 +172,7 @@ func TestCreateAttemptIsIdempotentWithinOwnedConversation(t *testing.T) {
 	mock.ExpectQuery(`(?s)INSERT INTO kb\.agentic_response_attempts.*SELECT.*FROM kb\.agentic_conversations c.*c\.owner_user_id = \$2.*ON CONFLICT \(conversation_id, idempotency_key\).*RETURNING`).
 		WithArgs("conv-1", "user-1", "turn-key-1").
 		WillReturnRows(attemptRows().AddRow(
-			"attempt-1", "conv-1", "turn-key-1", "running", "", "", 0, 0, testNow, testNow,
+			"attempt-1", "conv-1", "turn-key-1", "running", "", "", 0, 0, testNow, testNow, "pi", "1", "model-a",
 		))
 
 	got, err := store.CreateAttempt(context.Background(), "user-1", "conv-1", "turn-key-1")
@@ -190,7 +191,7 @@ func TestSetAttemptOutcomeHandlesStoppedAndFailedStates(t *testing.T) {
 			mock.ExpectQuery(`(?s)UPDATE kb\.agentic_response_attempts a.*FROM kb\.agentic_conversations c.*c\.owner_user_id = \$2.*a\.status = 'running'.*RETURNING`).
 				WithArgs("attempt-1", "user-1", status, "gateway_error", "details", int64(11), int64(7)).
 				WillReturnRows(attemptRows().AddRow(
-					"attempt-1", "conv-1", "turn-key-1", status, "gateway_error", "details", 11, 7, testNow, testNow,
+					"attempt-1", "conv-1", "turn-key-1", status, "gateway_error", "details", 11, 7, testNow, testNow, "pi", "1", "model-a",
 				))
 
 			got, err := store.SetAttemptOutcome(context.Background(), "user-1", "attempt-1", AttemptOutcome{

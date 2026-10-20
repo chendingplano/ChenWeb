@@ -85,6 +85,18 @@ type PiHarnessAdapter struct {
 	models map[string]cachedModelInfo
 }
 
+// piAdapterVersion identifies the Pi gateway protocol this adapter speaks.
+const piAdapterVersion = "1"
+
+// piMaxRequestBytes leaves headroom under the gateway's 512 KiB body limit.
+const piMaxRequestBytes = 480 * 1024
+
+func (g *PiHarnessAdapter) Describe() HarnessDescriptor {
+	return HarnessDescriptor{Name: "pi", AdapterVersion: piAdapterVersion, MaxRequestBytes: piMaxRequestBytes,
+		Capabilities: []HarnessCapability{CapabilityStreaming, CapabilityCancellation, CapabilityInteractiveToolApproval,
+			CapabilityUsageReporting, CapabilityHistoryReplay, CapabilityContextCapacityReporting, CapabilityHistorySummary}}
+}
+
 func NewPiHarnessAdapter(rawURL, secret string, client *http.Client) *PiHarnessAdapter {
 	return &PiHarnessAdapter{client: sharedllm.NewPiGatewayClient(rawURL, secret, client), models: make(map[string]cachedModelInfo)}
 }

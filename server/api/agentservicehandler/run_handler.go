@@ -19,7 +19,7 @@ type RunStore interface {
 	LoadResumeState(context.Context, string, string) (ResumeState, error)
 	LoadSourceDependencies(context.Context, string, string) (map[string][]SourceRecord, error)
 	ListGrantedStores(context.Context, string, []string) ([]GrantedKnowledgeStore, error)
-	CreateRunAttempt(context.Context, string, string, string) (ResponseAttempt, bool, error)
+	CreateRunAttempt(context.Context, string, string, string, RunHarness) (ResponseAttempt, bool, error)
 	CreateMessage(context.Context, string, CreateMessageInput) (Message, error)
 	AppendMessageDelta(context.Context, string, string, string, string) (Message, error)
 	RecordToolCall(context.Context, string, ToolCallInput) (string, error)
@@ -32,7 +32,12 @@ type RunStore interface {
 	SetConversationTitleIfEmpty(context.Context, string, string, string) error
 }
 
+// HarnessAdapter translates SemOS runs to one agent harness. Start returns
+// newline-delimited normalized run events (see RunEventCollector). Decide,
+// ModelContextWindow and Summarize are called only when Describe declares the
+// matching capability.
 type HarnessAdapter interface {
+	Describe() HarnessDescriptor
 	Start(context.Context, AgentRunRequest) (io.ReadCloser, error)
 	Cancel(context.Context, string) error
 	Decide(context.Context, string, string, bool) error
@@ -46,11 +51,11 @@ type RunSourceChecker interface {
 }
 
 type RunHandler struct {
-	store    RunStore
-	profiles *ProfileRegistry
-	sources  RunSourceChecker
-	adapter  HarnessAdapter
-	signer   *CapabilitySigner
+	store     RunStore
+	profiles  *ProfileRegistry
+	sources   RunSourceChecker
+	harnesses *HarnessRegistry
+	signer    *CapabilitySigner
 	// defaultStoreName returns [frontend].default_knowledge_store; nil means
 	// no default.
 	defaultStoreName func() string
@@ -60,8 +65,8 @@ type RunHandler struct {
 // has finished; tests replace it to run synchronously.
 var runInBackground = func(f func()) { go f() }
 
-func NewRunHandler(store RunStore, profiles *ProfileRegistry, sources RunSourceChecker, adapter HarnessAdapter, signer *CapabilitySigner) *RunHandler {
-	return &RunHandler{store: store, profiles: profiles, sources: sources, adapter: adapter, signer: signer}
+func NewRunHandler(store RunStore, profiles *ProfileRegistry, sources RunSourceChecker, harnesses *HarnessRegistry, signer *CapabilitySigner) *RunHandler {
+	return &RunHandler{store: store, profiles: profiles, sources: sources, harnesses: harnesses, signer: signer}
 }
 
 // SetDefaultKnowledgeStoreName supplies the configured default knowledge store
@@ -78,7 +83,7 @@ func RegisterRunRoutes(group *echo.Group, handler *RunHandler) {
 }
 
 func (h *RunHandler) available() bool {
-	return h != nil && h.store != nil && h.profiles != nil && h.adapter != nil && h.signer != nil
+	return h != nil && h.store != nil && h.profiles != nil && h.harnesses != nil && h.signer != nil
 }
 
 func (h *RunHandler) Start(c echo.Context) error {
@@ -119,12 +124,21 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if profile.Model != state.Conversation.ModelName {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "pinned model is no longer available"})
 	}
+	adapter, err := h.harnesses.AdapterFor(profile)
+	if err != nil {
+		logger.Warn("agent service harness unavailable", "service", profile.Slug, "error", err)
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
+	}
+	descriptor := adapter.Describe()
 	permission := profile.PermissionDefault
 	if body.PermissionMode != "" {
 		permission = body.PermissionMode
 	}
 	if permission != PermissionAsk && permission != PermissionAuto {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "permission mode must be ask or auto"})
+	}
+	if permission == PermissionAsk && !descriptor.Supports(CapabilityInteractiveToolApproval) {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "this service cannot ask for tool approval"})
 	}
 	dependencies, err := h.store.LoadSourceDependencies(ctx, userID, state.Conversation.ID)
 	if err != nil {
@@ -163,14 +177,15 @@ func (h *RunHandler) Start(c echo.Context) error {
 		logger.Error("build agent knowledge context failed", "service", profile.Slug, "error", err)
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
 	}
-	attempt, created, err := h.store.CreateRunAttempt(ctx, userID, state.Conversation.ID, body.IdempotencyKey)
+	attempt, created, err := h.store.CreateRunAttempt(ctx, userID, state.Conversation.ID, body.IdempotencyKey,
+		RunHarness{Harness: descriptor.Name, AdapterVersion: descriptor.AdapterVersion, ModelName: profile.Model})
 	if errors.Is(err, ErrRunAlreadyActive) || (!created && err == nil) {
 		return c.JSON(http.StatusConflict, map[string]any{"error": "run already exists", "run_id": attempt.ID, "status": attempt.Status})
 	}
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not create run"})
 	}
-	logger.Info("agent run started", "run_id", attempt.ID, "service", profile.Slug)
+	logger.Info("agent run started", "run_id", attempt.ID, "service", profile.Slug, "harness", descriptor.Name, "adapter_version", descriptor.AdapterVersion)
 	settleCtx := context.WithoutCancel(ctx)
 	settleCtx, stopSettlement := context.WithTimeout(settleCtx, 10*time.Second)
 	defer stopSettlement()
@@ -229,7 +244,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 		logger.Warn("load agent history summary failed", "run_id", attempt.ID, "error", err)
 		summary = HistorySummary{}
 	}
-	budget := h.historyBudget(ctx, profile, logger)
+	budget := h.historyBudget(ctx, adapter, profile, logger)
 	turns := completeTurns(visible.Messages, visible.SourcesByMessage, visible.ToolResults, summary.ThroughSeq, profile.Limits.MaxHistoryToolResultBytes)
 	selected := selectHistory(turns, budget, estimateTokens(summary.Text))
 	agentProfile := MapAgentProfile(profile, permission)
@@ -237,7 +252,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	request := AgentRunRequest{RunID: attempt.ID, ConversationID: state.Conversation.ID, UserID: userID,
 		Message: strings.TrimSpace(body.Message), Capability: capability, Profile: agentProfile, History: historyMessages(selected), Knowledge: &knowledge, HistorySummary: summary.Text}
 	for len(selected) > 0 {
-		if raw, err := json.Marshal(request); err == nil && len(raw) <= maxRunRequestBytes {
+		if raw, err := json.Marshal(request); err == nil && len(raw) <= descriptor.maxRequestBytes() {
 			break
 		}
 		selected = selected[1:]
@@ -246,11 +261,11 @@ func (h *RunHandler) Start(c echo.Context) error {
 	if len(selected) < len(turns) {
 		logger.Info("agent history trimmed", "run_id", attempt.ID, "turns", len(turns), "sent", len(selected), "budget", budget)
 	}
-	stream, err := h.adapter.Start(ctx, request)
+	stream, err := adapter.Start(ctx, request)
 	if err != nil {
-		logger.Error("Pi gateway start failed", "run_id", attempt.ID, "error", err)
+		logger.Error("agent harness start failed", "run_id", attempt.ID, "harness", descriptor.Name, "error", err)
 		outcome.ErrorCode = "gateway_unavailable"
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "Pi gateway unavailable; retry later"})
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "Agent runtime unavailable; retry later"})
 	}
 	defer stream.Close()
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream; charset=utf-8")
@@ -265,7 +280,7 @@ func (h *RunHandler) Start(c echo.Context) error {
 	for scanner.Scan() {
 		event, acceptErr := collector.Accept(scanner.Bytes())
 		if acceptErr != nil {
-			logger.Error("unsafe Pi event", "run_id", attempt.ID, "error", acceptErr)
+			logger.Error("unsafe harness event", "run_id", attempt.ID, "harness", descriptor.Name, "error", acceptErr)
 			outcome.ErrorCode = "unsafe_event"
 			break
 		}
@@ -357,12 +372,11 @@ func (h *RunHandler) Start(c echo.Context) error {
 	verifiedSources = result.Sources
 	outcome.Status, outcome.ErrorCode, outcome.ErrorMessage = "completed", "", ""
 	conversationID := state.Conversation.ID
-	runInBackground(func() { h.foldHistory(userID, conversationID, profile, budget) })
+	if descriptor.Supports(CapabilityHistorySummary) {
+		runInBackground(func() { h.foldHistory(adapter, userID, conversationID, profile, budget) })
+	}
 	return nil
 }
-
-// maxRunRequestBytes leaves headroom under the gateway's 512 KiB body limit.
-const maxRunRequestBytes = 480 * 1024
 
 // documentAccess is the snapshot rule's access-only check for history older
 // than the snapshot period.
@@ -375,8 +389,13 @@ func (h *RunHandler) documentAccess(userID string, profile AgentServiceProfile) 
 	}
 }
 
-func (h *RunHandler) historyBudget(ctx context.Context, profile AgentServiceProfile, logger interface{ Warn(string, ...any) }) int {
-	contextWindow, err := h.adapter.ModelContextWindow(ctx, profile.Provider, profile.Model)
+// historyBudget uses the model's context window when the adapter reports it,
+// and the fallback budget otherwise.
+func (h *RunHandler) historyBudget(ctx context.Context, adapter HarnessAdapter, profile AgentServiceProfile, logger interface{ Warn(string, ...any) }) int {
+	if !adapter.Describe().Supports(CapabilityContextCapacityReporting) {
+		return historyBudget(0, profile.Limits.MaxHistoryTokens)
+	}
+	contextWindow, err := adapter.ModelContextWindow(ctx, profile.Provider, profile.Model)
 	if err != nil {
 		logger.Warn("model context window unavailable; using fallback history budget", "provider", profile.Provider, "model", profile.Model, "error", err)
 		contextWindow = 0
@@ -387,7 +406,8 @@ func (h *RunHandler) historyBudget(ctx context.Context, profile AgentServiceProf
 // foldHistory folds the oldest unsummarized turns into the conversation's
 // rolling summary once they no longer fit the history budget. It runs after
 // the turn has finished; a failure only means the next turn trims instead.
-func (h *RunHandler) foldHistory(userID, conversationID string, profile AgentServiceProfile, budget int) {
+// It runs only on adapters that declare CapabilityHistorySummary.
+func (h *RunHandler) foldHistory(adapter HarnessAdapter, userID, conversationID string, profile AgentServiceProfile, budget int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	logger := loggerutil.CreateDefaultLogger("20261004-582")
@@ -418,7 +438,7 @@ func (h *RunHandler) foldHistory(userID, conversationID string, profile AgentSer
 	if len(fold) == 0 {
 		return
 	}
-	text, err := h.adapter.Summarize(ctx, AgentSummaryRequest{UserID: userID, Provider: profile.Provider, Model: profile.Model,
+	text, err := adapter.Summarize(ctx, AgentSummaryRequest{UserID: userID, Provider: profile.Provider, Model: profile.Model,
 		SystemPrompt: h.profiles.HistorySummaryPrompt(), PreviousSummary: summary.Text, Messages: historyMessages(fold), MaxTokens: min(1024, budget/4)})
 	if err != nil {
 		logger.Warn("history fold: summarize failed", "conversation_id", conversationID, "turns", len(fold), "error", err)
@@ -464,6 +484,12 @@ func publicRunMessage(outcome AttemptOutcome) string {
 	}
 }
 
+// attemptAdapter returns the adapter recorded on a run, so cancel and
+// approval reach the harness that started it.
+func (h *RunHandler) attemptAdapter(attempt ResponseAttempt) (HarnessAdapter, bool) {
+	return h.harnesses.Get(attempt.Harness)
+}
+
 func (h *RunHandler) authorizedRunningAttempt(c echo.Context) (string, ResponseAttempt, error) {
 	userID, ok := agentUserID(c)
 	if !ok {
@@ -484,7 +510,11 @@ func (h *RunHandler) Cancel(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "active run not found"})
 	}
-	if err := h.adapter.Cancel(c.Request().Context(), attempt.ID); err != nil {
+	adapter, ok := h.attemptAdapter(attempt)
+	if !ok {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "could not stop run"})
+	}
+	if err := adapter.Cancel(c.Request().Context(), attempt.ID); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "could not stop run"})
 	}
 	return c.JSON(http.StatusAccepted, map[string]string{"status": "stop_requested"})
@@ -506,7 +536,11 @@ func (h *RunHandler) Decide(c echo.Context) error {
 	if err := decoder.Decode(&body); err != nil || body.Allowed == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid permission decision"})
 	}
-	if err := h.adapter.Decide(c.Request().Context(), attempt.ID, c.Param("requestId"), *body.Allowed); err != nil {
+	adapter, ok := h.attemptAdapter(attempt)
+	if !ok || !adapter.Describe().Supports(CapabilityInteractiveToolApproval) {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "this run cannot accept tool approval"})
+	}
+	if err := adapter.Decide(c.Request().Context(), attempt.ID, c.Param("requestId"), *body.Allowed); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "permission request is no longer active"})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "decision_recorded"})

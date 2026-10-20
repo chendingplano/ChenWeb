@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/EchoFactory"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
 )
 
@@ -16,6 +17,20 @@ type ConversationHandler struct {
 	store    *Store
 	profiles *ProfileRegistry
 	sources  *CurrentSourceAccessChecker
+	// harnesses, when set, hides and refuses services their harness cannot run.
+	harnesses *HarnessRegistry
+}
+
+func (h *ConversationHandler) WithHarnesses(harnesses *HarnessRegistry) *ConversationHandler {
+	h.harnesses = harnesses
+	return h
+}
+
+func (h *ConversationHandler) runnable(profile AgentServiceProfile) error {
+	if h.harnesses == nil {
+		return nil
+	}
+	return h.harnesses.CheckProfile(profile)
 }
 
 func NewConversationHandler(store *Store, profiles *ProfileRegistry, sources *CurrentSourceAccessChecker) *ConversationHandler {
@@ -58,7 +73,7 @@ func (h *ConversationHandler) ListServices(c echo.Context) error {
 		}
 		for _, stored := range activeProfiles {
 			profile, err := authorizeProfile(stored, userID)
-			if err == nil {
+			if err == nil && h.runnable(profile) == nil {
 				services = append(services, profile)
 			}
 		}
@@ -66,7 +81,7 @@ func (h *ConversationHandler) ListServices(c echo.Context) error {
 	}
 	for slug := range h.profiles.active {
 		profile, err := h.profiles.ResolveActive(c.Request().Context(), slug, userID)
-		if err == nil {
+		if err == nil && h.runnable(profile) == nil {
 			services = append(services, profile)
 		}
 	}
@@ -95,6 +110,10 @@ func (h *ConversationHandler) CreateConversation(c echo.Context) error {
 			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
 		}
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "service unavailable"})
+	}
+	if err := h.runnable(profile); err != nil {
+		loggerutil.CreateDefaultLogger("20261020-517").Warn("agent service harness unavailable", "service", profile.Slug, "error", err)
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent service unavailable"})
 	}
 	var body struct {
 		Title string `json:"title"`

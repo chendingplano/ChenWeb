@@ -84,6 +84,17 @@ type ResponseAttempt struct {
 	OutputTokens   int64     `json:"output_tokens"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// Harness, AdapterVersion and ModelName record how the run was executed.
+	Harness        string `json:"harness"`
+	AdapterVersion string `json:"adapter_version"`
+	ModelName      string `json:"model_name"`
+}
+
+// RunHarness is the effective harness, adapter version and model of a run.
+type RunHarness struct {
+	Harness        string
+	AdapterVersion string
+	ModelName      string
 }
 
 type AttemptOutcome struct {
@@ -152,6 +163,7 @@ func scanAttempt(row interface{ Scan(...any) error }) (ResponseAttempt, error) {
 	err := row.Scan(
 		&out.ID, &out.ConversationID, &out.IdempotencyKey, &out.Status, &out.ErrorCode,
 		&out.ErrorMessage, &out.InputTokens, &out.OutputTokens, &out.CreatedAt, &out.UpdatedAt,
+		&out.Harness, &out.AdapterVersion, &out.ModelName,
 	)
 	return out, err
 }
@@ -295,7 +307,7 @@ WHERE c.id = $1 AND c.owner_user_id = $2
 ON CONFLICT (conversation_id, idempotency_key) DO UPDATE
 SET idempotency_key = EXCLUDED.idempotency_key
 RETURNING id, conversation_id, idempotency_key, status, error_code, error_message,
-          input_tokens, output_tokens, created_at, updated_at`
+          input_tokens, output_tokens, created_at, updated_at, harness, adapter_version, model_name`
 	return scanAttempt(s.db.QueryRowContext(ctx, query, conversationID, ownerUserID, idempotencyKey))
 }
 
@@ -324,14 +336,14 @@ ORDER BY ks.id::text`
 	return stores, rows.Err()
 }
 
-func (s *Store) CreateRunAttempt(ctx context.Context, ownerUserID, conversationID, idempotencyKey string) (ResponseAttempt, bool, error) {
-	const insert = `INSERT INTO kb.agentic_response_attempts (conversation_id, idempotency_key)
-SELECT c.id, $3 FROM kb.agentic_conversations c
+func (s *Store) CreateRunAttempt(ctx context.Context, ownerUserID, conversationID, idempotencyKey string, run RunHarness) (ResponseAttempt, bool, error) {
+	const insert = `INSERT INTO kb.agentic_response_attempts (conversation_id, idempotency_key, harness, adapter_version, model_name)
+SELECT c.id, $3, $4, $5, $6 FROM kb.agentic_conversations c
 WHERE c.id=$1 AND c.owner_user_id=$2
 ON CONFLICT DO NOTHING
 RETURNING id, conversation_id, idempotency_key, status, error_code, error_message,
-          input_tokens, output_tokens, created_at, updated_at`
-	created, err := scanAttempt(s.db.QueryRowContext(ctx, insert, conversationID, ownerUserID, idempotencyKey))
+          input_tokens, output_tokens, created_at, updated_at, harness, adapter_version, model_name`
+	created, err := scanAttempt(s.db.QueryRowContext(ctx, insert, conversationID, ownerUserID, idempotencyKey, harnessName(run.Harness), run.AdapterVersion, run.ModelName))
 	if err == nil {
 		return created, true, nil
 	}
@@ -339,7 +351,8 @@ RETURNING id, conversation_id, idempotency_key, status, error_code, error_messag
 		return ResponseAttempt{}, false, err
 	}
 	const existing = `SELECT a.id, a.conversation_id, a.idempotency_key, a.status, a.error_code,
-       a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at
+       a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at,
+       a.harness, a.adapter_version, a.model_name
 FROM kb.agentic_response_attempts a
 JOIN kb.agentic_conversations c ON c.id=a.conversation_id
 WHERE c.id=$1 AND c.owner_user_id=$2 AND a.idempotency_key=$3`
@@ -365,7 +378,8 @@ WHERE c.id=$1 AND c.owner_user_id=$2 AND a.status='running')`
 
 func (s *Store) GetRunAttempt(ctx context.Context, ownerUserID, conversationID, attemptID string) (ResponseAttempt, error) {
 	const query = `SELECT a.id, a.conversation_id, a.idempotency_key, a.status, a.error_code,
-       a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at
+       a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at,
+       a.harness, a.adapter_version, a.model_name
 FROM kb.agentic_response_attempts a
 JOIN kb.agentic_conversations c ON c.id=a.conversation_id
 WHERE a.id=$1 AND c.id=$2 AND c.owner_user_id=$3`
@@ -381,7 +395,8 @@ FROM kb.agentic_conversations c
 WHERE a.id = $1 AND a.conversation_id = c.id AND c.owner_user_id = $2
   AND a.status = 'running'
 RETURNING a.id, a.conversation_id, a.idempotency_key, a.status, a.error_code,
-          a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at`
+          a.error_message, a.input_tokens, a.output_tokens, a.created_at, a.updated_at,
+          a.harness, a.adapter_version, a.model_name`
 	return scanAttempt(s.db.QueryRowContext(ctx, query,
 		attemptID, ownerUserID, in.Status, in.ErrorCode, in.ErrorMessage, in.InputTokens, in.OutputTokens,
 	))

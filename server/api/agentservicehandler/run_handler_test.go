@@ -134,6 +134,7 @@ type fakeRunStore struct {
 	title         string
 	titleSets     int
 	sourceDeps    map[string][]SourceRecord
+	runHarness    *RunHarness
 }
 
 func (f *fakeRunStore) LoadHistorySummary(context.Context, string, string) (HistorySummary, error) {
@@ -172,7 +173,8 @@ func (f *fakeRunStore) ListGrantedStores(context.Context, string, []string) ([]G
 	}
 	return []GrantedKnowledgeStore{{ID: "7", Name: "Research"}}, nil
 }
-func (f *fakeRunStore) CreateRunAttempt(context.Context, string, string, string) (ResponseAttempt, bool, error) {
+func (f *fakeRunStore) CreateRunAttempt(_ context.Context, _, _, _ string, run RunHarness) (ResponseAttempt, bool, error) {
+	f.runHarness = &run
 	return ResponseAttempt{ID: "run-1", ConversationID: "conversation-1", Status: "running"}, f.created, nil
 }
 func (f *fakeRunStore) CreateMessage(_ context.Context, _ string, in CreateMessageInput) (Message, error) {
@@ -220,9 +222,31 @@ type fakeHarnessAdapter struct {
 	windowErr    error
 	summarized   []AgentSummaryRequest
 	summaryText  string
+	windowCalls  int
+	// capabilities replaces the default (every capability) when non-nil.
+	capabilities []HarnessCapability
+}
+
+func (g *fakeHarnessAdapter) Describe() HarnessDescriptor {
+	capabilities := g.capabilities
+	if capabilities == nil {
+		capabilities = []HarnessCapability{CapabilityStreaming, CapabilityCancellation, CapabilityInteractiveToolApproval,
+			CapabilityUsageReporting, CapabilityHistoryReplay, CapabilityContextCapacityReporting, CapabilityHistorySummary}
+	}
+	return HarnessDescriptor{Name: "pi", AdapterVersion: "test-1", Capabilities: capabilities}
+}
+
+// testHarnesses registers adapter as the only harness.
+func testHarnesses(adapter HarnessAdapter) *HarnessRegistry {
+	registry := NewHarnessRegistry()
+	if err := registry.Register(adapter); err != nil {
+		panic(err)
+	}
+	return registry
 }
 
 func (g *fakeHarnessAdapter) ModelContextWindow(context.Context, string, string) (int, error) {
+	g.windowCalls++
 	return g.window, g.windowErr
 }
 func (g *fakeHarnessAdapter) Summarize(_ context.Context, in AgentSummaryRequest) (string, error) {
@@ -273,7 +297,7 @@ func TestRunEndpointMintsScopedCapabilityStreamsAndPersistsSourcesOnce(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewRunHandler(store, profile, allowRunSources{}, gateway, signer).SetDefaultKnowledgeStoreName(func() string { return "Research" })
+	handler := NewRunHandler(store, profile, allowRunSources{}, testHarnesses(gateway), signer).SetDefaultKnowledgeStoreName(func() string { return "Research" })
 	e := echo.New()
 	RegisterRunRoutes(e.Group("/api/v1/agent-services"), handler)
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Why is flow low?","idempotency_key":"key-1","permission_mode":"auto"}`)
@@ -302,7 +326,7 @@ func TestRunWithoutGrantedStoreProceedsWithoutKnowledgeTools(t *testing.T) {
 	gateway := &fakeHarnessAdapter{stream: `{"type":"answer_delta","text":"I can explain what this service does."}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer).SetDefaultKnowledgeStoreName(func() string { return "Research" }))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, testHarnesses(gateway), signer).SetDefaultKnowledgeStoreName(func() string { return "Research" }))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"What can you do?","idempotency_key":"key-1"}`)
 	if rec.Code != http.StatusOK || len(store.settled) != 1 || store.settled[0].Status != "completed" {
 		t.Fatalf("status=%d settled=%+v body=%s", rec.Code, store.settled, rec.Body.String())
@@ -325,7 +349,7 @@ func TestDuplicateRunKeyDoesNotCreateMessagesOrCallGateway(t *testing.T) {
 	gateway := &fakeHarnessAdapter{}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), nil, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), nil, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"same-key"}`)
 	if rec.Code != http.StatusConflict || len(store.userTexts) != 0 || gateway.request.RunID != "" {
 		t.Fatalf("duplicate status=%d messages=%v gateway=%+v", rec.Code, store.userTexts, gateway.request)
@@ -356,7 +380,7 @@ func TestRunDoesNotTellBrowserCompletedBeforeFinalization(t *testing.T) {
 	gateway := &fakeHarnessAdapter{stream: `{"type":"answer_delta","text":"Draft"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
 	if strings.Contains(rec.Body.String(), `"status":"completed"`) || !strings.Contains(rec.Body.String(), `"status":"failed"`) || !strings.Contains(rec.Body.String(), "event: error") || len(store.settled) != 1 || store.settled[0].Status != "failed" {
 		t.Fatalf("misleading completion: body=%s settled=%+v", rec.Body.String(), store.settled)
@@ -374,7 +398,7 @@ func TestRunRejectsSourceFromFailedTool(t *testing.T) {
 	}, "\n") + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
 	if len(store.sources) != 0 || len(store.settled) != 1 || store.settled[0].Status == "completed" || strings.Contains(rec.Body.String(), "event: sources") || strings.Contains(rec.Body.String(), "event: completion\ndata: {\"type\":\"completion\",\"status\":\"completed\"}") {
 		t.Fatalf("failed-tool citation accepted: sources=%+v settled=%+v body=%s", store.sources, store.settled, rec.Body.String())
@@ -387,7 +411,7 @@ func TestRunControlsRequireOwnedActiveAttempt(t *testing.T) {
 	gateway := &fakeHarnessAdapter{}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), nil, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), nil, testHarnesses(gateway), signer))
 	cancel := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs/run-1/cancel", `{}`)
 	decision := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs/run-1/permissions/request-1", `{"allowed":true}`)
 	if cancel.Code != http.StatusAccepted || decision.Code != http.StatusOK || !gateway.cancelled || !gateway.decision {
@@ -406,7 +430,7 @@ func TestGatewayFailureSettlesRunAndReturnsRetryableUnavailable(t *testing.T) {
 	gateway := &fakeHarnessAdapter{startErr: errors.New("connection refused")}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
 	if rec.Code != http.StatusServiceUnavailable || len(store.settled) != 1 || store.settled[0].ErrorCode != "gateway_unavailable" || strings.Contains(rec.Body.String(), "connection refused") {
 		t.Fatalf("gateway failure status=%d settled=%+v body=%s", rec.Code, store.settled, rec.Body.String())
@@ -419,7 +443,7 @@ func TestRunWithoutGatewayCompletionIsInterruptedAndKeepsPartialAnswer(t *testin
 	gateway := &fakeHarnessAdapter{stream: `{"type":"answer_delta","text":"Partial check"}` + "\n"}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, testHarnesses(gateway), signer))
 	rec := callAgentHandler(t, e, http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", `{"message":"Question","idempotency_key":"key-1"}`)
 	if store.answer != "Partial check" || len(store.settled) != 1 || store.settled[0].Status != "interrupted" || !strings.Contains(rec.Body.String(), `"status":"interrupted"`) {
 		t.Fatalf("incomplete stream answer=%q settled=%+v body=%s", store.answer, store.settled, rec.Body.String())
@@ -456,7 +480,7 @@ func TestBrowserDisconnectSettlesAttemptWithoutLeakingFinalSignal(t *testing.T) 
 	gateway := &fakeHarnessAdapter{streamReader: &cancelOnRead{reader: strings.NewReader(`{"type":"answer_delta","text":"Partial"}` + "\n" + `{"type":"completion","status":"completed"}` + "\n"), cancel: cancel}}
 	signer, _ := NewCapabilitySigner([]byte("0123456789abcdef0123456789abcdef"), time.Now)
 	e := echo.New()
-	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, gateway, signer))
+	RegisterRunRoutes(e.Group("/api/v1/agent-services"), NewRunHandler(store, testAgentProfileRegistry(), allowRunSources{}, testHarnesses(gateway), signer))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent-services/conversations/conversation-1/runs", strings.NewReader(`{"message":"Question","idempotency_key":"key-1"}`)).WithContext(ctx)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

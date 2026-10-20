@@ -139,6 +139,7 @@ func decodeStoredProfile(raw []byte, prompt string) (AgentServiceProfile, error)
 	profile := stored.AgentServiceProfile
 	profile.PilotUsers = append([]string(nil), stored.PilotUsers...)
 	profile.SystemPrompt = prompt
+	profile.Harness = harnessName(profile.Harness)
 	return profile, nil
 }
 
