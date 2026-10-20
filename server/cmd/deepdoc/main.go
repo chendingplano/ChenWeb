@@ -11,6 +11,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api"
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
+	"github.com/chendingplano/deepdoc/server/api/codemonitor"
 	"github.com/chendingplano/deepdoc/server/api/database"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
@@ -198,6 +199,12 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("migrations completed successfully")
+	monitorLoc, err := time.LoadLocation(config.GetLLMConfig().WorkspaceTimezone)
+	if err != nil {
+		logger.Error("failed to load code monitor timezone", "error", err)
+		os.Exit(1)
+	}
+	codemonitor.Start(context.Background(), codemonitor.Store{DB: project_db}, config.GetConfigDir(), config.AppConfig.Frontend.CodePackagesToMonitor, monitorLoc, loggerutil.CreateDefaultLogger("20261020-672"))
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer bootstrapCancel()
 	warnings, err := seed.EnsureCuratedModules(bootstrapCtx, project_db)

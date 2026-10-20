@@ -29,6 +29,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
 	"github.com/chendingplano/deepdoc/server/api/chadsessionshandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
+	"github.com/chendingplano/deepdoc/server/api/codemonitor"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/datasync"
@@ -315,6 +316,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
+	monitorLoc, err := time.LoadLocation(appconfig.GetLLMConfig().WorkspaceTimezone)
+	if err != nil {
+		return fmt.Errorf("load code monitor timezone: %w", err)
+	}
+	apiGroup.GET("/code-monitor", codemonitor.Handler(appconfig.AppConfig.Frontend.CodePackagesToMonitor, monitorLoc))
 	piGatewayURL := os.Getenv("PI_GATEWAY_URL")
 	agentservicehandler.RegisterProfileAdminRoutes(apiGroup.Group("/system-admin/pi-harness"),
 		agentservicehandler.NewProfileAdminHandler(profileRegistry, profileVersionStore, promptDir, piGatewayURL, os.Getenv("PI_GATEWAY_SECRET")))

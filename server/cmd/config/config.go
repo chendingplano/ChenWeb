@@ -130,6 +130,7 @@ type LanguagesConfig struct {
 }
 
 type FrontendConfigSection struct {
+	CodePackagesToMonitor []string `mapstructure:"code-packages-to-monitor"`
 	// ImageGenerationModels controls the model choices shown by image-generation
 	// forms. An unset or empty value uses the built-in Qwen/OpenAI choices.
 	ImageGenerationModels []string `mapstructure:"image_generation_models"`
@@ -293,6 +294,7 @@ type SiteConfigSection struct {
 
 var AppConfig AppConfigDef
 var appConfigViper = viper.New()
+var appConfigDir string
 
 func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath string) error {
 	call_flow := ctx.Value(ApiTypes.CallFlowKey).(string)
@@ -329,6 +331,11 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 		return fmt.Errorf("(MID_26031003) unable to decode app config, error:%w", err)
 	}
 	appConfigViper = appVp
+	if absConfigPath, absErr := filepath.Abs(configPath); absErr == nil {
+		appConfigDir = filepath.Dir(absConfigPath)
+	} else {
+		appConfigDir = filepath.Dir(configPath)
+	}
 
 	warnOnMissingIdentityPropertyMap(logger)
 	if err := validateNormalizePropertyMaps(); err != nil {
@@ -371,6 +378,10 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 		"mysql", ApiTypes.CommonConfig.MySQLConf.Create)
 	return nil
 }
+
+// GetConfigDir returns the directory containing the main project config file.
+// Local overrides are merged from this directory but do not change the project root.
+func GetConfigDir() string { return appConfigDir }
 
 func GetDatabaseType() string {
 	return ApiTypes.CommonConfig.AppInfo.DatabaseType
