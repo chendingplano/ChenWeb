@@ -46,6 +46,7 @@
 	let loading = $state(false);
 	let alive = true;
 	let sequence = 0;
+	let detailSequence = 0;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	function parseSourceLines(value: unknown): number[] {
 		const found: number[] = [];
@@ -171,23 +172,26 @@
 	}
 
 	async function open(id: number, quiet = false) {
+		const current = ++detailSequence;
 		try {
 			const result = await summaryScoreDetail(id);
-			if (alive) detail = result;
-		} catch (err) { if (alive && !quiet) error = errorText(err); }
+			if (alive && current === detailSequence) detail = result;
+		} catch (err) { if (alive && current === detailSequence && !quiet) error = errorText(err); }
 	}
 
 	async function run() {
 		if (!selected || !algorithm || !model || starting) return;
+		const current = ++detailSequence;
 		starting = true;
 		error = '';
 		try {
-			detail = await startSummaryScore({
+			const result = await startSummaryScore({
 				record_id: selected.id, algorithm, model, lang,
 				gold: gold.find((item) => JSON.stringify([item.skill_version, item.model_name, item.benchmark_run_id]) === goldChoice)
 			});
+			if (alive && current === detailSequence) detail = result;
 			await history();
-		} catch (err) { error = errorText(err); }
+		} catch (err) { if (current === detailSequence) error = errorText(err); }
 		finally { starting = false; }
 	}
 
@@ -249,7 +253,7 @@
 	{#snippet reportBody(props: ReportBodyProps)}
 		{@const selectSource = props.selectSource}
 		{@const selectedSourceLines = props.selectedSourceLines}
-		<button class="close-report" onclick={() => { pendingSource = null; detail = null; }}>{m.ssb_close()}</button>
+		<button class="close-report" onclick={() => { detailSequence++; pendingSource = null; detail = null; }}>{m.ssb_close()}</button>
 		<p>{detail!.title} · {m.ssb_record({ id: detail!.input_record_id })} · {detail!.algorithm} · {detail!.model_name} · {date(detail!.created_at)}</p>
 		{#if detail!.status === 'running'}<p role="status">{m.ssb_background()}</p>{/if}
 		{#if detail!.status === 'failed'}<p class="error" role="alert">{errorText(new ScoreAPIError(detail!.error_code ?? '', 500))}</p>{/if}
