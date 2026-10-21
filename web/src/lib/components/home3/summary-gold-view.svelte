@@ -14,6 +14,8 @@
 	let { darkMode = true, onSummaryDetailsChange }: { darkMode: boolean; onSummaryDetailsChange?: (details: Snippet | null) => void } = $props();
 	const gold = new GoldRunFilter('summaries');
 	let browserFolded = $state(false);
+	let searchPanelWidth = $state(330);
+	let searchPanelResizing = $state(false);
 	let currentInput = $state<KbInputRecord | null>(null);
 	let summaries = $state<GoldSummaryRecord[]>([]);
 	let rawLines = $state<RawLine[]>([]);
@@ -48,6 +50,9 @@
 	const muted = $derived(darkMode ? '#8F8975' : '#786F5F');
 	const brass = $derived(darkMode ? '#D4A24C' : '#B8801E');
 	const red = $derived(darkMode ? '#C8553D' : '#A23E26');
+	const bodyGridStyle = $derived(browserFolded
+		? 'grid-template-columns:42px 360px minmax(0,1fr)'
+		: `grid-template-columns:${searchPanelWidth}px 14px 360px minmax(0,1fr)`);
 
 	$effect(() => {
 		void gold.load();
@@ -71,6 +76,39 @@
 			badges: [record.type?.trim() || '—'],
 			benchmarkRuns: goldRunBadges(record)
 		};
+	}
+
+	function startSearchPanelResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = searchPanelWidth;
+		searchPanelResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (moveEvent: PointerEvent) => {
+			searchPanelWidth = Math.max(250, Math.min(560, startWidth + moveEvent.clientX - startX));
+		};
+		const finish = () => {
+			searchPanelResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', finish);
+			window.removeEventListener('pointercancel', finish);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', finish, { once: true });
+		window.addEventListener('pointercancel', finish, { once: true });
+	}
+
+	function resizeSearchPanelByKeyboard(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			searchPanelWidth = Math.max(250, searchPanelWidth - 16);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			searchPanelWidth = Math.min(560, searchPanelWidth + 16);
+		}
 	}
 
 	function clearBenchmarkRecord() {
@@ -188,7 +226,7 @@
 		</div>
 	</header>
 
-	<div class="body" class:browser-folded={browserFolded}>
+	<div class="body" class:browser-folded={browserFolded} style={bodyGridStyle}>
 		{#if browserFolded}
 			<div class="browser-rail">
 				<button type="button" class="fold-toggle" onclick={() => (browserFolded = false)} title={m.metric_mgmt_unfold_record_list()} aria-label={m.metric_mgmt_unfold_record_list()}><PanelLeftOpenIcon size={16} /></button>
@@ -218,6 +256,11 @@
 					{/snippet}
 				</KbInputRecordBrowser>
 			</div>
+		{/if}
+		{#if !browserFolded}
+			<button type="button" class="search-resize-handle" class:active={searchPanelResizing} aria-label={m.kb_input_record_browser_resize_record_browser()} onpointerdown={startSearchPanelResize} onkeydown={resizeSearchPanelByKeyboard}>
+				<span class="search-resize-grip" aria-hidden="true"></span>
+			</button>
 		{/if}
 
 		<aside class="summary-sidebar">
@@ -301,9 +344,13 @@
 	.header-meta { display:flex; flex:1; justify-content:flex-end; align-items:baseline; flex-wrap:wrap; gap:4px 10px; padding:7px 12px; border:1px solid var(--ink-line); background:var(--panel-bg-alt); white-space:nowrap; }
 	.header-meta span,.detail-eyebrow { color:var(--text-muted); font:10px var(--font-mono); letter-spacing:.14em; text-transform:uppercase; }
 	.header-meta strong { margin-right:8px; color:var(--text-primary); font:12px var(--font-mono); }
-	.body { display:grid; grid-template-columns:auto 360px minmax(0,1fr); grid-template-rows:minmax(0,1fr); flex:1; min-width:0; min-height:0; overflow:hidden; }
-	.body.browser-folded { grid-template-columns:42px 360px minmax(0,1fr); }
-	.record-browser-slot { position:relative; min-width:0; min-height:0; border-right:1px solid var(--ink-line); }
+	.body { display:grid; grid-template-columns:330px 14px 360px minmax(0,1fr); grid-template-rows:minmax(0,1fr); flex:1; min-width:0; min-height:0; overflow:hidden; }
+	.body.browser-folded { grid-template-columns:42px 360px minmax(0,1fr) !important; }
+	.record-browser-slot { position:relative; min-width:0; min-height:0; overflow:hidden; border-right:1px solid var(--ink-line); }
+	.search-resize-handle { grid-column:2; grid-row:1; position:relative; min-width:14px; padding:0; border:0; background:transparent; cursor:col-resize; outline:none; touch-action:none; z-index:2; }
+	.search-resize-handle::before { content:''; position:absolute; top:0; bottom:0; left:6px; width:2px; background:var(--ink-line); opacity:.6; transition:background 140ms,opacity 140ms; }
+	.search-resize-handle:hover::before,.search-resize-handle.active::before,.search-resize-handle:focus-visible::before { background:var(--brass); opacity:1; }
+	.search-resize-grip { position:absolute; top:50%; left:50%; width:7px; height:48px; transform:translate(-50%,-50%); border-radius:999px; background:radial-gradient(circle,var(--text-muted) 22%,transparent 24%) center 6px / 5px 10px repeat-y,var(--panel-bg); border:1px solid var(--ink-line); }
 	.fold-toggle { all:unset; position:absolute; top:10px; right:10px; z-index:6; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:1px solid var(--ink-line); background:var(--panel-bg-alt); color:var(--text-secondary); cursor:pointer; }
 	.fold-toggle:hover,.fold-toggle:focus-visible { border-color:var(--brass); color:var(--brass); }
 	.browser-rail { position:relative; display:flex; align-items:center; justify-content:center; border-right:1px solid var(--ink-line); background:var(--panel-bg); }
@@ -353,7 +400,7 @@
 	.context-summary-details .run-meta { grid-column:1 / -1; }
 	.context-summary-details .detail-grid { grid-template-columns:minmax(0,1fr); gap:7px; }
 	.context-summary-details .data-card pre { max-height:190px; font-size:9px; }
-	@media (max-width:1480px) { .body:not(.browser-folded) { grid-template-columns:auto 320px minmax(0,1fr); } .body.browser-folded { grid-template-columns:42px 320px minmax(0,1fr); } }
+	@media (max-width:1480px) { .body:not(.browser-folded) { grid-template-columns: minmax(250px, 330px) 14px 320px minmax(0,1fr); } .body.browser-folded { grid-template-columns:42px 320px minmax(0,1fr) !important; } }
 	@media (max-width:1250px) { .metadata-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-	@media (max-width:900px) { .benchmark-header { align-items:flex-start; flex-direction:column; } .header-meta { justify-content:flex-start; width:100%; } .body,.body.browser-folded { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(260px,38vh) minmax(240px,32vh) minmax(400px,1fr); overflow:auto; } .record-browser-slot,.browser-rail,.summary-sidebar { border-right:0; border-bottom:1px solid var(--ink-line); } .browser-rail { display:none; } .record-browser-slot { min-height:280px; } .detail-grid { grid-template-columns:minmax(0,1fr); } }
+	@media (max-width:900px) { .benchmark-header { align-items:flex-start; flex-direction:column; } .header-meta { justify-content:flex-start; width:100%; } .body,.body.browser-folded { grid-template-columns:minmax(0,1fr) !important; grid-template-rows:minmax(260px,38vh) minmax(240px,32vh) minmax(400px,1fr); overflow:auto; } .search-resize-handle { display:none; } .record-browser-slot,.browser-rail,.summary-sidebar { border-right:0; border-bottom:1px solid var(--ink-line); } .browser-rail { display:none; } .record-browser-slot { min-height:280px; } .detail-grid { grid-template-columns:minmax(0,1fr); } }
 </style>
