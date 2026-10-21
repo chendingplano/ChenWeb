@@ -30,10 +30,12 @@
 	let {
 		darkMode = true,
 		browserInstanceKey = 'summary-tree',
+		extractedSummaries = false,
 		onFocusModeChange
 	}: {
 		darkMode?: boolean;
 		browserInstanceKey?: string;
+		extractedSummaries?: boolean;
 		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
 
@@ -510,8 +512,18 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">{m.summary_tree_knowledge_system_document_summaries()}</div>
-			<h1 class="display">{m.summary_tree_document()};<span class="amp">{m.summary_tree_tree()}</span></h1>
+			<div class="eyebrow">
+				{extractedSummaries
+					? m.summary_tree_knowledge_system_extracted_summaries()
+					: m.summary_tree_knowledge_system_document_summaries()}
+			</div>
+			<h1 class="display">
+				{#if extractedSummaries}
+					{m.home3_knowledge_extracted_summaries()}
+				{:else}
+					{m.summary_tree_document()};<span class="amp">{m.summary_tree_tree()}</span>
+				{/if}
+			</h1>
 			<div class="subtitle">
 				{m.summary_tree_a_document_centric_reading_room()}
 			</div>

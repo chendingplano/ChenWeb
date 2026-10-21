@@ -65,6 +65,7 @@
 		| 'kb-import'
 		| 'kb-input-details'
 		| 'kb-metrics'
+		| 'kb-extracted-summaries'
 		| 'kb-metric-wiki'
 		| 'kb-metric-ontology'
 		| 'kb-metric-ontology-explorer'
@@ -178,6 +179,11 @@
 					id: 'kb-metrics',
 					label: m.home3_knowledge_metrics(),
 					description: m.home3_knowledge_manage_extracted_metrics()
+				},
+				{
+					id: 'kb-extracted-summaries',
+					label: m.home3_knowledge_extracted_summaries(),
+					description: m.home3_knowledge_browse_extracted_summaries()
 				},
 				{
 					id: 'kb-references',
@@ -934,6 +940,13 @@
 				<ArtifactWikiView {darkMode} />
 			{:else if activeSection === 'kb-summary-tree'}
 				<SummaryTreeView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+			{:else if activeSection === 'kb-extracted-summaries'}
+				<SummaryTreeView
+					{darkMode}
+					browserInstanceKey="extracted-summaries"
+					extractedSummaries
+					onFocusModeChange={handleExtractionFocusMode}
+				/>
 			{:else if activeSection === 'kb-topic-graph'}
 				<TopicGraphView {darkMode} />
 			{:else if activeSection === 'kb-topic-tree'}
