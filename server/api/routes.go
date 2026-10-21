@@ -26,6 +26,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/buildinfohandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/calendarhandler"
+	"github.com/chendingplano/deepdoc/server/api/categorytree"
 	"github.com/chendingplano/deepdoc/server/api/cdmhandler"
 	"github.com/chendingplano/deepdoc/server/api/chadsessionshandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
@@ -628,6 +629,9 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/cdm/documents/:key/publish", cdmhandler.PublishDocument)
 	apiGroup.GET("/cdm/documents/:key/render", cdmhandler.RenderDocument)
 	apiGroup.POST("/cdm/documents/:key/render-preview", cdmhandler.RenderDraftDocument)
+
+	// Category trees and classification (openspec change category-trees).
+	categorytree.NewHandler().Register(apiGroup)
 
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/stores", kbhandler.ListKnowledgeStores)

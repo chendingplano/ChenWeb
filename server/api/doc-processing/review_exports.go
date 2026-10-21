@@ -56,6 +56,12 @@ func LoadPromptByRef(promptRef string) (promptText, promptRefOut, promptPath str
 	return loadPromptByRef(promptRef)
 }
 
+// ResolveModelsFilePath finds the .models.toml file (env override, MODELS_FILE, or the nearest
+// .models.toml above the working directory).
+func ResolveModelsFilePath(modelsFileEnv string) (string, error) {
+	return resolveModelsFilePath(modelsFileEnv)
+}
+
 // ParseTOMLMap parses TOML bytes into out (used by reviewer config loading).
 func ParseTOMLMap(data []byte, out any) error { return parseTOMLMap(data, out) }
 
