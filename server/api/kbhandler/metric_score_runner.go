@@ -273,21 +273,51 @@ func freezeMetricScoreTools(root, script string) (string, map[string]string, err
 }
 
 func freezeScoreTools(root, script, scoreSkill, goldSkill string) (string, map[string]string, error) {
-	helper := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(script))), goldSkill, "scripts", "benchmark_io.py")
+	goldRoot := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(script))), goldSkill)
+	helper := filepath.Join(goldRoot, "scripts", "benchmark_io.py")
 	hashes := map[string]string{}
-	for name, source := range map[string]string{scoreSkill + "/scripts/score_io.py": script, goldSkill + "/scripts/benchmark_io.py": helper} {
+	freezeFile := func(source, name string) error {
 		raw, err := os.ReadFile(source)
 		if err != nil {
-			return "", nil, metricScoreFailure{"SCORER_UNAVAILABLE"}
+			return metricScoreFailure{"SCORER_UNAVAILABLE"}
 		}
 		target := filepath.Join(root, "skills", name)
 		if err = os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			return "", nil, err
+			return err
 		}
 		if err = os.WriteFile(target, raw, 0600); err != nil {
+			return err
+		}
+		hashes[filepath.ToSlash(name)] = metricScoreDigest(raw)
+		return nil
+	}
+	for _, item := range []struct{ source, name string }{
+		{script, filepath.Join(scoreSkill, "scripts", "score_io.py")},
+		{helper, filepath.Join(goldSkill, "scripts", "benchmark_io.py")},
+	} {
+		if err := freezeFile(item.source, item.name); err != nil {
 			return "", nil, err
 		}
-		hashes[name] = metricScoreDigest(raw)
+	}
+	rulesRoot := filepath.Join(goldRoot, "rules")
+	err := filepath.WalkDir(rulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(goldRoot, path)
+		if err != nil {
+			return err
+		}
+		return freezeFile(path, filepath.Join(goldSkill, relative))
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil, metricScoreFailure{"SCORER_UNAVAILABLE"}
+		}
+		return "", nil, err
 	}
 	return filepath.Join(root, "skills", scoreSkill, "scripts", "score_io.py"), hashes, nil
 }
