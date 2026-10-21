@@ -40,6 +40,8 @@
 	type SourceIdentity = { runId: number; inputId: number; status: SummaryScoreRun['status'] };
 	let rawLinesIdentity: SourceIdentity | null = null;
 	let pendingSource: { identity: SourceIdentity; lines: number[]; select: ReportBodyProps['selectSource'] } | null = null;
+	const sameSourceIdentity = (left: SourceIdentity | null | undefined, right: SourceIdentity) =>
+		left?.runId === right.runId && left.inputId === right.inputId && left.status === right.status;
 	let starting = $state(false);
 	let loading = $state(false);
 	let alive = true;
@@ -87,28 +89,30 @@
 	$effect(() => {
 		const inputId = detail?.input_record_id ?? null;
 		const runId = detail?.id ?? null;
-		const requestKey = runId == null || inputId == null ? '' : `${runId}:${inputId}`;
+		const status = detail?.status ?? null;
+		const requestKey = runId == null || inputId == null || status == null ? '' : `${runId}:${inputId}:${status}`;
 		if (requestKey === rawLinesRequestKey) return;
 		rawLinesRequestKey = requestKey;
 		const sequence = ++rawLineSequence;
 		rawLines = []; sourceLines = []; rawLinesIdentity = null; pendingSource = null;
 		if (inputId == null || runId == null) return;
-		const identity = { runId, inputId, status: detail!.status };
+		const identity: SourceIdentity = { runId, inputId, status: detail!.status };
 		void getRawLines(inputId).then((result) => {
-			if (!alive || sequence !== rawLineSequence || detail?.id !== runId || detail.input_record_id !== inputId) return;
+			if (!alive || sequence !== rawLineSequence || !sameSourceIdentity(detail ? { runId: detail.id, inputId: detail.input_record_id, status: detail.status } : null, identity)) return;
 			rawLines = result.lines ?? [];
 			rawLinesIdentity = identity;
-			if (pendingSource?.identity.runId === runId && pendingSource.identity.inputId === inputId) {
-				const pending = pendingSource;
+			const pending = pendingSource;
+			if (pending && sameSourceIdentity(pending.identity, identity)) {
 				pendingSource = null;
-				if (detail.status === pending.identity.status) selectSourceLines(pending.lines, pending.select);
+				if (detail?.status === pending.identity.status) selectSourceLines(pending.lines, pending.select);
 				else pending.select([]);
 			}
 		}).catch(() => {
-			if (!alive || sequence !== rawLineSequence) return;
+			if (!alive || sequence !== rawLineSequence || !sameSourceIdentity(detail ? { runId: detail.id, inputId: detail.input_record_id, status: detail.status } : null, identity)) return;
 			rawLines = []; rawLinesIdentity = identity;
-			if (pendingSource?.identity.runId === runId && pendingSource.identity.inputId === inputId) {
-				const pending = pendingSource; pendingSource = null; pending.select([]);
+			const pending = pendingSource;
+			if (pending && sameSourceIdentity(pending.identity, identity)) {
+				pendingSource = null; pending.select([]);
 			}
 		});
 	});
@@ -260,9 +264,9 @@
 			event.stopPropagation();
 			const prediction = detail?.input?.predictions?.find((item: any) => String(item.id) === String(chunk.pred));
 			const lines = parseSourceLines(prediction?.source_line_spans);
-			const identity = { runId: detail!.id, inputId: detail!.input_record_id, status: detail!.status };
+			const identity: SourceIdentity = { runId: detail!.id, inputId: detail!.input_record_id, status: detail!.status };
 			if (!lines.length) { pendingSource = null; sourceLines = []; selectSource([]); return; }
-			if (rawLinesIdentity?.runId === identity.runId && rawLinesIdentity.inputId === identity.inputId) selectSourceLines(lines, selectSource);
+			if (sameSourceIdentity(rawLinesIdentity, identity)) selectSourceLines(lines, selectSource);
 			else { pendingSource = { identity, lines, select: selectSource }; sourceLines = []; selectSource([]); }
 		}}>{m.ssb_chunk({ id: chunk.pred })}</button> · {chunk.diagnostics}</summary><pre>{JSON.stringify(chunk, null, 2)}</pre><small>{selectedSourceLines.length ? selectedSourceLines.join(', ') : ''}</small></details>{/each}{/if}
 		{#if detail!.report}<details><summary>{m.ssb_report()}</summary><pre>{detail!.report}</pre></details>{/if}
