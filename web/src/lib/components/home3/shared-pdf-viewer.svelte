@@ -137,15 +137,25 @@
 	$effect(() => {
 		// Selection changes repaint overlays on just the previously and newly highlighted pages.
 		highlightVersion;
+		const requestedHighlightPages = highlightPages ?? [];
+		const renderedPageCount = pdfRenderedPages.length;
 		const highlights = tableHighlights;
 		const seq = ++tablePaintSeq;
 		tableNavigationPending = highlights.length > 0;
 		void tick().then(() => {
 			if (seq !== tablePaintSeq) return;
+			const availablePageCount = loadedPageCount() || renderedPageCount;
+			const requestedPage = requestedHighlightPages.find(pageNo => pageNo <= availablePageCount);
 			const first = highlights.find(box => box.page <= loadedPageCount());
-			if (first) { page = first.page; tableNavigationPending = false; }
+			const targetPage = requestedPage ?? first?.page ?? clampPage(page);
+			if (requestedPage != null) {
+				page = requestedPage;
+				tableNavigationPending = false;
+			} else if (first) {
+				page = first.page;
+				tableNavigationPending = false;
+			}
 			paintChangedHighlightPages();
-			const targetPage = first?.page ?? clampPage(page);
 			if (!scrollToFirstHighlight(targetPage, 'auto')) scrollToPage(targetPage, 'auto');
 		});
 	});
