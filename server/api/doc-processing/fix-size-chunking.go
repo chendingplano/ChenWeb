@@ -915,7 +915,7 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
 	}
-	totalSummaries := totalPlannedSummaries(len(chunks), s.SummaryGroupSize)
+	totalSummaries := len(chunks)
 	s.summaryProgressTracker = &summaryProgressTracker{
 		Total: totalSummaries,
 		Persist: func(progress string) error {
@@ -984,32 +984,11 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		}
 	}
 
-	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, s.GenerateSummaryMaxTasks, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
-		if isCtxStopped(ctx) {
-			return summaryGenerateResult{}, ErrPipelineStopped
-		}
-		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
-	})
-	if err != nil {
-		if isCtxStopped(ctx) {
-			s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
-			return ErrPipelineStopped
-		}
-		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
-		return err
-	}
+	// Only summarize source chunks (level 0). Do not generate rollup summaries
+	// from groups of leaf summaries.
+	allSummaries := leafSummaries
 	for i := range allSummaries {
 		allSummaries[i].Language = rec.SourceLanguage
-	}
-	s.Logger.Info("writing non-leaf summary files", "record_id", rec.ID, "count", len(allSummaries), "source_language", rec.SourceLanguage)
-	for _, item := range allSummaries {
-		if item.Level == 0 {
-			continue
-		}
-		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
-			s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
-			return err
-		}
 	}
 	if err := os.MkdirAll(s.ArtifactWebDir, 0o755); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
@@ -1603,7 +1582,7 @@ func (s *FixedSizeChunkingService) GenerateLeafSummaryForChunk(ctx context.Conte
 	}, nil
 }
 
-// FinalizeSummaries builds the summary tree, writes artifacts, indexes, and persists status.
+// FinalizeSummaries writes level-0 chunk summaries, indexes them, and persists status.
 // Implements summaryChunkBatcher.
 func (s *FixedSizeChunkingService) FinalizeSummaries(ctx context.Context, recordID int64, inputFilename string, start time.Time, leafSummaries []SummaryItem, chunks []Chunk) error {
 	rec, err := s.Store.GetInputRecord(ctx, recordID)
@@ -1621,28 +1600,9 @@ func (s *FixedSizeChunkingService) FinalizeSummaries(ctx context.Context, record
 			return fmt.Errorf("(MID_26070422) batch write leaf summary file: %w", err)
 		}
 	}
-	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, s.GenerateSummaryMaxTasks, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
-		if isCtxStopped(ctx) {
-			return summaryGenerateResult{}, ErrPipelineStopped
-		}
-		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
-	})
-	if err != nil {
-		if isCtxStopped(ctx) {
-			return ErrPipelineStopped
-		}
-		return fmt.Errorf("(MID_26070423) batch build summary tree for record %d: %w", recordID, err)
-	}
+	allSummaries := leafSummaries
 	for i := range allSummaries {
 		allSummaries[i].Language = rec.SourceLanguage
-	}
-	for _, item := range allSummaries {
-		if item.Level == 0 {
-			continue
-		}
-		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
-			return fmt.Errorf("(MID_26070424) batch write non-leaf summary file: %w", err)
-		}
 	}
 	if err := os.MkdirAll(s.ArtifactWebDir, 0o755); err != nil {
 		return fmt.Errorf("(MID_26070425) batch create artifact web dir: %w", err)

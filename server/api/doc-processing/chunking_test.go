@@ -1544,19 +1544,12 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summarize chunk"
 	svc.SummaryGroupSize = 2
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error) {
-		if level == 0 {
-			return summaryGenerateResult{
-				Summary:       "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromMarkedLines(lines)),
-				CategoryPaths: []string{"Safety Overview", "Closing Notes"},
-			}, nil
-		}
-		ids := make([]string, 0, len(children))
-		for _, child := range children {
-			ids = append(ids, child.SummaryID)
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
+		if level != 0 {
+			return summaryGenerateResult{}, errors.New("unexpected non-leaf summary generation")
 		}
 		return summaryGenerateResult{
-			Summary:       "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","),
+			Summary:       "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromMarkedLines(lines)),
 			CategoryPaths: []string{"Safety Overview", "Closing Notes"},
 		}, nil
 	}
@@ -1577,7 +1570,6 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	for _, rel := range []string{
 		"summary_0_0001.txt",
 		"summary_0_0002.txt",
-		"summary_1_0001.txt",
 	} {
 		if _, err := os.Stat(filepath.Join(recordDir, rel)); err != nil {
 			t.Fatalf("missing summary artifact %s: %v", rel, err)
@@ -1589,7 +1581,7 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read summary tree leaf: %v", err)
 	}
-	wantTreeContent := "8123_sum_0_0001\n8123_sum_0_0002\n8123_sum_1_0001"
+	wantTreeContent := "8123_sum_0_0001\n8123_sum_0_0002"
 	if strings.TrimSpace(string(treeBody)) != wantTreeContent {
 		t.Fatalf("unexpected summary tree content: %q, want %q", strings.TrimSpace(string(treeBody)), wantTreeContent)
 	}
@@ -1611,8 +1603,8 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	if summaryStatus["proc_status"] != "success" {
 		t.Fatalf("summary proc_status=%v, want success", summaryStatus["proc_status"])
 	}
-	if summaryStatus["progress"] != "100% (3/3)" {
-		t.Fatalf("summary progress=%v, want 100%% (3/3)", summaryStatus["progress"])
+	if summaryStatus["progress"] != "100% (2/2)" {
+		t.Fatalf("summary progress=%v, want 100%% (2/2)", summaryStatus["progress"])
 	}
 	if st.updateCalls < 3 {
 		t.Fatalf("updateCalls=%d, want at least 3 summary progress updates", st.updateCalls)
@@ -1624,7 +1616,7 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 			t.Fatalf("status history json: %v", err)
 		}
 		for _, entry := range entries {
-			if entry["operation"] == "generate_summaries" && entry["proc_status"] == "running" && entry["progress"] == "33% (1/3)" {
+			if entry["operation"] == "generate_summaries" && entry["proc_status"] == "running" && entry["progress"] == "50% (1/2)" {
 				foundIntermediate = true
 				break
 			}
