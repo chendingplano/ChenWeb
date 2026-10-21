@@ -118,12 +118,19 @@ func (p *ExtractSummariesProcessor) HandleEvent(ctx context.Context, payload []b
 	}
 	inputJSON, _ := json.Marshal(request)
 	inputHash := sha256.Sum256(inputJSON)
+	lineNosBySeq := make(map[int][]int, len(chunks))
+	for _, c := range chunks {
+		for _, marked := range c.Lines {
+			lineNosBySeq[c.SeqNo] = append(lineNosBySeq[c.SeqNo], marked.Line.LineNo)
+		}
+	}
 	for i := range response.Summaries {
 		config := map[string]any{"sentence_count": p.Config.SentenceCount, "versions": response.Versions, "input_sha256": hex.EncodeToString(inputHash[:]), "worker_version": "1.0.0"}
 		if response.Summaries[i].RankingFallback != "" {
 			config["ranking_fallback"] = response.Summaries[i].RankingFallback
 		}
 		response.Summaries[i].ConfigJSON = mustJSONString(config, map[string]any{})
+		response.Summaries[i].SourceLineNos = lineNosBySeq[response.Summaries[i].SeqNo]
 	}
 	sort.Slice(response.Summaries, func(i, j int) bool { return response.Summaries[i].SeqNo < response.Summaries[j].SeqNo })
 	if err := p.Store.Replace(ctx, rec.ID, p.Config.Algorithm, response.Summaries, verify); err != nil {

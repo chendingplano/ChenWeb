@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	envDecisionModel  = "CATEGORY_DECISION_MODEL"
-	envPolicyPrompt   = "CATEGORY_MEMBERSHIP_POLICY_PROMPT"
-	envQuestionPrompt = "CATEGORY_MEMBERSHIP_QUESTION_PROMPT"
-	defaultPolicyRef  = "prompt-category-membership-policy-v1.md"
-	defaultQuestion   = "prompt-category-membership-question-v1.md"
-	questionKeyMarker = "{{key}}"
+	envDecisionModel     = "CATEGORY_DECISION_MODEL"
+	defaultDecisionModel = "deepseek-flash-decision-model"
+	envPolicyPrompt      = "CATEGORY_MEMBERSHIP_POLICY_PROMPT"
+	envQuestionPrompt    = "CATEGORY_MEMBERSHIP_QUESTION_PROMPT"
+	defaultPolicyRef     = "prompt-category-membership-policy-v1.md"
+	defaultQuestion      = "prompt-category-membership-question-v1.md"
+	questionKeyMarker    = "{{key}}"
 )
 
 // JevDecider asks a decision model (Jev, or a chat model through jev_emulated) one noul
@@ -35,12 +36,9 @@ type JevDecider struct {
 }
 
 // NewJevDeciderFromEnv builds the decider from CATEGORY_DECISION_MODEL (a .models.toml
-// profile of type decision-model or llm) and the two prompt files.
+// profile of type decision-model or llm; default deepseek-flash-decision-model) and the two prompt files.
 func NewJevDeciderFromEnv(logger ApiTypes.JimoLogger) (*JevDecider, error) {
-	ref := strings.TrimSpace(os.Getenv(envDecisionModel))
-	if ref == "" {
-		return nil, fmt.Errorf("(MID_26102101) %s is not set: no decision model for category classification", envDecisionModel)
-	}
+	ref := envOr(envDecisionModel, defaultDecisionModel)
 	path, err := docprocessing.ResolveModelsFilePath("MODEL_DEF_FILE")
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26102102) %w", err)

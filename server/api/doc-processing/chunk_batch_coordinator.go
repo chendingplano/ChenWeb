@@ -165,6 +165,10 @@ func (s *ControlService) runProcessorsChunkBatched(
 
 	// --- Init each processor ---
 	var batchFirstErr error
+	// Only processors whose init succeeded are scheduled or finalized. A failed
+	// init leaves the processor's per-record state unset, so running it would
+	// call the LLM with no prompt and finalize a record it never loaded.
+	initOK := make([]ChunkBatchProcessor, 0, len(batchProcessors))
 
 	for _, bp := range batchProcessors {
 		processorName := processorLogName(bp.(Processor))
@@ -189,17 +193,26 @@ func (s *ControlService) runProcessorsChunkBatched(
 			if batchFirstErr == nil {
 				batchFirstErr = fmt.Errorf("(MID_26062707) %s init: %w", bp.Name(), err)
 			}
+			continue
 		}
+		initOK = append(initOK, bp)
+	}
+
+	if len(initOK) == 0 {
+		*requestFailed = true
+		*firstErr = batchFirstErr
+		phaseBSpan.SetStatus(codes.Error, batchFirstErr.Error())
+		return
 	}
 
 	if s.Logger != nil {
 		s.Logger.Info("chunk batch: scheduling three-phase cache-optimized run",
 			"record_id", recordID,
-			"num_processors", len(batchProcessors),
+			"num_processors", len(initOK),
 			"num_chunks", len(chunks),
 		)
 	}
-	if schedErr := s.scheduleChunkBatch(ctx, batchProcessors, chunks, recordID); schedErr != nil {
+	if schedErr := s.scheduleChunkBatch(ctx, initOK, chunks, recordID); schedErr != nil {
 		if errors.Is(schedErr, ErrPipelineStopped) {
 			*requestStopped = true
 			phaseBSpan.SetStatus(codes.Error, "stopped")
@@ -211,7 +224,7 @@ func (s *ControlService) runProcessorsChunkBatched(
 	}
 
 	// --- Finalize each processor ---
-	for _, bp := range batchProcessors {
+	for _, bp := range initOK {
 		processorName := processorLogName(bp.(Processor))
 		if isCtxStopped(ctx) {
 			*requestStopped = true

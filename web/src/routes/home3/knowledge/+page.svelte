@@ -59,6 +59,7 @@
 	import MetricOntologyAnalysisView from '$lib/components/home3/metric-ontology-analysis-view.svelte';
 	import MetricOntologyExplorerView from '$lib/components/home3/metric-ontology-explorer-view.svelte';
 	import CategoryTreesView from '$lib/components/home3/category-trees-view.svelte';
+	import MeshBrowserView from '$lib/components/home3/mesh-browser-view.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -70,6 +71,7 @@
 		| 'kb-metric-ontology'
 		| 'kb-metric-ontology-explorer'
 		| 'kb-ontology-categories'
+		| 'kb-ontology-mesh'
 		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
@@ -260,6 +262,11 @@
 					id: 'kb-ontology-categories',
 					label: m.home3_knowledge_categories(),
 					description: m.home3_knowledge_categories_description()
+				},
+				{
+					id: 'kb-ontology-mesh',
+					label: m.home3_knowledge_mesh(),
+					description: m.home3_knowledge_mesh_description()
 				}
 			]
 		}
@@ -481,6 +488,7 @@
 			activeSection !== 'kb-metric-ontology' &&
 			activeSection !== 'kb-metric-ontology-explorer' &&
 			activeSection !== 'kb-ontology-categories' &&
+			activeSection !== 'kb-ontology-mesh' &&
 			activeSection !== 'kb-artifact-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
@@ -905,6 +913,8 @@
 				<MetricOntologyExplorerView {darkMode} metricId={metricOntologyExplorerId} />
 			{:else if activeSection === 'kb-ontology-categories'}
 				<CategoryTreesView {darkMode} />
+			{:else if activeSection === 'kb-ontology-mesh'}
+				<MeshBrowserView {darkMode} />
 			{:else if activeSection === 'kb-artifact-wiki'}
 				{#if artifactWikiType && artifactWikiId}
 					<ArtifactWikiPage

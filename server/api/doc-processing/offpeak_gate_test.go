@@ -156,3 +156,29 @@ func TestRunSingleProcessorCollect_StopWhileHeld(t *testing.T) {
 		t.Fatalf("res=%+v ran=%v, want stopped without running", res, ran)
 	}
 }
+
+// modeErrStore fails the processing_mode lookup; everything else is unused.
+type modeErrStore struct{ DocMetadataStore }
+
+func (modeErrStore) GetProcessingMode(context.Context, int64) (string, error) {
+	return "", errors.New("db unavailable")
+}
+
+func TestOffPeakOnly_ModeLookupErrorFallsBackToNoHold(t *testing.T) {
+	g, _ := scriptedGate(1<<30, nil)
+	s := &ControlService{OffPeak: g, InputStore: modeErrStore{}}
+	if s.offPeakOnly(context.Background(), 1) {
+		t.Fatal("offPeakOnly = true, want false when processing_mode lookup fails")
+	}
+}
+
+func TestRunSingleProcessorCollect_PeakErrorRunsWithoutHold(t *testing.T) {
+	g, _ := scriptedGate(0, errors.New("peak hours not found"))
+	s := &ControlService{OffPeak: g}
+	var ran []string
+
+	res := s.runSingleProcessorCollect(withOffPeakHold(context.Background()), nil, fakeProcessor{name: "extract_metrics", calls: &ran}, 1)
+	if res.failed || len(ran) != 1 {
+		t.Fatalf("res=%+v ran=%v, want processor run without hold on peak error", res, ran)
+	}
+}

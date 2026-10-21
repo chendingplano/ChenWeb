@@ -34,7 +34,13 @@ func TestLoadSceneBlocksPromptFromEnvDefaultsToEnrichmentPrompt(t *testing.T) {
 	if promptErr != nil {
 		t.Fatalf("loadSceneBlocksPromptFromEnv: %v", promptErr)
 	}
-	if got, want := strings.TrimSpace(promptRef), "prompt-enrich-scene-blocks-v1.md"; got != want {
+	// With no env var set the default is the embedded one (generated from mise.local.toml),
+	// else the code's fallback.
+	want := "prompt-enrich-scene-blocks-v1.md"
+	if d, ok := embeddedPromptDefaults["ENRICH_SCENE_BLOCKS_PROMPT"]; ok {
+		want = d.Ref
+	}
+	if got := strings.TrimSpace(promptRef); got != want {
 		t.Fatalf("promptRef=%q, want %q", got, want)
 	}
 }

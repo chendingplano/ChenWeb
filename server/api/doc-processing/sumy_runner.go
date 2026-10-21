@@ -90,6 +90,8 @@ type ExtractSummary struct {
 	Sentences       []ExtractSummarySentence `json:"sentences"`
 	RankingFallback string                   `json:"ranking_fallback,omitempty"`
 	ConfigJSON      string                   `json:"-"`
+	// SourceLineNos is the chunk's full line set (overlap + regular), filled by Go, not Sumy.
+	SourceLineNos []int `json:"-"`
 }
 type SumyResponse struct {
 	Algorithm string            `json:"algorithm"`

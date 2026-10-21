@@ -40,18 +40,12 @@ summary_id,input_record_id,algorithm,summary_level,summary_seq_no,
 source_line_spans,source_sentence_spans,summary_text,language,extraction_config
 ) VALUES ($1,$2,$3,0,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb)`
 	for _, item := range items {
-		lineNos := []int{}
-		for _, sentence := range item.Sentences {
-			for _, span := range sentence.Spans {
-				lineNos = append(lineNos, span.Line)
-			}
-		}
 		config := item.ConfigJSON
 		if config == "" {
 			config = "{}"
 		}
 		if _, err := tx.ExecContext(ctx, insert, fmt.Sprintf("%d_exsum_%s_0_%d", recordID, algorithm, item.SeqNo), recordID, algorithm, item.SeqNo,
-			mustJSONString(lineRangesFromNumbers(lineNos), []string{}), mustJSONString(item.Sentences, []ExtractSummarySentence{}), item.Summary, item.Language, config); err != nil {
+			mustJSONString(lineRangesFromNumbers(item.SourceLineNos), []string{}), mustJSONString(item.Sentences, []ExtractSummarySentence{}), item.Summary, item.Language, config); err != nil {
 			return err
 		}
 	}

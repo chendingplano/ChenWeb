@@ -54,7 +54,10 @@ func ParseModelsTOML(raw []byte) (ParsedModels, error) {
 	profiles := make([]ImportedProfile, 0, len(keys))
 	for _, key := range keys {
 		model := models[key]
-		provider := inferProvider(key, model.ModelType, model.BaseURL)
+		if err := model.CheckDecisionModelType(); err != nil {
+			return ParsedModels{}, fmt.Errorf("model %q: %w", key, err)
+		}
+		provider := inferProvider(key, model.ModelType, model.DecisionModelType, model.BaseURL)
 		accountKey := makeAccountKey(provider, model.BaseURL, model.APIKey)
 		if _, exists := accountMap[accountKey]; !exists {
 			accountName := uniqueAccountName(usedAccountNames, defaultAccountName(provider, model.BaseURL))
@@ -90,9 +93,12 @@ func ParseModelsTOML(raw []byte) (ParsedModels, error) {
 	}, nil
 }
 
-func inferProvider(profileName, modelType, baseURL string) string {
+func inferProvider(profileName, modelType, decisionModelType, baseURL string) string {
 	base := strings.ToLower(strings.TrimSpace(baseURL))
-	if strings.EqualFold(strings.TrimSpace(modelType), "decision-model") {
+	// Only a native decision model is a Jev-style service; an emulated one is an
+	// ordinary chat model and is classified by its base URL like any other.
+	if strings.EqualFold(strings.TrimSpace(modelType), "decision-model") &&
+		strings.TrimSpace(decisionModelType) == ApiTypes.DecisionModelNative {
 		return "jev_compatible"
 	}
 	if u, err := url.Parse(base); err == nil {

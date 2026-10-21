@@ -100,7 +100,7 @@ further shortcut: a unit does not settle it, because an activity frequency can c
 
 ### D4. The decision request
 
-- Client: `jev_emulated`, built from the `.models.toml` profile named by `METRIC_DECISION_MODEL`.
+- Client: built from the `.models.toml` profile named by `METRIC_DECISION_MODEL`, which must have `model_type = 'decision-model'` (any other type is a configuration error); `decision_model_type` picks `jev_compatible` (`native`) or `jev_emulated` (`emulated`).
   The Playground's profile → `ProviderConfig` mapping (`playgroundProviderConfig`: DashScope
   `top_logprobs = 5`; DeepSeek `thinking = disabled`, `temperature = 1`; `omit_temperature`) moves
   to a helper used by both. A profile whose `model_type` is `decision-model` uses
@@ -187,7 +187,7 @@ current maximum; existing dropped rows are kept, as existing live rows are.
 ## Migration Plan
 
 1. Apply the goose migration (`mise dev` applies it at start).
-2. Deploy server, set `METRIC_DECISION_MODEL` in `mise.local.toml` (e.g. `deepseek-flash-4-1`).
+2. Deploy server, set `METRIC_DECISION_MODEL` in `mise.local.toml` (e.g. `deepseek-flash-decision-model`).
 3. Re-extract record 416 with `force_clear`; expect `416_mtc_3` in `kb.metrics_dropped` with stage
    `decision_model`, and the five A4 rows live.
 4. Rollback: unset `METRIC_DECISION_MODEL` (decision step skipped, rows kept). The table can stay;

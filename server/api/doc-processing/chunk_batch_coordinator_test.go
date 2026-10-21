@@ -2,7 +2,9 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -130,5 +132,68 @@ func TestSeedPhaseRunsChunksConcurrently(t *testing.T) {
 	if len(seed.starts) != 4 || len(remainder.starts) != 4 {
 		t.Fatalf("each processor should run all 4 chunks; seed=%d remainder=%d",
 			len(seed.starts), len(remainder.starts))
+	}
+}
+
+// countingBatchProc counts the chunk-batch lifecycle calls it receives. With
+// initErr set, InitChunkBatch fails the way extract_references does when its
+// prompt cannot be loaded.
+type countingBatchProc struct {
+	name      string
+	initErr   error
+	processed int32
+	finalized int32
+}
+
+func (c *countingBatchProc) Name() string                              { return c.name }
+func (c *countingBatchProc) HandleEvent(context.Context, []byte) error { return nil }
+func (c *countingBatchProc) InitChunkBatch(context.Context, int64, []Chunk, string) error {
+	return c.initErr
+}
+func (c *countingBatchProc) ProcessChunk(context.Context, int) error {
+	atomic.AddInt32(&c.processed, 1)
+	return nil
+}
+func (c *countingBatchProc) FinalizeChunkBatch(context.Context) error {
+	atomic.AddInt32(&c.finalized, 1)
+	return nil
+}
+
+func TestChunkBatchSkipsProcessorWhoseInitFailed(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "0")
+	dir := t.TempDir()
+	writeLineFile(t, filepath.Join(dir, "source_opendata.txt"))
+
+	chunks := []Chunk{{SeqNo: 1}}
+	failing := &countingBatchProc{name: "extract_references", initErr: errors.New("prompt not found")}
+	healthy := &countingBatchProc{name: "extract_inventory_items"}
+	svc := &ControlService{
+		InputStore: &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+			ID:              245,
+			ParserName:      "opendata",
+			ResultFilename:  filepath.Join(dir, "result.json"),
+			StagingFilename: filepath.Join(dir, "source.pdf"),
+			StatusRaw:       "[]",
+		}},
+		Processors: []Processor{
+			&chunkBufferingPhaseAProc{name: "chunking", chunks: chunks},
+			failing,
+			healthy,
+		},
+	}
+
+	// The failed init still fails the request; it must be reported, not hidden.
+	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"245"}`))
+	if err == nil || !strings.Contains(err.Error(), "extract_references init") {
+		t.Fatalf("handleEvent err=%v, want extract_references init failure", err)
+	}
+	if n := atomic.LoadInt32(&failing.processed); n != 0 {
+		t.Fatalf("failed-init processor ran ProcessChunk %d times, want 0", n)
+	}
+	if n := atomic.LoadInt32(&failing.finalized); n != 0 {
+		t.Fatalf("failed-init processor was finalized %d times, want 0", n)
+	}
+	if n := atomic.LoadInt32(&healthy.finalized); n != 1 {
+		t.Fatalf("healthy processor finalized %d times, want 1", n)
 	}
 }

@@ -12,23 +12,50 @@ import (
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
-// Provider maps a .models.toml entry to the decision provider used to run it:
-// real Jev for decision-model entries, the logprob emulation for ordinary chat
-// models.
-func Provider(cfg ApiTypes.LLMModelDef) (llmclients.ProviderID, bool) {
+// Provider maps a .models.toml entry to the provider that runs its decisions.
+//
+// A "decision-model" entry is a decision model and must say which kind through
+// decision_model_type: "native" (a real decision-model service such as Jev) runs
+// through jev_compatible, "emulated" (a chat model answering through its logprobs)
+// through jev_emulated. A missing or invalid decision_model_type is an error. An
+// "llm" entry is an ordinary chat model and always runs emulated. Any other
+// model type cannot run decisions (ok is false).
+func Provider(cfg ApiTypes.LLMModelDef) (provider llmclients.ProviderID, ok bool, err error) {
 	switch strings.TrimSpace(cfg.ModelType) {
 	case "decision-model":
-		return llmclients.ProviderJevCompatible, true
+		if err := cfg.CheckDecisionModelType(); err != nil {
+			return "", true, err
+		}
+		if strings.TrimSpace(cfg.DecisionModelType) == ApiTypes.DecisionModelNative {
+			return llmclients.ProviderJevCompatible, true, nil
+		}
+		return llmclients.ProviderJevEmulated, true, nil
 	case "llm":
-		return llmclients.ProviderJevEmulated, true
+		return llmclients.ProviderJevEmulated, true, nil
 	default:
-		return "", false
+		return "", false, nil
 	}
+}
+
+// RequireDecisionModel reports an error unless the entry is a decision model, that is
+// model_type = "decision-model" with a valid decision_model_type. An "llm" entry does
+// not qualify, although Provider can still run it for the Playground.
+func RequireDecisionModel(key string, cfg ApiTypes.LLMModelDef) error {
+	if t := strings.TrimSpace(cfg.ModelType); t != "decision-model" {
+		return fmt.Errorf("model %q has model_type %q: a decision model must have model_type %q", key, t, "decision-model")
+	}
+	if err := cfg.CheckDecisionModelType(); err != nil {
+		return fmt.Errorf("model %q: %w", key, err)
+	}
+	return nil
 }
 
 // ProviderConfig builds the client config for a model entry.
 func ProviderConfig(key string, cfg ApiTypes.LLMModelDef) (llmclients.ProviderConfig, error) {
-	provider, ok := Provider(cfg)
+	provider, ok, err := Provider(cfg)
+	if err != nil {
+		return llmclients.ProviderConfig{}, fmt.Errorf("model %q: %w", key, err)
+	}
 	if !ok {
 		return llmclients.ProviderConfig{}, fmt.Errorf("model %q (type %q) cannot run decisions", key, cfg.ModelType)
 	}

@@ -50,6 +50,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmadminhandler"
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
+	"github.com/chendingplano/deepdoc/server/api/meshbrowser"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/pageconfighandler"
 	"github.com/chendingplano/deepdoc/server/api/peakhourshandler"
@@ -638,6 +639,9 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Category trees and classification (openspec change category-trees).
 	categorytree.NewHandler().Register(apiGroup)
+
+	// MeSH browser over resources.mesh (read-only).
+	meshbrowser.NewHandler().Register(apiGroup)
 
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/stores", kbhandler.ListKnowledgeStores)

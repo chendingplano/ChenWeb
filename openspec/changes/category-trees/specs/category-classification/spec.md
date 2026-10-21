@@ -80,9 +80,9 @@ error when the artifact type has no bound tree or no decision model is configure
 - **WHEN** a record's metrics were re-extracted with new IDs and classification is run for the record
 - **THEN** bindings of the old metric IDs are deleted and the new metrics are classified
 
-#### Scenario: No decision model
+#### Scenario: No decision model configured
 - **WHEN** `CATEGORY_DECISION_MODEL` is unset and classification is requested
-- **THEN** the request is rejected with an error naming the variable
+- **THEN** the profile `deepseek-flash-decision-model` is used
 
 ### Requirement: Review queue
 The system SHALL list the latest attempt per artifact whose status is `failed` or `in_review`,

@@ -84,8 +84,8 @@
 		stage: 'M5.2 3.2l7 4.8-7 4.8Z'
 	};
 
-	const STEP = 212;
-	const ROW = 48;
+	const STEP = 300;
+	const ROW = 65;
 	const DEG = Math.PI / 180;
 	const base = (i: number) => (-90 + i * (360 / SATELLITES.length)) * DEG;
 	const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -211,6 +211,7 @@
 	let ty = $state(0);
 	let k = $state(1);
 	let animating = $state(false);
+	let animationsEnabled = $state(true);
 
 	function fitView(animate = true) {
 		if (!nodes.length) return;
@@ -228,7 +229,7 @@
 		const padY = 78;
 		const nk = clamp(Math.min(hostW / (maxX - minX + padX * 2), hostH / (maxY - minY + padY * 2)), 0.42, 1.3);
 		const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-		if (animate) {
+		if (animate && animationsEnabled) {
 			animating = true;
 			setTimeout(() => (animating = false), 620);
 		}
@@ -395,6 +396,9 @@
 		<button onclick={() => fitView(true)} title={m.ontology_canvas_fit()}>⤢</button>
 		<button onclick={() => { animating = false; k = clamp(k * 1.15, 0.25, 3); }} title={m.ontology_canvas_zoom_in()}>+</button>
 		<button onclick={() => { animating = false; k = clamp(k / 1.15, 0.25, 3); }} title={m.ontology_canvas_zoom_out()}>−</button>
+		<button onclick={() => { animationsEnabled = !animationsEnabled; }} title={animationsEnabled ? m.ontology_canvas_pause() : m.ontology_canvas_play()}>
+			{animationsEnabled ? '▮▮' : '▶'}
+		</button>
 	</div>
 </div>
 

@@ -139,7 +139,12 @@ func GetDecisionPlaygroundOptions(c echo.Context) error {
 	}
 	out := make([]playgroundModel, 0, len(models))
 	for key, cfg := range models {
-		if provider, ok := decisionmodel.Provider(cfg); ok {
+		provider, ok, perr := decisionmodel.Provider(cfg)
+		if perr != nil {
+			logger.Error("decision model entry is invalid", "model", key, "err", perr)
+			continue
+		}
+		if ok {
 			out = append(out, playgroundModel{Key: key, ModelName: cfg.ModelName, ModelType: cfg.ModelType, Provider: string(provider)})
 		}
 	}

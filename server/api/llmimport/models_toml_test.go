@@ -95,6 +95,7 @@ func TestParseModelsTOMLUsesDecisionModelTypeForMultipleProfiles(t *testing.T) {
 [decision-model-alpha]
 host = "cloud"
 model_type = "decision-model"
+decision_model_type = "native"
 model_name = "arbitrary-alpha"
 api_key = "shared-key"
 base_url = "https://models.example/api"
@@ -102,6 +103,7 @@ base_url = "https://models.example/api"
 [decision-model-beta]
 host = "cloud"
 model_type = "decision-model"
+decision_model_type = "native"
 model_name = "arbitrary-beta"
 api_key = "shared-key"
 base_url = "https://models.example/api"

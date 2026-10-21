@@ -32,7 +32,7 @@ const metricSelect = `SELECT id, input_record_id, COALESCE(metric_name, ''), COA
 	FROM kb.metrics`
 
 func (s MetricsSource) ListRecord(ctx context.Context, recordID int64) ([]Artifact, error) {
-	rows, err := s.DB.QueryContext(ctx, metricSelect+` WHERE input_record_id = $1 ORDER BY id`, recordID)
+	rows, err := s.DB.QueryContext(ctx, metricSelect+` WHERE input_record_id = $1 AND ref_mention_id IS NULL ORDER BY id`, recordID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (s MetricsSource) Get(ctx context.Context, artifactID string) (*Artifact, e
 	if err != nil {
 		return nil, fmt.Errorf("metric id %q: %w", artifactID, err)
 	}
-	a, err := scanMetric(s.DB.QueryRowContext(ctx, metricSelect+` WHERE id = $1`, id))
+	a, err := scanMetric(s.DB.QueryRowContext(ctx, metricSelect+` WHERE id = $1 AND ref_mention_id IS NULL`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("metric %s: %w", artifactID, ErrNotFound)
 	}

@@ -214,7 +214,8 @@ type decisionModelJudge struct {
 	logger       ApiTypes.JimoLogger
 }
 
-// newOpenValueJudgeFromEnv builds the judge from METRIC_DECISION_MODEL (a .models.toml profile)
+// newOpenValueJudgeFromEnv builds the judge from METRIC_DECISION_MODEL (a .models.toml profile
+// whose model_type is "decision-model"; any other type is an error)
 // and the policy prompt. It returns (nil, nil) when METRIC_DECISION_MODEL is unset.
 func newOpenValueJudgeFromEnv(logger ApiTypes.JimoLogger) (openValueJudge, error) {
 	ref := strings.TrimSpace(os.Getenv("METRIC_DECISION_MODEL"))
@@ -236,6 +237,9 @@ func newOpenValueJudgeFromEnv(logger ApiTypes.JimoLogger) (openValueJudge, error
 	def, ok := parsed[ref]
 	if !ok {
 		return nil, fmt.Errorf("(MID_26100813) METRIC_DECISION_MODEL %q not found in %s", ref, modelPath)
+	}
+	if err := decisionmodel.RequireDecisionModel(ref, def); err != nil {
+		return nil, fmt.Errorf("(MID_26102301) METRIC_DECISION_MODEL: %w", err)
 	}
 	pc, err := decisionmodel.ProviderConfig(ref, def)
 	if err != nil {
