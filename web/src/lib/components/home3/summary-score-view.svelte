@@ -93,7 +93,7 @@
 		const sequence = ++rawLineSequence;
 		rawLines = []; sourceLines = []; rawLinesIdentity = null; pendingSource = null;
 		if (inputId == null || runId == null) return;
-		const identity = { runId, inputId };
+		const identity = { runId, inputId, status: detail!.status };
 		void getRawLines(inputId).then((result) => {
 			if (!alive || sequence !== rawLineSequence || detail?.id !== runId || detail.input_record_id !== inputId) return;
 			rawLines = result.lines ?? [];
