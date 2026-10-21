@@ -105,7 +105,7 @@
 		children?: Array<{ id: KbSectionId; entryKey?: string; label: string; description: string }>;
 	};
 
-	const menuItems: KbMenuItem[] = [
+	const menuItems: KbMenuItem[] = $derived([
 		{
 			id: 'kb-search',
 			label: m.home3_knowledge_knowledge_stores(),
@@ -250,7 +250,7 @@
 				}
 			]
 		}
-	];
+	]);
 
 	// kb.page_config lookup key for a menu item: `entryKey` when set (a child
 	// routing to the same section id as its parent, or another item, but
@@ -261,11 +261,13 @@
 	// source of truth for [knowledge-content]/labels-<lang>.toml menu ids. Used
 	// to detect config entries that don't match anything, which config loading
 	// otherwise treats as a silent no-op (see unknownMenuConfigIds below).
-	const knownMenuIds = new Set<string>(
-		menuItems.flatMap((item) => [
-			configKeyOf(item),
-			...(item.children?.map((child) => configKeyOf(child)) ?? [])
-		])
+	const knownMenuIds = $derived(
+		new Set<string>(
+			menuItems.flatMap((item) => [
+				configKeyOf(item),
+				...(item.children?.map((child) => configKeyOf(child)) ?? [])
+			])
+		)
 	);
 
 	// DB-backed page config for the Wiki sidebar (GET /api/v1/page-config/
@@ -276,8 +278,6 @@
 	// (fail-open). An id in neither `overrides` nor `hidden` has no config row,
 	// so it renders with its hardcoded default (what a deleted entry reverts to).
 	let pageConfig = $state<PageConfig | null>(null);
-
-	let menuConfigLang = $state(getLocale());
 
 	// Ids referenced by the resolver (override or hidden) that don't match any
 	// real menu item id — almost always a stale or mistyped entry_key in
@@ -298,15 +298,18 @@
 		}
 	});
 
-	onMount(() => {
-		menuConfigLang = getLocale();
-		getPageConfig('home3-knowledge', menuConfigLang)
+	$effect(() => {
+		let current = true;
+		getPageConfig('home3-knowledge', getLocale())
 			.then((cfg) => {
-				pageConfig = cfg;
+				if (current) pageConfig = cfg;
 			})
 			.catch(() => {
 				// Keep the full menu, with default labels, on failure (fail open).
 			});
+		return () => {
+			current = false;
+		};
 	});
 
 	// Resolves visibility + labels against pageConfig (overlay model). Before the

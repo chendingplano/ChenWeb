@@ -60,6 +60,7 @@
 		width = 240,
 		pageKey = undefined,
 		onSelect,
+		onRelabel,
 		onToggleRail,
 		onWidthDragStart,
 		onHoverChange
@@ -74,6 +75,7 @@
 		// (spec 2026072001 §11). Left undefined (e.g. /home3) → full hardcoded menu.
 		pageKey?: string;
 		onSelect: (sel: ActiveSelection) => void;
+		onRelabel?: (sel: ActiveSelection) => void;
 		onToggleRail: () => void;
 		onWidthDragStart: (e: MouseEvent) => void;
 		onHoverChange: (hovered: boolean) => void;
@@ -119,7 +121,7 @@
 	// Nav item definitions. Labels are Paraglide messages (nav_<id>) in en and
 	// zh-cn; kb.page_config can still override a label per language, and still
 	// controls visibility/access (spec 2026072001 §11, ADR 2026093001).
-	const mainNav: NavItem[] = [
+	const mainNav: NavItem[] = $derived([
 		{
 			id: 'dashboard',
 			label: m.nav_dashboard(),
@@ -394,19 +396,19 @@
 			group: 'Personal',
 			children: [{ id: 'diary', label: m.nav_diary() }]
 		}
-	];
+	]);
 
-	const bottomNav: NavItem[] = [
+	const bottomNav: NavItem[] = $derived([
 		{ id: 'settings', label: m.nav_settings(), icon: SettingsIcon },
 		{ id: 'about', label: m.nav_about(), icon: InfoIcon }
-	];
+	]);
 
 	// Resources page (pageKey='resources') gets its own menu tree, rendered in
 	// place of the workspace `mainNav`. A dedicated tree — rather than DB-hiding
 	// the workspace tree — keeps these items off /home3 (which passes no pageKey,
 	// so the page-config overlay is fail-open there). Labels/visibility are still
 	// overlaid from the seeded `resources` page-config.
-	const resourcesNav: NavItem[] = [
+	const resourcesNav: NavItem[] = $derived([
 		{
 			id: 'documents',
 			label: m.nav_documents(),
@@ -424,11 +426,11 @@
 			group: 'Resources',
 			children: [{ id: 'videos-training', label: m.nav_videos_training() }]
 		}
-	];
+	]);
 
 	// Development page (pageKey='development') appends its own section to the
 	// workspace tree, kept off /home3 for the same reason as `resourcesNav`.
-	const developmentNav: NavItem[] = [
+	const developmentNav: NavItem[] = $derived([
 		{
 			id: 'development',
 			label: m.nav_development(),
@@ -445,7 +447,7 @@
 				}
 			]
 		}
-	];
+	]);
 
 	// The workspace tree is the default; `resources` swaps in its own tree and
 	// `development` extends it.
@@ -475,15 +477,19 @@
 	// unset) so the full default menu renders — fail open.
 	let pageConfig = $state<PageConfig | null>(null);
 
-	onMount(() => {
+	$effect(() => {
 		if (!pageKey) return;
+		let current = true;
 		getPageConfig(pageKey, getLocale())
 			.then((cfg) => {
-				pageConfig = cfg;
+				if (current) pageConfig = cfg;
 			})
 			.catch(() => {
 				// Keep the full menu with default labels on failure.
 			});
+		return () => {
+			current = false;
+		};
 	});
 
 	type UserProfile = { name: string; email: string };
@@ -580,6 +586,11 @@
 
 	const displayMainNav = $derived(buildVisible(activeMainNav));
 	const displayBottomNav = $derived(buildVisible(bottomNav));
+
+	$effect(() => {
+		const selection = resolveSelection(new URL(window.location.href), [...displayMainNav, ...displayBottomNav]);
+		if (selection) onRelabel?.(selection);
+	});
 
 	onMount(() => {
 		const selection = resolveSelection(new URL(window.location.href), [...displayMainNav, ...displayBottomNav]);

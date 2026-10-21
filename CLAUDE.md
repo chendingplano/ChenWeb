@@ -98,6 +98,9 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   6. `bun run check`, then `--update` the baseline.
 * **Text generated on the server** (LLM output, reports) is not covered by Paraglide: pass
   `getLocale()` to the API and produce/store it per language (see Review Metrics, `lang`).
-* Locale in code: `getLocale()` from `$lib/paraglide/runtime` (`en` | `zh-cn`); a language switch
-  reloads translations while keeping the selected view. Dashboard menus store stable IDs in
-  `view`/`child` query parameters; Knowledge Base stores its selection in `section`.
+* Locale in code: `getLocale()` from `$lib/paraglide/runtime` (`en` | `zh-cn`). The root layout
+  installs the reactive client locale bridge in `web/src/lib/stores/locale.svelte.ts`:
+  language switches persist the cookie and update mounted components without a reload.
+  Keep translated menu arrays and other computed copy in `$derived`, not one-time constants.
+  Dashboard menus store stable IDs in `view`/`child` query parameters; Knowledge Base uses
+  `section`. These also preserve the selected view across ordinary reloads.

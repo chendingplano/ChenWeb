@@ -187,7 +187,9 @@
 			docReviewKey++;
 		}
 		activeMenu = selection;
-		replaceState(selectionUrl(page.url, selection), page.state);
+		const url = selectionUrl(page.url, selection);
+		// Restoring the existing URL during mount runs before SvelteKit's router is ready.
+		if (url.href !== page.url.href) replaceState(url, page.state);
 	}
 
 	async function handleLogout() {
@@ -273,6 +275,7 @@
 			expanded={railExpanded}
 			width={railWidth}
 			onSelect={handleMenuSelect}
+			onRelabel={(selection) => { activeMenu = selection; }}
 			onToggleRail={handleRailButton}
 			onWidthDragStart={startRailDrag}
 			onHoverChange={handleRailHoverChange}
