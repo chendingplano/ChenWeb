@@ -16,11 +16,21 @@ Benchmark-specific report sections remain supplied by each benchmark page. Metri
 
 Selecting a metric detail continues to highlight the associated source lines and table references in the PDF. Selecting a summary chunk highlights the chunk's source line span in the same PDF pane. The viewer accepts the input/document identity and source line selection from its benchmark-specific content; source selection is shared presentation state, while the data mapping stays with each benchmark.
 
-If a selected item has no usable source line numbers or the PDF cannot be loaded, the report content remains usable and the source pane shows the existing empty/error state. Changing the selected run resets the source selection and PDF page to that run's initial state.
+If a selected item has no usable source line numbers or the PDF cannot be loaded, the report content remains usable and the source pane shows the existing empty/error state. Changing the selected run clears the selected source lines/table references and resets the PDF to page 1 at its default zoom.
 
 ## Component boundary
 
-Create a reusable benchmark report viewer component in the existing Svelte component area. It owns shared report chrome and accepts typed common run metadata, score-card data, warnings, provenance/evidence actions, source document identity, and optional source references. Benchmark pages provide report-specific body content through a Svelte snippet/slot and provide callbacks or source metadata for selecting relevant lines. Avoid a generic schema for every artifact's detailed rows; keep those sections in their benchmark-specific components.
+Create a reusable benchmark report viewer component in the existing Svelte component area. It owns shared report chrome and source-selection state. Use a typed Svelte interface equivalent to:
+
+- `run`: `{ id, title, status, documentTitle, createdAt, subtitle? }`.
+- `scoreCards`: `{ label, value, detail? }[]`.
+- `warnings`: `string[]`.
+- `provenance`: optional rendered content supplied through a snippet.
+- `evidenceActions`: `{ id, label, view(): void, download?(): void }[]`; omit the list when the run has no saved evidence.
+- `inputId`: document identity used by the existing PDF component; nullable when no source PDF is available.
+- `reportBody`: snippet receiving `{ selectSource(lines: number[], tableReferences?: TableReference[]): void, selectedSourceLines: number[] }`. Domain-specific rows/chunks call `selectSource` when activated. `TableReference` uses the existing shared PDF viewer type.
+
+The viewer resets its selection and PDF page to page 1 when `run.id` changes. The benchmark-specific component owns how its records map to line spans and table references; the shared viewer owns displaying the current highlight. The PDF pane renders the existing empty state when `inputId` is null or the PDF is unavailable. Optional provenance and evidence are omitted when absent. Avoid a generic schema for every artifact's detailed rows; keep those sections in their benchmark-specific components.
 
 Metrics and Summary are the first consumers. Migrate the Metrics viewer without changing its displayed information or interactions, then make Summary use the same frame. Do not move benchmark selection, run-history querying, score creation, or benchmark-specific API models into the shared viewer.
 
