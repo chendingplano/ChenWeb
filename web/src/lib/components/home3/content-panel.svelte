@@ -374,7 +374,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
 			<MetricScoreView {darkMode} {onSelectMetrics} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-summaries-benchmark'}
-			<SummaryScoreView {darkMode} />
+			<SummaryScoreView {darkMode} {onSummaryDetailsChange} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-gold'}
 			<ReferencesMgmtView {darkMode} source="testbed" {onReferenceDetailsChange} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}

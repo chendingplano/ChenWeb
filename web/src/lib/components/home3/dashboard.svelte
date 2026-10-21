@@ -87,7 +87,7 @@
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
 	$effect(() => {
 		if (activeMenu?.childId !== 'kb-metrics' && activeMenu?.childId !== 'sysadmin-llm-metrics-gold') metricDetails = null;
-		if (activeMenu?.childId !== 'sysadmin-llm-summaries-gold') summaryDetails = null;
+		if (activeMenu?.childId !== 'sysadmin-llm-summaries-gold' && activeMenu?.childId !== 'sysadmin-llm-summaries-benchmark') summaryDetails = null;
 		if (activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark') {
 			selectedMetrics = null;
 		}
