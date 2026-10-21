@@ -20,8 +20,8 @@
 
 ### Task 1: Create the typed report frame
 
-- [ ] Define props for run identity/title/status/document title/timestamp/subtitle, score cards, warnings, optional provenance snippet, evidence action list, nullable `inputId`, and typed report-body snippet. Import `Snippet` from `svelte` and `TableReference` from `./pdf-table-geometry`.
-- [ ] Move the Metrics report's common split-panel markup and resize behavior into the frame, retaining the same pointer and keyboard controls, responsive styles, and selectable text.
+- [ ] Define typed props: `run: { id: string; title: string; status: string; documentTitle: string; createdAt: string; subtitle?: string }`; `scoreCards: { label: string; value: string; detail?: string }[]`; `warnings: string[]`; optional `provenance: Snippet`; `evidenceActions?: { id: string; label: string; view(): void; download?(): void }[]`; `inputId: string | null`; and `reportBody: Snippet<[{ selectSource(lines: number[], tableReferences?: TableReference[]): void; selectedSourceLines: number[]; selectedTableReferences: TableReference[] }]>`. Import `Snippet` from `svelte` and `TableReference` from `./pdf-table-geometry`.
+- [ ] Render the shared run heading and status, document/timestamp metadata, optional subtitle, score cards, warnings/limitations, optional provenance snippet, and evidence controls in the report column. Move the Metrics report's common split-panel markup and resize behavior into the frame, retaining the same pointer and keyboard controls, responsive styles, and selectable text.
 - [ ] Render the existing `PdfViewWindow` in the source pane. Key/remount it by `run.id` and `inputId` so either identity change clears lines and table references and resets page/zoom to page 1/default.
 - [ ] Implement `selectSource(lines, tableReferences?)` as replacement semantics: set lines and set table references to the supplied list or empty. Provide both selected values and the callback to the typed report body snippet.
 - [ ] Keep optional subtitle, provenance, and evidence controls absent when not supplied; show the existing PDF empty/error state for a null or unavailable source.
