@@ -1,9 +1,13 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, type Snippet } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { searchAllInputs, type InputRecordSummary } from './metric-review-client.js';
 	import { ScoreAPIError } from './metric-score-client';
+	import { getRawLines, type RawLine } from '$lib/services/kbService';
+	import BenchmarkReportViewer from './benchmark-report-viewer.svelte';
+	import type { TableReference } from './pdf-table-geometry';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import {
 		summaryGoldRuns, summaryScoreAlgorithms, summaryScoreArtifact, summaryScoreDetail,
 		summaryScoreHistory, summaryScoreModels, startSummaryScore,
@@ -26,11 +30,87 @@
 	let goldChoice = $state('');
 	let runs = $state<SummaryScoreRun[]>([]);
 	let detail = $state<SummaryScoreRun | null>(null);
+	let rawLines = $state<RawLine[]>([]);
+	let sourceLines = $state<RawLine[]>([]);
+	let sourcePage = $state(1);
+	let sourcePageVersion = $state(0);
+	let rawLineSequence = 0;
+	let rawLinesRequestKey = '';
+	type ReportBodyProps = { selectSource(lines: number[], tableReferences?: TableReference[]): void; selectedSourceLines: number[]; selectedTableReferences: TableReference[] };
+	type SourceIdentity = { runId: number; inputId: number };
+	let rawLinesIdentity: SourceIdentity | null = null;
+	let pendingSource: { identity: SourceIdentity; lines: number[]; select: ReportBodyProps['selectSource'] } | null = null;
 	let starting = $state(false);
 	let loading = $state(false);
 	let alive = true;
 	let sequence = 0;
 	let timer: ReturnType<typeof setInterval> | undefined;
+	function parseSourceLines(value: unknown): number[] {
+		const found: number[] = [];
+		const add = (candidate: unknown) => {
+			if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0) { found.push(candidate); return; }
+			if (typeof candidate !== 'string') return;
+			const text = candidate.trim();
+			const range = text.match(/^(\d+)\s*[:-]\s*(\d+)$/);
+			if (range) { const start = Number(range[1]), end = Number(range[2]); if (start > 0 && end >= start) for (let n = start; n <= end; n++) found.push(n); return; }
+			if (/^\d+$/.test(text) && Number(text) > 0) found.push(Number(text));
+		};
+		const visit = (item: unknown) => {
+			if (Array.isArray(item)) item.forEach(visit);
+			else if (item && typeof item === 'object') { const record = item as Record<string, unknown>; if (record.line_number !== undefined) add(record.line_number); }
+			else add(item);
+		};
+		visit(value);
+		return [...new Set(found)].sort((a, b) => a - b);
+	}
+	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) {
+		for (const line of sourceLines) {
+			if (resolvedTableLines.has(line.line_number) || line.page_number !== pageNo || !Array.isArray(line.coords) || line.coords.length < 4) continue;
+			const coords = line.coords.slice(0, 4);
+			if (!coords.every(Number.isFinite)) continue;
+			const [x1, y1, x2, y2] = coords;
+			const left = Math.min(x1, x2) * viewport.width / 1000, top = Math.min(y1, y2) * viewport.height / 1000;
+			const width = Math.abs(x2 - x1) * viewport.width / 1000, height = Math.abs(y2 - y1) * viewport.height / 1000;
+			if (width < 1 || height < 1) continue;
+			const mark = document.createElement('div'); mark.className = 'pdf-highlight';
+			mark.style.left = `${left}px`; mark.style.top = `${top}px`; mark.style.width = `${width}px`; mark.style.height = `${height}px`; overlay.appendChild(mark);
+		}
+	}
+	function selectSourceLines(lines: number[], select: ReportBodyProps['selectSource']) {
+		const byNumber = new Map(rawLines.map((line) => [line.line_number, line]));
+		sourceLines = lines.flatMap((number) => { const line = byNumber.get(number); return line ? [line] : []; });
+		if (!sourceLines.length) { select([]); return; }
+		sourcePage = sourceLines[0].page_number;
+		sourcePageVersion++;
+		select(sourceLines.map((line) => line.line_number), []);
+	}
+	$effect(() => {
+		const inputId = detail?.input_record_id ?? null;
+		const runId = detail?.id ?? null;
+		const requestKey = runId == null || inputId == null ? '' : `${runId}:${inputId}`;
+		if (requestKey === rawLinesRequestKey) return;
+		rawLinesRequestKey = requestKey;
+		const sequence = ++rawLineSequence;
+		rawLines = []; sourceLines = []; rawLinesIdentity = null; pendingSource = null;
+		if (inputId == null || runId == null) return;
+		const identity = { runId, inputId };
+		void getRawLines(inputId).then((result) => {
+			if (!alive || sequence !== rawLineSequence || detail?.id !== runId || detail.input_record_id !== inputId) return;
+			rawLines = result.lines ?? [];
+			rawLinesIdentity = identity;
+			if (pendingSource?.identity.runId === runId && pendingSource.identity.inputId === inputId) {
+				const pending = pendingSource;
+				pendingSource = null;
+				selectSourceLines(pending.lines, pending.select);
+			}
+		}).catch(() => {
+			if (!alive || sequence !== rawLineSequence) return;
+			rawLines = []; rawLinesIdentity = identity;
+			if (pendingSource?.identity.runId === runId && pendingSource.identity.inputId === inputId) {
+				const pending = pendingSource; pendingSource = null; pending.select([]);
+			}
+		});
+	});
 
 	const date = (value?: string) => value ? new Date(value).toLocaleString(lang) : '—';
 	const status = (value: string) => value === 'done' ? m.ssb_done() : value === 'failed' ? m.ssb_failed() : m.ssb_running();
@@ -150,27 +230,50 @@
 		{#if !loading && !runs.length}<p class="muted">{m.ssb_empty_history()}</p>{/if}
 	</section>
 
-	{#if detail}<section class="card result">
-		<div class="section-head"><h2>{m.ssb_results({ id: detail.id })} · {status(detail.status)}</h2><button onclick={() => detail = null}>{m.ssb_close()}</button></div>
-		<p>{detail.title} · {m.ssb_record({ id: detail.input_record_id })} · {detail.algorithm} · {detail.model_name} · {date(detail.created_at)}</p>
-		{#if detail.status === 'running'}<p role="status">{m.ssb_background()}</p>{/if}
-		{#if detail.status === 'failed'}<p class="error" role="alert">{errorText(new ScoreAPIError(detail.error_code ?? '', 500))}</p>{/if}
-		{#if detail.input?.gold}<p>{m.ssb_gold_identity()} · {detail.input.gold.skill_version} · {detail.input.gold.model_name} · {detail.input.gold.run_id}</p>{/if}
-		{#if detail.score}
-			<div class="score"><span>{m.ssb_score()}</span><strong>{detail.score.score}<small>{m.ssb_out_of_100()}</small></strong></div>
-			<h3>{m.ssb_components()}</h3><div class="components">{#each Object.entries(detail.score.components ?? {}) as [name, value]}<div><span>{name}</span><strong>{value == null ? m.ssb_na() : `${Math.round(Number(value) * 1000) / 10}%`}</strong><small>{m.ssb_weight({ value: detail.score.weights?.[name] ?? 0 })}</small></div>{/each}</div>
-			<p class="muted">{m.ssb_alignment({ matched: detail.score.matched, gold: detail.score.gold_count, candidate: detail.score.prediction_count })}</p>
+	{#if detail}<BenchmarkReportViewer
+		run={{ id: detail!.id, title: m.ssb_results({ id: detail!.id }), status: status(detail!.status), documentTitle: `${detail!.title} · ${m.ssb_record({ id: detail!.input_record_id })} · ${detail!.algorithm} · ${detail!.model_name}`, createdAt: date(detail!.created_at) }}
+		scoreCards={detail!.score ? [{ label: m.ssb_score(), value: String(detail!.score.score), detail: m.ssb_out_of_100() }, ...Object.entries(detail!.score.components ?? {}).map(([name, value]) => ({ label: name, value: value == null ? m.ssb_na() : `${Math.round(Number(value) * 1000) / 10}%`, detail: m.ssb_weight({ value: detail!.score!.weights?.[name] ?? 0 }) }))] : []}
+		warnings={detail!.input?.warnings ?? []}
+		evidenceActions={(['input', 'judgments', 'score', 'report'] as const).map((kind) => ({ id: kind, label: kind === 'input' ? m.ssb_input() : kind === 'judgments' ? m.ssb_judgments() : kind === 'score' ? m.ssb_score_json() : m.ssb_report(), view: () => { window.location.href = summaryScoreArtifact(detail!.id, kind); } }))}
+		inputId={detail!.input_record_id}
+		{sourcePage}
+		{sourcePageVersion}
+		darkMode={darkMode}
+		renderSourceHighlights={renderSourceHighlights}
+	>
+	{#snippet reportBody(props: ReportBodyProps)}
+		{@const selectSource = props.selectSource}
+		{@const selectedSourceLines = props.selectedSourceLines}
+		<button class="close-report" onclick={() => { pendingSource = null; detail = null; }}>{m.ssb_close()}</button>
+		<p>{detail!.title} · {m.ssb_record({ id: detail!.input_record_id })} · {detail!.algorithm} · {detail!.model_name} · {date(detail!.created_at)}</p>
+		{#if detail!.status === 'running'}<p role="status">{m.ssb_background()}</p>{/if}
+		{#if detail!.status === 'failed'}<p class="error" role="alert">{errorText(new ScoreAPIError(detail!.error_code ?? '', 500))}</p>{/if}
+		{#if detail!.input?.gold}<p>{m.ssb_gold_identity()} · {detail!.input.gold.skill_version} · {detail!.input.gold.model_name} · {detail!.input.gold.run_id}</p>{/if}
+		{#if detail!.input?.provenance}<details><summary>{m.ssb_gold_identity()}</summary><pre>{JSON.stringify(detail!.input.provenance, null, 2)}</pre></details>{/if}
+		{#if detail!.score}
+			<h3>{m.ssb_components()}</h3>
+			<p class="muted">{m.ssb_alignment({ matched: detail!.score.matched, gold: detail!.score.gold_count, candidate: detail!.score.prediction_count })}</p>
 		{/if}
-		{#if detail.input?.warnings?.length}<h3>{m.ssb_warnings()}</h3><ul>{#each detail.input.warnings as warning}<li>{warning}</li>{/each}</ul>{/if}
-		<div class="actions"><a href={summaryScoreArtifact(detail.id, 'input')}>{m.ssb_input()}</a><a href={summaryScoreArtifact(detail.id, 'judgments')}>{m.ssb_judgments()}</a><a href={summaryScoreArtifact(detail.id, 'score')}>{m.ssb_score_json()}</a><a href={summaryScoreArtifact(detail.id, 'report')}>{m.ssb_report()}</a></div>
-		{#if detail.matches?.chunks}<h3>{m.ssb_chunk_reviews()}</h3>{#each detail.matches.chunks as chunk}<details><summary>{m.ssb_chunk({ id: chunk.pred })} · {chunk.diagnostics}</summary><pre>{JSON.stringify(chunk, null, 2)}</pre></details>{/each}{/if}
-		{#if detail.report}<details><summary>{m.ssb_report()}</summary><pre>{detail.report}</pre></details>{/if}
-	</section>{/if}
+		{#if detail!.matches?.chunks}<h3>{m.ssb_chunk_reviews()}</h3>{#each detail!.matches.chunks as chunk}<details><summary><button type="button" class="chunk-source" onclick={(event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			const prediction = detail?.input?.predictions?.find((item: any) => String(item.id) === String(chunk.pred));
+			const lines = parseSourceLines(prediction?.source_line_spans);
+			const identity = { runId: detail!.id, inputId: detail!.input_record_id };
+			if (!lines.length) { pendingSource = null; sourceLines = []; selectSource([]); return; }
+			if (rawLinesIdentity?.runId === identity.runId && rawLinesIdentity.inputId === identity.inputId) selectSourceLines(lines, selectSource);
+			else { pendingSource = { identity, lines, select: selectSource }; sourceLines = []; selectSource([]); }
+		}}>{m.ssb_chunk({ id: chunk.pred })}</button> · {chunk.diagnostics}</summary><pre>{JSON.stringify(chunk, null, 2)}</pre><small>{selectedSourceLines.length ? selectedSourceLines.join(', ') : ''}</small></details>{/each}{/if}
+		{#if detail!.report}<details><summary>{m.ssb_report()}</summary><pre>{detail!.report}</pre></details>{/if}
+	{/snippet}
+	</BenchmarkReportViewer>
+	{/if}
 </div>
 
 <style>
 	.summary-benchmark{--bg:#11151d;--panel:#191f2a;--line:#303847;--text:#ece8dd;--muted:#a6a18f;--surface:#252a3a;--accent:#d3a64f;--selected-accent:#818cf8;min-height:100%;padding:24px;color:var(--text);background:var(--bg);font:14px/1.5 system-ui,sans-serif;user-select:text}
+	.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}.summary-benchmark :global(.chunk-source){user-select:text}
 	.summary-benchmark.light{--bg:#f5f2e9;--panel:#fffdf7;--line:#d9d3c5;--text:#211e18;--muted:#716b5e;--surface:#eceef2;--accent:#96701f;--selected-accent:#6366f1}
-	header h1{margin:0;font-size:24px}header p,.muted{color:var(--muted)}header p{margin:4px 0 20px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}.card h2{margin:0 0 12px;font-size:16px}.search,.controls,.section-head,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.search input{flex:1;min-width:200px}.controls{margin-top:14px;align-items:end}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button,.actions a{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}button,.actions a{cursor:pointer;text-decoration:none}button:hover,.actions a:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:default}.primary{background:var(--accent);color:#17130b;border-color:var(--accent);font-weight:700}.documents{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr));gap:8px;margin-top:12px;max-height:180px;overflow:auto}.documents button{min-width:0;text-align:left;display:flex;flex-direction:column;gap:4px;background:var(--surface)}.document-id-row{display:flex;justify-content:space-between;gap:8px;width:100%;color:var(--muted);font-size:11px}.document-id-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.document-field{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.documents small,td small{color:var(--muted);font-size:12px}.documents button.chosen{background:color-mix(in srgb,var(--selected-accent) 22%,var(--surface));border-color:var(--selected-accent)}.chosen{outline:1px solid var(--accent)}.selected{margin:12px 0 0}.select-prompt{margin:14px 0 0}.section-head{justify-content:space-between}.section-head h2{margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}td:first-child{white-space:normal}td small{display:block}.result{scroll-margin-top:24px}.score{display:flex;align-items:baseline;gap:16px;padding:14px 0}.score span{color:var(--muted)}.score strong{font-size:38px;color:var(--accent)}.score small{font-size:15px;color:var(--muted)}.components{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}.components div{padding:12px;border:1px solid var(--line);border-radius:7px;display:grid;gap:4px}.components span,.components small{color:var(--muted)}.components strong{font-size:20px}h3{margin:18px 0 8px}details{border-top:1px solid var(--line);padding:10px 0}summary{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:12px;border-radius:6px;max-height:500px;overflow:auto}.error{color:#ff8f7e;background:#4b211e;padding:10px;border-radius:6px}.actions{margin-top:12px}.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}
+	header h1{margin:0;font-size:24px}header p,.muted{color:var(--muted)}header p{margin:4px 0 20px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}.card h2{margin:0 0 12px;font-size:16px}.search,.controls,.section-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.search input{flex:1;min-width:200px}.controls{margin-top:14px;align-items:end}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}button{cursor:pointer;text-decoration:none}button:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:default}.primary{background:var(--accent);color:#17130b;border-color:var(--accent);font-weight:700}.documents{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr));gap:8px;margin-top:12px;max-height:180px;overflow:auto}.documents button{min-width:0;text-align:left;display:flex;flex-direction:column;gap:4px;background:var(--surface)}.document-id-row{display:flex;justify-content:space-between;gap:8px;width:100%;color:var(--muted);font-size:11px}.document-id-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.document-field{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.documents small,td small{color:var(--muted);font-size:12px}.documents button.chosen{background:color-mix(in srgb,var(--selected-accent) 22%,var(--surface));border-color:var(--selected-accent)}.chosen{outline:1px solid var(--accent)}.selected{margin:12px 0 0}.select-prompt{margin:14px 0 0}.section-head{justify-content:space-between}.section-head h2{margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}td:first-child{white-space:normal}td small{display:block}h3{margin:18px 0 8px}details{border-top:1px solid var(--line);padding:10px 0}summary{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:12px;border-radius:6px;max-height:500px;overflow:auto}.error{color:#ff8f7e;background:#4b211e;padding:10px;border-radius:6px}.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}
 	@media(max-width:760px){.summary-benchmark{padding:14px}.controls{align-items:stretch}.controls label,.controls button{width:100%}}
 </style>
