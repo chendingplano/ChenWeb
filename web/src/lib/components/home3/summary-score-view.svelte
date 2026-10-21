@@ -37,7 +37,7 @@
 	let rawLineSequence = 0;
 	let rawLinesRequestKey = '';
 	type ReportBodyProps = { selectSource(lines: number[], tableReferences?: TableReference[]): void; selectedSourceLines: number[]; selectedTableReferences: TableReference[] };
-	type SourceIdentity = { runId: number; inputId: number };
+	type SourceIdentity = { runId: number; inputId: number; status: SummaryScoreRun['status'] };
 	let rawLinesIdentity: SourceIdentity | null = null;
 	let pendingSource: { identity: SourceIdentity; lines: number[]; select: ReportBodyProps['selectSource'] } | null = null;
 	let starting = $state(false);
@@ -101,7 +101,8 @@
 			if (pendingSource?.identity.runId === runId && pendingSource.identity.inputId === inputId) {
 				const pending = pendingSource;
 				pendingSource = null;
-				selectSourceLines(pending.lines, pending.select);
+				if (detail.status === pending.identity.status) selectSourceLines(pending.lines, pending.select);
+				else pending.select([]);
 			}
 		}).catch(() => {
 			if (!alive || sequence !== rawLineSequence) return;
@@ -259,7 +260,7 @@
 			event.stopPropagation();
 			const prediction = detail?.input?.predictions?.find((item: any) => String(item.id) === String(chunk.pred));
 			const lines = parseSourceLines(prediction?.source_line_spans);
-			const identity = { runId: detail!.id, inputId: detail!.input_record_id };
+			const identity = { runId: detail!.id, inputId: detail!.input_record_id, status: detail!.status };
 			if (!lines.length) { pendingSource = null; sourceLines = []; selectSource([]); return; }
 			if (rawLinesIdentity?.runId === identity.runId && rawLinesIdentity.inputId === identity.inputId) selectSourceLines(lines, selectSource);
 			else { pendingSource = { identity, lines, select: selectSource }; sourceLines = []; selectSource([]); }
