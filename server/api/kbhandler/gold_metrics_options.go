@@ -17,10 +17,11 @@ import (
 // benchmark rows; each has input_record_id, skill_version, model_name and run_id.
 // Only these constants are spliced into SQL. An empty kind means metrics.
 var goldRunTables = map[string]string{
-	"":           "testbed.metrics",
-	"metrics":    "testbed.metrics",
-	"references": "testbed.reference_benchmark_runs",
-	"summaries":  "testbed.summary_benchmark_runs",
+	"":             "testbed.metrics",
+	"metrics":      "testbed.metrics",
+	"references":   "testbed.reference_benchmark_runs",
+	"summaries":    "testbed.summary_benchmark_runs",
+	"summary_rows": "testbed.summaries",
 }
 
 // goldRunTable returns the table for kind, or false for an unknown kind.

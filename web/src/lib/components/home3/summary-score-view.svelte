@@ -50,7 +50,7 @@
 		searching = true;
 		error = '';
 		try {
-			documents = await searchInputs(query, false);
+			documents = await searchInputs(query, true, 'summary_rows');
 			searched = true;
 		} catch (err) { error = errorText(err); }
 		finally { searching = false; }

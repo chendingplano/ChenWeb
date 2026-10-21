@@ -115,12 +115,13 @@ type MetricReviewResponse = {
 };
 
 /** A purely numeric query searches by record ID; anything else by title. */
-export function buildInputSearchQuery(query: string, hasGoldMetrics = false): string {
+export function buildInputSearchQuery(query: string, hasGoldMetrics = false, goldKind?: string): string {
 	const q = query.trim();
 	const params = new URLSearchParams({ page: '1', page_size: '50' });
 	if (/^\d+$/.test(q)) params.set('record_id', q);
 	else if (q) params.set('title', q);
 	if (hasGoldMetrics) params.set('has_gold_metrics', 'true');
+	if (goldKind) params.set('gold_kind', goldKind);
 	return params.toString();
 }
 
@@ -170,9 +171,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	return parsed as T;
 }
 
-export async function searchInputs(query: string, hasGoldMetrics = false): Promise<InputRecordSummary[]> {
+export async function searchInputs(query: string, hasGoldMetrics = false, goldKind?: string): Promise<InputRecordSummary[]> {
 	const res = await req<{ results?: InputRecordSummary[] }>(
-		`/api/v1/kb/inputs?${buildInputSearchQuery(query, hasGoldMetrics)}`
+		`/api/v1/kb/inputs?${buildInputSearchQuery(query, hasGoldMetrics, goldKind)}`
 	);
 	return res.results ?? [];
 }
