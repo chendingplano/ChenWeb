@@ -80,12 +80,14 @@
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
 	let metricDetails = $state<Snippet | null>(null);
+	let summaryDetails = $state<Snippet | null>(null);
 	let referenceDetails = $state<KbReferenceDetails | null>(null);
 	let selectedReferences = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let selectedMetrics = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
 	$effect(() => {
 		if (activeMenu?.childId !== 'kb-metrics' && activeMenu?.childId !== 'sysadmin-llm-metrics-gold') metricDetails = null;
+		if (activeMenu?.childId !== 'sysadmin-llm-summaries-gold') summaryDetails = null;
 		if (activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark') {
 			selectedMetrics = null;
 		}
@@ -323,6 +325,10 @@
 				metricDetails = details;
 				if (details) shelfOpen = true;
 			}}
+			onSummaryDetailsChange={(details) => {
+				summaryDetails = details;
+				if (details) shelfOpen = true;
+			}}
 			railOffset={currentRailOffset}
 			onToggleShelf={() => {
 				shelfOpen = !shelfOpen;
@@ -363,6 +369,7 @@
 				{selectedMetrics}
 				{selectedReferences}
 				{metricDetails}
+				{summaryDetails}
 				{referenceDetails}
 				width={shelfWidth}
 				open={shelfOpen}

@@ -1,14 +1,16 @@
 <script lang="ts">
+	import { onDestroy, type Snippet } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import GoldRunFilters from '$lib/components/home3/gold-run-filters.svelte';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { GoldRunFilter, goldRunBadges } from './gold-run-filter.svelte';
 	import { kbInputRecordKey, metricBenchmarkSelection } from './metric-benchmark-record';
 	import { listGoldSummaries, type GoldSummaryRecord, type KbInputRecord } from '$lib/services/kbService';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 
-	let { darkMode = true }: { darkMode: boolean } = $props();
+	let { darkMode = true, onSummaryDetailsChange }: { darkMode: boolean; onSummaryDetailsChange?: (details: Snippet | null) => void } = $props();
 	const gold = new GoldRunFilter('summaries');
 	let browserFolded = $state(false);
 	let currentInput = $state<KbInputRecord | null>(null);
@@ -17,7 +19,12 @@
 	let loading = $state(false);
 	let error = $state('');
 	let requestVersion = 0;
+	let docPage = $state(1);
+	let pdfZoom = $state(0.5);
+	let pdfNumPages = $state(0);
 	const selectedSummary = $derived(summaries.find((item) => item.id === selectedSummaryId) ?? null);
+	const fileUrl = $derived(currentInput ? `/api/v1/kb/inputs/${currentInput.id}/file#page=${docPage}&zoom=page-width` : '');
+	const isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	const bg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	const panel = $derived(darkMode ? '#161A22' : '#FBF8F0');
 	const panelAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
@@ -30,6 +37,13 @@
 	$effect(() => {
 		void gold.load();
 	});
+
+	$effect(() => {
+		const hasSelectedSummary = selectedSummary != null;
+		onSummaryDetailsChange?.(hasSelectedSummary ? (summaryDetailsContent as unknown as Snippet) : null);
+	});
+
+	onDestroy(() => onSummaryDetailsChange?.(null));
 
 	function mapBrowserRecord(record: KbInputRecord) {
 		return {
@@ -49,6 +63,8 @@
 		currentInput = null;
 		summaries = [];
 		selectedSummaryId = null;
+		docPage = 1;
+		pdfNumPages = 0;
 		loading = false;
 		error = '';
 	}
@@ -59,6 +75,8 @@
 		currentInput = record;
 		summaries = [];
 		selectedSummaryId = null;
+		docPage = 1;
+		pdfNumPages = 0;
 		loading = true;
 		error = '';
 		try {
@@ -153,42 +171,55 @@
 		</aside>
 
 		<section class="detail-panel">
-			{#if selectedSummary}
-				<div class="detail-toolbar">
-					<div><div class="detail-eyebrow">{m.sgv_summary_detail()}</div><h2>{selectedSummary.summary_id}</h2></div>
-					<div class="detail-badges"><span>{selectedSummary.language}</span><span>{selectedSummary.skill_version}</span><span>{selectedSummary.model_name}</span><span>{selectedSummary.run_id}</span></div>
-				</div>
-				<div class="detail-scroll">
-					<section class="summary-text-block">
-						<h3>{m.sgv_summary_text()}</h3>
-						<p>{selectedSummary.summary_text || selectedSummary.empty_reason || '—'}</p>
-					</section>
-					{#if selectedSummary.summary_text_en && selectedSummary.summary_text_en !== selectedSummary.summary_text}
-						<section class="summary-text-block"><h3>{m.sgv_english_summary()}</h3><p>{selectedSummary.summary_text_en}</p></section>
+			{#if currentInput}
+				<div class="doc-frame-wrap">
+					{#if isPdf}
+						<PdfViewWindow inputId={currentInput.id} {fileUrl} bind:page={docPage} bind:zoom={pdfZoom} bind:numPages={pdfNumPages} {darkMode} enableSelectionDialog={false} />
+					{:else}
+						<iframe class="doc-frame" title={currentInput.file_name ?? m.metric_mgmt_record_4({ id: currentInput.id })} src={fileUrl}></iframe>
 					{/if}
-					<div class="metadata-grid">
-						<div><span>{m.sgv_level()}</span><strong>{selectedSummary.summary_level}</strong></div>
-						<div><span>{m.sgv_sequence()}</span><strong>{selectedSummary.summary_seq_no}</strong></div>
-						<div><span>{m.sgv_empty_reason()}</span><strong>{selectedSummary.empty_reason || '—'}</strong></div>
-						<div><span>{m.sgv_created_at()}</span><strong>{new Date(selectedSummary.created_at).toLocaleString()}</strong></div>
-					</div>
-					<div class="detail-grid">
-						<section class="data-card"><h3>{m.sgv_keywords()}</h3><pre>{jsonText(selectedSummary.keywords)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_keywords_en()}</h3><pre>{jsonText(selectedSummary.keywords_en)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_source_line_spans()}</h3><pre>{jsonText(selectedSummary.source_line_spans)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_overlap_lines()}</h3><pre>{jsonText(selectedSummary.overlap_lines)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_regular_lines()}</h3><pre>{jsonText(selectedSummary.regular_lines)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_information_units()}</h3><pre>{jsonText(selectedSummary.units)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_completeness_review()}</h3><pre>{jsonText(selectedSummary.completeness_review)}</pre></section>
-						<section class="data-card"><h3>{m.sgv_correctness_review()}</h3><pre>{jsonText(selectedSummary.correctness_review)}</pre></section>
-					</div>
 				</div>
 			{:else}
-				<div class="detail-empty">{m.sgv_select_summary()}</div>
+				<div class="detail-empty">{m.sgv_select_document()}</div>
 			{/if}
 		</section>
 	</div>
 </div>
+
+{#snippet summaryDetailsContent()}
+	{#if selectedSummary}
+		<div class="context-summary-details select-text">
+			<div class="context-summary-heading">
+				<div class="detail-eyebrow">{m.sgv_summary_detail()}</div>
+				<h2>{selectedSummary.summary_id}</h2>
+				<div class="context-summary-badges"><span>{selectedSummary.language}</span><span>{selectedSummary.skill_version}</span><span>{selectedSummary.model_name}</span></div>
+			</div>
+			<section class="summary-text-block"><h3>{m.sgv_summary_text()}</h3><p>{selectedSummary.summary_text || selectedSummary.empty_reason || '—'}</p></section>
+			{#if selectedSummary.summary_text_en && selectedSummary.summary_text_en !== selectedSummary.summary_text}
+				<section class="summary-text-block"><h3>{m.sgv_english_summary()}</h3><p>{selectedSummary.summary_text_en}</p></section>
+			{/if}
+			<div class="metadata-grid">
+				<div><span>{m.sgv_level()}</span><strong>{selectedSummary.summary_level}</strong></div>
+				<div><span>{m.sgv_sequence()}</span><strong>{selectedSummary.summary_seq_no}</strong></div>
+				<div><span>{m.sgv_empty_reason()}</span><strong>{selectedSummary.empty_reason || '—'}</strong></div>
+				<div><span>{m.sgv_created_at()}</span><strong>{new Date(selectedSummary.created_at).toLocaleString()}</strong></div>
+				<div><span>{m.metric_mgmt_record()}</span><strong>{selectedSummary.input_record_id}</strong></div>
+				<div><span>{m.metric_mgmt_model_label()}</span><strong>{selectedSummary.model_name}</strong></div>
+				<div class="run-meta"><span>{m.sgv_run_id()}</span><strong>{selectedSummary.run_id}</strong></div>
+			</div>
+			<div class="detail-grid">
+				<section class="data-card"><h3>{m.sgv_keywords()}</h3><pre>{jsonText(selectedSummary.keywords)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_keywords_en()}</h3><pre>{jsonText(selectedSummary.keywords_en)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_source_line_spans()}</h3><pre>{jsonText(selectedSummary.source_line_spans)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_overlap_lines()}</h3><pre>{jsonText(selectedSummary.overlap_lines)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_regular_lines()}</h3><pre>{jsonText(selectedSummary.regular_lines)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_information_units()}</h3><pre>{jsonText(selectedSummary.units)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_completeness_review()}</h3><pre>{jsonText(selectedSummary.completeness_review)}</pre></section>
+				<section class="data-card"><h3>{m.sgv_correctness_review()}</h3><pre>{jsonText(selectedSummary.correctness_review)}</pre></section>
+			</div>
+		</div>
+	{/if}
+{/snippet}
 
 <style>
 	.benchmark-page { background: var(--page-bg); color: var(--text-primary); }
@@ -222,11 +253,8 @@
 	.error { margin:8px 10px; padding:8px 10px; border-left:3px solid var(--crimson); background:var(--crimson-faint); color:var(--crimson); font:11px var(--font-mono); overflow-wrap:anywhere; }
 	.empty-state,.detail-empty { display:grid; flex:1; place-items:center; padding:24px; color:var(--text-muted); font:12px/1.6 var(--font-mono); text-align:center; }
 	.detail-panel { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:var(--page-bg); }
-	.detail-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:58px; padding:9px 18px; border-bottom:1px solid var(--ink-line); background:var(--panel-bg); }
-	.detail-toolbar h2 { margin:3px 0 0; color:var(--text-primary); font:500 20px var(--font-serif); }
-	.detail-badges { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; }
-	.detail-badges span { max-width:220px; overflow:hidden; padding:4px 7px; border:1px solid var(--ink-line); background:var(--page-bg); color:var(--text-secondary); font:9px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
-	.detail-scroll { min-height:0; overflow:auto; padding:14px 16px 24px; }
+	.doc-frame-wrap { display:flex; flex:1; flex-direction:column; min-height:0; padding:12px 16px; overflow:hidden; }
+	.doc-frame { flex:1; width:100%; min-width:0; min-height:0; border:1px solid var(--ink-line); background:var(--panel-bg); }
 	.summary-text-block,.data-card { min-width:0; border:1px solid var(--ink-line); background:var(--panel-bg); }
 	.summary-text-block { margin-bottom:12px; padding:12px 14px; border-left:3px solid var(--brass); }
 	.summary-text-block h3,.data-card h3 { margin:0; color:var(--text-muted); font:600 10px var(--font-mono); letter-spacing:.11em; text-transform:uppercase; }
@@ -239,6 +267,20 @@
 	.data-card { overflow:hidden; }
 	.data-card h3 { padding:9px 11px; border-bottom:1px solid var(--ink-line); }
 	.data-card pre { max-height:260px; overflow:auto; margin:0; padding:10px 11px; color:var(--text-secondary); font:10px/1.5 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
+	.context-summary-details { display:flex; flex:1; flex-direction:column; gap:10px; min-height:0; overflow:auto; padding:0 2px 16px; }
+	.context-summary-heading { padding:12px; border:1px solid var(--ink-line); background:var(--panel-bg-alt); }
+	.context-summary-heading h2 { margin:5px 0 8px; color:var(--text-primary); font:500 18px/1.2 var(--font-serif); overflow-wrap:anywhere; }
+	.context-summary-badges { display:flex; flex-wrap:wrap; gap:4px; }
+	.context-summary-badges span { padding:3px 5px; border:1px solid var(--ink-line); color:var(--text-secondary); font:8px var(--font-mono); overflow-wrap:anywhere; }
+	.context-summary-details .summary-text-block { margin:0; padding:10px; }
+	.context-summary-details .summary-text-block p { font-size:12px; }
+	.context-summary-details .metadata-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; margin:0; }
+	.context-summary-details .metadata-grid div { padding:7px; }
+	.context-summary-details .metadata-grid span { font-size:8px; }
+	.context-summary-details .metadata-grid strong { font-size:9px; }
+	.context-summary-details .run-meta { grid-column:1 / -1; }
+	.context-summary-details .detail-grid { grid-template-columns:minmax(0,1fr); gap:7px; }
+	.context-summary-details .data-card pre { max-height:190px; font-size:9px; }
 	@media (max-width:1480px) { .body:not(.browser-folded) { grid-template-columns:auto 320px minmax(0,1fr); } .body.browser-folded { grid-template-columns:42px 320px minmax(0,1fr); } }
 	@media (max-width:1250px) { .metadata-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 	@media (max-width:900px) { .benchmark-header { align-items:flex-start; flex-direction:column; } .header-meta { justify-content:flex-start; width:100%; } .body,.body.browser-folded { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(260px,38vh) minmax(240px,32vh) minmax(400px,1fr); overflow:auto; } .record-browser-slot,.browser-rail,.summary-sidebar { border-right:0; border-bottom:1px solid var(--ink-line); } .browser-rail { display:none; } .record-browser-slot { min-height:280px; } .detail-grid { grid-template-columns:minmax(0,1fr); } }

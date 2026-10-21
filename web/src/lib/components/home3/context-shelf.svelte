@@ -46,6 +46,7 @@
 		selectedMetrics = null,
 		selectedReferences = null,
 		metricDetails = null,
+		summaryDetails = null,
 		referenceDetails = null,
 		width       = 280,
 		open        = true,
@@ -55,6 +56,7 @@
 		darkMode:    boolean;
 		activeMenu:  ActiveSelection | null;
 		metricDetails?: Snippet | null;
+		summaryDetails?: Snippet | null;
 		referenceDetails?: KbReferenceDetails | null;
 		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
 		selectedReferences?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
@@ -303,12 +305,13 @@
 		onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
 	></div>
 
-	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null}>
+	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null || summaryDetails != null}>
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
 				{#if referenceDetails}{msg.rsc_reference_details()}
 				{:else if selectedReferences}{msg.rsc_reference_details()}
+				{:else if summaryDetails}{msg.sgv_summary_detail()}
 				{:else if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
 				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
@@ -364,6 +367,8 @@
 					<dt style="color:{textMuted};">{msg.references_mgmt_source_excerpt()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{item.evidence || item.cited_raw || '—'}</dd>
 				</dl>
 			</div>
+		{:else if summaryDetails}
+			{@render summaryDetails?.()}
 		{:else if metricDetails}
 			{@render metricDetails?.()}
 		{:else if compare}

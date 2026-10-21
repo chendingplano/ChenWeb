@@ -186,7 +186,8 @@ The Gold Summary page in ChenWeb browses benchmark output imported into
 `testbed.summary_benchmark_runs` and `testbed.summaries`. Its Search panel selects
 the document and benchmark run, the Summary panel lists the stored summary rows,
 and Summary Detail displays the selected row's text, source spans, units, keywords,
-and review fields. The web view is separate from the offline scorer described here.
+and review fields in the dashboard's Context Info shelf. The center panel displays
+the selected document PDF. The web view is separate from the offline scorer here.
 
 `freeze.json` pins the canonical JSON digest. Validation also checks each real
 excerpt against the hashed snapshot. Change data by publishing a new version;

@@ -6642,6 +6642,7 @@
 	"sgv_sequence": "序号",
 	"sgv_empty_reason": "空摘要原因",
 	"sgv_created_at": "创建时间",
+	"sgv_run_id": "运行 ID",
 	"sgv_keywords": "关键词",
 	"sgv_keywords_en": "英文关键词",
 	"sgv_source_line_spans": "来源行范围",

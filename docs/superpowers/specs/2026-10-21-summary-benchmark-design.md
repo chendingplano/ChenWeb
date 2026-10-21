@@ -72,5 +72,6 @@ The benchmark harness and frozen JSON remain offline evaluation assets. The
 separate Gold Summary admin page browses imported benchmark output from
 `testbed.summary_benchmark_runs` and `testbed.summaries`: Search selects a document
 and run, Summary lists that run's rows, and Summary Detail shows the selected row's
-stored fields. This UI does not change the scorer or make the benchmark dataset a
-production summarizer.
+stored fields in the dashboard's Context Info shelf; the selected document PDF stays
+in the main detail pane. This UI does not change the scorer or make the benchmark
+dataset a production summarizer.

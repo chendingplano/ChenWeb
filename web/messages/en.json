@@ -6642,6 +6642,7 @@
 	"sgv_sequence": "Sequence",
 	"sgv_empty_reason": "Empty reason",
 	"sgv_created_at": "Created at",
+	"sgv_run_id": "Run ID",
 	"sgv_keywords": "Keywords",
 	"sgv_keywords_en": "English keywords",
 	"sgv_source_line_spans": "Source line spans",

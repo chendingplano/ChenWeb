@@ -112,6 +112,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		siteConfig,
 		onToggleShelf,
 		onMetricDetailsChange,
+		onSummaryDetailsChange,
 		onReferenceDetailsChange = (_details: KbReferenceDetails | null) => {},
 		onSelectReferences = (_references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
 		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
@@ -127,6 +128,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		siteConfig: SiteConfig;
 		onToggleShelf: () => void;
 		onMetricDetailsChange?: (details: Snippet | null) => void;
+		onSummaryDetailsChange?: (details: Snippet | null) => void;
 		onReferenceDetailsChange?: (details: KbReferenceDetails | null) => void;
 		onSelectReferences?: (references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
 		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
@@ -311,7 +313,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-gold'}
 			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} source="testbed" />
 		{:else if activeMenu?.childId === 'sysadmin-llm-summaries-gold'}
-			<SummaryGoldView {darkMode} />
+			<SummaryGoldView {darkMode} {onSummaryDetailsChange} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}
