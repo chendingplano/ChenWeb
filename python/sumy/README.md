@@ -13,6 +13,12 @@ python/sumy/.venv/bin/python -m nltk.downloader -d python/sumy/nltk_data punkt_t
 export SUMY_PYTHON="$PWD/python/sumy/.venv/bin/python"
 ```
 
+For the ChenWeb server, also set `SUMY_PYTHON` to the absolute virtual-environment
+Python path in the project's `.env` and restart the server. The shell export only
+applies to processes launched from that shell; it does not update a running
+`mise dev` session. Without this setting, the worker uses `python3` from `PATH`,
+which may lack `nltk` and Sumy even when the virtual environment is provisioned.
+
 For Windows use `.venv/Scripts/python.exe`. The worker finds `nltk_data` next to
 the virtual environment; `NLTK_DATA` can also point to a provisioned directory.
 Provision this environment on the deployment host as well: the Go executable
