@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -419,6 +420,17 @@ func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 			return e, fingerprintErr
 		}
 		judgments := map[string]any{"input_sha256": fingerprint, "reviewer": "model:" + cfg.ModelName, "limitations": limitations, "chunks": chunks}
+		rawJudgments, marshalErr := json.MarshalIndent(judgments, "", "  ")
+		if marshalErr != nil {
+			return e, marshalErr
+		}
+		if err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("judgments-attempt-%d.json", attempt)), rawJudgments, 0600); err != nil {
+			return e, err
+		}
+		if corrected := normalizeSummaryJudgmentSpans(judgments, input); corrected > 0 {
+			limitations = append(limitations, fmt.Sprintf("The server corrected %d span offsets where each exact quoted passage had one unique match; the original model output is retained as judgments-attempt-%d.json.", corrected, attempt))
+			judgments["limitations"] = limitations
+		}
 		e.Judgments, err = json.MarshalIndent(judgments, "", "  ")
 		if err != nil {
 			return e, err
@@ -434,9 +446,6 @@ func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 			logger.Warn("summary judgment validation failed", "run_id", id, "attempt", attempt, "validation_reason", validation.Reason)
 			if attempt == 2 {
 				return e, scoreErr
-			}
-			if err = os.WriteFile(filepath.Join(dir, "judgments-attempt-1.json"), e.Judgments, 0600); err != nil {
-				return e, err
 			}
 			feedback, _ := json.Marshal(map[string]any{"previous_judgments": judgments, "validation_error": validation.Reason})
 			inputText = originalInput + "\nJUDGMENT_REPAIR\n" + string(feedback)
@@ -454,6 +463,135 @@ func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 	}
 	e.Report = string(report)
 	return e, nil
+}
+
+// normalizeSummaryJudgmentSpans repairs offsets only when the model's exact quote
+// appears once in its target text. Ambiguous or inexact quotes remain for the
+// authoritative scorer to reject.
+func normalizeSummaryJudgmentSpans(judgments, input map[string]any) int {
+	predictionText := map[int64]string{}
+	if predictions, ok := input["predictions"].([]any); ok {
+		for _, item := range predictions {
+			row, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, ok := summaryScoreInteger(row["id"])
+			text, textOK := row["summary_text"].(string)
+			if ok && textOK {
+				predictionText[id] = text
+			}
+		}
+	}
+	sourceText := map[int64]string{}
+	if source, ok := input["source"].([]any); ok {
+		for _, item := range source {
+			row, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			line, ok := summaryScoreInteger(row["line"])
+			text, textOK := row["content"].(string)
+			if ok && textOK {
+				sourceText[line] = text
+			}
+		}
+	}
+	chunks, ok := judgments["chunks"].([]any)
+	if !ok {
+		return 0
+	}
+	corrected := 0
+	normalize := func(target string, span map[string]any) {
+		quote, ok := span["quote"].(string)
+		if !ok || quote == "" || summaryScoreSpanMatches(target, span, quote) {
+			return
+		}
+		start, end, ok := uniqueSummaryQuoteSpan(target, quote)
+		if !ok {
+			return
+		}
+		span["start"], span["end"] = start, end
+		corrected++
+	}
+	for _, item := range chunks {
+		chunk, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		predID, ok := summaryScoreInteger(chunk["pred"])
+		if !ok {
+			continue
+		}
+		text, ok := predictionText[predID]
+		if !ok {
+			continue
+		}
+		if units, ok := chunk["units"].([]any); ok {
+			for _, item := range units {
+				unit, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if spans, ok := unit["prediction_spans"].([]any); ok {
+					for _, item := range spans {
+						if span, ok := item.(map[string]any); ok {
+							normalize(text, span)
+						}
+					}
+				}
+			}
+		}
+		if claims, ok := chunk["claims"].([]any); ok {
+			for _, item := range claims {
+				claim, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				normalize(text, claim)
+				if evidence, ok := claim["evidence"].([]any); ok {
+					for _, item := range evidence {
+						span, ok := item.(map[string]any)
+						if !ok {
+							continue
+						}
+						line, ok := summaryScoreInteger(span["line"])
+						if ok {
+							normalize(sourceText[line], span)
+						}
+					}
+				}
+			}
+		}
+	}
+	return corrected
+}
+
+func summaryScoreInteger(value any) (int64, bool) {
+	number, ok := value.(float64)
+	if !ok || number != float64(int64(number)) {
+		return 0, false
+	}
+	return int64(number), true
+}
+
+func summaryScoreSpanMatches(target string, span map[string]any, quote string) bool {
+	start, startOK := summaryScoreInteger(span["start"])
+	end, endOK := summaryScoreInteger(span["end"])
+	if !startOK || !endOK || start < 0 || end <= start {
+		return false
+	}
+	runes := []rune(target)
+	return end <= int64(len(runes)) && string(runes[start:end]) == quote
+}
+
+func uniqueSummaryQuoteSpan(target, quote string) (int, int, bool) {
+	position := strings.Index(target, quote)
+	if position < 0 || strings.Index(target[position+1:], quote) >= 0 {
+		return 0, 0, false
+	}
+	start := utf8.RuneCountInString(target[:position])
+	return start, start + utf8.RuneCountInString(quote), true
 }
 
 func summaryInputFingerprint(ctx context.Context, script string, input []byte) (string, error) {
