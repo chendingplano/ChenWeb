@@ -16,6 +16,23 @@
 
 	let { darkMode = true, onSummaryDetailsChange }: { darkMode: boolean; onSummaryDetailsChange?: (details: Snippet | null) => void } = $props();
 	const lang = getLocale();
+	const comparisonFields = [
+		['summary_seq_no', () => m.ssb_summary_sequence()],
+		['summary_level', () => m.ssb_summary_level()],
+		['summary_text', () => m.sgv_summary_text()],
+		['summary_text_en', () => m.sgv_english_summary()],
+		['language', () => m.sgv_language()],
+		['keywords', () => m.sgv_keywords()],
+		['keywords_en', () => m.sgv_keywords_en()],
+		['source_line_spans', () => m.ssb_source_lines()],
+		['empty_reason', () => m.sgv_empty_reason()]
+	] as const;
+	function comparisonValue(item: Record<string, any> | null, field: string): string {
+		// Gold payloads describe leaf chunks; their level is implicit in the scoring contract.
+		const value = field === 'summary_level' && item ? item[field] ?? 0 : item?.[field];
+		if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return '—';
+		return typeof value === 'string' ? value : JSON.stringify(value);
+	}
 	let query = $state('');
 	let searching = $state(false);
 	let searched = $state(false);
@@ -78,6 +95,7 @@
 			const width = Math.abs(x2 - x1) * viewport.width / 1000, height = Math.abs(y2 - y1) * viewport.height / 1000;
 			if (width < 1 || height < 1) continue;
 			const mark = document.createElement('div'); mark.className = 'pdf-highlight';
+			mark.style.cssText = 'position:absolute;background:rgba(251,191,36,.22);border:1px solid rgba(245,158,11,.8);box-sizing:border-box;pointer-events:none;';
 			mark.style.left = `${left}px`; mark.style.top = `${top}px`; mark.style.width = `${width}px`; mark.style.height = `${height}px`; overlay.appendChild(mark);
 		}
 	}
@@ -286,7 +304,6 @@
 	>
 	{#snippet reportBody(props: ReportBodyProps)}
 		{@const selectSource = props.selectSource}
-		{@const selectedSourceLines = props.selectedSourceLines}
 		<button class="close-report" onclick={() => { detailSequence++; pendingSource = null; selectedSummaryPair = null; detail = null; }}>{m.ssb_close()}</button>
 		<p>{detail!.title} · {m.ssb_record({ id: detail!.input_record_id })} · {detail!.algorithm} · {detail!.model_name} · {date(detail!.created_at)}</p>
 		{#if detail!.status === 'running'}<p role="status">{m.ssb_background()}</p>{/if}
@@ -297,11 +314,9 @@
 			<h3>{m.ssb_components()}</h3>
 			<p class="muted">{m.ssb_alignment({ matched: detail!.score.matched, gold: detail!.score.gold_count, candidate: detail!.score.prediction_count })}</p>
 		{/if}
-		{#if detail!.matches?.chunks}<h3>{m.ssb_chunk_reviews()}</h3>{#each detail!.matches.chunks as chunk}<details><summary><button type="button" class="chunk-source" class:selected={String(selectedSummaryPair?.production?.id) === String(chunk.pred)} onclick={(event) => {
-			event.preventDefault();
-			event.stopPropagation();
+		{#if detail!.matches?.chunks}<h3>{m.ssb_chunk_reviews()}</h3>{#each detail!.matches.chunks as chunk}<details class="chunk-review" class:selected={String(selectedSummaryPair?.production?.id) === String(chunk.pred)}><summary onclick={() => {
 			selectSummary(chunk.pred, selectSource);
-		}}>{m.ssb_chunk({ id: chunk.pred })}</button> · {chunk.diagnostics}</summary><pre>{JSON.stringify(chunk, null, 2)}</pre><small>{selectedSourceLines.length ? selectedSourceLines.join(', ') : ''}</small></details>{/each}{/if}
+		}}><span class="chunk-source">{m.ssb_chunk({ id: chunk.pred })}</span> · {chunk.diagnostics}</summary><pre>{JSON.stringify(chunk, null, 2)}</pre></details>{/each}{/if}
 		{#if detail!.report}<details><summary>{m.ssb_report()}</summary><pre>{detail!.report}</pre></details>{/if}
 	{/snippet}
 	</BenchmarkReportViewer>
@@ -310,22 +325,24 @@
 
 {#snippet summaryDetailsContent()}
 	{#if selectedSummaryPair}
-		<div class="summary-comparison">
+		<div class="summary-comparison" class:light={!darkMode}>
 			{#each [
 				{ label: m.ssb_production_summary(), item: selectedSummaryPair.production },
 				{ label: m.ssb_gold_summary(), item: selectedSummaryPair.gold }
 			] as column (column.label)}
-				<section class="summary-column">
+				<div class="summary-column">
 					<h2>{column.label}</h2>
-					{#if column.item}
-						<p class="summary-body">{column.item.summary_text || column.item.empty_reason || '—'}</p>
-						<dl>
-							<dt>{m.ssb_summary_sequence()}</dt><dd>{column.item.summary_seq_no ?? '—'}</dd>
-							<dt>{m.ssb_summary_level()}</dt><dd>{column.item.summary_level ?? '—'}</dd>
-							<dt>{m.ssb_source_lines()}</dt><dd>{JSON.stringify(column.item.source_line_spans ?? [])}</dd>
-						</dl>
-					{:else}<p class="muted">{m.ssb_no_aligned_summary()}</p>{/if}
-				</section>
+					{#if !column.item}<p>{m.ssb_no_aligned_summary()}</p>{/if}
+				</div>
+			{/each}
+			{#each comparisonFields as [field, label]}
+				{@const productionValue = comparisonValue(selectedSummaryPair.production, field)}
+				{@const goldValue = comparisonValue(selectedSummaryPair.gold, field)}
+				<div class="comparison-row" class:differs={productionValue !== goldValue}>
+					<div class="comparison-label">{label()}</div>
+					<div class="comparison-value">{productionValue}</div>
+					<div class="comparison-value">{goldValue}</div>
+				</div>
 			{/each}
 		</div>
 	{/if}
@@ -333,10 +350,9 @@
 
 <style>
 	.summary-benchmark{--bg:#11151d;--panel:#191f2a;--line:#303847;--text:#ece8dd;--muted:#a6a18f;--surface:#252a3a;--accent:#d3a64f;--selected-accent:#818cf8;min-height:100%;padding:24px;color:var(--text);background:var(--bg);font:14px/1.5 system-ui,sans-serif;user-select:text}
-	.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}.summary-benchmark :global(.chunk-source){user-select:text}.summary-benchmark :global(.chunk-source.selected){background:color-mix(in srgb,var(--selected-accent) 22%,var(--surface));border-color:var(--selected-accent)}
-	.summary-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;user-select:text}.summary-column{min-width:0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}.summary-column h2{margin:0 0 10px;color:var(--accent);font-size:12px}.summary-body{margin:0 0 14px;white-space:pre-wrap;overflow-wrap:anywhere}.summary-column dl{display:grid;grid-template-columns:1fr;gap:3px;margin:0;font-size:11px}.summary-column dt{margin-top:6px;color:var(--muted);font-size:10px;text-transform:uppercase}.summary-column dd{margin:0;overflow-wrap:anywhere}
+	.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}.chunk-source{font-weight:600}.chunk-review.selected{background:color-mix(in srgb,var(--selected-accent) 18%,var(--surface));border-radius:6px;box-shadow:inset 3px 0 var(--selected-accent)}.chunk-review summary{padding:8px;user-select:text}
+	.summary-comparison{--line:#2d3348;--panel:#252a3a;--text:#e2e8f0;--muted:#94a3b8;--accent:#818cf8;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);user-select:text}.summary-comparison.light{--line:#e4e6eb;--panel:#fff;--text:#111827;--muted:#6b7280;--accent:#6366f1}.summary-column{min-width:0;padding:0 8px 8px}.summary-column h2{margin:0;color:var(--accent);font-size:12px}.summary-column p{font-size:12px;color:var(--muted)}.comparison-row{grid-column:span 2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 12px;padding:6px 8px;border-bottom:1px solid var(--line);border-radius:6px}.comparison-row.differs{background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.35)}.comparison-label{grid-column:span 2;color:var(--muted);font-size:9px;font-weight:600;text-transform:uppercase}.comparison-value{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
 	.summary-benchmark.light{--bg:#f5f2e9;--panel:#fffdf7;--line:#d9d3c5;--text:#211e18;--muted:#716b5e;--surface:#eceef2;--accent:#96701f;--selected-accent:#6366f1}
 	header h1{margin:0;font-size:24px}header p,.muted{color:var(--muted)}header p{margin:4px 0 20px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}.card h2{margin:0 0 12px;font-size:16px}.search,.controls,.section-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.search input{flex:1;min-width:200px}.controls{margin-top:14px;align-items:end}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}button{cursor:pointer;text-decoration:none}button:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:default}.primary{background:var(--accent);color:#17130b;border-color:var(--accent);font-weight:700}.documents{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr));gap:8px;margin-top:12px;max-height:180px;overflow:auto}.documents button{min-width:0;text-align:left;display:flex;flex-direction:column;gap:4px;background:var(--surface)}.document-id-row{display:flex;justify-content:space-between;gap:8px;width:100%;color:var(--muted);font-size:11px}.document-id-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.document-field{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.documents small,td small{color:var(--muted);font-size:12px}.documents button.chosen{background:color-mix(in srgb,var(--selected-accent) 22%,var(--surface));border-color:var(--selected-accent)}.chosen{outline:1px solid var(--accent)}.selected{margin:12px 0 0}.select-prompt{margin:14px 0 0}.section-head{justify-content:space-between}.section-head h2{margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}td:first-child{white-space:normal}td small{display:block}h3{margin:18px 0 8px}details{border-top:1px solid var(--line);padding:10px 0}summary{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:12px;border-radius:6px;max-height:500px;overflow:auto}.error{color:#ff8f7e;background:#4b211e;padding:10px;border-radius:6px}.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}
 	@media(max-width:760px){.summary-benchmark{padding:14px}.controls{align-items:stretch}.controls label,.controls button{width:100%}}
-	@media(max-width:420px){.summary-comparison{grid-template-columns:minmax(0,1fr)}}
 </style>

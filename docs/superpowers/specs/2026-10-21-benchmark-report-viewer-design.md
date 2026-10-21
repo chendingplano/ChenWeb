@@ -16,6 +16,8 @@ Benchmark-specific report sections remain supplied by each benchmark page. Metri
 
 Selecting a metric detail continues to highlight the associated source lines and table references in the PDF. Selecting a summary chunk highlights the chunk's source line span in the same PDF pane. The viewer accepts the input/document identity and source line selection from its benchmark-specific content; source selection is shared presentation state, while the data mapping stays with each benchmark.
 
+The whole summary review heading supports pointer and keyboard selection. Selection opens the right context panel with production and gold summaries aligned by chunk sequence. Each field occupies one shared row with two columns; differing values have an amber background, matching the Metrics comparison panel. Fields include sequence, level, summary text, English summary, language, keywords, English keywords, source lines, and empty reason. Gold payloads have an implicit leaf level of zero. Missing aligned gold is shown explicitly. The PDF navigates to the first resolved source page and paints visible amber boxes for the union of production and gold source lines, including selections on the current page. The comparison keeps its two columns in a narrow context panel and supports both themes and text selection.
+
 If a selected item has no usable source line numbers or the PDF cannot be loaded, the report content remains usable and the source pane shows the existing empty/error state. Changing the selected run clears the selected source lines/table references and resets the PDF to page 1 at its default zoom.
 
 ## Component boundary
@@ -49,3 +51,5 @@ Metrics and Summary are the first consumers. Migrate the Metrics viewer without 
 4. Metrics and Summary render their shared report frame through one reusable component, while their domain-specific sections remain separate.
 5. The component boundary is typed and documented well enough for another benchmark page to provide its own report sections without changing the shared viewer.
 6. English and Chinese UI strings remain localized through Paraglide, and text remains selectable.
+
+Browser regression coverage: `python3 web/scripts/test-summary-pdf-navigation.py --benchmark` (also run with `--locale zh-cn`) uses a real five-page PDF with mocked benchmark/source APIs. It checks full-row and keyboard selection, visible positioned highlights, same-page and multi-page navigation, aligned comparison columns, field differences, missing gold/source data, and clearing the details panel on close.
