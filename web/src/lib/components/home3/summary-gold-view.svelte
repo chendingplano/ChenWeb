@@ -238,6 +238,7 @@
 				<button type="button" class="fold-toggle" onclick={() => (browserFolded = true)} title={m.metric_mgmt_fold_record_list()} aria-label={m.metric_mgmt_fold_record_list()}><PanelLeftCloseIcon size={16} /></button>
 				<KbInputRecordBrowser
 					{darkMode}
+					fitPanel
 					instanceKey="gold-summary-record-browser"
 					title={m.metric_mgmt_kb_inputs()}
 					subtitle={m.metric_mgmt_search_filter_and_select_input()}
