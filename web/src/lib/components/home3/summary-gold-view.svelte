@@ -6,7 +6,8 @@
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { GoldRunFilter, goldRunBadges } from './gold-run-filter.svelte';
 	import { kbInputRecordKey, metricBenchmarkSelection } from './metric-benchmark-record';
-	import { listGoldSummaries, type GoldSummaryRecord, type KbInputRecord } from '$lib/services/kbService';
+	import { getRawLines, listGoldSummaries, type GoldSummaryRecord, type KbInputRecord, type RawLine } from '$lib/services/kbService';
+	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 
@@ -15,6 +16,7 @@
 	let browserFolded = $state(false);
 	let currentInput = $state<KbInputRecord | null>(null);
 	let summaries = $state<GoldSummaryRecord[]>([]);
+	let rawLines = $state<RawLine[]>([]);
 	let selectedSummaryId = $state<number | null>(null);
 	let loading = $state(false);
 	let error = $state('');
@@ -23,6 +25,19 @@
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
 	const selectedSummary = $derived(summaries.find((item) => item.id === selectedSummaryId) ?? null);
+	const selectedSourceLineNumbers = $derived(parseSummaryLineSpans(selectedSummary?.source_line_spans));
+	const selectedLinesByPage = $derived.by(() => {
+		const wanted = new Set(selectedSourceLineNumbers);
+		const byPage = new Map<number, RawLine[]>();
+		for (const line of rawLines) {
+			if (!wanted.has(line.line_number) || !Array.isArray(line.coords) || line.coords.length < 4) continue;
+			const pageLines = byPage.get(line.page_number) ?? [];
+			pageLines.push(line);
+			byPage.set(line.page_number, pageLines);
+		}
+		return byPage;
+	});
+	const selectedSummaryPages = $derived([...selectedLinesByPage.keys()].sort((a, b) => a - b));
 	const fileUrl = $derived(currentInput ? `/api/v1/kb/inputs/${currentInput.id}/file#page=${docPage}&zoom=page-width` : '');
 	const isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	const bg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
@@ -62,6 +77,7 @@
 		requestVersion++;
 		currentInput = null;
 		summaries = [];
+		rawLines = [];
 		selectedSummaryId = null;
 		docPage = 1;
 		pdfNumPages = 0;
@@ -74,6 +90,7 @@
 		const version = ++requestVersion;
 		currentInput = record;
 		summaries = [];
+		rawLines = [];
 		selectedSummaryId = null;
 		docPage = 1;
 		pdfNumPages = 0;
@@ -81,14 +98,69 @@
 		error = '';
 		try {
 			const filters = metricBenchmarkSelection(record, gold.skillVersion, gold.modelName);
-			const result = await listGoldSummaries(record.id, filters);
+			const [result, lineResult] = await Promise.all([
+				listGoldSummaries(record.id, filters),
+				getRawLines(record.id).catch(() => null)
+			]);
 			if (version !== requestVersion) return;
 			summaries = result.summaries ?? [];
+			rawLines = lineResult?.lines ?? [];
 			selectedSummaryId = summaries[0]?.id ?? null;
 		} catch (err) {
 			if (version === requestVersion) error = err instanceof Error ? err.message : m.sgv_load_failed();
 		} finally {
 			if (version === requestVersion) loading = false;
+		}
+	}
+
+	function parseSummaryLineSpans(value: unknown): number[] {
+		const found = new Set<number>();
+		const addRange = (start: unknown, end?: unknown) => {
+			const first = Number(start);
+			const last = end == null ? first : Number(end);
+			if (!Number.isInteger(first) || !Number.isInteger(last) || first < 1 || last < first || last - first > 200) return;
+			for (let line = first; line <= last; line++) found.add(line);
+		};
+		const visit = (entry: unknown) => {
+			if (typeof entry === 'number') { addRange(entry); return; }
+			if (typeof entry === 'string') {
+				const match = entry.trim().match(/^(\d+)\s*(?::|-|,)\s*(\d+)$/);
+				if (match) addRange(match[1], match[2]);
+				else if (/^\d+$/.test(entry.trim())) addRange(entry.trim());
+				return;
+			}
+			if (Array.isArray(entry)) { for (const part of entry) visit(part); return; }
+			if (entry && typeof entry === 'object') {
+				const span = entry as Record<string, unknown>;
+				const line = span.line_number ?? span.line ?? span.line_no ?? span.lineNo;
+				if (line != null) addRange(line);
+				else if (span.start_line != null || span.start != null) addRange(span.start_line ?? span.start, span.end_line ?? span.end);
+			}
+		};
+		visit(value);
+		return [...found].sort((a, b) => a - b);
+	}
+
+	$effect(() => {
+		const firstPage = selectedSummaryPages[0];
+		if (firstPage != null) docPage = firstPage;
+	});
+
+	function renderSummaryHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		for (const line of selectedLinesByPage.get(pageNo) ?? []) {
+			const [x1, y1, x2, y2] = line.coords;
+			const left = Math.min(x1, x2) * viewport.width / 1000;
+			const top = Math.max(0, Math.min(y1, y2) * viewport.height / 1000 - 2);
+			const width = Math.abs(x2 - x1) * viewport.width / 1000 + 20;
+			const height = Math.max(1, Math.abs(y2 - y1) * viewport.height / 1000 + 4);
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${left}px`;
+			mark.style.top = `${top}px`;
+			mark.style.width = `${width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = `line ${line.line_number}`;
+			overlay.appendChild(mark);
 		}
 	}
 
@@ -174,7 +246,7 @@
 			{#if currentInput}
 				<div class="doc-frame-wrap">
 					{#if isPdf}
-						<PdfViewWindow inputId={currentInput.id} {fileUrl} bind:page={docPage} bind:zoom={pdfZoom} bind:numPages={pdfNumPages} {darkMode} enableSelectionDialog={false} />
+						<PdfViewWindow inputId={currentInput.id} {fileUrl} bind:page={docPage} bind:zoom={pdfZoom} bind:numPages={pdfNumPages} {darkMode} enableSelectionDialog={false} highlightPages={selectedSummaryPages} highlightVersion={selectedSummaryId ?? 0} renderHighlights={renderSummaryHighlights} />
 					{:else}
 						<iframe class="doc-frame" title={currentInput.file_name ?? m.metric_mgmt_record_4({ id: currentInput.id })} src={fileUrl}></iframe>
 					{/if}
