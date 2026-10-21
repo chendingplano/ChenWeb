@@ -3,6 +3,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import type { TableReference } from './pdf-table-geometry';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
 	let {
 		run,
@@ -12,6 +13,10 @@
 		evidenceActions = [],
 		inputId,
 		darkMode,
+		sourcePage,
+		sourcePageVersion,
+		renderSourceHighlights,
+		onFrameElement,
 		reportBody
 	}: {
 		run: { id: string | number; title: string; status: string; documentTitle: string; createdAt: string; subtitle?: string };
@@ -21,6 +26,10 @@
 		evidenceActions?: { id: string; label: string; view(): void; download?(): void }[];
 		inputId: number | null;
 		darkMode: boolean;
+		sourcePage?: number;
+		sourcePageVersion?: number;
+		renderSourceHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
+		onFrameElement?: (element: HTMLDivElement | null) => void;
 		reportBody: Snippet<[{ selectSource(lines: number[], tableReferences?: TableReference[]): void; selectedSourceLines: number[]; selectedTableReferences: TableReference[] }]>
 	} = $props();
 
@@ -32,7 +41,9 @@
 	let splitPanelsEl = $state<HTMLDivElement | null>(null);
 	let leftPanelRatio = $state(0.5);
 	let resizingPanels = $state(false);
-	let previousIdentity = $state<{ runId: string | number; inputId: number | null } | null>(null);
+	let previousIdentity: { runId: string | number; inputId: number | null } | null = null;
+
+	$effect(() => onFrameElement?.(splitPanelsEl));
 
 	function selectSource(lines: number[], tableReferences: TableReference[] = []) {
 		selectedSourceLines = [...lines];
@@ -41,11 +52,18 @@
 	}
 
 	$effect(() => {
+		void sourcePageVersion;
+		if (sourcePage != null) pdfPage = sourcePage;
+	});
+
+	$effect(() => {
 		const identity = { runId: run.id, inputId };
 		if (previousIdentity && (previousIdentity.runId !== identity.runId || previousIdentity.inputId !== identity.inputId)) {
 			selectedSourceLines = [];
 			selectedTableReferences = [];
 			highlightVersion++;
+			pdfPage = 1;
+			pdfZoom = 0.5;
 		}
 		previousIdentity = identity;
 	});
@@ -75,8 +93,8 @@
 	<div class="split-panels" bind:this={splitPanelsEl} style={`--left-panel-fr: ${leftPanelRatio}fr; --right-panel-fr: ${1 - leftPanelRatio}fr;`}>
 		<section class="result-panel" aria-label={run.title}>
 			<header>
-				<h1>{run.title} · {run.status}</h1>
-				<p>{run.documentTitle} · {run.createdAt}</p>
+				<h1>{run.title}{run.status ? ` · ${run.status}` : ''}</h1>
+				{#if run.documentTitle || run.createdAt}<p>{run.documentTitle}{run.documentTitle && run.createdAt ? ' · ' : ''}{run.createdAt}</p>{/if}
 				{#if run.subtitle}<p>{run.subtitle}</p>{/if}
 			</header>
 			{#if scoreCards.length}<div class="stats">{#each scoreCards as card}<div><span>{card.label}</span><strong>{card.value}</strong>{#if card.detail}<small>{card.detail}</small>{/if}</div>{/each}</div>{/if}
@@ -90,7 +108,7 @@
 			<h2>{m.msc_pdf_panel()}</h2>
 			{#if inputId != null}
 				{#key `${run.id}|${inputId}`}
-					<PdfViewWindow inputId={inputId} fileUrl={`/api/v1/kb/inputs/${inputId}/file`} bind:page={pdfPage} bind:zoom={pdfZoom} {highlightVersion} tableReferences={selectedTableReferences} highlightPages={selectedSourceLines} enableSelectionDialog={false} {darkMode} />
+					<PdfViewWindow inputId={inputId} fileUrl={`/api/v1/kb/inputs/${inputId}/file`} bind:page={pdfPage} bind:zoom={pdfZoom} {highlightVersion} tableReferences={selectedTableReferences} renderHighlights={renderSourceHighlights} enableSelectionDialog={false} {darkMode} />
 				{/key}
 			{:else}<p class="muted pdf-empty">{m.msc_pdf_empty()}</p>{/if}
 		</aside>

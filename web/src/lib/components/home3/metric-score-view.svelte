@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick, type Snippet } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { getRawLines, listKbMetrics, type RawLine } from '$lib/services/kbService';
-	import PdfViewWindow from './pdf-view-window.svelte';
+	import BenchmarkReportViewer from './benchmark-report-viewer.svelte';
 	import type { TableReference } from './pdf-table-geometry';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 	import { searchInputs, type InputRecordSummary } from './metric-review-client.js';
@@ -51,20 +51,24 @@
 	let rawLines = $state<RawLine[]>([]);
 	let sourceLines = $state<RawLine[]>([]);
 	let tableReferences = $state<TableReference[]>([]);
+	let sourcePage = $state(1);
+	let sourcePageVersion = $state(0);
 	// source_table_rows are not in the scorer export; read them from the metric tables, keyed by metric_id.
 	let tableRowsById = $state(new Map<string, TableReference[]>());
 	let tableRowsKey = '';
-	let pdfPage = $state(1);
-	let highlightVersion = $state(0);
+	let previousInputId: number | null | undefined;
+	let previousRunId: number | null | undefined;
+	type ReportBodyProps = {
+		selectSource(lines: number[], tableReferences?: TableReference[]): void;
+		selectedSourceLines: number[];
+		selectedTableReferences: TableReference[];
+	};
+	let frameSelectSource: (lines: number[], refs?: TableReference[]) => void = () => {};
+	let splitPanelsEl = $state<HTMLDivElement | null>(null);
 	let rawLinesReady = $state(false);
 	let pendingSourceEntry = $state<Array<{ id: string; prediction: boolean }> | null>(null);
 	let selectedEntryKey = $state('');
-	let splitPanelsEl = $state<HTMLDivElement | null>(null);
-	let leftPanelRatio = $state(0.5);
-	let resizingPanels = $state(false);
 	let rawLineSequence = 0;
-	let previousInputId: number | null | undefined;
-	let previousRunId: number | null | undefined;
 	const evidenceLabels: Record<string, () => string> = {
 		input: m.msc_input_download,
 		matches: m.msc_matches_download,
@@ -93,12 +97,8 @@
 			? (detail?.report ?? '')
 			: json(detail?.[evidenceKind as 'input' | 'matches' | 'score'])
 	);
-	async function evidenceAction(event: Event, kind: string) {
-		const menu = event.currentTarget as HTMLSelectElement;
-		const action = menu.value;
-		menu.value = '';
-		if (action === 'view') evidenceKind = kind;
-		if (action === 'download' && detail) {
+	async function downloadEvidence(kind: string) {
+		if (detail) {
 			const id = detail.id;
 			try {
 				const response = await fetch(scoreArtifact(id, kind), { credentials: 'same-origin' });
@@ -114,6 +114,8 @@
 			}
 		}
 	}
+	const evidenceActions = $derived(Object.entries(evidenceLabels).flatMap(([kind, label]) => detail?.[kind as 'input' | 'matches' | 'score' | 'report'] ? [{ id: kind, label: label(), view: () => { evidenceKind = kind; }, download: () => { void downloadEvidence(kind); } }] : []));
+
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let alive = true,
 		historySequence = 0,
@@ -322,7 +324,8 @@
 		const record = rows?.find((item) => item.metric_id === id);
 		return parseSourceLines(record?.source_line_spans);
 	}
-	function selectSourceEntry(entryKey: string, ids: Array<{ id: string; prediction: boolean }>) {
+	function selectSourceEntry(entryKey: string, ids: Array<{ id: string; prediction: boolean }>, select = frameSelectSource) {
+		frameSelectSource = select;
 		selectedEntryKey = entryKey;
 		const productionId = ids.find((item) => item.prediction)?.id;
 		const goldId = ids.find((item) => !item.prediction)?.id;
@@ -330,28 +333,29 @@
 		const goldMetric = detail?.input?.gold.find((item) => item.metric_id === goldId) ?? null;
 		onSelectMetrics(production || goldMetric ? { production, gold: goldMetric } : null);
 		pendingSourceEntry = ids;
-		resolveSourceEntry(ids);
+		resolveSourceEntry(ids, frameSelectSource);
 	}
-	function resolveSourceEntry(ids: Array<{ id: string; prediction: boolean }>) {
+	function resolveSourceEntry(ids: Array<{ id: string; prediction: boolean }>, select = frameSelectSource) {
 		sourceLines = [];
 		tableReferences = [];
-		highlightVersion++;
+		select([], []);
 		if (!rawLinesReady) return;
 		const refs = ids.flatMap(({ id }) => tableRowsById.get(id) ?? []);
 		const numbers = [...new Set([...ids.flatMap(({ id, prediction }) => recordSourceLines(id, prediction)), ...refs.map((ref) => ref.line)])].sort(
 			(a, b) => a - b
 		);
-		if (!numbers.length) return;
+		if (!numbers.length) { select([], refs); return; }
 		const byNumber = new Map(rawLines.map((line) => [line.line_number, line]));
 		const resolved = numbers.flatMap((number) => {
 			const line = byNumber.get(number);
 			return line ? [line] : [];
 		});
-		if (!resolved.length) return;
+		if (!resolved.length) { select([], []); return; }
 		sourceLines = resolved;
 		tableReferences = refs;
-		pdfPage = resolved[0].page_number;
-		highlightVersion++;
+		sourcePage = resolved[0].page_number;
+		sourcePageVersion++;
+		select(resolved.map((line) => line.line_number), refs);
 	}
 	function renderSourceHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) {
 		for (const line of sourceLines) {
@@ -380,13 +384,12 @@
 		const runId = detail?.id ?? null;
 		if (inputId !== previousInputId) {
 			previousInputId = inputId;
-			pdfPage = 1;
+			sourcePage = 1;
 			sourceLines = [];
 			pendingSourceEntry = null;
 			selectedEntryKey = '';
 			rawLinesReady = false;
 			rawLines = [];
-			highlightVersion++;
 			const sequence = ++rawLineSequence;
 			if (inputId != null) {
 				void getRawLines(inputId).then((result) => {
@@ -401,8 +404,8 @@
 						rawLinesReady = true;
 						pendingSourceEntry = null;
 						sourceLines = [];
-						highlightVersion++;
-					}
+						frameSelectSource([], []);
+								}
 				});
 			}
 		}
@@ -434,39 +437,9 @@
 			sourceLines = [];
 			pendingSourceEntry = null;
 			selectedEntryKey = '';
-			highlightVersion++;
 		}
 	});
-	function startPanelResize(event: PointerEvent) {
-		if (window.matchMedia('(max-width: 700px)').matches) return;
-		event.preventDefault();
-		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-		resizingPanels = true;
-	}
-	function movePanelResize(event: PointerEvent) {
-		if (!resizingPanels || !splitPanelsEl) return;
-		const bounds = splitPanelsEl.getBoundingClientRect();
-		if (bounds.width <= 0) return;
-		leftPanelRatio = Math.min(0.75, Math.max(0.25, (event.clientX - bounds.left) / bounds.width));
-	}
-	function endPanelResize() {
-		resizingPanels = false;
-	}
-	function resizePanelsWithKeyboard(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-			event.preventDefault();
-			leftPanelRatio = Math.min(
-				0.75,
-				Math.max(0.25, leftPanelRatio + (event.key === 'ArrowLeft' ? -0.05 : 0.05))
-			);
-		} else if (event.key === 'Home') {
-			event.preventDefault();
-			leftPanelRatio = 0.25;
-		} else if (event.key === 'End') {
-			event.preventDefault();
-			leftPanelRatio = 0.75;
-		}
-	}
+
 	onMount(() => {
 		void search();
 		void history();
@@ -644,35 +617,58 @@
 			>
 		</div>
 	</section>
-	<div
-		class="split-panels"
-		bind:this={splitPanelsEl}
-		style={`--left-panel-fr: ${leftPanelRatio}fr; --right-panel-fr: ${1 - leftPanelRatio}fr;`}
-	>
-		<div class="result-panel">
-	{#if detail}
-		<section class="card results">
-			<div class="section-head">
-				<h2>{m.msc_results({ id: detail.id })} · {status(detail.status)}</h2>
-				<button
-					onclick={() => {
-							detailSequence++;
-						detail = null;
-						onSelectMetrics(null);
-					}}>{m.msc_close()}</button
-				>
-			</div>
-			<p>
-				{detail.title || m.msc_record({ id: detail.input_record_id })} · {detail.model_name} · {date(
-					detail.created_at
-				)}
-			</p>
-			{#if detail.status === 'running'}<p role="status">{m.msc_background()}</p>{/if}
-			{#if detail.status === 'failed'}<p class="error" role="alert">
-					{errorText(detail.error_code)}
-				</p>{/if}
+	<BenchmarkReportViewer
+		run={{
+			id: detail?.id ?? 'none',
+			title: detail ? m.msc_results({ id: detail.id }) : m.msc_title(),
+			status: detail ? status(detail.status) : '',
+			documentTitle: detail ? `${detail.title || m.msc_record({ id: detail.input_record_id })} · ${detail.model_name}` : '',
+			createdAt: detail ? date(detail.created_at) : '',
+			subtitle: undefined
+		}}
+		scoreCards={detail?.score ? [
+			{ label: m.msc_score(), value: String(detail.score.main.score) },
+			{ label: m.msc_soft_precision(), value: pct(detail.score.main.soft_precision) },
+			{ label: m.msc_soft_recall(), value: pct(detail.score.main.soft_recall) },
+			{ label: m.msc_precision(), value: pct(detail.score.main.precision) },
+			{ label: m.msc_recall(), value: pct(detail.score.main.recall) },
+			{ label: m.msc_gold_rows(), value: String(detail.score.main.gold_rows) },
+			{ label: m.msc_predicted_rows(), value: String(detail.score.main.predicted_rows) },
+			{ label: m.msc_matched(), value: String(detail.score.main.matched) }
+		] : []}
+		warnings={detail?.input?.warnings ?? []}
+		provenance={detail?.input ? (provenanceBody as Snippet) : undefined}
+		evidenceActions={evidenceActions}
+		inputId={activeInputId}
+		{sourcePage}
+		{sourcePageVersion}
+		onFrameElement={(element) => (splitPanelsEl = element)}
+		{darkMode}
+		renderSourceHighlights={renderSourceHighlights}
+		reportBody={reportBody as Snippet<[ReportBodyProps]>}
+	/>
+	{#snippet provenanceBody()}
+		<details>
+			<summary>{m.msc_provenance()}</summary>
+			<dl>
+				<dt>{m.msc_gold()}</dt><dd><pre>{json(detail?.input?.gold_run)}</pre></dd>
+				{#if detail?.input?.provenance}<dt>{m.msc_scorer_provenance()}</dt><dd><pre>{json(detail.input.provenance)}</pre></dd>{/if}
+				<dt>{m.msc_extraction()}</dt><dd><pre>{json(detail?.input?.extraction)}</pre></dd>
+				<dt>{m.msc_prompt()}</dt><dd>{detail?.prompt_name}</dd><dt>{m.msc_created_by()}</dt><dd>{detail?.created_by}</dd><dt>{m.msc_finished()}</dt><dd>{date(detail?.finished_at)}</dd>
+			</dl>
+		</details>
+		{#if evidenceKind}<div class="evidence-view"><div class="section-head"><h3>{evidenceLabels[evidenceKind]()}</h3><button onclick={() => (evidenceKind = '')}>{m.msc_close_evidence()}</button></div><pre>{evidenceText}</pre></div>{/if}
+	{/snippet}
+	{#snippet reportBody(props: ReportBodyProps)}
+		{@const selectSource = props.selectSource}
+		{@const selectedSourceLines = props.selectedSourceLines}
+		{@const selectedTableReferences = props.selectedTableReferences}
+		{#if detail}
+            {#if detail.status === 'running'}<p role="status">{m.msc_background()}</p>{/if}
+            {#if detail.status === 'failed'}<p class="error" role="alert">{errorText(detail.error_code)}</p>{/if}
+<section class="card results">
+			<button class="close-results" onclick={() => { detailSequence++; detail = null; onSelectMetrics(null); }}>{m.msc_close()}</button>
 			{#if detail.score}
-				{@render summary(detail.score.main)}
 				{#if detail.score.without_test_parameters}<details>
 						<summary>{m.msc_without_tests()}</summary>{@render summary(
 							detail.score.without_test_parameters
@@ -684,54 +680,6 @@
 							<span>{fields[field]?.() ?? field}</span><strong>{pct(accuracy)}</strong>
 						</div>{/each}
 				</div>
-			{/if}
-			{#if detail.input}
-				{#if detail.input.warnings?.length}<div class="warnings">
-						<h3>{m.msc_warnings()}</h3>
-						<ul>
-							{#each detail.input.warnings as warning}<li>{warning}</li>{/each}
-						</ul>
-					</div>{/if}
-				<details>
-					<summary>{m.msc_provenance()}</summary>
-					<dl>
-						<dt>{m.msc_gold()}</dt>
-						<dd><pre>{json(detail.input.gold_run)}</pre></dd>
-						{#if detail.input.provenance}
-							<dt>{m.msc_scorer_provenance()}</dt>
-							<dd><pre>{json(detail.input.provenance)}</pre></dd>
-						{/if}
-						<dt>{m.msc_extraction()}</dt>
-						<dd><pre>{json(detail.input.extraction)}</pre></dd>
-						<dt>{m.msc_prompt()}</dt>
-						<dd>{detail.prompt_name}</dd>
-						<dt>{m.msc_created_by()}</dt>
-						<dd>{detail.created_by}</dd>
-						<dt>{m.msc_finished()}</dt>
-						<dd>{date(detail.finished_at)}</dd>
-					</dl>
-				</details>
-				<h3>{m.msc_evidence()}</h3>
-				<div class="actions evidence-actions">
-					{#each Object.entries(evidenceLabels) as [kind, label]}
-						{#if detail[kind as 'input' | 'matches' | 'score' | 'report']}
-							<select aria-label={label()} onchange={(event) => evidenceAction(event, kind)}>
-								<option value="">{label()}</option>
-								<option value="view">{m.msc_view()}</option>
-								<option value="download">{m.msc_download()}</option>
-							</select>
-						{/if}
-					{/each}
-				</div>
-				{#if evidenceKind}
-					<div class="evidence-view">
-						<div class="section-head">
-							<h3>{evidenceLabels[evidenceKind]()}</h3>
-							<button onclick={() => (evidenceKind = '')}>{m.msc_close_evidence()}</button>
-						</div>
-						<pre>{evidenceText}</pre>
-					</div>
-				{/if}
 			{/if}
 			{#if detail.score}
 				<label class="pair-filter">
@@ -758,7 +706,7 @@
 								selectSourceEntry(entryKey, [
 									{ id: pair.gold, prediction: false },
 									{ id: pair.pred, prediction: true }
-								])}
+									], selectSource)}
 						>
 							<strong>{rowName(pair.gold)}</strong>
 							<span class="entry-line">{rowName(pair.pred, true)}</span>
@@ -788,7 +736,7 @@
 							class="result-entry"
 							class:selected-entry={selectedEntryKey === entryKey}
 							aria-pressed={selectedEntryKey === entryKey}
-							onclick={() => selectSourceEntry(entryKey, [{ id: missed.gold, prediction: false }])}
+							onclick={() => selectSourceEntry(entryKey, [{ id: missed.gold, prediction: false }], selectSource)}
 						>
 							<strong>{rowName(missed.gold)}</strong>
 							<span class="entry-line">{missed.note}</span>
@@ -803,7 +751,7 @@
 							class="result-entry"
 							class:selected-entry={selectedEntryKey === entryKey}
 							aria-pressed={selectedEntryKey === entryKey}
-							onclick={() => selectSourceEntry(entryKey, [{ id: fp.pred, prediction: true }])}
+							onclick={() => selectSourceEntry(entryKey, [{ id: fp.pred, prediction: true }], selectSource)}
 						>
 							<strong>{rowName(fp.pred, true)}</strong>
 							<span class="entry-line">{m.msc_cause()}: {causes[fp.cause]?.() ?? fp.cause}</span>
@@ -820,40 +768,9 @@
 					<pre class="report">{detail.report}</pre>
 				</details>{/if}
 		</section>
-	{/if}
-		</div>
-		<button
-			type="button"
-			class="panel-resizer"
-			class:resizing={resizingPanels}
-		role="slider"
-		aria-orientation="horizontal"
-			aria-label={m.msc_resize_panels()}
-			aria-valuemin="25"
-			aria-valuemax="75"
-			aria-valuenow={Math.round(leftPanelRatio * 100)}
-			onpointerdown={startPanelResize}
-			onpointermove={movePanelResize}
-			onpointerup={endPanelResize}
-			onpointercancel={endPanelResize}
-			onkeydown={resizePanelsWithKeyboard}
-		></button>
-		<aside class="pdf-panel" aria-label={m.msc_pdf_panel()}>
-			<h2>{m.msc_pdf_panel()}</h2>
-			{#if activeInputId != null}
-				<PdfViewWindow
-					inputId={activeInputId}
-					fileUrl={`/api/v1/kb/inputs/${activeInputId}/file`}
-					bind:page={pdfPage}
-					highlightVersion={highlightVersion}
-					{tableReferences}
-					renderHighlights={renderSourceHighlights}
-					enableSelectionDialog={false}
-					darkMode={darkMode}
-				/>
-			{:else}<p class="muted pdf-empty">{m.msc_pdf_empty()}</p>{/if}
-		</aside>
-	</div>
+		{/if}
+	{/snippet}
+
 </div>
 
 <style>
@@ -916,39 +833,6 @@
 		background: var(--card);
 		margin-bottom: 20px;
 	}
-	.split-panels {
-		display: grid;
-		grid-template-columns: minmax(0, var(--left-panel-fr)) 12px minmax(0, var(--right-panel-fr));
-		align-items: stretch;
-	}
-	.result-panel,
-	.pdf-panel {
-		min-width: 0;
-		height: min(75vh, 900px);
-		min-height: 480px;
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		background: var(--card);
-		padding: 16px;
-		box-sizing: border-box;
-	}
-	.result-panel {
-		overflow: auto;
-	}
-	.pdf-panel {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		overflow: hidden;
-	}
-	.pdf-panel h2 {
-		margin: 0;
-		flex: 0 0 auto;
-	}
-	.pdf-empty {
-		margin: auto;
-		text-align: center;
-	}
 	.result-entry {
 		display: block;
 		width: 100%;
@@ -967,35 +851,6 @@
 	.result-entry:focus-visible {
 		outline: 3px solid var(--accent);
 		outline-offset: 2px;
-	}
-	.panel-resizer {
-		position: relative;
-		width: 12px;
-		min-width: 12px;
-		margin: 0;
-		padding: 0;
-		border: 0;
-		border-radius: 8px;
-		background: transparent;
-		cursor: col-resize;
-		touch-action: none;
-		user-select: none;
-	}
-	.panel-resizer::before {
-		position: absolute;
-		inset: 0 4px;
-		border-radius: 4px;
-		background: var(--border);
-		content: '';
-	}
-	.panel-resizer:hover::before,
-	.panel-resizer:focus-visible::before,
-	.panel-resizer.resizing::before {
-		background: var(--accent);
-	}
-	.panel-resizer:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
 	}
 	.search,
 	.controls,
@@ -1181,18 +1036,9 @@
 	.failed {
 		color: #f87171;
 	}
-	.warnings {
-		color: #fbbf24;
-	}
-	.light .warnings {
-		color: #a16207;
-	}
 	.light .error,
 	.light .failed {
 		color: #dc2626;
-	}
-	ul {
-		padding-left: 20px;
 	}
 	pre {
 		white-space: pre-wrap;
@@ -1213,17 +1059,6 @@
 		line-height: 1.6;
 	}
 	@media (max-width: 700px) {
-		.split-panels {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.panel-resizer {
-			display: none;
-		}
-		.result-panel,
-		.pdf-panel {
-			height: 60vh;
-			min-height: 360px;
-		}
 		.benchmark {
 			padding: 12px;
 		}
