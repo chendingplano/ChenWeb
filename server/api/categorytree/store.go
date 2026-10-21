@@ -151,8 +151,8 @@ func getTree(ctx context.Context, q querier, ref string, lock bool) (*TreeInfo, 
 // CreateTree stores a tree and records its initial nodes as the first change set.
 func (s *Store) CreateTree(ctx context.Context, in CreateTreeInput, author string) (*TreeInfo, *ChangeSetResult, error) {
 	name := strings.TrimSpace(in.CanonicalName)
-	if !canonicalNamePattern.MatchString(name) {
-		return nil, nil, inputErr("tree canonical name %q must be a lower-case ASCII slug", name)
+	if !treeNamePattern.MatchString(name) {
+		return nil, nil, inputErr("tree canonical name %q must be a lower-case ASCII slug (':' allowed)", name)
 	}
 	if strings.TrimSpace(in.Namespace) == "" {
 		return nil, nil, inputErr("namespace is required")

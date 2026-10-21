@@ -58,6 +58,7 @@
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import MetricOntologyAnalysisView from '$lib/components/home3/metric-ontology-analysis-view.svelte';
 	import MetricOntologyExplorerView from '$lib/components/home3/metric-ontology-explorer-view.svelte';
+	import CategoryTreesView from '$lib/components/home3/category-trees-view.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -67,6 +68,7 @@
 		| 'kb-metric-wiki'
 		| 'kb-metric-ontology'
 		| 'kb-metric-ontology-explorer'
+		| 'kb-ontology-categories'
 		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
@@ -247,6 +249,11 @@
 					id: 'kb-metric-ontology-explorer',
 					label: m.home3_knowledge_metric_ontology_explorer(),
 					description: m.home3_knowledge_explore_a_metric_s_ontology()
+				},
+				{
+					id: 'kb-ontology-categories',
+					label: m.home3_knowledge_categories(),
+					description: m.home3_knowledge_categories_description()
 				}
 			]
 		}
@@ -467,6 +474,7 @@
 			activeSection !== 'kb-metric-wiki' &&
 			activeSection !== 'kb-metric-ontology' &&
 			activeSection !== 'kb-metric-ontology-explorer' &&
+			activeSection !== 'kb-ontology-categories' &&
 			activeSection !== 'kb-artifact-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
@@ -889,6 +897,8 @@
 				/>
 			{:else if activeSection === 'kb-metric-ontology-explorer'}
 				<MetricOntologyExplorerView {darkMode} metricId={metricOntologyExplorerId} />
+			{:else if activeSection === 'kb-ontology-categories'}
+				<CategoryTreesView {darkMode} />
 			{:else if activeSection === 'kb-artifact-wiki'}
 				{#if artifactWikiType && artifactWikiId}
 					<ArtifactWikiPage

@@ -3,6 +3,7 @@ package categorytree
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,7 +123,7 @@ func (h *Handler) GetTree(c echo.Context) error {
 	defer rc.Close()
 	ctx := c.Request().Context()
 	store := h.service().Store
-	info, err := store.GetTree(ctx, c.Param("name"))
+	info, err := store.GetTree(ctx, treeRef(c))
 	if err != nil {
 		return fail(c, rc, "category tree not found", err)
 	}
@@ -186,13 +187,23 @@ func (h *Handler) ApplyChangeSet(c echo.Context) error {
 	if err := c.Bind(&in); err != nil {
 		return badRequest(c, rc, "invalid change set: "+err.Error())
 	}
-	res, err := h.service().Store.ApplyChangeSet(c.Request().Context(), c.Param("name"), in.Operations, rc.GetUserID())
+	res, err := h.service().Store.ApplyChangeSet(c.Request().Context(), treeRef(c), in.Operations, rc.GetUserID())
 	if err != nil {
 		return fail(c, rc, "change set rejected", err)
 	}
 	rc.GetLogger().Info("category tree change set applied", "tree_id", res.TreeID, "change_set_id", res.ChangeSetID,
 		"from_seq", res.FromSeq, "to_seq", res.ToSeq, "entries", res.Entries, "stale_bindings", res.StaleBindings, "user_id", rc.GetUserID())
 	return c.JSON(http.StatusOK, map[string]any{"change_set": res})
+}
+
+// treeRef returns the :name path parameter. Echo does not decode path parameters, so a
+// client that percent-encodes the colon in "cat:…" sends "cat%3A…", which must be unescaped.
+func treeRef(c echo.Context) string {
+	name, err := url.PathUnescape(c.Param("name"))
+	if err != nil {
+		return c.Param("name")
+	}
+	return name
 }
 
 func queryInt(c echo.Context, key string) int64 {
@@ -205,7 +216,7 @@ func (h *Handler) ListChanges(c echo.Context) error {
 	defer rc.Close()
 	ctx := c.Request().Context()
 	store := h.service().Store
-	info, err := store.GetTree(ctx, c.Param("name"))
+	info, err := store.GetTree(ctx, treeRef(c))
 	if err != nil {
 		return fail(c, rc, "category tree not found", err)
 	}
@@ -225,7 +236,7 @@ func (h *Handler) ListRevisions(c echo.Context) error {
 	defer rc.Close()
 	ctx := c.Request().Context()
 	store := h.service().Store
-	info, err := store.GetTree(ctx, c.Param("name"))
+	info, err := store.GetTree(ctx, treeRef(c))
 	if err != nil {
 		return fail(c, rc, "category tree not found", err)
 	}
@@ -248,7 +259,7 @@ func (h *Handler) CreateRevision(c echo.Context) error {
 	}
 	ctx := c.Request().Context()
 	store := h.service().Store
-	info, err := store.GetTree(ctx, c.Param("name"))
+	info, err := store.GetTree(ctx, treeRef(c))
 	if err != nil {
 		return fail(c, rc, "category tree not found", err)
 	}
@@ -276,7 +287,7 @@ func (h *Handler) OthersReport(c echo.Context) error {
 	defer rc.Close()
 	ctx := c.Request().Context()
 	store := h.service().Store
-	info, err := store.GetTree(ctx, c.Param("name"))
+	info, err := store.GetTree(ctx, treeRef(c))
 	if err != nil {
 		return fail(c, rc, "category tree not found", err)
 	}

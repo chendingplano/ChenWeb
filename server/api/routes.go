@@ -23,6 +23,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/agentservicehandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
+	"github.com/chendingplano/deepdoc/server/api/alertloghandler"
 	"github.com/chendingplano/deepdoc/server/api/buildinfohandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/calendarhandler"
@@ -484,6 +485,11 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)
+	apiGroup.GET("/system-admin/alert-logs", alertloghandler.List)
+	apiGroup.PUT("/system-admin/alert-logs/:id/assign", alertloghandler.Assign)
+	apiGroup.PUT("/system-admin/alert-logs/:id/resolve", alertloghandler.Resolve)
+	apiGroup.GET("/system-admin/alert-logs/:id/comments", alertloghandler.ListComments)
+	apiGroup.POST("/system-admin/alert-logs/:id/comments", alertloghandler.AddComment)
 	apiGroup.PUT("/system-admin/users/:id", useradminhandler.UpdateUser)
 	apiGroup.DELETE("/system-admin/users/:id", useradminhandler.DeleteUser)
 

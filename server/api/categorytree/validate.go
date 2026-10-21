@@ -10,6 +10,10 @@ import (
 // canonicalNamePattern: a language-neutral ASCII slug (devdoc §3.1).
 var canonicalNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*$`)
 
+// treeNamePattern: a tree's canonical name is a slug that may also contain ':' (for example
+// "cat:general-tech-categories"). Node names keep the stricter canonicalNamePattern.
+var treeNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]*$`)
+
 // ValidationError lists every problem found in a tree.
 type ValidationError struct {
 	Problems []string `json:"problems"`

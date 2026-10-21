@@ -22,6 +22,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
 	import DocReviewLogsView from '$lib/components/home3/doc-review-logs-view.svelte';
+	import AlertLogsView from '$lib/components/home3/alert-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import DiaryView from '$lib/components/home3/diary-view.svelte';
@@ -222,6 +223,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
+			activeMenu?.childId !== 'sysadmin-alert-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-decision-candidates' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-assertions' &&
 			activeMenu?.childId !== 'cdm-editor'
@@ -345,6 +347,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<LLMUsageLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-review-logs'}
 			<DocReviewLogsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-alert-logs'}
+			<AlertLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-embedding'}

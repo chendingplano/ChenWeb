@@ -258,7 +258,8 @@
 					children: [
 						{ id: 'sysadmin-doc-proc-logs', label: m.nav_sysadmin_doc_proc_logs() },
 						{ id: 'sysadmin-llm-usage-logs', label: m.nav_sysadmin_llm_usage_logs() },
-						{ id: 'sysadmin-doc-review-logs', label: m.nav_sysadmin_doc_review_logs() }
+						{ id: 'sysadmin-doc-review-logs', label: m.nav_sysadmin_doc_review_logs() },
+						{ id: 'sysadmin-alert-logs', label: m.nav_sysadmin_alert_logs() }
 					]
 				},
 				{
