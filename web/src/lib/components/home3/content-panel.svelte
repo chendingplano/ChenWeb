@@ -10,6 +10,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import SiteFooter from '../../../routes/semos/components/SiteFooter.svelte';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
+	import SummaryGoldView from '$lib/components/home3/summary-gold-view.svelte';
 	import ReferencesMgmtView from '$lib/components/home3/references-mgmt-view.svelte';
 	import DocGenView from '$lib/components/home3/doc-gen-view.svelte';
 	import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
@@ -217,6 +218,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
 			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
+			activeMenu?.childId !== 'sysadmin-llm-summaries-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-references-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-references-benchmark' &&
@@ -308,6 +310,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-gold'}
 			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} source="testbed" />
+		{:else if activeMenu?.childId === 'sysadmin-llm-summaries-gold'}
+			<SummaryGoldView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}

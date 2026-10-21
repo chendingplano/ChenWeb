@@ -279,6 +279,13 @@
 										]
 									},
 									{
+										id: 'sysadmin-llm-summaries',
+										label: m.nav_sysadmin_llm_summaries(),
+										children: [
+											{ id: 'sysadmin-llm-summaries-gold', label: m.nav_sysadmin_llm_summaries_gold() }
+										]
+									},
+									{
 										id: 'sysadmin-llm-references',
 										label: m.nav_sysadmin_llm_references(),
 										children: [
