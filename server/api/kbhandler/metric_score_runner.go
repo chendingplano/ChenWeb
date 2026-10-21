@@ -293,6 +293,7 @@ func freezeScoreTools(root, script, scoreSkill, goldSkill string) (string, map[s
 	}
 	for _, item := range []struct{ source, name string }{
 		{script, filepath.Join(scoreSkill, "scripts", "score_io.py")},
+		{filepath.Join(filepath.Dir(filepath.Dir(script)), "weights.json"), filepath.Join(scoreSkill, "weights.json")},
 		{helper, filepath.Join(goldSkill, "scripts", "benchmark_io.py")},
 	} {
 		if err := freezeFile(item.source, item.name); err != nil {

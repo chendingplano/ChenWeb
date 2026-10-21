@@ -391,6 +391,7 @@ func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 		client.ThinkingType = "disabled"
 	}
 	inputText := "output_language: " + req.Lang + "\nSCORING_INPUT\n" + string(e.Input)
+	originalInput := inputText
 	for attempt := 1; attempt <= 2; attempt++ {
 		logger.Info("calling LLM for summary judgments", "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "attempt", attempt)
 		payload, callErr := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, PromptName: summaryScorePrompt, PromptText: string(prompt), ModelName: cfg.ModelName, InputText: inputText, RecordID: req.RecordID, RunID: id, CallReason: "score_extract_summaries", CallLoc: "MID-20261021-01"})
@@ -430,11 +431,15 @@ func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 			if !errors.As(scoreErr, &validation) {
 				return e, scoreErr
 			}
+			logger.Warn("summary judgment validation failed", "run_id", id, "attempt", attempt, "validation_reason", validation.Reason)
 			if attempt == 2 {
 				return e, scoreErr
 			}
+			if err = os.WriteFile(filepath.Join(dir, "judgments-attempt-1.json"), e.Judgments, 0600); err != nil {
+				return e, err
+			}
 			feedback, _ := json.Marshal(map[string]any{"previous_judgments": judgments, "validation_error": validation.Reason})
-			inputText += "\nJUDGMENT_REPAIR\n" + string(feedback)
+			inputText = originalInput + "\nJUDGMENT_REPAIR\n" + string(feedback)
 			continue
 		}
 		break
