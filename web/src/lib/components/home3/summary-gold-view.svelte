@@ -212,8 +212,9 @@
 	<title>{m.sgv_title()}</title>
 </svelte:head>
 
+<!-- Bound the PDF scroll pane to the content slot; min-height alone lets it grow to fit every page. -->
 <div
-	class="benchmark-page flex min-h-full min-w-0 flex-col select-text"
+	class="benchmark-page flex h-full min-h-0 min-w-0 flex-col overflow-hidden select-text"
 	style="--page-bg:{bg};--panel-bg:{panel};--panel-bg-alt:{panelAlt};--ink-line:{line};--ink-line-soft:{line};--text-primary:{text};--text-secondary:{muted};--text-muted:{muted};--brass:{brass};--brass-faint:color-mix(in srgb, {brass} 12%, transparent);--crimson:{red};--crimson-faint:color-mix(in srgb, {red} 14%, transparent);--teal:#5DAFA8;--font-serif:'Cormorant Garamond','Playfair Display',Georgia,serif;--font-mono:'JetBrains Mono','IBM Plex Mono',monospace;--font-sans:'Inter Tight',system-ui,sans-serif;"
 >
 	<header class="benchmark-header">
