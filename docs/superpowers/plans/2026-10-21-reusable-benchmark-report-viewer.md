@@ -20,16 +20,16 @@
 
 ### Task 1: Create the typed report frame
 
-- [ ] Define typed props: `run: { id: string; title: string; status: string; documentTitle: string; createdAt: string; subtitle?: string }`; `scoreCards: { label: string; value: string; detail?: string }[]`; `warnings: string[]`; optional `provenance: Snippet`; `evidenceActions?: { id: string; label: string; view(): void; download?(): void }[]`; `inputId: string | null`; and `reportBody: Snippet<[{ selectSource(lines: number[], tableReferences?: TableReference[]): void; selectedSourceLines: number[]; selectedTableReferences: TableReference[] }]>`. Import `Snippet` from `svelte` and `TableReference` from `./pdf-table-geometry`.
+- [ ] Define typed props: `run: { id: string | number; title: string; status: string; documentTitle: string; createdAt: string; subtitle?: string }`; `scoreCards: { label: string; value: string; detail?: string }[]`; `warnings: string[]`; optional `provenance: Snippet`; `evidenceActions?: { id: string; label: string; view(): void; download?(): void }[]`; `inputId: number | null`; and `reportBody: Snippet<[{ selectSource(lines: number[], tableReferences?: TableReference[]): void; selectedSourceLines: number[]; selectedTableReferences: TableReference[] }]>`. Import `Snippet` from `svelte` and `TableReference` from `./pdf-table-geometry`.
 - [ ] Render the shared run heading and status, document/timestamp metadata, optional subtitle, score cards, warnings/limitations, optional provenance snippet, and evidence controls in the report column. Move the Metrics report's common split-panel markup and resize behavior into the frame, retaining the same pointer and keyboard controls, responsive styles, and selectable text.
-- [ ] Render the existing `PdfViewWindow` in the source pane. Key/remount it by `run.id` and `inputId` so either identity change clears lines and table references and resets page/zoom to page 1/default.
+- [ ] Render the existing `PdfViewWindow` in the source pane using its numeric `inputId`, file URL, `renderHighlights`, and table-reference props. Wrap it in a Svelte `{#key}` keyed by `run.id` and `inputId` to remount on either identity change, and use a reactive identity-change effect to clear selected lines and table references. The remounted viewer starts at page 1/default zoom.
 - [ ] Implement `selectSource(lines, tableReferences?)` as replacement semantics: set lines and set table references to the supplied list or empty. Provide both selected values and the callback to the typed report body snippet.
-- [ ] Keep optional subtitle, provenance, and evidence controls absent when not supplied; show the existing PDF empty/error state for a null or unavailable source.
+- [ ] Keep optional subtitle, provenance, and evidence controls absent when not supplied. For `inputId === null`, show the existing localized no-source message (add a generic benchmark-viewer message in both Paraglide catalogs if there is no reusable key); for a non-null ID whose PDF request fails, rely on `PdfViewWindow`'s existing loading/error handling.
 
 ### Task 2: Migrate Metrics to the shared frame
 
 - [ ] Keep Metrics API calls, run selection, source-entry-to-line/table mapping, filters, and metric-specific details in `metric-score-view.svelte`.
-- [ ] Pass Metrics run metadata, score cards, warning/provenance content, evidence actions, input ID, and report-specific content to `BenchmarkReportViewer`.
+- [ ] Pass Metrics run metadata, score cards, warning/provenance content, evidence actions, input ID, and report-specific content to `BenchmarkReportViewer`. Preserve existing heading labels, metadata text and formatting; if the Metrics run lacks a title, document title, or timestamp, use the current localized record/date fallback instead of rendering blank metadata.
 - [ ] Route current metric source selection through the frame callback; preserve selected-row behavior and table-reference highlighting.
 - [ ] Remove only the common split/PDF/report-chrome code and styles made redundant by the migration.
 
