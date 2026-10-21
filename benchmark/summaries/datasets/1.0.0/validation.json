@@ -1,0 +1,940 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-10-21",
+  "dataset_sha256": "f63835ace60f55cc1c3f6e8749910b1ca06752dc1b32954f27a976af8af4c5f9",
+  "evaluator_sha256": "a6c4c22619dd94ffbb6992f802e6b6208bcc2b0e31e82567c139249652212f29",
+  "meaning": "Harness controls only; no candidate algorithm performance or human semantic evaluation.",
+  "automated_tests_passed": 26,
+  "cli_smoke_checks": [
+    "validate",
+    "baseline:lead",
+    "baseline:structural",
+    "baseline:gold-control",
+    "score:all-controls",
+    "inputs:no-gold",
+    "stress:10000-document",
+    "stress:10000-in-100-sentence-chunks"
+  ],
+  "controls": {
+    "lead": {
+      "overall": {
+        "case_count": 16,
+        "weighted_coverage": 0.35833333333333334,
+        "critical_recall": 0.30666666666666664,
+        "citation_validity": 1.0,
+        "accepted_rate": 0.1875
+      },
+      "groups": {
+        "stratum": {
+          "diagnostic": {
+            "case_count": 13,
+            "weighted_coverage": 0.39487179487179486,
+            "critical_recall": 0.3333333333333333,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.23076923076923078
+          },
+          "real-pilot": {
+            "case_count": 3,
+            "weighted_coverage": 0.19999999999999998,
+            "critical_recall": 0.19999999999999998,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          }
+        },
+        "language": {
+          "en": {
+            "case_count": 8,
+            "weighted_coverage": 0.30833333333333335,
+            "critical_recall": 0.1875,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.125
+          },
+          "mixed": {
+            "case_count": 1,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "zh-cn": {
+            "case_count": 7,
+            "weighted_coverage": 0.3952380952380952,
+            "critical_recall": 0.43333333333333335,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.2857142857142857
+          }
+        },
+        "tags": {
+          "condition": {
+            "case_count": 6,
+            "weighted_coverage": 0.2388888888888889,
+            "critical_recall": 0.18333333333333335,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "cross-line": {
+            "case_count": 2,
+            "weighted_coverage": 0.0,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "definition": {
+            "case_count": 2,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.5
+          },
+          "exception": {
+            "case_count": 4,
+            "weighted_coverage": 0.29166666666666663,
+            "critical_recall": 0.375,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.25
+          },
+          "long-input": {
+            "case_count": 1,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "near-duplicate": {
+            "case_count": 2,
+            "weighted_coverage": 0.4,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.5
+          },
+          "negation": {
+            "case_count": 3,
+            "weighted_coverage": 0.4444444444444444,
+            "critical_recall": 0.3333333333333333,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "non-normative": {
+            "case_count": 2,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.5
+          },
+          "numeric-limit": {
+            "case_count": 8,
+            "weighted_coverage": 0.30416666666666664,
+            "critical_recall": 0.2625,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "ocr": {
+            "case_count": 1,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "overview": {
+            "case_count": 5,
+            "weighted_coverage": 0.42666666666666664,
+            "critical_recall": 0.25,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.4
+          },
+          "parent-summary": {
+            "case_count": 1,
+            "weighted_coverage": 0.8,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "position-bias": {
+            "case_count": 1,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "short-line": {
+            "case_count": 3,
+            "weighted_coverage": 0.4777777777777778,
+            "critical_recall": 0.3666666666666667,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "table": {
+            "case_count": 2,
+            "weighted_coverage": 0.25,
+            "critical_recall": 0.25,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "uncertainty": {
+            "case_count": 1,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          }
+        }
+      },
+      "cases": [
+        {
+          "case_id": "en-rare-limit",
+          "weighted_coverage": 0.3333333333333333,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "limit"
+          ]
+        },
+        {
+          "case_id": "en-exception",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "limit-with-exception"
+          ]
+        },
+        {
+          "case_id": "zh-negation",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "bypass"
+          ]
+        },
+        {
+          "case_id": "en-table-footnote",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "transport"
+          ]
+        },
+        {
+          "case_id": "zh-definition-scope",
+          "weighted_coverage": 0.6666666666666666,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": [
+            "definition"
+          ]
+        },
+        {
+          "case_id": "en-near-duplicate",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "a",
+            "b"
+          ]
+        },
+        {
+          "case_id": "mixed-units",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "current"
+          ]
+        },
+        {
+          "case_id": "en-cross-line",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "storage"
+          ]
+        },
+        {
+          "case_id": "zh-ocr",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "duration"
+          ]
+        },
+        {
+          "case_id": "en-research-overview",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "limitation"
+          ]
+        },
+        {
+          "case_id": "zh-overview-no-mandates",
+          "weighted_coverage": 0.5,
+          "critical_recall": null,
+          "accepted": true,
+          "missing_units": [
+            "mechanism"
+          ]
+        },
+        {
+          "case_id": "en-parent-input",
+          "weighted_coverage": 0.8,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": [
+            "purpose"
+          ]
+        },
+        {
+          "case_id": "en-long-tail",
+          "weighted_coverage": 0.3333333333333333,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "shutdown"
+          ]
+        },
+        {
+          "case_id": "real-416-scope",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "scope",
+            "four-fixed",
+            "categories"
+          ]
+        },
+        {
+          "case_id": "real-416-collection",
+          "weighted_coverage": 0.6,
+          "critical_recall": 0.6,
+          "accepted": false,
+          "missing_units": [
+            "hazardous",
+            "vehicles"
+          ]
+        },
+        {
+          "case_id": "real-416-fertilizer",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "germination",
+            "organic",
+            "moisture",
+            "ph",
+            "arsenic",
+            "mercury",
+            "lead",
+            "cadmium",
+            "chromium"
+          ]
+        }
+      ]
+    },
+    "structural": {
+      "overall": {
+        "case_count": 16,
+        "weighted_coverage": 0.37083333333333335,
+        "critical_recall": 0.30666666666666664,
+        "citation_validity": 1.0,
+        "accepted_rate": 0.1875
+      },
+      "groups": {
+        "stratum": {
+          "diagnostic": {
+            "case_count": 13,
+            "weighted_coverage": 0.41025641025641024,
+            "critical_recall": 0.3333333333333333,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.23076923076923078
+          },
+          "real-pilot": {
+            "case_count": 3,
+            "weighted_coverage": 0.19999999999999998,
+            "critical_recall": 0.19999999999999998,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          }
+        },
+        "language": {
+          "en": {
+            "case_count": 8,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.1875,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.125
+          },
+          "mixed": {
+            "case_count": 1,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "zh-cn": {
+            "case_count": 7,
+            "weighted_coverage": 0.3952380952380952,
+            "critical_recall": 0.43333333333333335,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.2857142857142857
+          }
+        },
+        "tags": {
+          "condition": {
+            "case_count": 6,
+            "weighted_coverage": 0.2388888888888889,
+            "critical_recall": 0.18333333333333335,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "cross-line": {
+            "case_count": 2,
+            "weighted_coverage": 0.0,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "definition": {
+            "case_count": 2,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.5
+          },
+          "exception": {
+            "case_count": 4,
+            "weighted_coverage": 0.29166666666666663,
+            "critical_recall": 0.375,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.25
+          },
+          "long-input": {
+            "case_count": 1,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "near-duplicate": {
+            "case_count": 2,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.5
+          },
+          "negation": {
+            "case_count": 3,
+            "weighted_coverage": 0.4444444444444444,
+            "critical_recall": 0.3333333333333333,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "non-normative": {
+            "case_count": 2,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.5
+          },
+          "numeric-limit": {
+            "case_count": 8,
+            "weighted_coverage": 0.30416666666666664,
+            "critical_recall": 0.2625,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "ocr": {
+            "case_count": 1,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.5,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "overview": {
+            "case_count": 5,
+            "weighted_coverage": 0.4666666666666667,
+            "critical_recall": 0.25,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.4
+          },
+          "parent-summary": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "position-bias": {
+            "case_count": 1,
+            "weighted_coverage": 0.3333333333333333,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "short-line": {
+            "case_count": 3,
+            "weighted_coverage": 0.4777777777777778,
+            "critical_recall": 0.3666666666666667,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "table": {
+            "case_count": 2,
+            "weighted_coverage": 0.25,
+            "critical_recall": 0.25,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          },
+          "uncertainty": {
+            "case_count": 1,
+            "weighted_coverage": 0.5,
+            "critical_recall": 0.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 0.0
+          }
+        }
+      },
+      "cases": [
+        {
+          "case_id": "en-rare-limit",
+          "weighted_coverage": 0.3333333333333333,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "limit"
+          ]
+        },
+        {
+          "case_id": "en-exception",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "limit-with-exception"
+          ]
+        },
+        {
+          "case_id": "zh-negation",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "bypass"
+          ]
+        },
+        {
+          "case_id": "en-table-footnote",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "transport"
+          ]
+        },
+        {
+          "case_id": "zh-definition-scope",
+          "weighted_coverage": 0.6666666666666666,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": [
+            "definition"
+          ]
+        },
+        {
+          "case_id": "en-near-duplicate",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "a",
+            "b"
+          ]
+        },
+        {
+          "case_id": "mixed-units",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "current"
+          ]
+        },
+        {
+          "case_id": "en-cross-line",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "storage"
+          ]
+        },
+        {
+          "case_id": "zh-ocr",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.5,
+          "accepted": false,
+          "missing_units": [
+            "duration"
+          ]
+        },
+        {
+          "case_id": "en-research-overview",
+          "weighted_coverage": 0.5,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "limitation"
+          ]
+        },
+        {
+          "case_id": "zh-overview-no-mandates",
+          "weighted_coverage": 0.5,
+          "critical_recall": null,
+          "accepted": true,
+          "missing_units": [
+            "mechanism"
+          ]
+        },
+        {
+          "case_id": "en-parent-input",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-long-tail",
+          "weighted_coverage": 0.3333333333333333,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "shutdown"
+          ]
+        },
+        {
+          "case_id": "real-416-scope",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "scope",
+            "four-fixed",
+            "categories"
+          ]
+        },
+        {
+          "case_id": "real-416-collection",
+          "weighted_coverage": 0.6,
+          "critical_recall": 0.6,
+          "accepted": false,
+          "missing_units": [
+            "hazardous",
+            "vehicles"
+          ]
+        },
+        {
+          "case_id": "real-416-fertilizer",
+          "weighted_coverage": 0.0,
+          "critical_recall": 0.0,
+          "accepted": false,
+          "missing_units": [
+            "germination",
+            "organic",
+            "moisture",
+            "ph",
+            "arsenic",
+            "mercury",
+            "lead",
+            "cadmium",
+            "chromium"
+          ]
+        }
+      ]
+    },
+    "gold-control": {
+      "overall": {
+        "case_count": 16,
+        "weighted_coverage": 1.0,
+        "critical_recall": 1.0,
+        "citation_validity": 1.0,
+        "accepted_rate": 1.0
+      },
+      "groups": {
+        "stratum": {
+          "diagnostic": {
+            "case_count": 13,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "real-pilot": {
+            "case_count": 3,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          }
+        },
+        "language": {
+          "en": {
+            "case_count": 8,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "mixed": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "zh-cn": {
+            "case_count": 7,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          }
+        },
+        "tags": {
+          "condition": {
+            "case_count": 6,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "cross-line": {
+            "case_count": 2,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "definition": {
+            "case_count": 2,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "exception": {
+            "case_count": 4,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "long-input": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "near-duplicate": {
+            "case_count": 2,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "negation": {
+            "case_count": 3,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "non-normative": {
+            "case_count": 2,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "numeric-limit": {
+            "case_count": 8,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "ocr": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "overview": {
+            "case_count": 5,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "parent-summary": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "position-bias": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "short-line": {
+            "case_count": 3,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "table": {
+            "case_count": 2,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          },
+          "uncertainty": {
+            "case_count": 1,
+            "weighted_coverage": 1.0,
+            "critical_recall": 1.0,
+            "citation_validity": 1.0,
+            "accepted_rate": 1.0
+          }
+        }
+      },
+      "cases": [
+        {
+          "case_id": "en-rare-limit",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-exception",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "zh-negation",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-table-footnote",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "zh-definition-scope",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-near-duplicate",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "mixed-units",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-cross-line",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "zh-ocr",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-research-overview",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "zh-overview-no-mandates",
+          "weighted_coverage": 1.0,
+          "critical_recall": null,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-parent-input",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "en-long-tail",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "real-416-scope",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "real-416-collection",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        },
+        {
+          "case_id": "real-416-fertilizer",
+          "weighted_coverage": 1.0,
+          "critical_recall": 1.0,
+          "accepted": true,
+          "missing_units": []
+        }
+      ]
+    }
+  }
+}

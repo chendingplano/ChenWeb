@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset_sha256": null,
+  "case_id": null,
+  "anonymous_output_id": null,
+  "reviewer_id": null,
+  "reviewed_at": null,
+  "output_text": null,
+  "within_budget": null,
+  "units": [
+    {"unit_id": null, "status": null, "output_evidence": null, "rationale": null}
+  ],
+  "unsupported_claims": [],
+  "contradicted_claims": [],
+  "contextual_integrity_0_to_2": null,
+  "readability_0_to_3": null,
+  "review_status": "unscored",
+  "adjudication": null
+}

@@ -1,0 +1,2573 @@
+{
+  "schema_version": 1,
+  "dataset_id": "semos-summary-evidence",
+  "version": "1.0.0",
+  "created_on": "2026-10-21",
+  "annotation_status": "independent-agent-audited; not human-certified",
+  "budget_unit": "non-whitespace Unicode code points",
+  "cases": [
+    {
+      "id": "en-rare-limit",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "numeric-limit",
+        "short-line",
+        "overview"
+      ],
+      "budget_chars": 110,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Equipment storage"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "The equipment family supports routine storage and transport workflows."
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "Storage workflows are described throughout the equipment handbook."
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "Storage temperature shall not exceed 8°C."
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "A red label marks units requiring inspection."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "The handbook contains several illustrations of storage workflows."
+        }
+      ],
+      "units": [
+        {
+          "id": "topic",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "Identify the equipment storage topic.",
+          "evidence": [
+            [
+              {
+                "line": 2,
+                "start": 0,
+                "end": 70
+              }
+            ]
+          ]
+        },
+        {
+          "id": "limit",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "The rare numeric prohibition must survive repeated general background.",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 41
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-exception",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "exception",
+        "condition"
+      ],
+      "budget_chars": 110,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Pressure control"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "The pressure-control subsystem provides stable operation."
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "During normal operation, pressure shall remain below 20 kPa."
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "This limit does not apply during the sealed proof test."
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "Operators may consult the illustrated maintenance guide."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "The subsystem has replaceable handles and a painted housing."
+        }
+      ],
+      "units": [
+        {
+          "id": "limit-with-exception",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "The limit is misleading without its operating scope and proof-test exception.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 60
+              },
+              {
+                "line": 4,
+                "start": 0,
+                "end": 55
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zh-negation",
+      "language": "zh-cn",
+      "stratum": "diagnostic",
+      "tags": [
+        "negation",
+        "short-line"
+      ],
+      "budget_chars": 42,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "安全联锁"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "设备采用模块化结构，便于安装与维护。"
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "防护门打开时，不得启动电机。"
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "不得通过短接传感器绕过安全联锁。"
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "指示灯可显示设备当前状态。"
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "设备外壳颜色由制造商自行选择。"
+        }
+      ],
+      "units": [
+        {
+          "id": "door",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "保留条件及禁止启动的否定表述。",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 14
+              }
+            ]
+          ]
+        },
+        {
+          "id": "bypass",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "禁止绕过联锁属于独立要求。",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 16
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-table-footnote",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "table",
+        "exception",
+        "numeric-limit"
+      ],
+      "budget_chars": 110,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Thermal qualification"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "The fixture accepts both operating modes."
+        },
+        {
+          "id": 3,
+          "kind": "table",
+          "text": "Mode | Maximum temperature (°C)"
+        },
+        {
+          "id": 4,
+          "kind": "table",
+          "text": "Continuous | 8"
+        },
+        {
+          "id": 5,
+          "kind": "table",
+          "text": "Transport | 12*"
+        },
+        {
+          "id": 6,
+          "kind": "footnote",
+          "text": "* Transport exposure shall not exceed 2 h."
+        },
+        {
+          "id": 7,
+          "kind": "paragraph",
+          "text": "Table values were selected for this fictional example."
+        },
+        {
+          "id": 8,
+          "kind": "paragraph",
+          "text": "The fixture has four adjustable feet and two handles."
+        }
+      ],
+      "units": [
+        {
+          "id": "continuous",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "Column heading binds 8 to its maximum and unit.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 31
+              },
+              {
+                "line": 4,
+                "start": 0,
+                "end": 14
+              }
+            ]
+          ]
+        },
+        {
+          "id": "transport",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "The 12°C value applies only to transport and needs the 2 h footnote.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 31
+              },
+              {
+                "line": 5,
+                "start": 0,
+                "end": 15
+              },
+              {
+                "line": 6,
+                "start": 0,
+                "end": 42
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zh-definition-scope",
+      "language": "zh-cn",
+      "stratum": "diagnostic",
+      "tags": [
+        "definition",
+        "exception"
+      ],
+      "budget_chars": 62,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "术语和范围"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "本文件用于教学中的虚构分类流程。"
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "本文件适用于居民生活垃圾分类，不适用于工业危险废物。"
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "“可回收物”指可循环使用或再生利用的废弃物品。"
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "图例采用蓝色、绿色和灰色。"
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "背景材料介绍了分类流程的发展历史。"
+        }
+      ],
+      "units": [
+        {
+          "id": "scope",
+          "kind": "scope",
+          "critical": true,
+          "weight": 2,
+          "rationale": "适用对象和排除对象不可拆开。",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 26
+              }
+            ]
+          ]
+        },
+        {
+          "id": "definition",
+          "kind": "definition",
+          "critical": false,
+          "weight": 1,
+          "rationale": "定义属于重要信息，但不将其误标为强制条款。",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 23
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-near-duplicate",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "near-duplicate",
+        "numeric-limit"
+      ],
+      "budget_chars": 64,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Independent alarm channels"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "Both channels use the same alarm housing."
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "Channel A shall trigger at 8 kPa."
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "Channel B shall trigger at 12 kPa."
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "Both channels use the same indicator shape."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "A common bracket supports the two alarm channels."
+        }
+      ],
+      "units": [
+        {
+          "id": "a",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "Channel identity and 8 kPa are one fact.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 33
+              }
+            ]
+          ]
+        },
+        {
+          "id": "b",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "Similarity-based deduplication must not remove the different B threshold.",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 34
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mixed-units",
+      "language": "mixed",
+      "stratum": "diagnostic",
+      "tags": [
+        "numeric-limit",
+        "condition",
+        "negation"
+      ],
+      "budget_chars": 85,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "充电条件 / Charging conditions"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "本例描述一套虚构的充电设备。"
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "Only in charging mode, input voltage shall be 24 V ± 1 V."
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "充电电流不得超过 2 A；待机模式不适用此限值。"
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "The enclosure has a label with two languages."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "说明书中的照片仅用于展示设备外观。"
+        }
+      ],
+      "units": [
+        {
+          "id": "voltage",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "Retain mode, tolerance and voltage unit.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 57
+              }
+            ]
+          ]
+        },
+        {
+          "id": "current",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "保留电流上限及待机例外。",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 24
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-cross-line",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "cross-line",
+        "condition",
+        "numeric-limit"
+      ],
+      "budget_chars": 105,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Delayed analysis"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "Samples may be stored before analysis."
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "If analysis cannot begin immediately, the extract shall be stored"
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "at 0°C to 4°C for no longer than 48 h."
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "The container is reusable and has a screw cap."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "Illustrations show three alternative container shapes."
+        }
+      ],
+      "units": [
+        {
+          "id": "storage",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "A line boundary must not separate the condition from temperature and duration.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 65
+              },
+              {
+                "line": 4,
+                "start": 0,
+                "end": 38
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zh-ocr",
+      "language": "zh-cn",
+      "stratum": "diagnostic",
+      "tags": [
+        "ocr",
+        "numeric-limit"
+      ],
+      "budget_chars": 76,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "试验条件（OCR样本）"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "下列文本保留模拟OCR产生的字符。"
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "试验温度应为 2O ℃。"
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "[校核注] 数字“2O”中的末位为字母O，原文待人工核实。"
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "试验持续时间应为 30 min。"
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "试验装置可安装在水平工作台上。"
+        }
+      ],
+      "units": [
+        {
+          "id": "ambiguous",
+          "kind": "uncertainty",
+          "critical": true,
+          "weight": 2,
+          "rationale": "不得默默将OCR歧义改写为已经核实的20℃。",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 12
+              },
+              {
+                "line": 4,
+                "start": 0,
+                "end": 29
+              }
+            ]
+          ]
+        },
+        {
+          "id": "duration",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "时长可独立提取。",
+          "evidence": [
+            [
+              {
+                "line": 5,
+                "start": 0,
+                "end": 16
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-research-overview",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "overview",
+        "uncertainty",
+        "non-normative"
+      ],
+      "budget_chars": 180,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Fictional pilot study"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "This pilot tested whether a revised index reduced lookup time."
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "In a sample of 12 records, median lookup time fell from 10 ms to 8 ms."
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "The sample was not randomized, so the result does not establish causation."
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "The team used a blue terminal theme during the pilot."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "The appendix lists the workstation inventory and monitor sizes."
+        }
+      ],
+      "units": [
+        {
+          "id": "purpose",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "A summary should identify the research question.",
+          "evidence": [
+            [
+              {
+                "line": 2,
+                "start": 0,
+                "end": 62
+              }
+            ]
+          ]
+        },
+        {
+          "id": "result",
+          "kind": "result",
+          "critical": false,
+          "weight": 1,
+          "rationale": "Retain sample size and observed result.",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 70
+              }
+            ]
+          ]
+        },
+        {
+          "id": "limitation",
+          "kind": "uncertainty",
+          "critical": true,
+          "weight": 2,
+          "rationale": "The limitation prevents converting an observation into a causal claim.",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 74
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zh-overview-no-mandates",
+      "language": "zh-cn",
+      "stratum": "diagnostic",
+      "tags": [
+        "overview",
+        "non-normative"
+      ],
+      "budget_chars": 50,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "虚构档案检索方案"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "本方案通过主题索引和日期筛选帮助用户定位档案。"
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "主题索引按项目组织，日期筛选用于缩小查询范围。"
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "界面示例使用灰色按钮和圆角边框。"
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "附录展示了多种窗口尺寸下的布局截图。"
+        }
+      ],
+      "units": [
+        {
+          "id": "purpose",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "没有强制词时仍应识别核心用途。",
+          "evidence": [
+            [
+              {
+                "line": 2,
+                "start": 0,
+                "end": 23
+              }
+            ]
+          ]
+        },
+        {
+          "id": "mechanism",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "同时保留主题和日期的作用。",
+          "evidence": [
+            [
+              {
+                "line": 3,
+                "start": 0,
+                "end": 23
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-parent-input",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "parent-summary",
+        "overview",
+        "near-duplicate"
+      ],
+      "budget_chars": 150,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Child extract 1"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "Pump A shall stop when inlet pressure falls below 8 kPa."
+        },
+        {
+          "id": 3,
+          "kind": "heading",
+          "text": "Child extract 2"
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "Pump B shall stop when inlet pressure falls below 12 kPa."
+        },
+        {
+          "id": 5,
+          "kind": "heading",
+          "text": "Child extract 3"
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "The pumping station supports two independent supply circuits."
+        },
+        {
+          "id": 7,
+          "kind": "paragraph",
+          "text": "Both pumps have identical grey protective covers."
+        },
+        {
+          "id": 8,
+          "kind": "paragraph",
+          "text": "The child extracts were prepared for a fictional demonstration."
+        }
+      ],
+      "units": [
+        {
+          "id": "a",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "A parent summary must not collapse different pump thresholds.",
+          "evidence": [
+            [
+              {
+                "line": 2,
+                "start": 0,
+                "end": 56
+              }
+            ]
+          ]
+        },
+        {
+          "id": "b",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "The second child has a distinct limit.",
+          "evidence": [
+            [
+              {
+                "line": 4,
+                "start": 0,
+                "end": 57
+              }
+            ]
+          ]
+        },
+        {
+          "id": "purpose",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "The station purpose provides parent-level context.",
+          "evidence": [
+            [
+              {
+                "line": 6,
+                "start": 0,
+                "end": 61
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "en-long-tail",
+      "language": "en",
+      "stratum": "diagnostic",
+      "tags": [
+        "long-input",
+        "position-bias",
+        "condition",
+        "negation"
+      ],
+      "budget_chars": 180,
+      "source": {
+        "kind": "synthetic",
+        "description": "Hand-authored diagnostic fiction; no real-world requirement is asserted."
+      },
+      "lines": [
+        {
+          "id": 1,
+          "kind": "heading",
+          "text": "Long maintenance bulletin"
+        },
+        {
+          "id": 2,
+          "kind": "paragraph",
+          "text": "This bulletin specifies inspection and shutdown requirements."
+        },
+        {
+          "id": 3,
+          "kind": "paragraph",
+          "text": "Background note 001: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 4,
+          "kind": "paragraph",
+          "text": "Background note 002: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 5,
+          "kind": "paragraph",
+          "text": "Background note 003: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 6,
+          "kind": "paragraph",
+          "text": "Background note 004: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 7,
+          "kind": "paragraph",
+          "text": "Background note 005: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 8,
+          "kind": "paragraph",
+          "text": "Background note 006: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 9,
+          "kind": "paragraph",
+          "text": "Background note 007: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 10,
+          "kind": "paragraph",
+          "text": "Background note 008: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 11,
+          "kind": "paragraph",
+          "text": "Background note 009: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 12,
+          "kind": "paragraph",
+          "text": "Background note 010: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 13,
+          "kind": "paragraph",
+          "text": "Background note 011: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 14,
+          "kind": "paragraph",
+          "text": "Background note 012: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 15,
+          "kind": "paragraph",
+          "text": "Background note 013: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 16,
+          "kind": "paragraph",
+          "text": "Background note 014: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 17,
+          "kind": "paragraph",
+          "text": "Background note 015: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 18,
+          "kind": "paragraph",
+          "text": "Background note 016: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 19,
+          "kind": "paragraph",
+          "text": "Background note 017: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 20,
+          "kind": "paragraph",
+          "text": "Background note 018: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 21,
+          "kind": "paragraph",
+          "text": "Background note 019: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 22,
+          "kind": "paragraph",
+          "text": "Background note 020: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 23,
+          "kind": "paragraph",
+          "text": "Background note 021: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 24,
+          "kind": "paragraph",
+          "text": "Background note 022: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 25,
+          "kind": "paragraph",
+          "text": "Background note 023: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 26,
+          "kind": "paragraph",
+          "text": "Background note 024: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 27,
+          "kind": "paragraph",
+          "text": "Background note 025: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 28,
+          "kind": "paragraph",
+          "text": "Background note 026: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 29,
+          "kind": "paragraph",
+          "text": "Background note 027: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 30,
+          "kind": "paragraph",
+          "text": "Background note 028: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 31,
+          "kind": "paragraph",
+          "text": "Background note 029: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 32,
+          "kind": "paragraph",
+          "text": "Background note 030: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 33,
+          "kind": "paragraph",
+          "text": "Background note 031: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 34,
+          "kind": "paragraph",
+          "text": "Background note 032: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 35,
+          "kind": "paragraph",
+          "text": "Background note 033: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 36,
+          "kind": "paragraph",
+          "text": "Background note 034: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 37,
+          "kind": "paragraph",
+          "text": "Background note 035: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 38,
+          "kind": "paragraph",
+          "text": "Background note 036: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 39,
+          "kind": "paragraph",
+          "text": "Background note 037: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 40,
+          "kind": "paragraph",
+          "text": "Background note 038: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 41,
+          "kind": "paragraph",
+          "text": "Background note 039: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 42,
+          "kind": "paragraph",
+          "text": "Background note 040: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 43,
+          "kind": "paragraph",
+          "text": "Background note 041: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 44,
+          "kind": "paragraph",
+          "text": "Background note 042: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 45,
+          "kind": "paragraph",
+          "text": "Background note 043: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 46,
+          "kind": "paragraph",
+          "text": "Background note 044: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 47,
+          "kind": "paragraph",
+          "text": "Background note 045: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 48,
+          "kind": "paragraph",
+          "text": "Background note 046: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 49,
+          "kind": "paragraph",
+          "text": "Background note 047: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 50,
+          "kind": "paragraph",
+          "text": "Background note 048: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 51,
+          "kind": "paragraph",
+          "text": "Background note 049: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 52,
+          "kind": "paragraph",
+          "text": "Background note 050: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 53,
+          "kind": "paragraph",
+          "text": "Background note 051: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 54,
+          "kind": "paragraph",
+          "text": "Background note 052: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 55,
+          "kind": "paragraph",
+          "text": "Background note 053: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 56,
+          "kind": "paragraph",
+          "text": "Background note 054: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 57,
+          "kind": "paragraph",
+          "text": "Background note 055: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 58,
+          "kind": "paragraph",
+          "text": "Background note 056: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 59,
+          "kind": "paragraph",
+          "text": "Background note 057: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 60,
+          "kind": "paragraph",
+          "text": "Background note 058: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 61,
+          "kind": "paragraph",
+          "text": "Background note 059: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 62,
+          "kind": "paragraph",
+          "text": "Background note 060: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 63,
+          "kind": "paragraph",
+          "text": "Background note 061: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 64,
+          "kind": "paragraph",
+          "text": "Background note 062: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 65,
+          "kind": "paragraph",
+          "text": "Background note 063: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 66,
+          "kind": "paragraph",
+          "text": "Background note 064: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 67,
+          "kind": "paragraph",
+          "text": "Background note 065: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 68,
+          "kind": "paragraph",
+          "text": "Background note 066: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 69,
+          "kind": "paragraph",
+          "text": "Background note 067: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 70,
+          "kind": "paragraph",
+          "text": "Background note 068: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 71,
+          "kind": "paragraph",
+          "text": "Background note 069: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 72,
+          "kind": "paragraph",
+          "text": "Background note 070: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 73,
+          "kind": "paragraph",
+          "text": "Background note 071: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 74,
+          "kind": "paragraph",
+          "text": "Background note 072: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 75,
+          "kind": "paragraph",
+          "text": "Background note 073: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 76,
+          "kind": "paragraph",
+          "text": "Background note 074: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 77,
+          "kind": "paragraph",
+          "text": "Background note 075: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 78,
+          "kind": "paragraph",
+          "text": "Background note 076: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 79,
+          "kind": "paragraph",
+          "text": "Background note 077: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 80,
+          "kind": "paragraph",
+          "text": "Background note 078: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 81,
+          "kind": "paragraph",
+          "text": "Background note 079: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 82,
+          "kind": "paragraph",
+          "text": "Background note 080: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 83,
+          "kind": "paragraph",
+          "text": "Background note 081: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 84,
+          "kind": "paragraph",
+          "text": "Background note 082: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 85,
+          "kind": "paragraph",
+          "text": "Background note 083: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 86,
+          "kind": "paragraph",
+          "text": "Background note 084: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 87,
+          "kind": "paragraph",
+          "text": "Background note 085: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 88,
+          "kind": "paragraph",
+          "text": "Background note 086: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 89,
+          "kind": "paragraph",
+          "text": "Background note 087: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 90,
+          "kind": "paragraph",
+          "text": "Background note 088: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 91,
+          "kind": "paragraph",
+          "text": "Background note 089: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 92,
+          "kind": "paragraph",
+          "text": "Background note 090: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 93,
+          "kind": "paragraph",
+          "text": "Background note 091: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 94,
+          "kind": "paragraph",
+          "text": "Background note 092: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 95,
+          "kind": "paragraph",
+          "text": "Background note 093: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 96,
+          "kind": "paragraph",
+          "text": "Background note 094: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 97,
+          "kind": "paragraph",
+          "text": "Background note 095: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 98,
+          "kind": "paragraph",
+          "text": "Background note 096: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 99,
+          "kind": "paragraph",
+          "text": "Background note 097: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 100,
+          "kind": "paragraph",
+          "text": "Background note 098: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 101,
+          "kind": "paragraph",
+          "text": "Background note 099: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 102,
+          "kind": "paragraph",
+          "text": "Background note 100: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 103,
+          "kind": "paragraph",
+          "text": "Background note 101: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 104,
+          "kind": "paragraph",
+          "text": "Background note 102: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 105,
+          "kind": "paragraph",
+          "text": "Background note 103: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 106,
+          "kind": "paragraph",
+          "text": "Background note 104: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 107,
+          "kind": "paragraph",
+          "text": "Background note 105: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 108,
+          "kind": "paragraph",
+          "text": "Background note 106: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 109,
+          "kind": "paragraph",
+          "text": "Background note 107: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 110,
+          "kind": "paragraph",
+          "text": "Background note 108: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 111,
+          "kind": "paragraph",
+          "text": "Background note 109: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 112,
+          "kind": "paragraph",
+          "text": "Background note 110: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 113,
+          "kind": "paragraph",
+          "text": "Background note 111: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 114,
+          "kind": "paragraph",
+          "text": "Background note 112: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 115,
+          "kind": "paragraph",
+          "text": "Background note 113: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 116,
+          "kind": "paragraph",
+          "text": "Background note 114: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 117,
+          "kind": "paragraph",
+          "text": "Background note 115: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 118,
+          "kind": "paragraph",
+          "text": "Background note 116: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 119,
+          "kind": "paragraph",
+          "text": "Background note 117: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 120,
+          "kind": "paragraph",
+          "text": "Background note 118: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 121,
+          "kind": "paragraph",
+          "text": "Background note 119: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 122,
+          "kind": "paragraph",
+          "text": "Background note 120: the inspection program documents routine observations and equipment appearance."
+        },
+        {
+          "id": 123,
+          "kind": "paragraph",
+          "text": "If coolant leakage is detected, the unit shall be shut down immediately."
+        },
+        {
+          "id": 124,
+          "kind": "paragraph",
+          "text": "Restart is prohibited until the leaking seal has been replaced."
+        }
+      ],
+      "units": [
+        {
+          "id": "purpose",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "Retain the bulletin purpose.",
+          "evidence": [
+            [
+              {
+                "line": 2,
+                "start": 0,
+                "end": 61
+              }
+            ]
+          ]
+        },
+        {
+          "id": "shutdown",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "The last two lines contain the action and restart condition.",
+          "evidence": [
+            [
+              {
+                "line": 123,
+                "start": 0,
+                "end": 72
+              },
+              {
+                "line": 124,
+                "start": 0,
+                "end": 63
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "real-416-scope",
+      "language": "zh-cn",
+      "stratum": "real-pilot",
+      "tags": [
+        "definition",
+        "exception",
+        "cross-line",
+        "overview"
+      ],
+      "budget_chars": 240,
+      "source": {
+        "kind": "canonical-excerpt",
+        "description": "DB33/T 2030—2018 农村生活垃圾分类处理规范; existing MinerU canonical extract, not checked against page images in this benchmark. No claim of current legal applicability.",
+        "record_id": 416,
+        "snapshot": "sources/record-416.lines.txt",
+        "snapshot_sha256": "5acb3df6b320fdd4d3e293cc8170e4b68511ee274b2ee3f930268b1a4a590fcd",
+        "original_path": "KnowledgeStore/TestData/extract-metrics-benchmark/416/20261007_122930/canonical-source.txt",
+        "original_line_range": [
+          16,
+          55
+        ],
+        "group_id": "record-416",
+        "selection": "Purposive pilot excerpt; not a blind holdout."
+      },
+      "lines": [
+        {
+          "id": 16,
+          "kind": "heading",
+          "text": "农村生活垃圾分类处理规范"
+        },
+        {
+          "id": 17,
+          "kind": "heading",
+          "text": "1 范围"
+        },
+        {
+          "id": 18,
+          "kind": "paragraph",
+          "text": "本标准规定了农村生活垃圾的术语和定义，分类类别，以及分类投放、分类收集、分类运输、分类处理、长效管理等内容。"
+        },
+        {
+          "id": 19,
+          "kind": "paragraph",
+          "text": "本标准适用于农村生活垃圾分类处理。"
+        },
+        {
+          "id": 20,
+          "kind": "heading",
+          "text": "2 规范性引用文件"
+        },
+        {
+          "id": 21,
+          "kind": "paragraph",
+          "text": "下列文件对于本文件的应用是必不可少的。凡是注日期的引用文件，仅所注日期的版本适用于本文件。凡是不注日期的引用文件，其最新版本（包括所有的修改单）适用于本文件。"
+        },
+        {
+          "id": 22,
+          "kind": "paragraph",
+          "text": "GB 14554 恶臭污染物排放标准"
+        },
+        {
+          "id": 23,
+          "kind": "paragraph",
+          "text": "GB 16889 生活垃圾填埋场污染控制标准"
+        },
+        {
+          "id": 24,
+          "kind": "paragraph",
+          "text": "GB 18485 生活垃圾焚烧污染控制标准"
+        },
+        {
+          "id": 25,
+          "kind": "paragraph",
+          "text": "GB/T 19095 生活垃圾分类标志"
+        },
+        {
+          "id": 26,
+          "kind": "paragraph",
+          "text": "GB/T 31962 污水排入城镇下水道水质标准"
+        },
+        {
+          "id": 27,
+          "kind": "paragraph",
+          "text": "GB 50869 生活垃圾卫生填埋处理技术规范"
+        },
+        {
+          "id": 28,
+          "kind": "paragraph",
+          "text": "CJJ 27 环境卫生设施设置标准"
+        },
+        {
+          "id": 29,
+          "kind": "paragraph",
+          "text": "CJJ 52 生活垃圾堆肥处理技术规范"
+        },
+        {
+          "id": 30,
+          "kind": "paragraph",
+          "text": "CJJ 90 生活垃圾焚烧处理工程技术规范"
+        },
+        {
+          "id": 31,
+          "kind": "paragraph",
+          "text": "CJJ 184 餐厨垃圾处理技术规范"
+        },
+        {
+          "id": 32,
+          "kind": "paragraph",
+          "text": "NY/T 90 农村户用沼气发酵工艺规程"
+        },
+        {
+          "id": 33,
+          "kind": "paragraph",
+          "text": "NY 884 生物有机肥"
+        },
+        {
+          "id": 34,
+          "kind": "paragraph",
+          "text": "NY 1109 微生物肥料生物安全通用技术准则"
+        },
+        {
+          "id": 35,
+          "kind": "paragraph",
+          "text": "NY/T 2371 农村沼气集中供气工程技术规范"
+        },
+        {
+          "id": 36,
+          "kind": "heading",
+          "text": "3 术语和定义"
+        },
+        {
+          "id": 37,
+          "kind": "paragraph",
+          "text": "下列术语和定义适用于本文件。"
+        },
+        {
+          "id": 38,
+          "kind": "heading",
+          "text": "3.1"
+        },
+        {
+          "id": 39,
+          "kind": "heading",
+          "text": "农村生活垃圾"
+        },
+        {
+          "id": 40,
+          "kind": "paragraph",
+          "text": "农村日常生活、农户家庭生活及生活性服务业产生的固体废弃物，不包括农村的工业垃圾、建筑垃圾、医疗垃圾、农业生产产生的废弃物、畜禽和宠物的尸体。"
+        },
+        {
+          "id": 41,
+          "kind": "heading",
+          "text": "3.2"
+        },
+        {
+          "id": 42,
+          "kind": "heading",
+          "text": "四分四定"
+        },
+        {
+          "id": 43,
+          "kind": "paragraph",
+          "text": "分类投放要定时、分类收集要定人、分类运输要定车、分类处理要定位的农村生活垃圾处置要求。"
+        },
+        {
+          "id": 44,
+          "kind": "heading",
+          "text": "4 基本要求"
+        },
+        {
+          "id": 45,
+          "kind": "list-item",
+          "text": "4.1 以减量化、资源化、无害化为目标，因地制宜、源头减量、综合利用、科学治理。"
+        },
+        {
+          "id": 46,
+          "kind": "list-item",
+          "text": "4.2 以农村生活垃圾 “四分四定”为原则，做到应收尽收，应分尽分，日产日清。"
+        },
+        {
+          "id": 47,
+          "kind": "list-item",
+          "text": "4.3 以农民可接受、操作较容易、设施设备全、环境效益好为导向，实施长效管理。"
+        },
+        {
+          "id": 48,
+          "kind": "heading",
+          "text": "5 设施配套要求"
+        },
+        {
+          "id": 49,
+          "kind": "list-item",
+          "text": "5.1 农村生活垃圾分类投放、分类收集、分类运输和分类处理设施的布局、规模和用地指标应纳入县（市、区）相关规划。"
+        },
+        {
+          "id": 50,
+          "kind": "list-item",
+          "text": "5.2 乡镇（街道）应科学配置垃圾转运站或垃圾处理终端设施，配备密闭的垃圾转运车辆；建制村应合理配备分类垃圾桶、分类垃圾箱和分类垃圾收运车。也可通过政府购买服务的方式配置垃圾收集、转运和处理设施。"
+        },
+        {
+          "id": 51,
+          "kind": "list-item",
+          "text": "5.3 村庄内的车站、公园、商店等公共场所以及文体活动设施场所的经营、管理单位，应按照 CJJ 27的要求配置生活垃圾分类收集设施。"
+        },
+        {
+          "id": 52,
+          "kind": "list-item",
+          "text": "5.4 农村新居建设及新建、改建、扩建工程项目，应按照 CJJ 27和 GB 16889的要求配置生活垃圾分类投放、分类收集、分类运输、分类处理设施。"
+        },
+        {
+          "id": 53,
+          "kind": "heading",
+          "text": "6 分类"
+        },
+        {
+          "id": 54,
+          "kind": "heading",
+          "text": "6.1 分类类别"
+        },
+        {
+          "id": 55,
+          "kind": "paragraph",
+          "text": "农村生活垃圾分为易腐垃圾、可回收物、有害垃圾和其他垃圾四大类，分类标志见附录A。"
+        }
+      ],
+      "units": [
+        {
+          "id": "scope",
+          "kind": "scope",
+          "critical": true,
+          "weight": 2,
+          "rationale": "生活垃圾的适用范围必须包含明确的排除对象。",
+          "evidence": [
+            [
+              {
+                "line": 19,
+                "start": 0,
+                "end": 17
+              },
+              {
+                "line": 39,
+                "start": 0,
+                "end": 6
+              },
+              {
+                "line": 40,
+                "start": 0,
+                "end": 70
+              }
+            ]
+          ]
+        },
+        {
+          "id": "four-fixed",
+          "kind": "definition",
+          "critical": false,
+          "weight": 1,
+          "rationale": "术语名称和跨页定义共同构成证据。",
+          "evidence": [
+            [
+              {
+                "line": 42,
+                "start": 0,
+                "end": 4
+              },
+              {
+                "line": 43,
+                "start": 0,
+                "end": 43
+              }
+            ]
+          ]
+        },
+        {
+          "id": "categories",
+          "kind": "overview",
+          "critical": false,
+          "weight": 1,
+          "rationale": "四种垃圾类别是本节核心信息。",
+          "evidence": [
+            [
+              {
+                "line": 55,
+                "start": 0,
+                "end": 40
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "real-416-collection",
+      "language": "zh-cn",
+      "stratum": "real-pilot",
+      "tags": [
+        "short-line",
+        "numeric-limit",
+        "condition"
+      ],
+      "budget_chars": 330,
+      "source": {
+        "kind": "canonical-excerpt",
+        "description": "DB33/T 2030—2018 农村生活垃圾分类处理规范; existing MinerU canonical extract, not checked against page images in this benchmark. No claim of current legal applicability.",
+        "record_id": 416,
+        "snapshot": "sources/record-416.lines.txt",
+        "snapshot_sha256": "5acb3df6b320fdd4d3e293cc8170e4b68511ee274b2ee3f930268b1a4a590fcd",
+        "original_path": "KnowledgeStore/TestData/extract-metrics-benchmark/416/20261007_122930/canonical-source.txt",
+        "original_line_range": [
+          87,
+          110
+        ],
+        "group_id": "record-416",
+        "selection": "Purposive pilot excerpt; not a blind holdout."
+      },
+      "lines": [
+        {
+          "id": 87,
+          "kind": "heading",
+          "text": "7 分类投放"
+        },
+        {
+          "id": 88,
+          "kind": "heading",
+          "text": "7.1 投放要求"
+        },
+        {
+          "id": 89,
+          "kind": "list-item",
+          "text": "7.1.1 垃圾分类收集容器应有盖，应在显著位置印制垃圾分类标志。"
+        },
+        {
+          "id": 90,
+          "kind": "list-item",
+          "text": "7.1.2 每户应至少配备易腐垃圾及其他垃圾 2 个(一组)分类垃圾容器并分类投放。"
+        },
+        {
+          "id": 91,
+          "kind": "list-item",
+          "text": "7.1.3 易腐垃圾应沥干水分后投放，盖好垃圾桶。集中供餐单位的餐厨垃圾应单独投放。"
+        },
+        {
+          "id": 92,
+          "kind": "list-item",
+          "text": "7.1.4 可回收物应尽量保持清洁，清空内容物，避免污染。体积大、整体性强或需要拆分再处理的废弃家具、电器电子产品等大件垃圾，应预约再生资源回收服务单位上门收集，或投放至指定的废弃物投放点。"
+        },
+        {
+          "id": 93,
+          "kind": "list-item",
+          "text": "7.1.5 有害垃圾应投放到有害垃圾收集容器或有害垃圾独立贮存点。"
+        },
+        {
+          "id": 94,
+          "kind": "list-item",
+          "text": "7.1.6 其他垃圾投放至户分类垃圾容器，或村分类垃圾投放点。"
+        },
+        {
+          "id": 95,
+          "kind": "heading",
+          "text": "7.2 管理要求"
+        },
+        {
+          "id": 96,
+          "kind": "list-item",
+          "text": "7.2.1 建制村应建立生活垃圾分类管理制度及分类投放管理台账，指导村民分类投放生活垃圾。设置垃圾分类投放点，并公告不同类别的生活垃圾的投放时间、投放地点、投放方式等。"
+        },
+        {
+          "id": 97,
+          "kind": "list-item",
+          "text": "7.2.2 建制村应保持公共场所收集容器完好和整洁美观，发现破旧、污损或者数量不足时，及时维修、更换、清洗或者补设。"
+        },
+        {
+          "id": 98,
+          "kind": "heading",
+          "text": "8 分类收运"
+        },
+        {
+          "id": 99,
+          "kind": "heading",
+          "text": "8.1 收运要求"
+        },
+        {
+          "id": 100,
+          "kind": "list-item",
+          "text": "8.1.1 分类投放后的各类垃圾应分类收集、分类运输。"
+        },
+        {
+          "id": 101,
+          "kind": "list-item",
+          "text": "8.1.2 易腐垃圾应每日定时收运，由生活垃圾收运单位直接运输至易腐垃圾处理站。集中供餐单位的餐厨垃圾应由政府部门确定的单位收运。收运单位应与集中供餐单位约定餐厨垃圾收运的时间和频次，收运过程应符合 CJJ 184的要求，并及时清理作业过程中产生的废水、废渣，保持餐厨垃圾转运设施和周边环境整洁。"
+        },
+        {
+          "id": 102,
+          "kind": "list-item",
+          "text": "8.1.3 可回收物运输至资源回收处理单位。"
+        },
+        {
+          "id": 103,
+          "kind": "list-item",
+          "text": "8.1.4 有害垃圾由生活垃圾收运单位收集后，委托具有相应危险废物经营许可证的单位进行运输。"
+        },
+        {
+          "id": 104,
+          "kind": "list-item",
+          "text": "8.1.5 其他垃圾应每日定时收运，转运至所属区域的垃圾处理终端。"
+        },
+        {
+          "id": 105,
+          "kind": "list-item",
+          "text": "8.1.6 收运过程应实行密闭化管理。采用非垃圾压缩车直接清运方式的，应密闭清运，防止二次污染。"
+        },
+        {
+          "id": 106,
+          "kind": "heading",
+          "text": "8.2 管理要求"
+        },
+        {
+          "id": 107,
+          "kind": "list-item",
+          "text": "8.2.1 分类后的垃圾由村收集、乡镇（街道）转运，或通过政府购买服务的方式进行收运。"
+        },
+        {
+          "id": 108,
+          "kind": "list-item",
+          "text": "8.2.2 生活垃圾收运单位应根据垃圾的类别、数量、作业时间等要求，配备相应的收集、运输设备和作业人员。"
+        },
+        {
+          "id": 109,
+          "kind": "list-item",
+          "text": "8.2.3 收集、运输车辆应明显标示相应的生活垃圾分类标志，并保持全密闭，具有防臭、防遗撒、防渗滤液跑冒滴漏等功能。"
+        },
+        {
+          "id": 110,
+          "kind": "list-item",
+          "text": "8.2.4 生活垃圾收运单位应建立管理台账。"
+        }
+      ],
+      "units": [
+        {
+          "id": "containers",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "容器标志及每户至少两个容器。",
+          "evidence": [
+            [
+              {
+                "line": 89,
+                "start": 0,
+                "end": 33
+              },
+              {
+                "line": 90,
+                "start": 0,
+                "end": 42
+              }
+            ]
+          ]
+        },
+        {
+          "id": "kitchen",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "沥干水分与集中供餐餐厨垃圾单独投放。",
+          "evidence": [
+            [
+              {
+                "line": 91,
+                "start": 0,
+                "end": 42
+              }
+            ]
+          ]
+        },
+        {
+          "id": "hazardous",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "有害垃圾的投放和持证运输要求。",
+          "evidence": [
+            [
+              {
+                "line": 93,
+                "start": 0,
+                "end": 33
+              },
+              {
+                "line": 103,
+                "start": 0,
+                "end": 46
+              }
+            ]
+          ]
+        },
+        {
+          "id": "separate",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "分类收集和分类运输。",
+          "evidence": [
+            [
+              {
+                "line": 100,
+                "start": 0,
+                "end": 27
+              }
+            ]
+          ]
+        },
+        {
+          "id": "vehicles",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "车辆标志、全密闭及防渗漏等要求。",
+          "evidence": [
+            [
+              {
+                "line": 109,
+                "start": 0,
+                "end": 58
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "real-416-fertilizer",
+      "language": "zh-cn",
+      "stratum": "real-pilot",
+      "tags": [
+        "table",
+        "numeric-limit",
+        "condition"
+      ],
+      "budget_chars": 330,
+      "source": {
+        "kind": "canonical-excerpt",
+        "description": "DB33/T 2030—2018 农村生活垃圾分类处理规范; existing MinerU canonical extract, not checked against page images in this benchmark. No claim of current legal applicability.",
+        "record_id": 416,
+        "snapshot": "sources/record-416.lines.txt",
+        "snapshot_sha256": "5acb3df6b320fdd4d3e293cc8170e4b68511ee274b2ee3f930268b1a4a590fcd",
+        "original_path": "KnowledgeStore/TestData/extract-metrics-benchmark/416/20261007_122930/canonical-source.txt",
+        "original_line_range": [
+          122,
+          134
+        ],
+        "group_id": "record-416",
+        "selection": "Purposive pilot excerpt; not a blind holdout."
+      },
+      "lines": [
+        {
+          "id": 122,
+          "kind": "heading",
+          "text": "9.3 易腐垃圾处理管理要求"
+        },
+        {
+          "id": 123,
+          "kind": "list-item",
+          "text": "9.3.1 由建制村（或多村联合）规划建设易腐垃圾处理站。"
+        },
+        {
+          "id": 124,
+          "kind": "list-item",
+          "text": "9.3.2 运营单位应制定运行管理制度、安全生产制度，停电、设备故障、台风暴雨等自然灾害天气应急预案，建立运行管理台账。运行管理人员和维护检修人员应严格执行安全操作规程。"
+        },
+        {
+          "id": 125,
+          "kind": "list-item",
+          "text": "9.3.3 垃圾处理站应设置臭气处理设施、污水收集和处理设施。易腐垃圾处理设备应有产品合格证。污水收集后纳入管网的，应在处理站对渗滤液进行预处理，出水水质满足GB/T 31962的规定；若采用直接排放方式，应对渗滤液进行处理后排放，排放水质应稳定达到GB 16889的规定。恶臭污染物排放应符合 GB 14554 的要求。"
+        },
+        {
+          "id": 126,
+          "kind": "list-item",
+          "text": "9.3.4 运行空间环境无臭气、无污水、无地面垃圾，主体设备及附属设备运行状态良好，场地整洁。"
+        },
+        {
+          "id": 127,
+          "kind": "list-item",
+          "text": "9.3.5 易腐垃圾处理如需微生物菌种，菌种应安全、有效，有明确来源和种名。微生物菌种的安全性应符合NY 1109的规定。"
+        },
+        {
+          "id": 128,
+          "kind": "list-item",
+          "text": "9.3.6 机器成肥、太阳能辅助堆肥产出的成品肥料，植物种子发芽指数应≥60%，发芽实验方法见附录B；粪大肠菌群数和蛔虫卵死亡率应达到NY884的要求。机器成肥产出的肥料其他指标应达到表 2和表3的要求。太阳能辅助堆肥产出的成品肥料重金属限量应达到表 3的要求。"
+        },
+        {
+          "id": 129,
+          "kind": "table-caption",
+          "text": "表2 肥料技术指标"
+        },
+        {
+          "id": 130,
+          "kind": "table-image",
+          "text": "images/845cf0a024ed353e3c16bbeb9835233dd1250028a94261bd7a70fa44780113c8.jpg"
+        },
+        {
+          "id": 131,
+          "kind": "table",
+          "text": "<table><tr><td>项目</td><td>技术指标</td></tr><tr><td>有机质的质量分数（以烘干基计），%</td><td>≥30</td></tr><tr><td>水分（鲜样）的质量分数，%</td><td>≤30</td></tr><tr><td>酸碱度（pH）</td><td>5.5~8.5</td></tr></table>"
+        },
+        {
+          "id": 132,
+          "kind": "table-caption",
+          "text": "表3 肥料重金属限量指标"
+        },
+        {
+          "id": 133,
+          "kind": "table-image",
+          "text": "images/6cd88ddb078b748ccdf551818f5674433174a2d118948a986696234a85681dcc.jpg"
+        },
+        {
+          "id": 134,
+          "kind": "table",
+          "text": "<table><tr><td>项目</td><td>限量指标 (mg/kg)</td></tr><tr><td>总砷（As）（以烘干基计）</td><td>≤15</td></tr><tr><td>总汞（Hg）（以烘干基计）</td><td>≤2</td></tr><tr><td>总铅（Pb）（以烘干基计）</td><td>≤50</td></tr><tr><td>总镉（Cd）（以烘干基计）</td><td>≤3</td></tr><tr><td>总铬（Cr）（以烘干基计）</td><td>≤150</td></tr></table>"
+        }
+      ],
+      "units": [
+        {
+          "id": "germination",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "发芽指数≥60%及不同工艺适用的指标表。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              }
+            ]
+          ]
+        },
+        {
+          "id": "organic",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "干基有机质质量分数下限。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 131,
+                "start": 48,
+                "end": 65
+              },
+              {
+                "line": 131,
+                "start": 74,
+                "end": 77
+              }
+            ]
+          ]
+        },
+        {
+          "id": "moisture",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "鲜样水分上限，不能混同干基有机质。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 131,
+                "start": 95,
+                "end": 108
+              },
+              {
+                "line": 131,
+                "start": 117,
+                "end": 120
+              }
+            ]
+          ]
+        },
+        {
+          "id": "ph",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "pH范围。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 131,
+                "start": 138,
+                "end": 145
+              },
+              {
+                "line": 131,
+                "start": 154,
+                "end": 161
+              }
+            ]
+          ]
+        },
+        {
+          "id": "arsenic",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "总砷限量必须带单位和干基口径。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 134,
+                "start": 26,
+                "end": 38
+              },
+              {
+                "line": 134,
+                "start": 56,
+                "end": 69
+              },
+              {
+                "line": 134,
+                "start": 78,
+                "end": 81
+              }
+            ]
+          ]
+        },
+        {
+          "id": "mercury",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "总汞限量和同一表头绑定。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 134,
+                "start": 26,
+                "end": 38
+              },
+              {
+                "line": 134,
+                "start": 99,
+                "end": 112
+              },
+              {
+                "line": 134,
+                "start": 121,
+                "end": 123
+              }
+            ]
+          ]
+        },
+        {
+          "id": "lead",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "保留重金属名称、干基口径、限量及mg/kg单位。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 134,
+                "start": 26,
+                "end": 38
+              },
+              {
+                "line": 134,
+                "start": 141,
+                "end": 154
+              },
+              {
+                "line": 134,
+                "start": 163,
+                "end": 166
+              }
+            ]
+          ]
+        },
+        {
+          "id": "cadmium",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "保留重金属名称、干基口径、限量及mg/kg单位。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 134,
+                "start": 26,
+                "end": 38
+              },
+              {
+                "line": 134,
+                "start": 184,
+                "end": 197
+              },
+              {
+                "line": 134,
+                "start": 206,
+                "end": 208
+              }
+            ]
+          ]
+        },
+        {
+          "id": "chromium",
+          "kind": "requirement",
+          "critical": true,
+          "weight": 2,
+          "rationale": "保留重金属名称、干基口径、限量及mg/kg单位。 同时保留9.3.6对不同处理工艺适用指标表的限定。",
+          "evidence": [
+            [
+              {
+                "line": 128,
+                "start": 0,
+                "end": 131
+              },
+              {
+                "line": 134,
+                "start": 26,
+                "end": 38
+              },
+              {
+                "line": 134,
+                "start": 226,
+                "end": 239
+              },
+              {
+                "line": 134,
+                "start": 248,
+                "end": 252
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

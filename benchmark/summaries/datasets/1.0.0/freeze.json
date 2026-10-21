@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "dataset_id": "semos-summary-evidence",
+  "version": "1.0.0",
+  "frozen_on": "2026-10-21",
+  "dataset_sha256": "f63835ace60f55cc1c3f6e8749910b1ca06752dc1b32954f27a976af8af4c5f9",
+  "review_kind": "independent agent audit; see audit.md",
+  "cases": 16,
+  "information_units": 43
+}
