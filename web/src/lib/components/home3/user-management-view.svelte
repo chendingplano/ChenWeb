@@ -376,7 +376,6 @@
 			</tbody>
 		</table>
 	</div>
-</div>
 
 {#if editDialogOpen}
 	<div
@@ -492,6 +491,7 @@
 		</div>
 	</div>
 {/if}
+</div>
 
 <style>
 	.wrap {
