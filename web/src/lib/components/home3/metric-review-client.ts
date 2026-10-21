@@ -115,9 +115,9 @@ type MetricReviewResponse = {
 };
 
 /** A purely numeric query searches by record ID; anything else by title. */
-export function buildInputSearchQuery(query: string, hasGoldMetrics = false, goldKind?: string): string {
+export function buildInputSearchQuery(query: string, hasGoldMetrics = false, goldKind?: string, page = 1, pageSize = 50): string {
 	const q = query.trim();
-	const params = new URLSearchParams({ page: '1', page_size: '50' });
+	const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
 	if (/^\d+$/.test(q)) params.set('record_id', q);
 	else if (q) params.set('title', q);
 	if (hasGoldMetrics) params.set('has_gold_metrics', 'true');
@@ -176,6 +176,25 @@ export async function searchInputs(query: string, hasGoldMetrics = false, goldKi
 		`/api/v1/kb/inputs?${buildInputSearchQuery(query, hasGoldMetrics, goldKind)}`
 	);
 	return res.results ?? [];
+}
+
+/** Fetch every matching input, following the endpoint's paginated results. */
+export async function searchAllInputs(query: string, hasGoldMetrics = false, goldKind?: string): Promise<InputRecordSummary[]> {
+	const pageSize = 500;
+	const results: InputRecordSummary[] = [];
+	let page = 1;
+	let total = Number.POSITIVE_INFINITY;
+	while (results.length < total) {
+		const res = await req<{ results?: InputRecordSummary[]; total?: number }>(
+			`/api/v1/kb/inputs?${buildInputSearchQuery(query, hasGoldMetrics, goldKind, page, pageSize)}`
+		);
+		const rows = res.results ?? [];
+		results.push(...rows);
+		total = Number(res.total ?? results.length);
+		if (rows.length === 0) break;
+		page += 1;
+	}
+	return results;
 }
 
 /** The record's newest review in `lang`, plus the other languages that have one. */

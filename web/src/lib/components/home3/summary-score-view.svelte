@@ -2,7 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
-	import { searchInputs, type InputRecordSummary } from './metric-review-client.js';
+	import { searchAllInputs, type InputRecordSummary } from './metric-review-client.js';
 	import { ScoreAPIError } from './metric-score-client';
 	import {
 		summaryGoldRuns, summaryScoreAlgorithms, summaryScoreArtifact, summaryScoreDetail,
@@ -50,7 +50,7 @@
 		searching = true;
 		error = '';
 		try {
-			documents = await searchInputs(query, true, 'summary_rows');
+			documents = await searchAllInputs(query, true, 'summary_rows');
 			searched = true;
 		} catch (err) { error = errorText(err); }
 		finally { searching = false; }
@@ -107,6 +107,7 @@
 	}
 
 	onMount(() => {
+		void search();
 		void Promise.all([summaryScoreModels().then((result) => { models = result; model = result[0] ?? ''; }), history()]).catch((err) => error = errorText(err));
 		timer = setInterval(() => {
 			if (runs.some((item) => item.status === 'running')) void history(true);
@@ -170,6 +171,6 @@
 <style>
 	.summary-benchmark{--bg:#11151d;--panel:#191f2a;--line:#303847;--text:#ece8dd;--muted:#a6a18f;--accent:#d3a64f;min-height:100%;padding:24px;color:var(--text);background:var(--bg);font:14px/1.5 system-ui,sans-serif;user-select:text}
 	.summary-benchmark.light{--bg:#f5f2e9;--panel:#fffdf7;--line:#d9d3c5;--text:#211e18;--muted:#716b5e;--accent:#96701f}
-	header h1{margin:0;font-size:24px}header p,.muted{color:var(--muted)}header p{margin:4px 0 20px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}.card h2{margin:0 0 12px;font-size:16px}.search,.controls,.section-head,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.search input{flex:1;min-width:200px}.controls{margin-top:14px}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button,.actions a{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}button,.actions a{cursor:pointer;text-decoration:none}button:hover,.actions a:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:default}.primary{background:var(--accent);color:#17130b;border-color:var(--accent);font-weight:700}.documents{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:12px}.documents button{text-align:left;display:grid;gap:4px}.documents button span,.documents small,td small{color:var(--muted);font-size:12px}.chosen{outline:1px solid var(--accent)}.selected{margin:12px 0 0}.section-head{justify-content:space-between}.section-head h2{margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}td:first-child{white-space:normal}td small{display:block}.result{scroll-margin-top:24px}.score{display:flex;align-items:baseline;gap:16px;padding:14px 0}.score span{color:var(--muted)}.score strong{font-size:38px;color:var(--accent)}.score small{font-size:15px;color:var(--muted)}.components{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}.components div{padding:12px;border:1px solid var(--line);border-radius:7px;display:grid;gap:4px}.components span,.components small{color:var(--muted)}.components strong{font-size:20px}h3{margin:18px 0 8px}details{border-top:1px solid var(--line);padding:10px 0}summary{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:12px;border-radius:6px;max-height:500px;overflow:auto}.error{color:#ff8f7e;background:#4b211e;padding:10px;border-radius:6px}.actions{margin-top:12px}.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}
-	@media(max-width:760px){.summary-benchmark{padding:14px}.controls{align-items:stretch}.controls label,.controls button{width:100%}}
+	header h1{margin:0;font-size:24px}header p,.muted{color:var(--muted)}header p{margin:4px 0 20px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0}.card h2{margin:0 0 12px;font-size:16px}.search,.controls,.section-head,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.search input{flex:1;min-width:200px}.controls{margin-top:14px}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button,.actions a{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}button,.actions a{cursor:pointer;text-decoration:none}button:hover,.actions a:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:default}.primary{background:var(--accent);color:#17130b;border-color:var(--accent);font-weight:700}.documents{display:grid;grid-template-columns:repeat(auto-fill,220px);gap:8px;margin-top:12px}.documents button{text-align:left;display:grid;gap:4px;width:220px;min-width:0}.documents button span,.documents small,td small{color:var(--muted);font-size:12px}.chosen{outline:1px solid var(--accent)}.selected{margin:12px 0 0}.section-head{justify-content:space-between}.section-head h2{margin:0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}td:first-child{white-space:normal}td small{display:block}.result{scroll-margin-top:24px}.score{display:flex;align-items:baseline;gap:16px;padding:14px 0}.score span{color:var(--muted)}.score strong{font-size:38px;color:var(--accent)}.score small{font-size:15px;color:var(--muted)}.components{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}.components div{padding:12px;border:1px solid var(--line);border-radius:7px;display:grid;gap:4px}.components span,.components small{color:var(--muted)}.components strong{font-size:20px}h3{margin:18px 0 8px}details{border-top:1px solid var(--line);padding:10px 0}summary{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:12px;border-radius:6px;max-height:500px;overflow:auto}.error{color:#ff8f7e;background:#4b211e;padding:10px;border-radius:6px}.actions{margin-top:12px}.summary-benchmark :global(button),.summary-benchmark :global(a){user-select:none}
+	@media(max-width:760px){.summary-benchmark{padding:14px}.controls{align-items:stretch}.controls label,.controls button{width:100%}.documents{grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr))}.documents button{width:100%}}
 </style>
