@@ -3,7 +3,7 @@
 	import { onMount, type Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { theme } from '$lib/stores/theme.svelte';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
@@ -475,6 +475,9 @@
 			goto('/deep-wiki');
 			return;
 		}
+		const url = new URL(page.url);
+		url.searchParams.set('section', id === 'kb-doc-wiki' ? 'kb-input-details' : id);
+		replaceState(url, page.state);
 		if (id === 'kb-doc-wiki') {
 			activeSection = 'kb-input-details';
 			documentWikiOpen = true;

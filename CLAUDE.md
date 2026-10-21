@@ -99,4 +99,5 @@ Every page must work in English and Chinese. Decision and rationale: ADR
 * **Text generated on the server** (LLM output, reports) is not covered by Paraglide: pass
   `getLocale()` to the API and produce/store it per language (see Review Metrics, `lang`).
 * Locale in code: `getLocale()` from `$lib/paraglide/runtime` (`en` | `zh-cn`); a language switch
-  reloads the page.
+  reloads translations while keeping the selected view. Dashboard menus store stable IDs in
+  `view`/`child` query parameters; Knowledge Base stores its selection in `section`.

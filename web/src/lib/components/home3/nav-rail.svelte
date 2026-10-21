@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolveSelection } from './navigation-state';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
@@ -579,6 +580,26 @@
 
 	const displayMainNav = $derived(buildVisible(activeMainNav));
 	const displayBottomNav = $derived(buildVisible(bottomNav));
+
+	onMount(() => {
+		const selection = resolveSelection(new URL(window.location.href), [...displayMainNav, ...displayBottomNav]);
+		if (!selection) return;
+		onSelect(selection);
+		accordionOpen[selection.itemId] = true;
+		// Expand the ancestors of nested selections in the restored menu.
+		type Ancestor = { id: string; children?: Ancestor[] };
+		function expandAncestors(nodes: Ancestor[]): boolean {
+			return nodes.some((node) => {
+				if (node.id === selection?.childId) return true;
+				if (expandAncestors(node.children ?? [])) {
+					subAccordionOpen[node.id] = true;
+					return true;
+				}
+				return false;
+			});
+		}
+		expandAncestors(displayMainNav);
+	});
 
 	// Every id the active menu owns — the source of truth for valid entry_keys.
 	// Used to flag config rows that match nothing (a stale/typo entry_key), which

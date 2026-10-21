@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
+	import { selectionUrl } from './navigation-state';
 	import { onMount, type Snippet } from 'svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
@@ -185,6 +187,7 @@
 			docReviewKey++;
 		}
 		activeMenu = selection;
+		replaceState(selectionUrl(page.url, selection), page.state);
 	}
 
 	async function handleLogout() {
