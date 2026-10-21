@@ -59,7 +59,7 @@ with sync_playwright() as p:
  if args.benchmark:
   view=page.locator('.summary-benchmark');view.wait_for()
   view.get_by_role('button',name=labels['ssb_open'],exact=True).click()
-  cards=view.locator('.chunk-review summary')
+  cards=view.locator('button.chunk-review')
  else:
   view=page.locator('.benchmark-page');view.wait_for()
   view.locator('input[inputmode="numeric"]').fill('416')
@@ -84,6 +84,7 @@ with sync_playwright() as p:
    assert comparison.get_by_text(f'Gold summary {index+1}',exact=True).count()==1
    assert comparison.evaluate('el=>getComputedStyle(el).gridTemplateColumns.split(" ").length')==2
    assert comparison.evaluate('el=>getComputedStyle(el).userSelect')=='text'
+   assert view.locator('.chunk-review pre').count()==0
   else:
    page.wait_for_function('(expected)=>JSON.stringify([...document.querySelectorAll(".pdf-highlight")].map(el=>Number(el.title.split(" ")[1])))===JSON.stringify(expected)',arg=expected_lines)
   page.wait_for_function('(pg)=>document.querySelector(".page-input").value===String(pg)',arg=pg)

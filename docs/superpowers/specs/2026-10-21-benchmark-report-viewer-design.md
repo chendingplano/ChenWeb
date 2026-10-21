@@ -22,6 +22,8 @@ If a selected item has no usable source line numbers or the PDF cannot be loaded
 
 ## Component boundary
 
+Summary chunk reviews are selectable buttons showing the prediction label and diagnostics. Selecting a chunk does not expand raw judgment JSON beneath it; details appear in the comparison panel.
+
 Create a reusable benchmark report viewer component in the existing Svelte component area. It owns shared report chrome and source-selection state. Use a typed Svelte interface equivalent to:
 
 - `run`: `{ id, title, status, documentTitle, createdAt, subtitle? }`.
