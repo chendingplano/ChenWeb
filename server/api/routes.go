@@ -824,6 +824,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/objects/pdf-locator", kbhandler.GetObjectPDFLocator)
 	apiGroup.POST("/kb/objects/search", kbhandler.SearchObjects)
 	apiGroup.GET("/kb/summaries/search", kbhandler.SearchSummaries)
+	apiGroup.GET("/kb/summaries/gold-options", kbhandler.ListGoldSummaryOptions)
+	apiGroup.GET("/kb/summaries/gold", kbhandler.ListGoldSummaries)
 	apiGroup.GET("/kb/topics/search", kbhandler.SearchTopics)
 	apiGroup.GET("/kb/scene-blocks/search", kbhandler.SearchSceneBlocks)
 	apiGroup.GET("/kb/provisions/search", kbhandler.SearchProvisions)

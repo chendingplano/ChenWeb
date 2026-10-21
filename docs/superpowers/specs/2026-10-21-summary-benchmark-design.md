@@ -65,3 +65,12 @@ content, missing cases, Chinese budgets, oversized outputs, and edited fixtures.
 Every case must have a feasible all-gold extract within budget and distractor text
 outside that extract. Review real-source spans against the canonical source and
 save the review result. Freeze only after correcting review findings.
+
+## Admin UI integration (2026-10-21)
+
+The benchmark harness and frozen JSON remain offline evaluation assets. The
+separate Gold Summary admin page browses imported benchmark output from
+`testbed.summary_benchmark_runs` and `testbed.summaries`: Search selects a document
+and run, Summary lists that run's rows, and Summary Detail shows the selected row's
+stored fields. This UI does not change the scorer or make the benchmark dataset a
+production summarizer.

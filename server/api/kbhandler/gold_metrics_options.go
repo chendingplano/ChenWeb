@@ -20,6 +20,7 @@ var goldRunTables = map[string]string{
 	"":           "testbed.metrics",
 	"metrics":    "testbed.metrics",
 	"references": "testbed.reference_benchmark_runs",
+	"summaries":  "testbed.summary_benchmark_runs",
 }
 
 // goldRunTable returns the table for kind, or false for an unknown kind.
@@ -133,6 +134,11 @@ func ListGoldMetricOptions(c echo.Context) error {
 // skill versions and models available for the Reference Benchmark view's filters.
 func ListGoldReferenceOptions(c echo.Context) error {
 	return listGoldOptions(c, "CWB_KB_REF_010", goldRunTables["references"])
+}
+
+// ListGoldSummaryOptions handles GET /api/v1/kb/summaries/gold-options.
+func ListGoldSummaryOptions(c echo.Context) error {
+	return listGoldOptions(c, "CWB_KB_SUM_001", goldRunTables["summaries"])
 }
 
 // listGoldOptions lists the (skill version, model) combinations in table, which

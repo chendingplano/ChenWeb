@@ -424,13 +424,56 @@ export type GoldMetricOptionsResponse = {
 
 // Which gold benchmark set a gold view reads: testbed.metrics or the
 // testbed reference tables.
-export type GoldKind = 'metrics' | 'references';
+export type GoldKind = 'metrics' | 'references' | 'summaries';
 
 // Skill versions and models present in a gold set, for the gold views' filters.
 export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptionsResponse> {
 	return fetchOrThrow<GoldMetricOptionsResponse>(
 		`${BASE}/${kind}/gold-options`,
-		kind === 'metrics' ? 'Failed to list gold metric options' : 'Failed to list gold reference options'
+		kind === 'metrics'
+			? 'Failed to list gold metric options'
+			: kind === 'references'
+				? 'Failed to list gold reference options'
+				: 'Failed to list gold summary options'
+	);
+}
+
+export type GoldSummaryRecord = {
+	id: number;
+	skill_name: string;
+	skill_version: string;
+	model_name: string;
+	run_id: string;
+	input_record_id: number;
+	summary_id: string;
+	summary_level: number;
+	summary_seq_no: number;
+	source_line_spans: unknown;
+	overlap_lines: unknown;
+	regular_lines: unknown;
+	summary_text: string;
+	summary_text_en: string;
+	language: string;
+	keywords: unknown;
+	keywords_en: unknown;
+	units: unknown;
+	empty_reason: string;
+	completeness_review: unknown;
+	correctness_review: unknown;
+	created_at: string;
+};
+
+export async function listGoldSummaries(
+	inputRecordId: number,
+	filters: GoldMetricFilters = {}
+): Promise<{ status: boolean; record_id: number; summaries: GoldSummaryRecord[] }> {
+	const params = new URLSearchParams({ input_record_id: String(inputRecordId) });
+	if (filters.skillVersion) params.set('skill_version', filters.skillVersion);
+	if (filters.modelName) params.set('model_name', filters.modelName);
+	if (filters.runId) params.set('run_id', filters.runId);
+	return fetchOrThrow(
+		`${BASE}/summaries/gold?${params.toString()}`,
+		'Failed to list gold summaries'
 	);
 }
 

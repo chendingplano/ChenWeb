@@ -180,6 +180,14 @@ their cost is not attributed to the ranking algorithm.
 
 ## Freeze and next evaluation
 
+### Admin UI
+
+The Gold Summary page in ChenWeb browses benchmark output imported into
+`testbed.summary_benchmark_runs` and `testbed.summaries`. Its Search panel selects
+the document and benchmark run, the Summary panel lists the stored summary rows,
+and Summary Detail displays the selected row's text, source spans, units, keywords,
+and review fields. The web view is separate from the offline scorer described here.
+
 `freeze.json` pins the canonical JSON digest. Validation also checks each real
 excerpt against the hashed snapshot. Change data by publishing a new version;
 never silently update frozen gold to favor a candidate. `audit.md` records the
