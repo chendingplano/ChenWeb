@@ -7091,5 +7091,6 @@
 	"ssb_error": "摘要基准请求失败。",
 	"ssb_out_of_100": "满分 100",
 	"ssb_gold_identity": "所选金标准",
+	"ssb_provenance": "运行来源信息",
 	"ssb_error_judgments": "评分模型返回的判断记录不符合评分约定。"
 }

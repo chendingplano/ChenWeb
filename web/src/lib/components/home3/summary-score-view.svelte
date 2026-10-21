@@ -47,6 +47,7 @@
 	let alive = true;
 	let sequence = 0;
 	let detailSequence = 0;
+	let historySequence = 0;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	function parseSourceLines(value: unknown): number[] {
 		const found: number[] = [];
@@ -143,7 +144,12 @@
 	}
 
 	async function choose(record: InputRecordSummary) {
+		detailSequence++;
+		historySequence++;
 		selected = record;
+		detail = null;
+		runs = [];
+		loading = false;
 		algorithm = '';
 		goldChoice = '';
 		gold = [];
@@ -163,35 +169,41 @@
 	}
 
 	async function history(quiet = false) {
+		const current = ++historySequence;
+		const recordId = selected?.id;
 		if (!quiet) loading = true;
 		try {
-			const result = await summaryScoreHistory(selected?.id);
-			if (alive) runs = result.runs ?? [];
-		} catch (err) { if (alive) error = errorText(err); }
-		finally { loading = false; }
+			const result = await summaryScoreHistory(recordId);
+			if (alive && current === historySequence && selected?.id === recordId) runs = result.runs ?? [];
+		} catch (err) { if (alive && current === historySequence && selected?.id === recordId) error = errorText(err); }
+		finally { if (current === historySequence) loading = false; }
 	}
 
 	async function open(id: number, quiet = false) {
 		const current = ++detailSequence;
+		const selectedId = selected?.id;
 		try {
 			const result = await summaryScoreDetail(id);
-			if (alive && current === detailSequence) detail = result;
-		} catch (err) { if (alive && current === detailSequence && !quiet) error = errorText(err); }
+			if (alive && current === detailSequence && selected?.id === selectedId && (selectedId == null || result.input_record_id === selectedId)) detail = result;
+		} catch (err) { if (alive && current === detailSequence && selected?.id === selectedId && !quiet) error = errorText(err); }
 	}
 
 	async function run() {
 		if (!selected || !algorithm || !model || starting) return;
+		const recordId = selected.id;
 		const current = ++detailSequence;
 		starting = true;
 		error = '';
 		try {
 			const result = await startSummaryScore({
-				record_id: selected.id, algorithm, model, lang,
+				record_id: recordId, algorithm, model, lang,
 				gold: gold.find((item) => JSON.stringify([item.skill_version, item.model_name, item.benchmark_run_id]) === goldChoice)
 			});
-			if (alive && current === detailSequence) detail = result;
-			await history();
-		} catch (err) { if (current === detailSequence) error = errorText(err); }
+			if (alive && current === detailSequence && selected?.id === recordId && result.input_record_id === recordId) {
+				detail = result;
+				await history();
+			}
+		} catch (err) { if (alive && current === detailSequence && selected?.id === recordId) error = errorText(err); }
 		finally { starting = false; }
 	}
 
@@ -258,7 +270,7 @@
 		{#if detail!.status === 'running'}<p role="status">{m.ssb_background()}</p>{/if}
 		{#if detail!.status === 'failed'}<p class="error" role="alert">{errorText(new ScoreAPIError(detail!.error_code ?? '', 500))}</p>{/if}
 		{#if detail!.input?.gold}<p>{m.ssb_gold_identity()} · {detail!.input.gold.skill_version} · {detail!.input.gold.model_name} · {detail!.input.gold.run_id}</p>{/if}
-		{#if detail!.input?.provenance}<details><summary>{m.ssb_gold_identity()}</summary><pre>{JSON.stringify(detail!.input.provenance, null, 2)}</pre></details>{/if}
+		{#if detail!.input?.provenance}<details><summary>{m.ssb_provenance()}</summary><pre>{JSON.stringify(detail!.input.provenance, null, 2)}</pre></details>{/if}
 		{#if detail!.score}
 			<h3>{m.ssb_components()}</h3>
 			<p class="muted">{m.ssb_alignment({ matched: detail!.score.matched, gold: detail!.score.gold_count, candidate: detail!.score.prediction_count })}</p>

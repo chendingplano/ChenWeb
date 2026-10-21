@@ -7091,5 +7091,6 @@
 	"ssb_error": "The summary benchmark request failed.",
 	"ssb_out_of_100": "out of 100",
 	"ssb_gold_identity": "Selected gold",
+	"ssb_provenance": "Run provenance",
 	"ssb_error_judgments": "The scoring model returned judgments that did not satisfy the scoring contract."
 }
