@@ -49,8 +49,8 @@
 
 - [ ] Map the selected summary run's ID, title, status, document title, created timestamp, score cards, warnings, optional provenance, saved evidence actions, input ID, and current `darkMode` value into the shared props.
 - [ ] Move summary chunk judgments and summary-specific report content into the typed report-body snippet; retain Summary API models and score interpretation in the Summary page.
-- [ ] For each selectable chunk, derive its source line span from the summary input snapshot and call `selectSource` on activation. If a chunk has no usable lines, keep it readable and clear the source selection.
-- [ ] Preserve the current score details and evidence artifact links as actions/controls in the common layout.
+- [ ] For each selectable chunk, derive source spans from the summary input snapshot, normalize supported span values to positive integer line numbers, expand inclusive ranges, deduplicate and sort them, then call `selectSource` on activation. Empty, malformed, non-positive, or reversed spans produce an empty selection, clearing stale highlights while keeping the chunk readable.
+- [ ] Preserve the current score details and all four evidence artifact links (input, judgments, score JSON, report) in the common layout, retaining each `summaryScoreArtifact` URL and its current navigation behavior. Map these to the shared evidence controls without changing artifact routes.
 
 ### Task 5: Check Summary parity and localization
 
