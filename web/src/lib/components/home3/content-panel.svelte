@@ -37,6 +37,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import ChadSessionsView from '$lib/components/home3/chad-sessions-view.svelte';
 	import MetricReviewView from '$lib/components/home3/metric-review-view.svelte';
 	import MetricScoreView from '$lib/components/home3/metric-score-view.svelte';
+	import SummaryScoreView from '$lib/components/home3/summary-score-view.svelte';
 	import ReferenceScoreView from '$lib/components/home3/reference-score-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
@@ -222,6 +223,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-summaries-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark' &&
+			activeMenu?.childId !== 'sysadmin-llm-summaries-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-references-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-references-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
@@ -371,6 +373,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<DecisionPlaygroundView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-benchmark'}
 			<MetricScoreView {darkMode} {onSelectMetrics} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-summaries-benchmark'}
+			<SummaryScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-gold'}
 			<ReferencesMgmtView {darkMode} source="testbed" {onReferenceDetailsChange} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-references-benchmark'}

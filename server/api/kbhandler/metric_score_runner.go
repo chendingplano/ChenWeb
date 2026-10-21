@@ -145,6 +145,14 @@ func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) 
 				return metricScoreFailure{"NO_GOLD"}
 			case 4:
 				return metricScoreFailure{"NO_PREDICTIONS"}
+			case 1:
+				line := strings.SplitN(strings.TrimSpace(string(exit.Stderr)), "\n", 2)[0]
+				if strings.Contains(line, "Source changed") || strings.Contains(line, "Chunks changed") {
+					return metricScoreFailure{"STALE_GOLD"}
+				}
+				if strings.Contains(line, "STALE_PREDICTIONS") {
+					return metricScoreFailure{"STALE_PREDICTIONS"}
+				}
 			}
 		}
 		if errors.Is(err, exec.ErrNotFound) {
@@ -153,9 +161,9 @@ func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) 
 		if len(args) > 0 && args[0] == "score" {
 			if exit != nil {
 				line := strings.SplitN(strings.TrimSpace(string(exit.Stderr)), "\n", 2)[0]
-				if strings.HasPrefix(line, "score_io: ") {
+				if line != "" {
 					reason := strings.TrimPrefix(line, "score_io: ")
-					for _, prefix := range []string{"gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "false positive ", "override ", `override "correct"`} {
+					for _, prefix := range []string{"gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
 						if strings.HasPrefix(reason, prefix) {
 							return metricScoreValidationError{Reason: reason}
 						}
