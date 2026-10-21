@@ -19,6 +19,11 @@ applies to processes launched from that shell; it does not update a running
 `mise dev` session. Without this setting, the worker uses `python3` from `PATH`,
 which may lack `nltk` and Sumy even when the virtual environment is provisioned.
 
+The standalone `doc-processor` loads `.env` from its working directory. When
+running `mise doc-processor-run` from `server/cmd/doc-processor`, set
+`SUMY_PYTHON` in `server/cmd/doc-processor/.env` and restart that worker. Updating
+the root `.env` or restarting the web server does not configure this process.
+
 For Windows use `.venv/Scripts/python.exe`. The worker finds `nltk_data` next to
 the virtual environment; `NLTK_DATA` can also point to a provisioned directory.
 Provision this environment on the deployment host as well: the Go executable
