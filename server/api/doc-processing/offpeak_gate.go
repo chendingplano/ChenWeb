@@ -173,10 +173,11 @@ func offPeakHoldFromContext(ctx context.Context) bool {
 }
 
 // processorUsesLLM reports whether an off-peak pipeline must hold before
-// running the processor. Every processor except the blocking one calls an
-// LLM somewhere (even static_analyzer's TOC detection and chunking).
+// running the processor. Blocking and Sumy extraction run locally; other
+// processors may call an LLM (including static_analyzer and chunking).
 func processorUsesLLM(name string) bool {
-	return canonicalOperationName(name) != nonLLMBlockingProcessorKey
+	name = canonicalOperationName(name)
+	return name != nonLLMBlockingProcessorKey && name != "extract_summaries"
 }
 
 // processingModeLoader is optionally implemented by the input store.

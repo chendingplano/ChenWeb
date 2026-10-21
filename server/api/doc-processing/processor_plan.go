@@ -413,6 +413,7 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "chunking", Phase: "A", DependsOn: []string{"static_analyzer"}, Requires: []string{"lines"}, Produces: []string{"chunks"}},
 	{Name: "generate_summaries", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"summaries"}},
 	{Name: "generate_topics", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"topics"}},
+	{Name: "extract_summaries", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"ex_summaries"}, Cost: "free", Idempotent: true},
 	{Name: "extract_doc_metadata", Phase: "A", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"doc_metadata"}},
 	{Name: "extract_semantic_projections", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"semantic_projections"}},
 	{Name: "extract_structured_knowledge", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"structured_knowledge"}},

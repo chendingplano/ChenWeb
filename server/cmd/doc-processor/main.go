@@ -112,6 +112,7 @@ func buildChunkPhaseProcessors(
 		docprocessing.NewChunkingProcessor(inputStore, fixedChunkSvc, logger),
 		docprocessing.NewGenerateSummariesProcessor(inputStore, fixedChunkSvc, logger),
 		docprocessing.NewGenerateTopicsProcessor(inputStore, fixedChunkSvc, logger),
+		docprocessing.NewExtractSummariesProcessor(inputStore, ApiTypes.ProjectDBHandle, logger),
 	}
 }
 

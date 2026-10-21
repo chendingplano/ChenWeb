@@ -66,6 +66,7 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 	phase := []Processor{NewChunkingProcessor(inputStore, fixed, logger), NewGenerateSummariesProcessor(inputStore, fixed, logger), NewGenerateTopicsProcessor(inputStore, fixed, logger)}
 	all := []Processor{
 		NewStaticAnalyzerProcessor(inputStore, newClient(), logger), phase[0], phase[1], phase[2],
+		NewExtractSummariesProcessor(inputStore, ApiTypes.ProjectDBHandle, logger),
 		NewExtractDocMetadataProcessor(inputStore, newClient(), logger),
 		NewSemanticProjectionsProcessor(inputStore, SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewStructuredKnowledgeProcessor(inputStore, StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
@@ -254,6 +255,9 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	for _, p := range control.Processors {
 		if m, ok := p.(*MetricsProcessor); ok {
 			r.services["extract_metrics"] = m.RuntimeConfig()
+		}
+		if p, ok := p.(*ExtractSummariesProcessor); ok {
+			r.services[p.Name()] = map[string]any{"algorithm": p.Config.Algorithm, "sentence_count": p.Config.SentenceCount, "timeout": p.Config.Timeout.String()}
 		}
 	}
 	r.config = makeResolvedConfig(control, r.services, r.plan)

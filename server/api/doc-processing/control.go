@@ -527,6 +527,16 @@ func upsertProcessorRuntimeStatus(raw string, now time.Time, processorName strin
 			if originalStart := strings.TrimSpace(asString(e["start_time"])); originalStart != "" {
 				entry["start_time"] = originalStart
 			}
+			// The local extractor writes algorithm/count/provenance details before
+			// the controller records its terminal outcome. Keep that information,
+			// but clear it when starting a new invocation.
+			if operation == "extract_summaries" && status != "active" {
+				for key, value := range e {
+					if _, exists := entry[key]; !exists {
+						entry[key] = value
+					}
+				}
+			}
 			out = append(out, entry)
 			replaced = true
 		}
