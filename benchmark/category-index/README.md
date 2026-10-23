@@ -76,6 +76,7 @@ frame.
 | ICS with alternative labels, same method | 12% | (inflated) | 0.68 | 0.65 | 64 |
 | Level-by-level LLM walk, one best child | 0% | 0.68 | 0.59 | 0.56 | 20 |
 | **Level-by-level LLM walk, up to 3 children** | 0% | **0.97** | **0.86** | **0.83** | 62 |
+| Same, model reasoning off | 0% | 0.93 | 0.84 | 0.80 | 80 |
 
 Metrics with no domain match every query, which inflates the domain figures in the first two
 rows. Baselines: brute-force cosine R@10 0.95, BM25 0.45 (0.16 for English queries, since most
@@ -94,8 +95,16 @@ What we learned:
 1. **The flat embedding shortlist fails on ICS.** Short names hit the wrong words in formal
    titles ("blood pressure monitor" → *Pressure vessels*). Alternative labels listing the
    typical things under each node helped, but not enough.
-2. **The walk works and is cheap.** One LLM call per parent node, with items batched, came to
-   about 0.5 calls per metric.
+2. **The walk works, and is cheap once reasoning is off.** One LLM call per parent node, with
+   items batched, came to about 0.5 calls per metric. DeepSeek Flash reasons unless the request
+   sends `thinking: disabled`, and every row above except the last ran with reasoning on: the
+   metric walk alone used 3.7M completion tokens, about 99% of them hidden reasoning, and a
+   call took about 70 s. With reasoning off, the walk and facet filing together used 0.26M
+   completion tokens (about 100 per metric) and a call took about 2 s. The prompt tokens
+   (about 2,000 per metric) are unchanged and are now the main cost. Reasoning bought 4 to 5
+   points of domain cell recall. Without it, picks are more often swayed by the document's
+   topic (a container rain-test metric in a waste-treatment standard filed under waste
+   installations).
 3. **A metric needs several ICS homes.** ICS classifies one thing by product, technique,
    component and use. Allowing up to three children per level raised domain cell recall from
    0.68 to 0.97.
@@ -155,4 +164,8 @@ EXP_MDOMAIN=walk_v2 EXP_QDOMAIN=walk_v2 EXP_FACET=v2 .venv/bin/python s7_budget.
 LLM results are cached per item in `out/*.jsonl`, so a rerun only calls models for new items;
 delete a cache file to redo that step. Options: `EXP_ICS=ics2` (s3_file.py, enriched ICS),
 `EXP_WALK=v1|v2` (s3b_walk.py), and for the evaluation `EXP_MDOMAIN` and `EXP_QDOMAIN`
-(`v1`, `ics2`, `walk`, `walk_v2`) and `EXP_FACET` (`v1`, `v2`).
+(`v1`, `ics2`, `walk`, `walk_v2`, `walk_v2_nothink`) and `EXP_FACET` (`v1`, `v2`, `v2_nothink`).
+
+`EXP_THINKING` controls model reasoning: `disabled` (the default since 2026-10-23) sends
+`thinking: disabled` and tags output files `_nothink`; `default` sends nothing, so the model
+reasons. The untagged files in `out/` and `results/` were produced with reasoning on.
