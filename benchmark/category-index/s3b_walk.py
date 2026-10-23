@@ -10,12 +10,12 @@ import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from lib import OUT, batched_llm, log, prompt
+from lib import OUT, RUN_TAG, batched_llm, log, prompt
 from s2_candidates import view
 
 MAX_FANOUT = 3
 WALK = os.environ.get("EXP_WALK", "v1")  # v2 = generous multi-membership (prompt-catidx-walk-v2.md)
-TAG = "" if WALK == "v1" else "_" + WALK
+TAG = ("" if WALK == "v1" else "_" + WALK) + RUN_TAG
 what = sys.argv[1]
 ics = json.loads((OUT / "ics2.json").read_text())
 node = {n["id"]: n for n in ics}

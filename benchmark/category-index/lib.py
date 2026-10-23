@@ -18,6 +18,10 @@ OUT.mkdir(exist_ok=True)
 MODELS = tomllib.loads(Path(os.environ.get("MODEL_DEF_FILE", CHENWEB / ".models.toml")).read_text())
 LLM = MODELS[os.environ.get("EXP_LLM", "deepseek-flash-processor")]
 EMB = MODELS["bge-m3-llama-cpp"]
+# DeepSeek Flash reasons unless told not to. "disabled" sends thinking={"type":"disabled"}; "default" sends no
+# field (model reasons). Results before 2026-10-23 afternoon used "default"; their files carry no tag.
+THINKING = os.environ.get("EXP_THINKING", "disabled")
+RUN_TAG = "" if THINKING == "default" else f"_{'nothink' if THINKING == 'disabled' else 'think'}"
 
 
 def log(*a):
@@ -41,6 +45,8 @@ def llm_json(system, payload, retries=4):
     body = {"model": LLM["model_name"], "temperature": 0, "response_format": {"type": "json_object"},
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
+    if THINKING != "default":
+        body["thinking"] = {"type": THINKING}
     url = LLM["base_url"].rstrip("/") + "/chat/completions"
     err = None
     for i in range(retries):

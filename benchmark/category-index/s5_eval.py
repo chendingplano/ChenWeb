@@ -19,18 +19,18 @@ memb = np.load(OUT / "metric_emb.npy")
 #   ics2 = ICS with LLM-written alternative labels, same method (EXP_ICS=ics2 s3_file.py)
 #   walk = ICS v2, level-by-level LLM walk (s3b_walk.py); for queries, the emb@k modes still use the ics2 shortlist
 MD, QD = os.environ.get("EXP_MDOMAIN", "v1"), os.environ.get("EXP_QDOMAIN", "v1")
-MSRC = {"v1": "", "ics2": "_ics2", "walk": "", "walk_v2": ""}  # walk: domain replaced below; facets are the same in every file
-QSRC = {"v1": "", "ics2": "_ics2", "walk": "_ics2", "walk_v2": "_ics2"}
-fm = json.loads((OUT / f"filed_metrics{MSRC[MD]}.json").read_text())
-fq = json.loads((OUT / f"filed_queries{QSRC[QD]}.json").read_text())
+# walk sources (walk, walk_v2, walk_v2_nothink...) replace the domain below; facets are the same in every file
+fm = json.loads((OUT / f"filed_metrics{'_ics2' if MD == 'ics2' else ''}.json").read_text())
+fq = json.loads((OUT / f"filed_queries{'' if QD == 'v1' else '_ics2'}.json").read_text())
 for f, src, what in ((fm, MD, "metrics"), (fq, QD, "queries")):
     if src.startswith("walk"):
         for iid, nodes in json.loads((OUT / f"{src}_{what}.json").read_text()).items():
             if iid in f:
                 f[iid]["domain"] = nodes
-if os.environ.get("EXP_FACET") == "v2":  # facet bindings re-verified with verify-facets-v2.md (s3c_facets.py)
-    for f, name in ((fm, "facets_v2_metrics.json"), (fq, "facets_v2_queries.json")):
-        for iid, nodes in json.loads((OUT / name).read_text()).items():
+FV = os.environ.get("EXP_FACET", "v1")  # v2 / v2_nothink: re-verified with verify-facets-v2.md (s3c_facets.py)
+if FV != "v1":
+    for f, what in ((fm, "metrics"), (fq, "queries")):
+        for iid, nodes in json.loads((OUT / f"facets_{FV}_{what}.json").read_text()).items():
             if iid in f:
                 f[iid]["facet"] = nodes
 queries = [q for q in json.loads((OUT / "queries.json").read_text()) if q["id"] in fq and q["target"] in pos]
