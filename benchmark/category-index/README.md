@@ -27,9 +27,48 @@ Known-item search over 212 queries. Each query was written by an LLM to find one
 metric, in its own words, alternating English and Chinese. A metric counts as found if it is the
 target or a near-duplicate of it (cosine ≥ 0.95; GB 43150 appears three times).
 
-- **cell recall**: share of queries whose cells still contain the target;
-- **R@10**: target in the top 10 after ranking by cosine;
-- **|C|**: metrics left after filtering (median).
+Each query is handled in three steps:
+
+1. **Resolve the query to nodes.** The query is filed like a metric: it gets a set of ICS nodes
+   and a set of facet nodes, by the same method as the metrics in that row.
+2. **Filter.** A metric stays in the candidate set C when it passes the domain test and, for the
+   "pair" strategy, also the facet test. ("Domain only" and "facet only" strategies apply one
+   test.) A metric passes a test when one of its nodes and one of the query's nodes are on the
+   same branch of the tree:
+   - the metric's node is the query's node or lies below it (the query is broader), or
+   - the metric's node lies above the query's node (the metric was filed more coarsely, e.g.
+     stopped at an inner node's "others").
+
+   Siblings and cousins do not match: a metric filed under *17.100 Pressure measurement* fails a
+   query filed under *11.040.55 Diagnostic equipment*. Two special cases: a query that got no
+   node on a side is not filtered on that side; a metric that got no node on a side counts as
+   filed at the root and passes every query (this inflates the rows where many metrics are
+   unresolved). The `dL1` and `dL2` variants in `results/` first replace every ICS node by its
+   ancestor at level 1 or 2, so the test becomes "same Field" or "same Group".
+3. **Rank.** The metrics in C are ranked by cosine similarity between the query's bge-m3
+   embedding and each metric's existing embedding in `kb.search_artifacts_metric`.
+
+The columns:
+
+- **cell recall**: the share of queries for which C still contains the target (or a
+  near-duplicate). It measures only the filter, before any ranking. A target missing from C can
+  never be returned however good the ranking is, so cell recall is the ceiling for everything
+  after it. Brute force has cell recall 1.0 by definition.
+- **R@10**: the share of queries whose target is among the top 10 of C after step 3. The ranking
+  is pure vector search: cosine only, with no BM25 and no fusion. The brute-force baseline is the
+  same ranking with C = all metrics. The BM25 baseline is pure BM25 over all metrics (the `|||`
+  operator the search API uses), with no vectors and no category filter. A hybrid of the two was
+  not tested.
+- **|C|**: the size of the candidate set, as the median over queries; `results/` also gives the
+  90th percentile. It shows how much cosine work the filter saves.
+
+Query nodes come from the LLM (filing method of that row) unless a row in `results/` is marked
+`emb@k`, where they are the k nearest tree nodes by embedding, without any LLM.
+
+The metric fields the LLM sees are name, English name, subject, English subject, description,
+context, unit, value, condition and document title. `kb.metrics.frame` was added afterwards
+(2026-10-23), so these results do not include it; on that date only 23 of 2,660 metrics had a
+frame.
 
 | Domain filing (metrics and queries) | No domain | Domain cell recall | Pair cell recall | Pair R@10 | Pair \|C\| |
 |---|---|---|---|---|---|

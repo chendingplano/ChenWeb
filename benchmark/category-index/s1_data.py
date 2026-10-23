@@ -10,7 +10,7 @@ with db() as c:
         SELECT m.id, m.input_record_id, coalesce(i.title, ''), coalesce(m.metric_name, ''), coalesce(m.metric_name_en, ''),
                coalesce(m.metric_subject, ''), coalesce(m.metric_subject_en, ''), coalesce(m.metric_desc_en, m.metric_desc, ''),
                coalesce(m.metric_context, ''), coalesce(m.metric_unit, ''), coalesce(m.threshold_or_target, m.metric_value, ''),
-               coalesce(m.condition, ''), coalesce(m.metric_categories_en, ''), s.embedding::text
+               coalesce(m.condition, ''), coalesce(m.metric_categories_en, ''), s.embedding::text, m.frame
         FROM kb.metrics m JOIN kb.inputs i ON i.id = m.input_record_id
         JOIN kb.search_artifacts_metric s ON s.artifact_id = m.metric_id
         WHERE m.ref_mention_id IS NULL ORDER BY m.id""").fetchall()
@@ -18,7 +18,7 @@ with db() as c:
     for r in rows:
         metrics.append({"id": str(r[0]), "record_id": r[1], "doc_title": r[2][:120], "name": r[3], "name_en": r[4],
                         "subject": r[5], "subject_en": r[6], "description": r[7][:300], "context": r[8][:300],
-                        "unit": r[9], "value": r[10][:120], "condition": r[11][:200], "proposals": r[12]})
+                        "unit": r[9], "value": r[10][:120], "condition": r[11][:200], "proposals": r[12], "frame": r[14]})
         vecs.append(json.loads(r[13]))
     v = np.asarray(vecs, dtype=np.float32)
     np.save(OUT / "metric_emb.npy", v / np.linalg.norm(v, axis=1, keepdims=True))

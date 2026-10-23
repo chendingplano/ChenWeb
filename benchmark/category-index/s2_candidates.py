@@ -4,7 +4,7 @@ import sys
 
 from lib import OUT, batched_llm, prompt
 
-FIELDS = ("doc_title", "name", "name_en", "subject", "subject_en", "description", "context", "unit", "value", "condition")
+FIELDS = ("doc_title", "name", "name_en", "subject", "subject_en", "description", "context", "unit", "value", "condition", "frame")
 
 
 def view(m):
