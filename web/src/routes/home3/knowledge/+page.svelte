@@ -60,6 +60,7 @@
 	import MetricOntologyExplorerView from '$lib/components/home3/metric-ontology-explorer-view.svelte';
 	import CategoryTreesView from '$lib/components/home3/category-trees-view.svelte';
 	import MeshBrowserView from '$lib/components/home3/mesh-browser-view.svelte';
+	import MeshSearchView from '$lib/components/home3/mesh-search-view.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -72,6 +73,8 @@
 		| 'kb-metric-ontology-explorer'
 		| 'kb-ontology-categories'
 		| 'kb-ontology-mesh'
+		| 'kb-ontology-mesh-folder'
+		| 'kb-ontology-mesh-browser'
 		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
@@ -98,6 +101,14 @@
 		| 'kb-workflow'
 		| 'kb-product-parts';
 
+	type KbMenuChild = {
+		id: KbSectionId;
+		entryKey?: string;
+		label: string;
+		description: string;
+		children?: KbMenuChild[];
+	};
+
 	type KbMenuItem = {
 		id: KbSectionId;
 		// Overrides `id` as the kb.page_config lookup key (label overrides +
@@ -107,7 +118,7 @@
 		label: string;
 		description: string;
 		icon: any;
-		children?: Array<{ id: KbSectionId; entryKey?: string; label: string; description: string }>;
+		children?: KbMenuChild[];
 	};
 
 	const menuItems: KbMenuItem[] = $derived([
@@ -264,13 +275,29 @@
 					description: m.home3_knowledge_categories_description()
 				},
 				{
-					id: 'kb-ontology-mesh',
+					id: 'kb-ontology-mesh-folder',
 					label: m.home3_knowledge_mesh(),
-					description: m.home3_knowledge_mesh_description()
+					description: m.mesh_search_folder_description(),
+					children: [
+						{
+							id: 'kb-ontology-mesh',
+							label: m.home3_knowledge_mesh(),
+							description: m.home3_knowledge_mesh_description()
+						},
+						{
+							id: 'kb-ontology-mesh-browser',
+							label: m.mesh_search_title(),
+							description: m.mesh_search_description()
+						}
+					]
 				}
 			]
 		}
 	]);
+
+	function flattenMenu(items: KbMenuChild[]): KbMenuChild[] {
+		return items.flatMap((item) => [item, ...flattenMenu(item.children ?? [])]);
+	}
 
 	// kb.page_config lookup key for a menu item: `entryKey` when set (a child
 	// routing to the same section id as its parent, or another item, but
@@ -281,14 +308,7 @@
 	// source of truth for [knowledge-content]/labels-<lang>.toml menu ids. Used
 	// to detect config entries that don't match anything, which config loading
 	// otherwise treats as a silent no-op (see unknownMenuConfigIds below).
-	const knownMenuIds = $derived(
-		new Set<string>(
-			menuItems.flatMap((item) => [
-				configKeyOf(item),
-				...(item.children?.map((child) => configKeyOf(child)) ?? [])
-			])
-		)
-	);
+	const knownMenuIds = $derived(new Set(flattenMenu(menuItems).map(configKeyOf)));
 
 	// DB-backed page config for the Wiki sidebar (GET /api/v1/page-config/
 	// home3-knowledge; kb.page_config). Overlay model (spec 2026072001 §9.4):
@@ -342,17 +362,17 @@
 		const cfg = pageConfig;
 		const isVisible = (id: string) => cfg === null || !cfg.hidden.has(id);
 		const labelFor = (id: string, fallback: string) => cfg?.overrides[id]?.label ?? fallback;
-		return menuItems
-			.filter((item) => isVisible(configKeyOf(item)))
-			.map((item) => {
-				const label = labelFor(configKeyOf(item), item.label);
-				if (!item.children) return { ...item, label };
-				const children = item.children
-					.filter((child) => isVisible(configKeyOf(child)))
-					.map((child) => ({ ...child, label: labelFor(configKeyOf(child), child.label) }));
-				return { ...item, label, children };
-			})
-			.filter((item) => !item.children || item.children.length > 0);
+		function resolve<T extends KbMenuChild>(items: T[]): T[] {
+			return items
+				.filter((item) => isVisible(configKeyOf(item)))
+				.map((item) => ({
+					...item,
+					label: labelFor(configKeyOf(item), item.label),
+					...(item.children ? { children: resolve(item.children) } : {})
+				}))
+				.filter((item) => !item.children || item.children.length > 0);
+		}
+		return resolve(menuItems);
 	});
 
 	let menuCollapsed = $state(false);
@@ -442,10 +462,7 @@
 	$effect(() => {
 		const found =
 			virtualSections.includes(initialSection) ||
-			menuItems.some(
-				(item) =>
-					item.id === initialSection || item.children?.some((child) => child.id === initialSection)
-			);
+			menuItems.some((item) => flattenMenu([item]).some((child) => child.id === initialSection));
 		if (found) {
 			if (initialSection === 'kb-doc-wiki') {
 				// The Knowledge Wiki menu entry is a collapsible parent. Treat a
@@ -453,7 +470,12 @@
 				activeSection = 'kb-input-details';
 				documentWikiOpen = true;
 			} else {
-				activeSection = initialSection;
+				activeSection =
+					initialSection === 'kb-ontology-mesh-folder' ? 'kb-ontology-mesh' : initialSection;
+				if (initialSection.startsWith('kb-ontology-mesh')) {
+					ontologyOpen = true;
+					meshFolderOpen = true;
+				}
 			}
 		}
 	});
@@ -462,11 +484,10 @@
 	let documentWikiOpen = $state(false);
 	let documentProcessingOpen = $state(false);
 	let ontologyOpen = $state(false);
+	let meshFolderOpen = $state(false);
 	let activeItem = $derived(
-		menuItems.find(
-			(item) =>
-				item.id === activeSection || item.children?.some((child) => child.id === activeSection)
-		) ?? menuItems[0]
+		menuItems.find((item) => flattenMenu([item]).some((child) => child.id === activeSection)) ??
+			menuItems[0]
 	);
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let panelBg = $derived(darkMode ? '#252A3A' : '#ECEEF2');
@@ -489,6 +510,7 @@
 			activeSection !== 'kb-metric-ontology-explorer' &&
 			activeSection !== 'kb-ontology-categories' &&
 			activeSection !== 'kb-ontology-mesh' &&
+			activeSection !== 'kb-ontology-mesh-browser' &&
 			activeSection !== 'kb-artifact-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
@@ -521,8 +543,9 @@
 			documentWikiOpen = true;
 		}
 		const ontologyItem = menuItems.find((item) => item.id === 'kb-metric-ontology');
-		if (ontologyItem?.children?.some((child) => child.id === id)) {
+		if (ontologyItem && flattenMenu([ontologyItem]).some((child) => child.id === id)) {
 			ontologyOpen = true;
+			if (id.startsWith('kb-ontology-mesh')) meshFolderOpen = true;
 		}
 	}
 
@@ -546,7 +569,9 @@
 	}
 
 	function isChildActive(childId: KbSectionId) {
-		return activeSection === childId;
+		return childId === 'kb-ontology-mesh-folder'
+			? activeSection.startsWith('kb-ontology-mesh')
+			: activeSection === childId;
 	}
 
 	function getUnderConstructionLabel(sectionId: KbSectionId) {
@@ -555,8 +580,46 @@
 			activeItem.label
 		);
 	}
-
 </script>
+
+{#snippet menuChild(child: KbMenuChild)}
+	<button
+		type="button"
+		onclick={() => (child.children ? (meshFolderOpen = !meshFolderOpen) : selectSection(child.id))}
+		aria-expanded={child.children ? meshFolderOpen : undefined}
+		data-entry-key={child.id}
+		class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
+		style="
+													background:{isChildActive(child.id) ? accentTint : childIdleBg};
+													color:{isChildActive(child.id) ? accent : textSecondary};
+													border:none;
+													border-left:{isChildActive(child.id) ? '2px solid ' + accent : '2px solid transparent'};
+												"
+		onmouseenter={(e) => {
+			if (!isChildActive(child.id)) (e.currentTarget as HTMLElement).style.background = hoverBg;
+		}}
+		onmouseleave={(e) => {
+			if (!isChildActive(child.id)) (e.currentTarget as HTMLElement).style.background = childIdleBg;
+		}}
+	>
+		<span style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};"
+			>{child.children ? (meshFolderOpen ? '−' : '+') : '•'}</span
+		>
+		<span class="min-w-0">
+			<span class="block truncate" style="font-size:13px; font-weight:600;">{child.label}</span>
+			<span class="block truncate" style="font-size:11px; color:{textMuted};"
+				>{child.description}</span
+			>
+		</span>
+	</button>
+	{#if child.children && meshFolderOpen}
+		<div class="ml-4 border-l pl-2" style="border-color:{borderColor};">
+			{#each child.children as leaf (leaf.id)}
+				{@render menuChild(leaf)}
+			{/each}
+		</div>
+	{/if}
+{/snippet}
 
 <svelte:window onmousemove={resizeMetricShelf} onmouseup={() => (metricShelfDrag = null)} />
 
@@ -721,42 +784,7 @@
 								{#if isParentOpen(item)}
 									<div class="pr-2 pb-2 pl-6">
 										{#each item.children ?? [] as child (child.id)}
-											<button
-												type="button"
-												onclick={() => selectSection(child.id)}
-													data-entry-key={child.id}
-												class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
-												style="
-													background:{isChildActive(child.id) ? accentTint : childIdleBg};
-													color:{isChildActive(child.id) ? accent : textSecondary};
-													border:none;
-													border-left:{isChildActive(child.id)
-													? '2px solid ' + accent
-													: '2px solid transparent'};
-												"
-												onmouseenter={(e) => {
-													if (!isChildActive(child.id))
-														(e.currentTarget as HTMLElement).style.background = hoverBg;
-												}}
-												onmouseleave={(e) => {
-													if (!isChildActive(child.id))
-														(e.currentTarget as HTMLElement).style.background = childIdleBg;
-												}}
-											>
-												<span
-													style="font-size:12px; color:{isChildActive(child.id)
-														? accent
-														: textMuted};">•</span
-												>
-												<span class="min-w-0">
-													<span class="block truncate" style="font-size:13px; font-weight:600;"
-														>{child.label}</span
-													>
-													<span class="block truncate" style="font-size:11px; color:{textMuted};"
-														>{child.description}</span
-													>
-												</span>
-											</button>
+											{@render menuChild(child)}
 										{/each}
 									</div>
 								{/if}
@@ -913,6 +941,8 @@
 				<MetricOntologyExplorerView {darkMode} metricId={metricOntologyExplorerId} />
 			{:else if activeSection === 'kb-ontology-categories'}
 				<CategoryTreesView {darkMode} />
+			{:else if activeSection === 'kb-ontology-mesh-browser'}
+				<MeshSearchView {darkMode} />
 			{:else if activeSection === 'kb-ontology-mesh'}
 				<MeshBrowserView {darkMode} />
 			{:else if activeSection === 'kb-artifact-wiki'}

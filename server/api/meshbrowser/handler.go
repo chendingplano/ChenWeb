@@ -30,6 +30,7 @@ func (h *Handler) s() *Store {
 
 // Register adds the routes to an authenticated group.
 func (h *Handler) Register(g *echo.Group) {
+	g.GET("/mesh/search", h.Search)
 	g.GET("/mesh/overview", h.Overview)
 	g.GET("/mesh/entities", h.Entities)
 	g.GET("/mesh/tree", h.Tree)

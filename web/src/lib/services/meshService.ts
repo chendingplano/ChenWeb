@@ -103,3 +103,21 @@ export function getMeshEntity(id: string): Promise<MeshEntity> {
 		'failed to load MeSH record'
 	);
 }
+
+export type MeshSearchRow = MeshEntityRow & { kind: string };
+export type MeshSearchOptions = {
+	q: string;
+	field: string;
+	match: string;
+	words: string;
+	sort: string;
+	limit: string;
+};
+
+export async function searchMesh(options: MeshSearchOptions, offset: number) {
+	const params = new URLSearchParams({ ...options, offset: String(offset) });
+	return getJson<{ items: MeshSearchRow[]; has_more: boolean }>(
+		`/api/v1/mesh/search?${params}`,
+		'failed to search MeSH'
+	);
+}
