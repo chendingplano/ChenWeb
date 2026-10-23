@@ -4,6 +4,7 @@
 //   GET /api/v1/mesh/entities?kind=…     → one page of records of a kind
 //   GET /api/v1/mesh/tree?parent=…       → tree numbers under a parent (none = top level)
 //   GET /api/v1/mesh/entity?id=…         → one record with its properties and links
+//   GET /api/v1/mesh/record?id=…         → record assembled for the four detail tabs
 //   GET /api/v1/mesh/neighborhood?id=…   → a tree number with its children and grandchildren
 
 export type MeshKindCount = { kind: string; count: number };
@@ -105,6 +106,23 @@ export function getMeshEntity(id: string): Promise<MeshEntity> {
 }
 
 export type MeshSearchRow = MeshEntityRow & { kind: string };
+
+export type MeshRecordConcept = { entity: MeshEntity; preferred: boolean; terms: MeshEntity[] };
+export type MeshRecordTreeNode = MeshEntityRow & { record_id?: string };
+export type MeshRecord = {
+	entity: MeshEntity;
+	release: string;
+	concepts: MeshRecordConcept[];
+	qualifiers: MeshEntityRow[];
+	trees: { id: string; path: MeshRecordTreeNode[]; children: MeshRecordTreeNode[] }[];
+};
+
+export function getMeshRecord(id: string): Promise<MeshRecord> {
+	return getJson<MeshRecord>(
+		`/api/v1/mesh/record?id=${encodeURIComponent(id)}`,
+		'failed to load MeSH record'
+	);
+}
 export type MeshSearchOptions = {
 	q: string;
 	field: string;

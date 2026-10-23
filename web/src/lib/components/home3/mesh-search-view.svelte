@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
+	import MeshRecordDetails from './mesh-record-details.svelte';
 	import {
-		getMeshEntity,
+		getMeshRecord,
 		searchMesh,
-		type MeshEntity,
+		type MeshRecord,
 		type MeshSearchOptions,
 		type MeshSearchRow
 	} from '$lib/services/meshService';
@@ -22,7 +23,7 @@
 	let busy = $state(false);
 	let failed = $state(false);
 	let selected = $state('');
-	let entity = $state<MeshEntity | null>(null);
+	let record = $state<MeshRecord | null>(null);
 	let detailBusy = $state(false);
 	let detailFailed = $state(false);
 	let request = 0;
@@ -59,7 +60,7 @@
 		rows = [];
 		hasMore = false;
 		selected = '';
-		entity = null;
+		record = null;
 		detailBusy = false;
 		detailFailed = false;
 		++detailRequest;
@@ -81,12 +82,12 @@
 	async function openRecord(id: string) {
 		const ticket = ++detailRequest;
 		selected = id;
-		entity = null;
+		record = null;
 		detailBusy = true;
 		detailFailed = false;
 		try {
-			const result = await getMeshEntity(id);
-			if (ticket === detailRequest) entity = result;
+			const result = await getMeshRecord(id);
+			if (ticket === detailRequest) record = result;
 		} catch {
 			if (ticket === detailRequest) detailFailed = true;
 		} finally {
@@ -160,7 +161,7 @@
 		</div>
 		<p class="source-note">{m.mesh_search_source()}</p>
 	</form>
-	<div class="workspace">
+	<div class="workspace" class:record-open={record !== null}>
 		<section aria-label={m.mesh_search_results()} aria-busy={busy}>
 			<h2>{m.mesh_search_results()}</h2>
 			<div aria-live="polite">
@@ -213,38 +214,17 @@
 			{/if}
 		</section>
 		<aside aria-label={m.mesh_detail_title()} aria-busy={detailBusy}>
-			<h2>{m.mesh_detail_title()}</h2>
+			{#if !record}<h2>{m.mesh_detail_title()}</h2>{/if}
 			{#if !selected}<p class="status">{m.mesh_detail_empty()}</p>
 			{:else if detailBusy}<p class="status" role="status">{m.mesh_loading()}</p>
 			{:else if detailFailed}<p class="status error" role="alert">
 					{m.mesh_search_detail_failed()}
 				</p>
 				<button type="button" onclick={() => openRecord(selected)}>{m.mesh_search_retry()}</button>
-			{:else if entity}
-				<h3>{entity.label || entity.id}</h3>
-				<p><code>{entity.id}</code> · {kindLabel(entity.kind)}</p>
-				<a
-					href={`https://meshb.nlm.nih.gov/record/ui?ui=${encodeURIComponent(entity.id)}`}
-					target="_blank"
-					rel="noreferrer">{m.mesh_search_official_record()} ↗</a
-				>
-				<dl>
-					{#each entity.properties as property (property.predicate)}
-						<dt>
-							{property.predicate === 'scopeNote' ? m.mesh_pred_scope_note() : property.predicate}
-						</dt>
-						<dd>
-							{#each property.values as value}
-								{#if value.id}<button
-										class="record-link"
-										type="button"
-										onclick={() => openRecord(value.id!)}>{value.label || value.id}</button
-									>
-								{:else}<p lang={value.lang || undefined}>{value.text}</p>{/if}
-							{/each}
-						</dd>
-					{/each}
-				</dl>
+			{:else if record}
+				{#key record.entity.id}
+					<MeshRecordDetails {record} onOpenRecord={openRecord} />
+				{/key}
 			{/if}
 		</aside>
 	</div>
@@ -287,11 +267,6 @@
 		font-size: 1rem;
 		font-weight: 650;
 		margin-bottom: 0.75rem;
-	}
-	h3 {
-		font-size: 1.2rem;
-		font-weight: 650;
-		margin-bottom: 0.5rem;
 	}
 	header p,
 	.source-note,
@@ -384,6 +359,9 @@
 		gap: 1.25rem;
 		margin-top: 1.25rem;
 	}
+	.workspace.record-open {
+		grid-template-columns: minmax(14rem, 0.7fr) minmax(0, 2fr);
+	}
 	section,
 	aside {
 		min-width: 0;
@@ -447,28 +425,12 @@
 		margin-bottom: 0.7rem;
 		font-size: 0.85rem;
 	}
-	dt {
-		font-size: 0.8rem;
-		font-weight: 650;
-		color: var(--muted);
-		margin-top: 1.25rem;
-	}
-	dd {
-		font-size: 0.875rem;
-		line-height: 1.65;
-		margin-top: 0.35rem;
-		white-space: pre-wrap;
-	}
-	.record-link {
-		color: var(--accent);
-		padding: 0.2rem 0.4rem;
-		margin: 0.2rem 0.35rem 0.2rem 0;
-	}
 	@media (max-width: 1100px) {
 		.options {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
-		.workspace {
+		.workspace,
+		.workspace.record-open {
 			grid-template-columns: 1fr;
 		}
 	}
