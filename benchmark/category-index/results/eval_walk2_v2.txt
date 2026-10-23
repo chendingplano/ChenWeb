@@ -1,0 +1,40 @@
+metric domain: walk_v2  query domain: walk_v2  facet: v2
+queries: 212  metrics: 2660  avg relevant per query: 1.64
+
+strategy                       R@10    MRR  cellRec  |C| med  |C| p90  R@10 en  R@10 zh
+brute-force cosine            0.953  0.823    1.000     2660     2660    0.943    0.962
+bm25                          0.448  0.331      nan      nan      nan    0.160    0.736
+cat domain [llm]              0.929  0.806    0.972      441      658    0.915    0.943
+cat facet [llm]               0.854  0.757    0.892      184      365    0.858    0.849
+cat pair [llm]                0.825  0.735    0.863       62      197    0.830    0.821
+cat pair dL2 [llm]            0.825  0.735    0.863       68      197    0.830    0.821
+cat domain dL2 [llm]          0.929  0.805    0.972      450      708    0.915    0.943
+cat pair dL1 [llm]            0.835  0.742    0.873      114      343    0.830    0.840
+cat domain dL1 [llm]          0.934  0.810    0.981     1105     1801    0.915    0.953
+cat domain [emb@1]            0.330  0.304    0.340       12      315    0.368    0.292
+cat facet [emb@1]             0.703  0.624    0.741      139      308    0.717    0.689
+cat pair [emb@1]              0.231  0.220    0.241        1       77    0.283    0.179
+cat pair dL2 [emb@1]          0.274  0.260    0.283        2       79    0.311    0.236
+cat domain dL2 [emb@1]        0.377  0.349    0.387       16      324    0.396    0.358
+cat pair dL1 [emb@1]          0.368  0.351    0.377       10      122    0.387    0.349
+cat domain dL1 [emb@1]        0.500  0.465    0.514      221     1105    0.491    0.509
+cat domain [emb@3]            0.448  0.419    0.458       54      449    0.491    0.406
+cat facet [emb@3]             0.840  0.741    0.882      364      688    0.849    0.830
+cat pair [emb@3]              0.387  0.364    0.396       10      171    0.434    0.340
+cat pair dL2 [emb@3]          0.420  0.392    0.429       25      175    0.481    0.358
+cat domain dL2 [emb@3]        0.476  0.442    0.491      203      478    0.528    0.425
+cat pair dL1 [emb@3]          0.542  0.506    0.557      108      420    0.585    0.500
+cat domain dL1 [emb@3]        0.618  0.567    0.637      588     1801    0.651    0.585
+cat domain [emb@5]            0.519  0.481    0.533      174      477    0.547    0.491
+cat facet [emb@5]             0.863  0.761    0.906      494      929    0.868    0.858
+cat pair [emb@5]              0.467  0.435    0.481       45      223    0.500    0.434
+cat pair dL2 [emb@5]          0.491  0.454    0.505       64      230    0.528    0.453
+cat domain dL2 [emb@5]        0.538  0.496    0.557      266      541    0.566    0.509
+cat pair dL1 [emb@5]          0.608  0.559    0.627      172      560    0.642    0.575
+cat domain dL1 [emb@5]        0.675  0.615    0.698      939     1931    0.698    0.651
+
+index shape (LLM-verified metric filing)
+  domain: unresolved 1, nodes used 167, avg per metric 2.19, largest [555, 433, 433, 401, 308]
+  facet: unresolved 26, nodes used 78, avg per metric 1.24, largest [326, 243, 236, 188, 178]
+  pair cells: 952, median 2, p90 18, largest [322, 232, 178, 143, 122]
+  metrics whose domain is not their document's most common domain: 248 of 2660

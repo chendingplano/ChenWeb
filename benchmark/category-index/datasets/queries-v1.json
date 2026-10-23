@@ -1,0 +1,1274 @@
+[
+ {
+  "id": "q32672",
+  "target": "32672",
+  "lang": "en",
+  "query": "How long must a blood pressure monitor rest before calibration"
+ },
+ {
+  "id": "q32661",
+  "target": "32661",
+  "lang": "zh",
+  "query": "标准器在血压计检定中显示的压力读数"
+ },
+ {
+  "id": "q32677",
+  "target": "32677",
+  "lang": "en",
+  "query": "How many times should pressure be lowered during blood pressure gauge error testing"
+ },
+ {
+  "id": "q32655",
+  "target": "32655",
+  "lang": "zh",
+  "query": "光柱式血压计漏气怎么查"
+ },
+ {
+  "id": "q32656",
+  "target": "32656",
+  "lang": "en",
+  "query": "Allowable error for the light column reading without a cuff"
+ },
+ {
+  "id": "q32686",
+  "target": "32686",
+  "lang": "zh",
+  "query": "血压计气压系统一分钟漏气允许下降多少"
+ },
+ {
+  "id": "q32658",
+  "target": "32658",
+  "lang": "en",
+  "query": "How much pressure can a blood pressure monitor lose to leakage in one minute"
+ },
+ {
+  "id": "q32675",
+  "target": "32675",
+  "lang": "zh",
+  "query": "血压计误差检测从多少压力开始"
+ },
+ {
+  "id": "q32692",
+  "target": "32692",
+  "lang": "en",
+  "query": "What pressure range should the calibration standard cover for blood pressure meters"
+ },
+ {
+  "id": "q32684",
+  "target": "32684",
+  "lang": "zh",
+  "query": "血压计气密性检查第二次读数要等多久"
+ },
+ {
+  "id": "q32665",
+  "target": "32665",
+  "lang": "en",
+  "query": "sphygmomanometer pressure reading drop over two minutes with cuff"
+ },
+ {
+  "id": "q32654",
+  "target": "32654",
+  "lang": "zh",
+  "query": "光柱式血压计示值偏差检定项目"
+ },
+ {
+  "id": "q32657",
+  "target": "32657",
+  "lang": "en",
+  "query": "digital display error limit for blood pressure meter without cuff"
+ },
+ {
+  "id": "q32685",
+  "target": "32685",
+  "lang": "zh",
+  "query": "血压计气密性检查两次读数压力下降多少"
+ },
+ {
+  "id": "q47583",
+  "target": "47583",
+  "lang": "en",
+  "query": "how much intramuscular adrenaline per kilogram for severe allergic reaction"
+ },
+ {
+  "id": "q47493",
+  "target": "47493",
+  "lang": "zh",
+  "query": "儿童用肾上腺素的最大用量限制"
+ },
+ {
+  "id": "q47537",
+  "target": "47537",
+  "lang": "en",
+  "query": "how many back blows between shoulder blades for choking infant"
+ },
+ {
+  "id": "q47499",
+  "target": "47499",
+  "lang": "zh",
+  "query": "洛贝林静脉注射多久可以重复一次"
+ },
+ {
+  "id": "q47617",
+  "target": "47617",
+  "lang": "en",
+  "query": "MEWS respiratory rate normal range score points"
+ },
+ {
+  "id": "q47584",
+  "target": "47584",
+  "lang": "zh",
+  "query": "child maximum adrenaline dose injected into thigh muscle"
+ },
+ {
+  "id": "q47491",
+  "target": "47491",
+  "lang": "en",
+  "query": "adult epinephrine 1:1000 thigh injection dose for airway swelling"
+ },
+ {
+  "id": "q47620",
+  "target": "47620",
+  "lang": "zh",
+  "query": "成人呼吸频率超过三十次每分钟评几分"
+ },
+ {
+  "id": "q47507",
+  "target": "47507",
+  "lang": "en",
+  "query": "weight based 25% glucose dose for child in hypoglycemic coma"
+ },
+ {
+  "id": "q47533",
+  "target": "47533",
+  "lang": "zh",
+  "query": "咪达唑仑抽搐时多久可以再打一次"
+ },
+ {
+  "id": "q47625",
+  "target": "47625",
+  "lang": "en",
+  "query": "early warning score points when patient responds to voice"
+ },
+ {
+  "id": "q47623",
+  "target": "47623",
+  "lang": "zh",
+  "query": "成人发烧到三十八度五以上预警评分几分"
+ },
+ {
+  "id": "q47577",
+  "target": "47577",
+  "lang": "en",
+  "query": "how many hours apart for oral ibuprofen"
+ },
+ {
+  "id": "q47488",
+  "target": "47488",
+  "lang": "zh",
+  "query": "儿童极高危心率低于六十伴低灌注"
+ },
+ {
+  "id": "q46767",
+  "target": "46767",
+  "lang": "en",
+  "query": "step test counter beat rate allowed deviation"
+ },
+ {
+  "id": "q46381",
+  "target": "46381",
+  "lang": "zh",
+  "query": "引体向上测试仪模拟运动频率范围是多少"
+ },
+ {
+  "id": "q46291",
+  "target": "46291",
+  "lang": "en",
+  "query": "how many cycles must body weight test equipment endure in durability testing"
+ },
+ {
+  "id": "q46553",
+  "target": "46553",
+  "lang": "zh",
+  "query": "成年人纵跳测试仪有效测量范围是多少"
+ },
+ {
+  "id": "q46707",
+  "target": "46707",
+  "lang": "en",
+  "query": "allowed error for seat board depth on sitting height tester"
+ },
+ {
+  "id": "q46336",
+  "target": "46336",
+  "lang": "zh",
+  "query": "游标皮褶厚度仪付尺哪些位置需要检验"
+ },
+ {
+  "id": "q46416",
+  "target": "46416",
+  "lang": "en",
+  "query": "sitting height measurement range for young children using sitting height tester"
+ },
+ {
+  "id": "q46482",
+  "target": "46482",
+  "lang": "zh",
+  "query": "标准电阻模型LA位置电阻值是多少"
+ },
+ {
+  "id": "q46341",
+  "target": "46341",
+  "lang": "en",
+  "query": "which main scale points are checked on pointer skinfold caliper"
+ },
+ {
+  "id": "q46544",
+  "target": "46544",
+  "lang": "zh",
+  "query": "被测器材脉搏测试系统频率范围两端数值怎么测"
+ },
+ {
+  "id": "q46328",
+  "target": "46328",
+  "lang": "en",
+  "query": "maximum error allowed for standard cylinder used to check circumference tester"
+ },
+ {
+  "id": "q46560",
+  "target": "46560",
+  "lang": "zh",
+  "query": "成年人背力测试仪最小刻度是多少"
+ },
+ {
+  "id": "q46425",
+  "target": "46425",
+  "lang": "en",
+  "query": "How deep is the seat board on a sitting height measuring device?"
+ },
+ {
+  "id": "q46554",
+  "target": "46554",
+  "lang": "zh",
+  "query": "成年人使用的纵跳测试仪最小刻度是多少"
+ },
+ {
+  "id": "q38170",
+  "target": "38170",
+  "lang": "en",
+  "query": "What data format is used for the gum examination finding description field?"
+ },
+ {
+  "id": "q38090",
+  "target": "38090",
+  "lang": "zh",
+  "query": "踝臂指数这个数据元最多能记录几次"
+ },
+ {
+  "id": "q38177",
+  "target": "38177",
+  "lang": "en",
+  "query": "How many times can the throat exam finding description be recorded?"
+ },
+ {
+  "id": "q38366",
+  "target": "38366",
+  "lang": "zh",
+  "query": "乳酸脱氢酶同工酶类别代码字段允许重复出现几次"
+ },
+ {
+  "id": "q38084",
+  "target": "38084",
+  "lang": "en",
+  "query": "How many entries of the ambulatory blood pressure monitoring description are permitted?"
+ },
+ {
+  "id": "q38049",
+  "target": "38049",
+  "lang": "zh",
+  "query": "皮肤检查结果描述这一数据项可以出现几次"
+ },
+ {
+  "id": "q38046",
+  "target": "38046",
+  "lang": "en",
+  "query": "How many times may body mass index appear in the record?"
+ },
+ {
+  "id": "q38195",
+  "target": "38195",
+  "lang": "zh",
+  "query": "肺部啰音描述这一项允许出现几次"
+ },
+ {
+  "id": "q38493",
+  "target": "38493",
+  "lang": "en",
+  "query": "How many times may liver sonogram findings be recorded in health exam data"
+ },
+ {
+  "id": "q38529",
+  "target": "38529",
+  "lang": "zh",
+  "query": "体检数据中骨密度检查结果描述最多能出现几次"
+ },
+ {
+  "id": "q38422",
+  "target": "38422",
+  "lang": "en",
+  "query": "How often can serum gastrin value appear in a health examination dataset"
+ },
+ {
+  "id": "q38306",
+  "target": "38306",
+  "lang": "zh",
+  "query": "粪便隐血标志在体检数据中可出现几次"
+ },
+ {
+  "id": "q38461",
+  "target": "38461",
+  "lang": "en",
+  "query": "How many times may a chest radiograph abnormality indicator appear"
+ },
+ {
+  "id": "q38449",
+  "target": "38449",
+  "lang": "zh",
+  "query": "眼底血管照相结果描述最多允许记录几次"
+ },
+ {
+  "id": "q32790",
+  "target": "32790",
+  "lang": "en",
+  "query": "What arm circumference range must a single-size public blood pressure cuff cover"
+ },
+ {
+  "id": "q32774",
+  "target": "32774",
+  "lang": "zh",
+  "query": "其他模式测试时使用的固定容积规定为多少"
+ },
+ {
+  "id": "q32761",
+  "target": "32761",
+  "lang": "en",
+  "query": "highest pressure allowed for blood pressure monitor in other modes"
+ },
+ {
+  "id": "q32901",
+  "target": "32901",
+  "lang": "zh",
+  "query": "这份行业标准文本的印刷日期是哪年哪月"
+ },
+ {
+  "id": "q32744",
+  "target": "32744",
+  "lang": "en",
+  "query": "How consistent are repeated blood pressure readings from a monitor?"
+ },
+ {
+  "id": "q32876",
+  "target": "32876",
+  "lang": "zh",
+  "query": "自动无创血压计压力误差测试环境温度范围是多少"
+ },
+ {
+  "id": "q32897",
+  "target": "32897",
+  "lang": "en",
+  "query": "How much does this medical electrical standard text cost to purchase?"
+ },
+ {
+  "id": "q32760",
+  "target": "32760",
+  "lang": "zh",
+  "query": "新生儿模式下自动无创血压计最高能充到多大压力"
+ },
+ {
+  "id": "q32718",
+  "target": "32718",
+  "lang": "en",
+  "query": "How long may an automatic blood pressure cuff stay inflated in other modes?"
+ },
+ {
+  "id": "q32845",
+  "target": "32845",
+  "lang": "zh",
+  "query": "其他模式自动无创血压计测试时脉率设定为多少"
+ },
+ {
+  "id": "q32832",
+  "target": "32832",
+  "lang": "en",
+  "query": "How do you average systolic and diastolic blood pressure readings?"
+ },
+ {
+  "id": "q32824",
+  "target": "32824",
+  "lang": "zh",
+  "query": "腕式袖带适合多大范围的手腕周长"
+ },
+ {
+  "id": "q32785",
+  "target": "32785",
+  "lang": "en",
+  "query": "At what pressure should a manometer's accuracy be checked?"
+ },
+ {
+  "id": "q32884",
+  "target": "32884",
+  "lang": "zh",
+  "query": "新生儿模式下血压计收缩压显示至少应达到多少"
+ },
+ {
+  "id": "q34159",
+  "target": "34159",
+  "lang": "en",
+  "query": "how UV disinfection equipment starts automatically based on airborne hydrogen sulfide and ammonia levels"
+ },
+ {
+  "id": "q34154",
+  "target": "34154",
+  "lang": "zh",
+  "query": "农村分散农户废塑料处理适用规模上限是多少"
+ },
+ {
+  "id": "q34164",
+  "target": "34164",
+  "lang": "en",
+  "query": "fermented waste organic matter content on dry basis requirement"
+ },
+ {
+  "id": "q34147",
+  "target": "34147",
+  "lang": "zh",
+  "query": "thickness of hardened concrete floor in equipment operating area"
+ },
+ {
+  "id": "q34148",
+  "target": "34148",
+  "lang": "en",
+  "query": "what voltage supply does the workshop distribution cabinet need for plastic treatment facility"
+ },
+ {
+  "id": "q34161",
+  "target": "34161",
+  "lang": "zh",
+  "query": "which hose type is allowed for gas conveying pipelines in foam recycling facility"
+ },
+ {
+  "id": "q34158",
+  "target": "34158",
+  "lang": "en",
+  "query": "disinfectant tank level falls below set point equipment stops and alarms"
+ },
+ {
+  "id": "q34150",
+  "target": "34150",
+  "lang": "zh",
+  "query": "多久统计一次每天进厂的有机垃圾量并调整投料"
+ },
+ {
+  "id": "q34155",
+  "target": "34155",
+  "lang": "en",
+  "query": "compression ratio for baling washed waste plastic before transport"
+ },
+ {
+  "id": "q34149",
+  "target": "34149",
+  "lang": "zh",
+  "query": "集装箱人工淋雨测试需要喷淋多长时间"
+ },
+ {
+  "id": "q34160",
+  "target": "34160",
+  "lang": "en",
+  "query": "organic waste shredding target size before fermentation"
+ },
+ {
+  "id": "q34165",
+  "target": "34165",
+  "lang": "zh",
+  "query": "发酵产物酸碱度应控制在多少"
+ },
+ {
+  "id": "q34145",
+  "target": "34145",
+  "lang": "en",
+  "query": "maximum rural domestic waste treatment capacity for scattered households"
+ },
+ {
+  "id": "q34163",
+  "target": "34163",
+  "lang": "zh",
+  "query": "有机垃圾处理后湿基有机物含量应达到多少"
+ },
+ {
+  "id": "q32696",
+  "target": "32696",
+  "lang": "en",
+  "query": "pressure accuracy tolerance for automatic blood pressure monitor"
+ },
+ {
+  "id": "q32697",
+  "target": "32697",
+  "lang": "zh",
+  "query": "自动血压计听诊法测试的压力范围是多少"
+ },
+ {
+  "id": "q47667",
+  "target": "47667",
+  "lang": "en",
+  "query": "germination rate index requirement for composted fertilizer product"
+ },
+ {
+  "id": "q47679",
+  "target": "47679",
+  "lang": "zh",
+  "query": "培养皿中水堇或萝卜种子放几粒"
+ },
+ {
+  "id": "q47668",
+  "target": "47668",
+  "lang": "en",
+  "query": "daily collection frequency requirement for residual waste"
+ },
+ {
+  "id": "q47676",
+  "target": "47676",
+  "lang": "zh",
+  "query": "每次测定需要做几个蒸馏水空白对照"
+ },
+ {
+  "id": "q47672",
+  "target": "47672",
+  "lang": "en",
+  "query": "minimum speed of reciprocating horizontal shaker for extraction"
+ },
+ {
+  "id": "q47675",
+  "target": "47675",
+  "lang": "zh",
+  "query": "振荡提取结束后需要放置多久"
+ },
+ {
+  "id": "q47671",
+  "target": "47671",
+  "lang": "en",
+  "query": "extraction water amount per dry solid weight ratio"
+ },
+ {
+  "id": "q47659",
+  "target": "47659",
+  "lang": "zh",
+  "query": "肥料中有机质含量按烘干基计算是多少"
+ },
+ {
+  "id": "q47680",
+  "target": "47680",
+  "lang": "en",
+  "query": "how much leachate is added to each petri dish"
+ },
+ {
+  "id": "q47665",
+  "target": "47665",
+  "lang": "zh",
+  "query": "肥料中镉含量按烘干基计的限量是多少"
+ },
+ {
+  "id": "q47682",
+  "target": "47682",
+  "lang": "en",
+  "query": "how long to incubate seeds in dark incubator"
+ },
+ {
+  "id": "q47678",
+  "target": "47678",
+  "lang": "zh",
+  "query": "浸出液最多可以存放多久"
+ },
+ {
+  "id": "q47657",
+  "target": "47657",
+  "lang": "en",
+  "query": "how often perishable waste should be collected each day"
+ },
+ {
+  "id": "q47681",
+  "target": "47681",
+  "lang": "zh",
+  "query": "培养箱里种子发芽试验温度是多少"
+ },
+ {
+  "id": "q34357",
+  "target": "34357",
+  "lang": "en",
+  "query": "what percentage of the upper arm should a blood pressure cuff cover"
+ },
+ {
+  "id": "q34379",
+  "target": "34379",
+  "lang": "zh",
+  "query": "嘉兴动态血压三级收缩压下限是多少"
+ },
+ {
+  "id": "q34374",
+  "target": "34374",
+  "lang": "en",
+  "query": "what hours count as nighttime in ambulatory blood pressure monitoring"
+ },
+ {
+  "id": "q34366",
+  "target": "34366",
+  "lang": "zh",
+  "query": "动态血压有效数据占比至少要达到多少"
+ },
+ {
+  "id": "q34356",
+  "target": "34356",
+  "lang": "en",
+  "query": "how many hourly time zones are in a blood pressure trend chart"
+ },
+ {
+  "id": "q34362",
+  "target": "34362",
+  "lang": "zh",
+  "query": "动态血压测量时两臂收缩压差多少选较高侧"
+ },
+ {
+  "id": "q34360",
+  "target": "34360",
+  "lang": "en",
+  "query": "how many fingers should fit under a blood pressure cuff"
+ },
+ {
+  "id": "q34339",
+  "target": "34339",
+  "lang": "zh",
+  "query": "动态血压记录仪需要哪些国际认证"
+ },
+ {
+  "id": "q34367",
+  "target": "34367",
+  "lang": "en",
+  "query": "how many valid readings per hour are required for ambulatory blood pressure"
+ },
+ {
+  "id": "q34375",
+  "target": "34375",
+  "lang": "zh",
+  "query": "嘉兴动态血压一级收缩压范围是多少"
+ },
+ {
+  "id": "q34348",
+  "target": "34348",
+  "lang": "en",
+  "query": "blood pressure monitor calibration highest pressure limit"
+ },
+ {
+  "id": "q34345",
+  "target": "34345",
+  "lang": "zh",
+  "query": "血压夜间监测推荐的时间段"
+ },
+ {
+  "id": "q34369",
+  "target": "34369",
+  "lang": "en",
+  "query": "ambulatory blood pressure diastolic acceptable measurement range"
+ },
+ {
+  "id": "q34380",
+  "target": "34380",
+  "lang": "zh",
+  "query": "嘉兴动态血压三级标准舒张压下限"
+ },
+ {
+  "id": "q33469",
+  "target": "33469",
+  "lang": "en",
+  "query": "electronic digital indicator threaded section minimum length"
+ },
+ {
+  "id": "q33487",
+  "target": "33487",
+  "lang": "zh",
+  "query": "电子数显指示表最大测量力是多少"
+ },
+ {
+  "id": "q33447",
+  "target": "33447",
+  "lang": "en",
+  "query": "digital indicator electromagnetic interference resistance provided or not"
+ },
+ {
+  "id": "q33477",
+  "target": "33477",
+  "lang": "zh",
+  "query": "数显指示表局部量程零点漂移时的读数偏差"
+ },
+ {
+  "id": "q34284",
+  "target": "34284",
+  "lang": "en",
+  "query": "electronic digital display indicator maximum distance dimension"
+ },
+ {
+  "id": "q34283",
+  "target": "34283",
+  "lang": "zh",
+  "query": "电子数显指示表表圈到测杆端长度标称值"
+ },
+ {
+  "id": "q34310",
+  "target": "34310",
+  "lang": "en",
+  "query": "smallest display increment of an electronic digital indicator in millimetres"
+ },
+ {
+  "id": "q33434",
+  "target": "33434",
+  "lang": "zh",
+  "query": "电子数显指示表的局部测量范围是多少"
+ },
+ {
+  "id": "q33456",
+  "target": "33456",
+  "lang": "en",
+  "query": "maximum allowed error across entire range of electronic digital indicator"
+ },
+ {
+  "id": "q34297",
+  "target": "34297",
+  "lang": "zh",
+  "query": "电子数显指示表重复测量结果的一致性"
+ },
+ {
+  "id": "q34285",
+  "target": "34285",
+  "lang": "en",
+  "query": "minimum sleeve length of an electronic digital display indicator"
+ },
+ {
+  "id": "q34323",
+  "target": "34323",
+  "lang": "zh",
+  "query": "电子数显指示表标记是否清晰耐磨"
+ },
+ {
+  "id": "q33485",
+  "target": "33485",
+  "lang": "en",
+  "query": "reading error over part of an electronic indicator's measuring range"
+ },
+ {
+  "id": "q33449",
+  "target": "33449",
+  "lang": "zh",
+  "query": "电子数显指示表防水防尘等级是多少"
+ },
+ {
+  "id": "q33556",
+  "target": "33556",
+  "lang": "en",
+  "query": "minimum thread length on an electronic digital display indicator"
+ },
+ {
+  "id": "q33571",
+  "target": "33571",
+  "lang": "zh",
+  "query": "电子数显指示表整个量程的读数偏差"
+ },
+ {
+  "id": "q33536",
+  "target": "33536",
+  "lang": "en",
+  "query": "what span can an electronic digital display indicator measure"
+ },
+ {
+  "id": "q33554",
+  "target": "33554",
+  "lang": "zh",
+  "query": "电子数显指示表轴套最短长度要求"
+ },
+ {
+  "id": "q33546",
+  "target": "33546",
+  "lang": "en",
+  "query": "overall outside size of an electronic digital display indicator"
+ },
+ {
+  "id": "q33549",
+  "target": "33549",
+  "lang": "zh",
+  "query": "电子数显指示表安装螺纹规格是多少"
+ },
+ {
+  "id": "q33530",
+  "target": "33530",
+  "lang": "en",
+  "query": "worst allowed deviation across the entire span of a digital indicator"
+ },
+ {
+  "id": "q33520",
+  "target": "33520",
+  "lang": "zh",
+  "query": "减少校准点后整体校准的测量不确定度"
+ },
+ {
+  "id": "q33511",
+  "target": "33511",
+  "lang": "en",
+  "query": "what is the smallest step on a digital display micrometer gauge"
+ },
+ {
+  "id": "q33523",
+  "target": "33523",
+  "lang": "zh",
+  "query": "电子数显指示表正反行程读数偏差"
+ },
+ {
+  "id": "q33578",
+  "target": "33578",
+  "lang": "en",
+  "query": "digital indicator reading difference when approached from both directions"
+ },
+ {
+  "id": "q33579",
+  "target": "33579",
+  "lang": "zh",
+  "query": "电子数显指示表显示值与实际值差多少"
+ },
+ {
+  "id": "q33574",
+  "target": "33574",
+  "lang": "en",
+  "query": "smallest display increment of electronic digital indicator"
+ },
+ {
+  "id": "q33502",
+  "target": "33502",
+  "lang": "zh",
+  "query": "电子数显指示表机身厚度尺寸是多少"
+ },
+ {
+  "id": "q33648",
+  "target": "33648",
+  "lang": "en",
+  "query": "finest display step options for electronic digital display indicator"
+ },
+ {
+  "id": "q33661",
+  "target": "33661",
+  "lang": "zh",
+  "query": "电子数显指示表正反行程示值偏差"
+ },
+ {
+  "id": "q33609",
+  "target": "33609",
+  "lang": "en",
+  "query": "how fast electronic digital indicator responds to movement"
+ },
+ {
+  "id": "q33619",
+  "target": "33619",
+  "lang": "zh",
+  "query": "电子数显指示表最小显示步进值"
+ },
+ {
+  "id": "q33622",
+  "target": "33622",
+  "lang": "en",
+  "query": "allowed error boundary for electronic digital display indicator"
+ },
+ {
+  "id": "q33586",
+  "target": "33586",
+  "lang": "zh",
+  "query": "数显百分表最小读数间隔"
+ },
+ {
+  "id": "q33604",
+  "target": "33604",
+  "lang": "en",
+  "query": "body thickness of electronic digital indicator specified by maker"
+ },
+ {
+  "id": "q33639",
+  "target": "33639",
+  "lang": "zh",
+  "query": "电子数显指示表最大测力值"
+ },
+ {
+  "id": "q33654",
+  "target": "33654",
+  "lang": "en",
+  "query": "electronic digital indicator total measuring span in millimeters"
+ },
+ {
+  "id": "q33633",
+  "target": "33633",
+  "lang": "zh",
+  "query": "电子数显指示表能测量的最大行程是多少"
+ },
+ {
+  "id": "q33664",
+  "target": "33664",
+  "lang": "en",
+  "query": "largest reading deviation when zero floats on an electronic digital indicator"
+ },
+ {
+  "id": "q33658",
+  "target": "33658",
+  "lang": "zh",
+  "query": "电子数显指示表局部行程允许偏差多少"
+ },
+ {
+  "id": "q33626",
+  "target": "33626",
+  "lang": "en",
+  "query": "how many calibration points needed for sampling-based indicator calibration"
+ },
+ {
+  "id": "q33602",
+  "target": "33602",
+  "lang": "zh",
+  "query": "测头接触表面是否具备耐磨性能"
+ },
+ {
+  "id": "q33694",
+  "target": "33694",
+  "lang": "en",
+  "query": "carbon neutrality plan how greenhouse gas removals increase over time"
+ },
+ {
+  "id": "q33900",
+  "target": "33900",
+  "lang": "zh",
+  "query": "温室气体核算体系范围三上游运输和配送属于哪类"
+ },
+ {
+  "id": "q33867",
+  "target": "33867",
+  "lang": "en",
+  "query": "carbon neutrality hierarchy direct and indirect emission cuts before offsets"
+ },
+ {
+  "id": "q33870",
+  "target": "33870",
+  "lang": "zh",
+  "query": "温室气体清除量提升如何定义和量化"
+ },
+ {
+  "id": "q33871",
+  "target": "33871",
+  "lang": "en",
+  "query": "what timeframe does the public carbon neutrality claim summary cover"
+ },
+ {
+  "id": "q33868",
+  "target": "33868",
+  "lang": "zh",
+  "query": "价值链内温室气体移除量增加是否比抵消更优先"
+ },
+ {
+  "id": "q33720",
+  "target": "33720",
+  "lang": "en",
+  "query": "how are all greenhouse gas emissions balanced by removals under IPCC neutrality"
+ },
+ {
+  "id": "q33913",
+  "target": "33913",
+  "lang": "zh",
+  "query": "外购商品与服务在范围三中对应哪个类别"
+ },
+ {
+  "id": "q33872",
+  "target": "33872",
+  "lang": "en",
+  "query": "how much greenhouse gas emissions are reported in the public summary"
+ },
+ {
+  "id": "q33698",
+  "target": "33698",
+  "lang": "zh",
+  "query": "如何评估碳中和计划雄心水平及责任能力匹配度"
+ },
+ {
+  "id": "q33764",
+  "target": "33764",
+  "lang": "en",
+  "query": "do increases in greenhouse gas removals help meet carbon neutral conditions"
+ },
+ {
+  "id": "q33701",
+  "target": "33701",
+  "lang": "zh",
+  "query": "达到剩余温室气体排放后是否需持续保持该状态"
+ },
+ {
+  "id": "q33773",
+  "target": "33773",
+  "lang": "en",
+  "query": "when must a carbon neutrality plan baseline be recalculated"
+ },
+ {
+  "id": "q33892",
+  "target": "33892",
+  "lang": "zh",
+  "query": "地区和组织实现净零排放是否只允许清除类抵消"
+ },
+ {
+  "id": "q37891",
+  "target": "37891",
+  "lang": "en",
+  "query": "how much does environmental heat exchange affect calorimeter measurement accuracy"
+ },
+ {
+  "id": "q37885",
+  "target": "37885",
+  "lang": "zh",
+  "query": "流量测点上游直管段长度要求多少倍管径"
+ },
+ {
+  "id": "q37914",
+  "target": "37914",
+  "lang": "en",
+  "query": "how much higher should maximum heat input be than minimum in calorimeter chamber"
+ },
+ {
+  "id": "q37947",
+  "target": "37947",
+  "lang": "zh",
+  "query": "管道内制冷剂温度需要设置几个测点"
+ },
+ {
+  "id": "q37877",
+  "target": "37877",
+  "lang": "en",
+  "query": "calorimeter room heat loss to surroundings as percentage of measured heat rejection"
+ },
+ {
+  "id": "q37884",
+  "target": "37884",
+  "lang": "zh",
+  "query": "量热室六个面周围各需几个内部和环境温度测点"
+ },
+ {
+  "id": "q37871",
+  "target": "37871",
+  "lang": "en",
+  "query": "low pressure calorimeter evaporator coil refrigerant superheat temperature tolerance around ambient"
+ },
+ {
+  "id": "q37943",
+  "target": "37943",
+  "lang": "zh",
+  "query": "大气压力测量结果允许偏差范围是多少"
+ },
+ {
+  "id": "q37890",
+  "target": "37890",
+  "lang": "en",
+  "query": "test space volume compared with condenser total hourly air flow"
+ },
+ {
+  "id": "q37939",
+  "target": "37939",
+  "lang": "zh",
+  "query": "电流测量误差允许范围是多少"
+ },
+ {
+  "id": "q37883",
+  "target": "37883",
+  "lang": "en",
+  "query": "how far from calorimeter chamber surface to measure air temperature"
+ },
+ {
+  "id": "q37917",
+  "target": "37917",
+  "lang": "zh",
+  "query": "气体冷却器进口温度允许波动范围是多少"
+ },
+ {
+  "id": "q37949",
+  "target": "37949",
+  "lang": "en",
+  "query": "permitted variation in condenser inlet air temperature during test"
+ },
+ {
+  "id": "q37874",
+  "target": "37874",
+  "lang": "zh",
+  "query": "进风口温度测量每个区域面积最大多大"
+ },
+ {
+  "id": "q33997",
+  "target": "33997",
+  "lang": "en",
+  "query": "how does LRU-K cache replacement policy work"
+ },
+ {
+  "id": "q34032",
+  "target": "34032",
+  "lang": "zh",
+  "query": "逻辑地址小于只读地址阈值时如何处理"
+ },
+ {
+  "id": "q34136",
+  "target": "34136",
+  "lang": "en",
+  "query": "how much RAM do the experiment machines have"
+ },
+ {
+  "id": "q34075",
+  "target": "34075",
+  "lang": "zh",
+  "query": "FASTER索引的哈希桶数量是多少"
+ },
+ {
+  "id": "q34017",
+  "target": "34017",
+  "lang": "en",
+  "query": "YCSB workload payload size in bytes"
+ },
+ {
+  "id": "q34141",
+  "target": "34141",
+  "lang": "zh",
+  "query": "YCSB-A 工作负载中值大小是多少"
+ },
+ {
+  "id": "q34043",
+  "target": "34043",
+  "lang": "en",
+  "query": "percentage of requests hitting the frequently accessed data set"
+ },
+ {
+  "id": "q34067",
+  "target": "34067",
+  "lang": "zh",
+  "query": "Redis 基准测试的键大小、随机范围和操作总数设置"
+ },
+ {
+  "id": "q34133",
+  "target": "34133",
+  "lang": "en",
+  "query": "number of CPU cores in each processor socket on experiment servers"
+ },
+ {
+  "id": "q34072",
+  "target": "34072",
+  "lang": "zh",
+  "query": "YCSB 测试中每条记录的数据负载大小"
+ },
+ {
+  "id": "q34100",
+  "target": "34100",
+  "lang": "en",
+  "query": "share of read-modify-write operations in the YCSB workload"
+ },
+ {
+  "id": "q34010",
+  "target": "34010",
+  "lang": "zh",
+  "query": "只读偏移量相对尾部偏移保持的固定滞后距离"
+ },
+ {
+  "id": "q34008",
+  "target": "34008",
+  "lang": "en",
+  "query": "HybridLog tail offset recorded after a fuzzy checkpoint completes"
+ },
+ {
+  "id": "q34103",
+  "target": "34103",
+  "lang": "zh",
+  "query": "FASTER 每秒处理量以及日志膨胀速度"
+ },
+ {
+  "id": "q47803",
+  "target": "47803",
+  "lang": "en",
+  "query": "how far liquid density may fall below nominal for low-pressure liquefied gas"
+ },
+ {
+  "id": "q47806",
+  "target": "47806",
+  "lang": "zh",
+  "query": "八氟环丁烷在六十摄氏度时的表压饱和蒸气压"
+ },
+ {
+  "id": "q47807",
+  "target": "47807",
+  "lang": "en",
+  "query": "maximum mass of octafluorocyclobutane allowed per litre in a cylinder"
+ },
+ {
+  "id": "q47763",
+  "target": "47763",
+  "lang": "zh",
+  "query": "十二点五兆帕气瓶内磷化氢每升最大允许充装量"
+ },
+ {
+  "id": "q47705",
+  "target": "47705",
+  "lang": "en",
+  "query": "mass of methyl bromide allowed per litre in a gas cylinder"
+ },
+ {
+  "id": "q47720",
+  "target": "47720",
+  "lang": "zh",
+  "query": "六十摄氏度下乙硅烷蒸气的表压是多少"
+ },
+ {
+  "id": "q47710",
+  "target": "47710",
+  "lang": "en",
+  "query": "gauge pressure of pentafluoroethane vapor at sixty degrees Celsius"
+ },
+ {
+  "id": "q47875",
+  "target": "47875",
+  "lang": "zh",
+  "query": "三氟乙烷钢瓶每升允许灌装的质量上限"
+ },
+ {
+  "id": "q47771",
+  "target": "47771",
+  "lang": "en",
+  "query": "maximum hydrogen chloride mass per litre in a cylinder at fifteen megapascals"
+ },
+ {
+  "id": "q47873",
+  "target": "47873",
+  "lang": "zh",
+  "query": "三氟氯乙烯钢瓶每升最大允许灌装质量"
+ },
+ {
+  "id": "q47751",
+  "target": "47751",
+  "lang": "en",
+  "query": "maximum carbon dioxide mass per litre in a cylinder at twelve point five megapascals"
+ },
+ {
+  "id": "q47861",
+  "target": "47861",
+  "lang": "zh",
+  "query": "氯二氟溴甲烷钢瓶每升允许灌装的质量"
+ },
+ {
+  "id": "q47725",
+  "target": "47725",
+  "lang": "en",
+  "query": "isobutene loading limit per unit volume in a cylinder"
+ },
+ {
+  "id": "q47816",
+  "target": "47816",
+  "lang": "zh",
+  "query": "R32在六十摄氏度下的饱和压力表读数"
+ }
+]
