@@ -5,12 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 )
@@ -103,6 +107,48 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	if legacyQuestions[0].Lang != "zh-cn" || legacyQuestions[0].SourceSHA256 != "legacy-hash" || legacy.TotalOneHopCount != 1 || !legacy.ExpiresAt.Equal(legacy.CreatedAt.Add(10*time.Minute)) {
 		t.Fatalf("legacy backfill: %+v %+v", legacy, legacyQuestions[0])
 	}
+	t.Run("HTTP create with optional record ID", func(t *testing.T) {
+		oldDB, oldLaunch := ApiTypes.ProjectDBHandle, launchQuestionGeneration
+		t.Cleanup(func() { ApiTypes.ProjectDBHandle, launchQuestionGeneration = oldDB, oldLaunch })
+		ApiTypes.ProjectDBHandle = db
+		var runIDs []int64
+		t.Cleanup(func() {
+			if _, err := db.ExecContext(ctx, `DELETE FROM testbed.generated_question_runs WHERE id = ANY($1)`, pq.Array(runIDs)); err != nil {
+				t.Error(err)
+			}
+		})
+		launched := 0
+		launchQuestionGeneration = func(_ *sql.DB, _ int64, _ questionGenerationRequest, _, _ string) { launched++ }
+		for _, body := range []string{
+			`{"purpose":"search_metrics"}`,
+			`{"input_record_id":0,"purpose":"search_metrics"}`,
+			`{"input_record_id":null,"purpose":"search_metrics"}`,
+			`{"input_record_id":416,"purpose":"search_metrics"}`,
+		} {
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), rec)
+			if err := StartQuestionGeneration(c); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusAccepted {
+				t.Errorf("body=%s status=%d response=%s", body, rec.Code, rec.Body.String())
+			} else {
+				var response struct {
+					Run questionGenerationRun `json:"run"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				runIDs = append(runIDs, response.Run.ID)
+				if response.Run.InputRecordID == 0 && (response.Run.Lang != "mixed" || response.Run.TotalOneHopCount != 10) {
+					t.Errorf("wrong batch metadata: %+v", response.Run)
+				}
+			}
+		}
+		if launched != 4 {
+			t.Errorf("launched %d runs, expected 4", launched)
+		}
+	})
 
 	insertRun := func(recordID any, totalOne, totalTwo, totalMulti int, expires string) int64 {
 		t.Helper()

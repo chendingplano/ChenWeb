@@ -7274,7 +7274,7 @@
 	"qg_review_hint": "These are benchmark candidates. Review the answers and cited evidence before using them as ground truth.",
 	"qg_retry": "Retry",
 	"qg_load_error": "Could not load saved results. Check your connection and try again.",
-	"qg_create_error": "Could not start generation. Check the input record ID and your connection, then try again.",
+	"qg_create_error": "Could not start generation. Check the generation settings and your connection, then try again.",
 	"qg_running_hint": "Generation is in progress. This run refreshes automatically; you can return to it later.",
 	"qg_generation_failed": "Generation failed. Review the diagnostic details, then start a new run if needed.",
 	"qg_error_detail": "Diagnostic details (original server message)",
