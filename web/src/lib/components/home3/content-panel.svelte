@@ -216,6 +216,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
+			activeMenu?.childId !== 'sysadmin-question-generator' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-metric-range-types' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-orphaned-labels' &&

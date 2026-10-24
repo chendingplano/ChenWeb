@@ -13,6 +13,28 @@ const questionRunColumns = `id, input_record_id, purpose, description,
  total_one_hop_count, total_two_hop_count, total_multi_hop_count,
  generated_one_hop_count, generated_two_hop_count, generated_multi_hop_count, documents_processed, expires_at`
 
+const generatedQuestionColumns = `id, run_id, input_record_id, hop_type, question, answer,
+ reasoning_steps, step_line_ids, evidence, metric_id, metric_snapshot, set_no, lang, source_sha256, purpose,
+ prompt_name, model_name, created_at`
+
+func scanGeneratedQuestion(row interface{ Scan(...any) error }) (generatedQuestion, error) {
+	var q generatedQuestion
+	var steps, stepLines, evidence, metricSnapshot []byte
+	if err := row.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256, &q.Purpose, &q.PromptName, &q.ModelName, &q.CreatedAt); err != nil {
+		return q, err
+	}
+	for _, v := range []struct {
+		raw    []byte
+		target any
+	}{{steps, &q.ReasoningSteps}, {stepLines, &q.StepLineIDs}, {evidence, &q.Evidence}} {
+		if err := json.Unmarshal(v.raw, v.target); err != nil {
+			return q, err
+		}
+	}
+	q.MetricSnapshot = json.RawMessage(metricSnapshot)
+	return q, nil
+}
+
 func scanQuestionRun(row interface{ Scan(...any) error }) (questionGenerationRun, error) {
 	var run questionGenerationRun
 	var inputID sql.NullInt64
@@ -63,28 +85,17 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 	if err != nil {
 		return run, nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, run_id, input_record_id, hop_type, question, answer,
- reasoning_steps, step_line_ids, evidence, metric_id, metric_snapshot, set_no, lang, source_sha256, purpose FROM testbed.generated_questions WHERE run_id = $1 ORDER BY id`, id)
+	rows, err := db.QueryContext(ctx, `SELECT `+generatedQuestionColumns+` FROM testbed.generated_questions WHERE run_id = $1 ORDER BY id`, id)
 	if err != nil {
 		return run, nil, err
 	}
 	defer rows.Close()
 	questions := []generatedQuestion{}
 	for rows.Next() {
-		var q generatedQuestion
-		var steps, stepLines, evidence, metricSnapshot []byte
-		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256, &q.Purpose); err != nil {
+		q, err := scanGeneratedQuestion(rows)
+		if err != nil {
 			return run, nil, err
 		}
-		for _, v := range []struct {
-			raw    []byte
-			target any
-		}{{steps, &q.ReasoningSteps}, {stepLines, &q.StepLineIDs}, {evidence, &q.Evidence}} {
-			if err := json.Unmarshal(v.raw, v.target); err != nil {
-				return run, nil, err
-			}
-		}
-		q.MetricSnapshot = json.RawMessage(metricSnapshot)
 		questions = append(questions, q)
 	}
 	return run, questions, rows.Err()
@@ -126,9 +137,9 @@ func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.generated_questions
    (run_id, input_record_id, hop_type, question, answer, reasoning_steps, step_line_ids, evidence,
-    metric_id, metric_snapshot, set_no, lang, source_sha256, purpose)
-   VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11,$12,$13,
-    (SELECT purpose FROM testbed.generated_question_runs WHERE id = $1))`,
+    metric_id, metric_snapshot, set_no, lang, source_sha256, purpose, prompt_name, model_name)
+   SELECT $1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11,$12,$13,
+    r.purpose, r.prompt_name, r.model_name FROM testbed.generated_question_runs r WHERE r.id = $1`,
 			runID, recordID, q.HopType, q.Question, q.Answer, string(steps), string(stepLines), string(evidence),
 			q.MetricID, string(metricSnapshot), q.SetNo, q.Lang, q.SourceSHA256); err != nil {
 			return err

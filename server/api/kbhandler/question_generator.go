@@ -135,6 +135,9 @@ type questionEvidence struct {
 }
 
 type generatedQuestion struct {
+	PromptName     string             `json:"prompt_name"`
+	ModelName      string             `json:"model_name"`
+	CreatedAt      time.Time          `json:"created_at"`
 	Purpose        string             `json:"purpose"`
 	ID             int64              `json:"id"`
 	RunID          int64              `json:"run_id"`

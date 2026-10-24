@@ -57,7 +57,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql"} {
+	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql"} {
 		raw, err := os.ReadFile(filepath.Join("../../../project_migrations", filename))
 		if err != nil {
 			t.Fatal(err)
@@ -88,9 +88,9 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		name string
 		run  func(context.Context) error
 	}{
-		{"new migration up", func(ctx context.Context) error { _, err := provider.Up(ctx); return err }},
+		{"new migration up", func(ctx context.Context) error { _, err := provider.UpTo(ctx, 20261024000012); return err }},
 		{"new migration down", func(ctx context.Context) error { _, err := provider.Down(ctx); return err }},
-		{"new migration re-up", func(ctx context.Context) error { _, err := provider.Up(ctx); return err }},
+		{"new migration re-up", func(ctx context.Context) error { _, err := provider.UpTo(ctx, 20261024000012); return err }},
 	} {
 		if err := action.run(ctx); err != nil {
 			t.Fatalf("%s: %v", action.name, err)
@@ -109,6 +109,25 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='testbed' AND table_name='generated_questions' AND column_name='purpose'`).Scan(&columns); err != nil || columns != 0 {
 				t.Fatalf("purpose rollback columns=%d error=%v", columns, err)
 			}
+		}
+	}
+	for _, action := range []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{"metadata up", func(ctx context.Context) error { _, err := provider.Up(ctx); return err }},
+		{"metadata down", func(ctx context.Context) error { _, err := provider.Down(ctx); return err }},
+		{"metadata re-up", func(ctx context.Context) error { _, err := provider.Up(ctx); return err }},
+	} {
+		if err := action.run(ctx); err != nil {
+			t.Fatalf("%s: %v", action.name, err)
+		}
+		if action.name == "metadata down" {
+			continue
+		}
+		var prompt, model string
+		if err := db.QueryRowContext(ctx, `SELECT prompt_name,model_name FROM testbed.generated_questions WHERE run_id=$1`, legacyID).Scan(&prompt, &model); err != nil || prompt != "fixture" || model != "" {
+			t.Fatalf("%s prompt=%q model=%q error=%v", action.name, prompt, model, err)
 		}
 	}
 	legacy, legacyQuestions, err := loadQuestionRun(ctx, db, legacyID)
@@ -165,9 +184,9 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Helper()
 		var id int64
 		if err := db.QueryRowContext(ctx, `INSERT INTO testbed.generated_question_runs
-  (input_record_id,purpose,lang,model_ref,prompt_name,one_hop_count,two_hop_count,multi_hop_count,
+  (input_record_id,purpose,lang,model_ref,prompt_name,model_name,one_hop_count,two_hop_count,multi_hop_count,
    total_one_hop_count,total_two_hop_count,total_multi_hop_count,expires_at)
-  VALUES ($1,'search_metrics','mixed','fixture','fixture',1,1,1,$2,$3,$4,NOW()+$5::interval) RETURNING id`,
+  VALUES ($1,'search_metrics','mixed','fixture','fixture','fixture-model',1,1,1,$2,$3,$4,NOW()+$5::interval) RETURNING id`,
 			recordID, totalOne, totalTwo, totalMulti, expires).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
@@ -186,6 +205,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	first := question("one_hop", "What is A?", "en", "metric-416", "hash-416")
 	// Question purpose is authoritative run data, never supplied by the model.
 	first.Purpose = "untrusted-question-purpose"
+	first.PromptName, first.ModelName = "untrusted-prompt", "untrusted-model"
 
 	if err := saveGeneratedQuestions(ctx, db, batchID, 416, []generatedQuestion{first}, false); err != nil {
 		t.Fatal(err)
@@ -194,7 +214,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	if err != nil || run.Status != "running" || run.InputRecordID != 0 || run.DocumentsProcessed != 1 || run.GeneratedOneHopCount != 1 || run.GeneratedTwoHopCount != 0 || run.FinishedAt != nil || len(questions) != 1 {
 		t.Fatalf("incremental progress: %+v questions=%+v error=%v", run, questions, err)
 	}
-	if questions[0].InputRecordID != 416 || questions[0].MetricID != "metric-416" || questions[0].Lang != "en" || questions[0].SourceSHA256 != "hash-416" || questions[0].SetNo != 2 || !strings.Contains(string(questions[0].MetricSnapshot), "temperature") {
+	if questions[0].PromptName != "fixture" || questions[0].ModelName != "fixture-model" || questions[0].CreatedAt.IsZero() || questions[0].InputRecordID != 416 || questions[0].MetricID != "metric-416" || questions[0].Lang != "en" || questions[0].SourceSHA256 != "hash-416" || questions[0].SetNo != 2 || !strings.Contains(string(questions[0].MetricSnapshot), "temperature") {
 		t.Fatalf("question provenance round trip: %+v", questions[0])
 	}
 	var savedPurpose string
@@ -220,6 +240,44 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	if questions[1].Lang != "zh-cn" || questions[1].InputRecordID != 417 {
 		t.Fatalf("per-question document/language: %+v", questions[1])
 	}
+	t.Run("query question database", func(t *testing.T) {
+		if _, err := db.ExecContext(ctx, `UPDATE testbed.generated_questions SET created_at=CASE WHEN input_record_id=416 THEN '2020-01-01T00:00:00Z'::timestamptz ELSE '2021-01-01T00:00:00Z'::timestamptz END WHERE run_id=$1`, batchID); err != nil {
+			t.Fatal(err)
+		}
+		all, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Page: 1, PageSize: 50})
+		if err != nil || all.Total != 5 || len(all.Questions) != 5 {
+			t.Fatalf("all=%+v error=%v", all, err)
+		}
+		from := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
+		filtered, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Purpose: "search_metrics", RunID: batchID, RecordID: 417, Lang: "zh-cn", From: &from, To: &from, Page: 1, PageSize: 10})
+		if err != nil || filtered.Total != 1 || len(filtered.Questions) != 1 || filtered.Questions[0].Question != "什么是 B？" {
+			t.Fatalf("filtered=%+v error=%v", filtered, err)
+		}
+		firstPage, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{RunID: batchID, Page: 1, PageSize: 1})
+		if err != nil || firstPage.Total != 4 || len(firstPage.Questions) != 1 {
+			t.Fatalf("first page=%+v error=%v", firstPage, err)
+		}
+		secondPage, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{RunID: batchID, Page: 2, PageSize: 1})
+		if err != nil || secondPage.Total != 4 || len(secondPage.Questions) != 1 || secondPage.Questions[0].ID >= firstPage.Questions[0].ID {
+			t.Fatalf("unstable pagination=%+v error=%v", secondPage, err)
+		}
+		empty, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Purpose: "x' OR TRUE --", Page: 1, PageSize: 50})
+		if err != nil || empty.Total != 0 || len(empty.Questions) != 0 {
+			t.Fatalf("empty=%+v error=%v", empty, err)
+		}
+		oldDB := ApiTypes.ProjectDBHandle
+		ApiTypes.ProjectDBHandle = db
+		t.Cleanup(func() { ApiTypes.ProjectDBHandle = oldDB })
+		response := httptest.NewRecorder()
+		httpContext := echo.New().NewContext(httptest.NewRequest(http.MethodGet, fmt.Sprintf("/?run_id=%d&lang=zh-cn", batchID), nil), response)
+		if err := ListGeneratedQuestions(httpContext); err != nil || response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"model_name":"fixture-model"`) {
+			t.Fatalf("list HTTP status=%d body=%s error=%v", response.Code, response.Body.String(), err)
+		}
+		options, err := loadQuestionBrowserOptions(ctx, db)
+		if err != nil || len(options.Purposes) != 2 || len(options.RunIDs) != 2 || len(options.RecordIDs) != 2 || len(options.Languages) != 2 {
+			t.Fatalf("options=%+v error=%v", options, err)
+		}
+	})
 	for _, tc := range []struct {
 		recordID int64
 		count    int
@@ -265,6 +323,9 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal("failed batch accepted late output")
 	}
 
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatalf("metadata down: %v", err)
+	}
 	// The additive purpose migration rolls back independently; restore it after
 	// checking the older migration's batch guard so API reads retain their schema.
 	if _, err := provider.Down(ctx); err != nil {

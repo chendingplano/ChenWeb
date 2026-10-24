@@ -26,6 +26,9 @@ export type QuestionRun = {
 };
 export type GeneratedQuestion = {
 	purpose: string;
+	created_at: string;
+	prompt_name: string;
+	model_name: string;
 	id: number;
 	run_id: number;
 	input_record_id: number;
@@ -56,13 +59,56 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 export function createQuestionRun(payload: QuestionRequest, signal?: AbortSignal) {
 	return request<{ run: QuestionRun }>(BASE, {
-		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(payload), signal
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload),
+		signal
 	});
 }
 export function listQuestionRuns(recordID?: number, signal?: AbortSignal) {
-	return request<{ runs: QuestionRun[] }>(recordID ? `${BASE}?input_record_id=${recordID}` : BASE, { signal });
+	return request<{ runs: QuestionRun[] }>(recordID ? `${BASE}?input_record_id=${recordID}` : BASE, {
+		signal
+	});
 }
 export function getQuestionRun(runID: number, signal?: AbortSignal) {
-	return request<{ run: QuestionRun; questions: GeneratedQuestion[] }>(`${BASE}/${runID}`, { signal });
+	return request<{ run: QuestionRun; questions: GeneratedQuestion[] }>(`${BASE}/${runID}`, {
+		signal
+	});
+}
+
+export type QuestionFilters = {
+	purpose: string;
+	run_id: string;
+	input_record_id: string;
+	lang: string;
+	created_from: string;
+	created_to: string;
+};
+export type QuestionFilterOptions = {
+	purposes: string[];
+	run_ids: number[];
+	record_ids: number[];
+	languages: string[];
+};
+export function listQuestions(
+	filters: QuestionFilters,
+	page: number,
+	pageSize: number,
+	signal?: AbortSignal
+) {
+	const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+	for (const [key, value] of Object.entries(filters)) {
+		if (value) params.set(key, key.startsWith('created_') ? new Date(value).toISOString() : value);
+	}
+	return request<{
+		questions: GeneratedQuestion[];
+		total: number;
+		page: number;
+		page_size: number;
+	}>(`/api/v1/kb/question-generator/questions?${params}`, { signal });
+}
+export function getQuestionFilters(signal?: AbortSignal) {
+	return request<QuestionFilterOptions>('/api/v1/kb/question-generator/question-filters', {
+		signal
+	});
 }

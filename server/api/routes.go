@@ -809,6 +809,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	summaryScores.GET("/:id/artifacts/:kind", kbhandler.DownloadSummaryScoreArtifact)
 	apiGroup.GET("/kb/metric-reviews/models", kbhandler.ListMetricReviewModels)
 	questionGenerator := apiGroup.Group("/kb/question-generator", kbhandler.QuestionGeneratorAdmin)
+	questionGenerator.GET("/questions", kbhandler.ListGeneratedQuestions)
+	questionGenerator.GET("/question-filters", kbhandler.ListQuestionBrowserFilters)
 	questionGenerator.POST("/runs", kbhandler.StartQuestionGeneration)
 	questionGenerator.GET("/runs", kbhandler.ListQuestionGenerationRuns)
 	questionGenerator.GET("/runs/:id", kbhandler.GetQuestionGenerationRun)
