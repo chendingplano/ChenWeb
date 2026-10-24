@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"sort"
 	"strconv"
+	"strings"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 var questionGenerationRandomInt = rand.IntN
@@ -27,37 +31,135 @@ type metricQuestionTarget struct {
 	HopType string `json:"hop_type"`
 	Lang    string `json:"lang"`
 }
-type metricQuestionSet struct {
-	SetNo     int                     `json:"set_no"`
-	Metric    metricReviewInputMetric `json:"metric"`
-	Questions []metricQuestionTarget  `json:"questions"`
+type questionGenerationMetric struct {
+	metricReviewInputMetric
+	Context        string `json:"context"`
+	ContextLineIDs []int  `json:"context_line_ids"`
 }
 
-// Each set chooses its own metric; reuse is allowed when a document has fewer
-// metrics than requested sets. The model must still produce distinct questions.
+type metricQuestionSet struct {
+	SetNo     int                      `json:"set_no"`
+	Metric    questionGenerationMetric `json:"metric"`
+	Questions []metricQuestionTarget   `json:"questions"`
+}
+
+// Sample without replacement, refilling the pool only when all metrics were used.
 func makeMetricQuestionSets(metrics []metricReviewInputMetric, counts questionCounts) ([]metricQuestionSet, error) {
 	if len(metrics) == 0 {
 		return nil, fmt.Errorf("document has no metrics")
 	}
-	setCount := max(counts.OneHop, counts.TwoHop, counts.MultiHop)
-	sets := make([]metricQuestionSet, 0, setCount)
-	for i := 0; i < setCount; i++ {
-		set := metricQuestionSet{SetNo: i + 1, Metric: metrics[questionGenerationRandomInt(len(metrics))]}
-		for _, target := range []struct {
-			hop   string
-			count int
-		}{{"one_hop", counts.OneHop}, {"two_hop", counts.TwoHop}, {"multi_hop", counts.MultiHop}} {
-			if i < target.count {
-				lang := "en"
-				if questionGenerationRandomInt(2) == 1 {
-					lang = "zh-cn"
+	sets := make([]metricQuestionSet, 0, counts.total())
+	var pool []int
+	for _, target := range []struct {
+		hop   string
+		count int
+	}{{"one_hop", counts.OneHop}, {"two_hop", counts.TwoHop}, {"multi_hop", counts.MultiHop}} {
+		for range target.count {
+			if len(pool) == 0 {
+				pool = make([]int, len(metrics))
+				for i := range pool {
+					pool[i] = i
 				}
-				set.Questions = append(set.Questions, metricQuestionTarget{HopType: target.hop, Lang: lang})
 			}
+			index := questionGenerationRandomInt(len(pool))
+			metric := metrics[pool[index]]
+			pool = append(pool[:index], pool[index+1:]...)
+			lang := "en"
+			if questionGenerationRandomInt(2) == 1 {
+				lang = "zh-cn"
+			}
+			sets = append(sets, metricQuestionSet{SetNo: len(sets) + 1, Metric: questionGenerationMetric{metricReviewInputMetric: metric}, Questions: []metricQuestionTarget{{HopType: target.hop, Lang: lang}}})
 		}
-		sets = append(sets, set)
 	}
 	return sets, nil
+}
+
+// Build contexts from actual canonical lines, counting neighbors by position rather
+// than assuming canonical IDs are contiguous. Disjoint metric spans keep their gaps out.
+func buildMetricQuestionContexts(lines []docprocessing.Line, sets []metricQuestionSet) ([]metricQuestionSet, map[int]string, string, error) {
+	byID := make(map[int]docprocessing.Line, len(lines))
+	ids := make([]int, 0, len(lines))
+	for _, line := range lines {
+		if line.LineNo <= 0 || strings.TrimSpace(line.Content) == "" {
+			continue
+		}
+		if _, ok := byID[line.LineNo]; ok {
+			return nil, nil, "", fmt.Errorf("duplicate source line %d", line.LineNo)
+		}
+		byID[line.LineNo] = line
+		ids = append(ids, line.LineNo)
+	}
+	sort.Ints(ids)
+	available := make(map[int]string, len(ids))
+	for _, id := range ids {
+		available[id] = ""
+	}
+	selected := map[int]bool{}
+	result := append([]metricQuestionSet(nil), sets...)
+	for i, set := range result {
+		spans := metricReviewSpansFromJSON(set.Metric.SourceLineSpans)
+		if len(spans) == 0 {
+			return nil, nil, "", fmt.Errorf("metric %s has no source spans", set.Metric.MetricID)
+		}
+		for _, span := range spans {
+			match := metricReviewLineSpanPattern.FindStringSubmatch(span)
+			if match == nil {
+				return nil, nil, "", fmt.Errorf("metric %s has invalid source span %q", set.Metric.MetricID, span)
+			}
+			start, _ := strconv.Atoi(match[1])
+			end := start
+			if match[2] != "" {
+				end, _ = strconv.Atoi(match[2])
+			}
+			_, startOK := byID[start]
+			_, endOK := byID[end]
+			if !startOK || !endOK || end < start {
+				return nil, nil, "", fmt.Errorf("metric %s references missing source span %q", set.Metric.MetricID, span)
+			}
+		}
+		evidence := metricEvidenceLineIDs(set.Metric.metricReviewInputMetric, available)
+		first, last := -1, -1
+		for pos, id := range ids {
+			if evidence[id] {
+				if first < 0 {
+					first = pos
+				}
+				last = pos
+			}
+		}
+		if first < 0 {
+			return nil, nil, "", fmt.Errorf("metric %s has no usable source lines", set.Metric.MetricID)
+		}
+		contextIDs := make([]int, 0, len(evidence)+20)
+		for pos, id := range ids {
+			if evidence[id] || (pos >= max(0, first-10) && pos < first) || (pos > last && pos <= min(len(ids)-1, last+10)) {
+				contextIDs = append(contextIDs, id)
+				selected[id] = true
+			}
+		}
+		result[i].Metric.ContextLineIDs = contextIDs
+	}
+	subset := make([]docprocessing.Line, 0, len(selected))
+	for _, id := range ids {
+		if selected[id] {
+			subset = append(subset, byID[id])
+		}
+	}
+	_, source, hash, err := buildQuestionGenerationSource(subset)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	for i := range result {
+		contents := make([]string, 0, len(result[i].Metric.ContextLineIDs))
+		for _, id := range result[i].Metric.ContextLineIDs {
+			contents = append(contents, source[id])
+		}
+		result[i].Metric.Context = strings.Join(contents, "\n")
+		if strings.TrimSpace(result[i].Metric.Context) == "" {
+			return nil, nil, "", fmt.Errorf("metric %s has empty context", result[i].Metric.MetricID)
+		}
+	}
+	return result, source, hash, nil
 }
 
 func metricEvidenceLineIDs(metric metricReviewInputMetric, source map[int]string) map[int]bool {
@@ -88,7 +190,7 @@ func validateMetricQuestions(payload map[string]any, req questionGenerationReque
 		return nil, err
 	}
 	expected := map[string]metricQuestionTarget{}
-	anchors := map[int]metricReviewInputMetric{}
+	anchors := map[int]questionGenerationMetric{}
 	for _, set := range sets {
 		anchors[set.SetNo] = set.Metric
 		for _, target := range set.Questions {
@@ -104,9 +206,16 @@ func validateMetricQuestions(payload map[string]any, req questionGenerationReque
 		}
 		delete(expected, key)
 		metric := anchors[q.SetNo]
-		anchorLines := metricEvidenceLineIDs(metric, source)
+		anchorLines := metricEvidenceLineIDs(metric.metricReviewInputMetric, source)
+		allowed := make(map[int]bool, len(metric.ContextLineIDs))
+		for _, id := range metric.ContextLineIDs {
+			allowed[id] = true
+		}
 		anchored := false
 		for _, e := range q.Evidence {
+			if !allowed[e.LineID] {
+				return nil, fmt.Errorf("question %d cites line %d outside its selected metric context", i+1, e.LineID)
+			}
 			if anchorLines[e.LineID] {
 				anchored = true
 			}

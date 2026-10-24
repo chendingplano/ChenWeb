@@ -7266,7 +7266,7 @@
 	"qg_saved_runs": "已保存任务",
 	"qg_no_runs": "当前选择暂无已保存任务。",
 	"qg_load_hint": "加载全部已保存任务，或输入记录 ID 以加载该文档的任务。",
-	"qg_run_number": "任务 #{id}",
+	"qg_run_number": "运行 ID：{id}",
 	"qg_running": "进行中",
 	"qg_done": "已完成",
 	"qg_failed": "失败",

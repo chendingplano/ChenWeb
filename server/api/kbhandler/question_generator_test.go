@@ -325,6 +325,7 @@ func (f questionExtractorFunc) ExtractJSON(ctx context.Context, in llmclients.JS
 }
 
 func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
+	installQuestionMetadataFixture(t)
 	for _, modelFails := range []bool{false, true} {
 		t.Run(fmt.Sprint(modelFails), func(t *testing.T) {
 			db, mock := installPolicyDB(t)
@@ -359,12 +360,11 @@ func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
 						Purpose     string              `json:"purpose"`
 						Description string              `json:"description"`
 						Sets        []metricQuestionSet `json:"sets"`
-						SourceLines []questionEvidence  `json:"source_lines"`
 					}
 					if err := json.Unmarshal([]byte(in.InputText), &input); err != nil {
 						t.Fatal(err)
 					}
-					if input.Purpose != "search_metrics" || input.Description != "weights" || len(input.Sets) != 1 || input.Sets[0].Metric.MetricID != "m1" || input.Sets[0].Questions[0].Lang != "zh-cn" || len(input.SourceLines) != 1 || input.SourceLines[0].LineID != 7 {
+					if input.Purpose != "search_metrics" || input.Description != "weights" || len(input.Sets) != 1 || input.Sets[0].Metric.MetricID != "m1" || input.Sets[0].Questions[0].Lang != "zh-cn" || input.Sets[0].Metric.Context != "The limit is 20 kg." || len(input.Sets[0].Metric.ContextLineIDs) != 1 || input.Sets[0].Metric.ContextLineIDs[0] != 7 {
 						t.Errorf("wrong model input: %+v", input)
 					}
 					if modelFails {

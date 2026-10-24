@@ -58,6 +58,7 @@ func TestQuestionGenerationMetricBatchRequest(t *testing.T) {
 }
 
 func TestQuestionGeneratorBatchSkipsAndHitsExactTargets(t *testing.T) {
+	installQuestionMetadataFixture(t)
 	db, mock := installPolicyDB(t)
 	oldLines, oldMetrics, oldCandidates, oldClient := loadQuestionGenerationLines, loadQuestionGenerationMetrics, questionGenerationCandidates, newQuestionGenerationClient
 	t.Cleanup(func() {
@@ -218,6 +219,7 @@ func TestStartQuestionGenerationBatchWithoutInput(t *testing.T) {
 }
 
 func TestQuestionGeneratorBatchRetriesDuplicateOutput(t *testing.T) {
+	installQuestionMetadataFixture(t)
 	for _, alwaysDuplicate := range []bool{false, true} {
 		t.Run(fmt.Sprint(alwaysDuplicate), func(t *testing.T) {
 			db, mock := installPolicyDB(t)
@@ -294,13 +296,13 @@ func TestMetricQuestionSetsAndLanguages(t *testing.T) {
 	original := questionGenerationRandomInt
 	t.Cleanup(func() { questionGenerationRandomInt = original })
 	counter := 0
-	questionGenerationRandomInt = func(n int) int { v := counter % n; counter++; return v }
+	questionGenerationRandomInt = func(n int) int { v := (counter / 2) % n; counter++; return v }
 	metrics := []metricReviewInputMetric{{MetricID: "m1", MetricName: "Weight", SourceLineSpans: json.RawMessage(`["2"]`)}, {MetricID: "m2", MetricName: "Time", SourceLineSpans: json.RawMessage(`["8"]`)}}
 	sets, err := makeMetricQuestionSets(metrics, questionCounts{OneHop: 3, TwoHop: 2, MultiHop: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sets) != 3 {
+	if len(sets) != 6 {
 		t.Fatalf("sets=%+v", sets)
 	}
 	count := map[string]int{}
@@ -327,7 +329,7 @@ func TestMetricQuestionValidationBindsAnchorAndLanguage(t *testing.T) {
 	if err := req.normalize(); err != nil {
 		t.Fatal(err)
 	}
-	sets := []metricQuestionSet{{SetNo: 1, Metric: metricReviewInputMetric{MetricID: "m1", SourceLineSpans: json.RawMessage(`["2"]`)}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "zh-cn"}}}}
+	sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", SourceLineSpans: json.RawMessage(`["2"]`)}, ContextLineIDs: []int{2}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "zh-cn"}}}}
 	valid := `{"questions":[{"set_no":1,"lang":"zh-cn","hop_type":"one_hop","question":"限重是多少？","answer":"20公斤","reasoning_steps":["读取限重。"],"step_line_ids":[[2]],"line_ids":[2]}]}`
 	decode := func(body string) map[string]any {
 		var p map[string]any

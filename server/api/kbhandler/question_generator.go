@@ -87,7 +87,7 @@ func (r *questionGenerationRequest) normalize() error {
 func questionPurposePrompt(purpose string) (string, error) {
 	switch purpose {
 	case "search_metrics":
-		return questionGenerationPrompt, nil
+		return envOrDefault("PROMPT_GENERATE_METRIC_QUESTIONS", questionGenerationPrompt), nil
 	default:
 		return "", fmt.Errorf("unsupported purpose: select Search Metrics")
 	}

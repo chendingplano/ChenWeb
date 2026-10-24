@@ -7266,7 +7266,7 @@
 	"qg_saved_runs": "Saved runs",
 	"qg_no_runs": "No saved runs match this selection.",
 	"qg_load_hint": "Load all saved runs, or enter a record ID to load runs for that document.",
-	"qg_run_number": "Run #{id}",
+	"qg_run_number": "Run ID: {id}",
 	"qg_running": "Running",
 	"qg_done": "Done",
 	"qg_failed": "Failed",

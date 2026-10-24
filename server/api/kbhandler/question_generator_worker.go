@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -14,10 +15,66 @@ import (
 )
 
 var (
-	loadQuestionGenerationLines   = docprocessing.LoadRecordLinesByID
-	loadQuestionGenerationMetrics = loadMetricReviewInputMetrics
-	questionGenerationCandidates  = randomQuestionDocumentIDs
+	loadQuestionGenerationLines    = docprocessing.LoadRecordLinesByID
+	loadQuestionGenerationMetrics  = loadMetricReviewInputMetrics
+	loadQuestionGenerationMetadata = readQuestionDocumentMetadata
+	questionGenerationCandidates   = randomQuestionDocumentIDs
 )
+
+type questionDocumentMetadata struct {
+	InputRecordID int64           `json:"input_record_id"`
+	Title         string          `json:"title"`
+	DocNo         string          `json:"doc_no"`
+	FileName      string          `json:"file_name"`
+	PublishDate   string          `json:"publish_date"`
+	Metadata      json.RawMessage `json:"metadata"`
+}
+
+func readQuestionDocumentMetadata(ctx context.Context, db *sql.DB, id int64) (questionDocumentMetadata, error) {
+	var meta questionDocumentMetadata
+	var raw []byte
+	err := db.QueryRowContext(ctx, `SELECT id, COALESCE(title,''), COALESCE(doc_no,''),
+ COALESCE(file_name,''), COALESCE(publish_date::text,''), COALESCE(doc_metadata,'{}'::jsonb)
+ FROM kb.inputs WHERE id = $1`, id).Scan(&meta.InputRecordID, &meta.Title, &meta.DocNo, &meta.FileName, &meta.PublishDate, &raw)
+	meta.Metadata = json.RawMessage(raw)
+	return meta, err
+}
+
+// Check span endpoints in constant time per span, without scanning the entire
+// document once for every stored metric. Only sampled spans are expanded later.
+func metricSourceAvailable(metric metricReviewInputMetric, index map[int]string) bool {
+	spans := metricReviewSpansFromJSON(metric.SourceLineSpans)
+	if len(spans) == 0 {
+		return false
+	}
+	for _, span := range spans {
+		match := metricReviewLineSpanPattern.FindStringSubmatch(span)
+		if match == nil {
+			return false
+		}
+		start, err := strconv.Atoi(match[1])
+		if err != nil {
+			return false
+		}
+		end := start
+		if match[2] != "" {
+			end, err = strconv.Atoi(match[2])
+			if err != nil {
+				return false
+			}
+		}
+		if end < start {
+			return false
+		}
+		if _, ok := index[start]; !ok {
+			return false
+		}
+		if _, ok := index[end]; !ok {
+			return false
+		}
+	}
+	return true
+}
 
 // Sampling eligible inputs directly is equivalent to repeatedly drawing kb.inputs
 // and skipping metric-free documents, without wasting a round trip per empty draw.
@@ -87,7 +144,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 			docReq := req
 			docReq.InputRecordID = recordID
 			docReq.OneHopCount, docReq.TwoHopCount, docReq.MultiHopCount = &counts.OneHop, &counts.TwoHop, &counts.MultiHop
-			questions, err := generateMetricQuestionDocument(ctx, db, docReq, cfg, client, promptName, prompt, userID, previousQuestions, logger)
+			questions, err := generateMetricQuestionDocument(ctx, db, runID, docReq, cfg, client, promptName, prompt, userID, previousQuestions, logger)
 			if err != nil {
 				logger.Warn("question generation document skipped", "run_id", runID, "record_id", recordID, "error", err)
 				if req.InputRecordID > 0 {
@@ -138,7 +195,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 	return nil
 }
 
-func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, req questionGenerationRequest, cfg ApiTypes.LLMModelDef, client metricJSONExtractor, promptName, prompt, userID string, previousQuestions []string, logger ApiTypes.JimoLogger) ([]generatedQuestion, error) {
+func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64, req questionGenerationRequest, cfg ApiTypes.LLMModelDef, client metricJSONExtractor, promptName, prompt, userID string, previousQuestions []string, logger ApiTypes.JimoLogger) ([]generatedQuestion, error) {
 	metrics, err := loadQuestionGenerationMetrics(ctx, db, req.InputRecordID)
 	if err != nil {
 		logger.Error("load question metrics failed", "record_id", req.InputRecordID, "error", err)
@@ -152,13 +209,17 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, req questio
 		logger.Error("load metric question source failed", "record_id", req.InputRecordID, "error", err)
 		return nil, fmt.Errorf("cannot read this record's canonical line file")
 	}
-	sourceText, source, hash, err := buildQuestionGenerationSource(lines)
-	if err != nil {
-		return nil, err
+	// Use the full line index only to find grounded metrics. Only sampled metrics'
+	// context windows are formatted, size-checked, and sent to the model.
+	lineIndex := make(map[int]string, len(lines))
+	for _, line := range lines {
+		if line.LineNo > 0 && strings.TrimSpace(line.Content) != "" {
+			lineIndex[line.LineNo] = line.Content
+		}
 	}
 	grounded := make([]metricReviewInputMetric, 0, len(metrics))
 	for _, metric := range metrics {
-		if metric.MetricID != "" && len(metricEvidenceLineIDs(metric, source)) > 0 {
+		if metric.MetricID != "" && metricSourceAvailable(metric, lineIndex) {
 			grounded = append(grounded, metric)
 		}
 	}
@@ -169,18 +230,33 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, req questio
 	if err != nil {
 		return nil, err
 	}
-	input, err := json.Marshal(map[string]any{
-		"input_record_id": req.InputRecordID, "purpose": req.Purpose, "description": req.Description,
-		"sets": sets, "document_metrics": metrics, "source_lines": json.RawMessage(sourceText),
-		"previous_questions": previousQuestions,
-	})
+	sets, source, hash, err := buildMetricQuestionContexts(lines, sets)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := loadQuestionGenerationMetadata(ctx, db, req.InputRecordID)
+	if err != nil {
+		logger.Error("load question document metadata failed", "record_id", req.InputRecordID, "error", err)
+		return nil, fmt.Errorf("cannot load document metadata")
+	}
+	// Struct field order keeps document metadata ahead of the metric listing in
+	// both the model input and the archived LLM request body.
+	input, err := json.Marshal(struct {
+		DocumentMetadata  questionDocumentMetadata `json:"document_metadata"`
+		RunID             int64                    `json:"run_id"`
+		InputRecordID     int64                    `json:"input_record_id"`
+		Purpose           string                   `json:"purpose"`
+		Description       string                   `json:"description"`
+		Sets              []metricQuestionSet      `json:"sets"`
+		PreviousQuestions []string                 `json:"previous_questions"`
+	}{metadata, runID, req.InputRecordID, req.Purpose, req.Description, sets, previousQuestions})
 	if err != nil {
 		return nil, fmt.Errorf("cannot format metric question input")
 	}
 	if utf8.RuneCount(input) > questionGenerationMaxInputChars {
 		return nil, fmt.Errorf("document and metric context too large after formatting")
 	}
-	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
+	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: runID, RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
 	if err != nil {
 		logger.Error("metric question model call failed", "record_id", req.InputRecordID, "error", err)
 		return nil, fmt.Errorf("question generation model request failed or timed out")
