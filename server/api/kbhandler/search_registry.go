@@ -69,6 +69,9 @@ func registryLexicalBackend() lexicalBackend {
 // pg_search extension is installed and returns a fatal-worthy error if not.
 // Call this once at startup after migrations have run.
 func CheckSearchBackend(db *sql.DB) error {
+	if strings.TrimSpace(os.Getenv("SEARCH_SEMANTIC_ENABLED")) == "" {
+		return fmt.Errorf("SEARCH_SEMANTIC_ENABLED is not set; set it to true or false explicitly")
+	}
 	if registryLexicalBackend() != lexicalBackendParadeDB {
 		return nil
 	}

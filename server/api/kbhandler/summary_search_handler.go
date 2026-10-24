@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -83,6 +84,14 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 	}
 	if strings.TrimSpace(artifactType) == "all" {
 		filters.ArtifactTypes = parseCSVValues(c.QueryParam("artifact_types"))
+		for _, t := range filters.ArtifactTypes {
+			if !slices.Contains(searchArtifactPartitionTypes, t) {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("unknown artifact_types value %q; valid: %s (CWB_KB_GSR_014)", t, strings.Join(searchArtifactPartitionTypes, ", ")),
+				})
+			}
+		}
 	}
 
 	total, err := countRegistrySearchResults(ApiTypes.ProjectDBHandle, artifactType, queryText, filters, cfg)
