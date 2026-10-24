@@ -7285,11 +7285,11 @@
 	"qg_source_line": "第 {line} 行",
 	"qg_select_run": "选择已保存任务以查看问题。",
 	"qg_step_lines": "来源行：{lines}",
-	"qg_record_hint": "留空或输入 0 时，将随机选取包含指标的文档，直到达到各类问题的批次总数。",
+	"qg_record_hint": "留空或输入 0，将随机选择含有指标的文档，直到达到指标总数目标。",
 	"qg_search_metrics": "检索指标",
 	"qg_total_counts": "批次问题总数",
 	"qg_total_count_hint": "每类总数可设为 0–1,000，且至少一个总数大于 0。总数大于 0 的类别，其每篇文档数量也必须大于 0。",
-	"qg_totals_ignored": "指定记录 ID 时忽略批次总数，仅使用每篇文档的问题数量。",
+	"qg_totals_ignored": "指定记录 ID 时忽略此项，仅使用每篇文档的指标数。",
 	"qg_english": "英语",
 	"qg_chinese": "中文",
 	"qg_mixed": "英语 / 中文",
@@ -7297,5 +7297,10 @@
 	"qg_metric_id": "指标：{id}",
 	"qg_batch_run": "批次 · 多篇文档",
 	"qg_documents_processed": "已处理文档数：{count}",
-	"qg_progress_count": "{count} / {total}"
+	"qg_progress_count": "{count} / {total}",
+	"qg_metrics_per_document": "每篇文档的指标数",
+	"qg_metrics_per_document_hint": "从每篇文档选择 1–50 个指标。",
+	"qg_total_metrics": "指标总数",
+	"qg_total_metrics_hint": "从本批次选择共 1–1,000 个指标。",
+	"qg_metric_triplet_hint": "每个选定指标生成三个问题：单跳、双跳和多跳各一个。"
 }

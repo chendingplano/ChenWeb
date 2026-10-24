@@ -40,7 +40,13 @@ export type GeneratedQuestion = {
 	step_line_ids?: number[][];
 	evidence: { line_id: number; text: string }[];
 };
-export type QuestionRequest = Pick<QuestionRun, 'input_record_id' | 'purpose' | 'description' | 'one_hop_count' | 'two_hop_count' | 'multi_hop_count' | 'total_one_hop_count' | 'total_two_hop_count' | 'total_multi_hop_count'>;
+export type QuestionRequest = {
+	input_record_id: number;
+	purpose: 'search_metrics';
+	description: string;
+	metrics_per_document: number;
+	total_metrics: number;
+};
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 	const response = await fetch(url, { credentials: 'same-origin', ...options });

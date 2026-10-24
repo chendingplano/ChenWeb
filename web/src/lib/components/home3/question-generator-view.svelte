@@ -6,14 +6,10 @@
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 	let recordID = $state<number | undefined>();
-	let purpose = $state('search_metrics');
+	let purpose = $state<'search_metrics'>('search_metrics');
 	let description = $state('');
-	let oneHop = $state(10);
-	let twoHop = $state(10);
-	let multiHop = $state(10);
-	let totalOneHop = $state(10);
-	let totalTwoHop = $state(10);
-	let totalMultiHop = $state(10);
+	let metricsPerDocument = $state(10);
+	let totalMetrics = $state(10);
 	let runs = $state<QuestionRun[]>([]);
 	let selectedID = $state<number | null>(null);
 	let selected = $state<QuestionRun | null>(null);
@@ -32,8 +28,8 @@
 	let normalizedRecordID = $derived(recordID ?? 0);
 	let validRecord = $derived(Number.isSafeInteger(normalizedRecordID) && normalizedRecordID >= 0);
 	let singleDocument = $derived(normalizedRecordID > 0);
-	let validCounts = $derived([oneHop, twoHop, multiHop].every(n => Number.isInteger(n) && n >= 0 && n <= 50) && oneHop + twoHop + multiHop > 0);
-	let validTotals = $derived([totalOneHop, totalTwoHop, totalMultiHop].every(n => Number.isInteger(n) && n >= 0 && n <= 1000) && totalOneHop + totalTwoHop + totalMultiHop > 0 && (totalOneHop === 0 || oneHop > 0) && (totalTwoHop === 0 || twoHop > 0) && (totalMultiHop === 0 || multiHop > 0));
+	let validCounts = $derived(Number.isInteger(metricsPerDocument) && metricsPerDocument >= 1 && metricsPerDocument <= 50);
+	let validTotals = $derived(Number.isInteger(totalMetrics) && totalMetrics >= 1 && totalMetrics <= 1000);
 	let valid = $derived(validRecord && purpose === 'search_metrics' && validCounts && (singleDocument || validTotals));
 	const purposeLabel = (value: string) => value === 'search_metrics' ? m.qg_search_metrics() : value;
 	const languageLabel = (lang: string | undefined) => lang === 'en' ? m.qg_english() : lang === 'zh-cn' ? m.qg_chinese() : m.qg_mixed();
@@ -116,7 +112,7 @@
 		saving = true;
 		error = '';
 		try {
-			const { run } = await createQuestionRun({ input_record_id: normalizedRecordID, purpose, description: description.trim(), one_hop_count: oneHop, two_hop_count: twoHop, multi_hop_count: multiHop, total_one_hop_count: singleDocument ? 0 : totalOneHop, total_two_hop_count: singleDocument ? 0 : totalTwoHop, total_multi_hop_count: singleDocument ? 0 : totalMultiHop }, createController.signal);
+			const { run } = await createQuestionRun({ input_record_id: normalizedRecordID, purpose, description: description.trim(), metrics_per_document: metricsPerDocument, total_metrics: singleDocument ? 0 : totalMetrics }, createController.signal);
 			if (!alive || version !== generation) return;
 			runs = [run, ...runs.filter(r => r.id !== run.id)];
 			listed = true;
@@ -139,16 +135,11 @@
 				<select id="qg-purpose" bind:value={purpose}><option value="search_metrics">{m.qg_search_metrics()}</option></select>
 				<label for="qg-description">{m.qg_description()}</label>
 				<textarea id="qg-description" rows="3" maxlength="10000" bind:value={description} placeholder={m.qg_description_placeholder()}></textarea>
-				<fieldset><legend>{m.qg_counts()}</legend><div class="counts">
-					<label>{m.qg_one_hop()}<input type="number" min="0" max="50" step="1" required bind:value={oneHop} /></label>
-					<label>{m.qg_two_hop()}<input type="number" min="0" max="50" step="1" required bind:value={twoHop} /></label>
-					<label>{m.qg_multi_hop()}<input type="number" min="0" max="50" step="1" required bind:value={multiHop} /></label>
-				</div><p class="hint">{m.qg_count_hint()}</p></fieldset>
-				<fieldset disabled={singleDocument}><legend>{m.qg_total_counts()}</legend><div class="counts total-counts">
-					<label>{m.qg_one_hop()}<input type="number" min="0" max="1000" step="1" required bind:value={totalOneHop} /></label>
-					<label>{m.qg_two_hop()}<input type="number" min="0" max="1000" step="1" required bind:value={totalTwoHop} /></label>
-					<label>{m.qg_multi_hop()}<input type="number" min="0" max="1000" step="1" required bind:value={totalMultiHop} /></label>
-				</div><p class="hint">{singleDocument ? m.qg_totals_ignored() : m.qg_total_count_hint()}</p></fieldset>
+				<div class="counts">
+					<div class="metric-count"><label for="qg-metrics-per-document">{m.qg_metrics_per_document()}</label><input id="qg-metrics-per-document" type="number" min="1" max="50" step="1" required bind:value={metricsPerDocument} /><p class="hint">{m.qg_metrics_per_document_hint()}</p></div>
+					<div class="metric-count"><label for="qg-total-metrics">{m.qg_total_metrics()}</label><input id="qg-total-metrics" type="number" min="1" max="1000" step="1" required disabled={singleDocument} bind:value={totalMetrics} /><p class="hint">{singleDocument ? m.qg_totals_ignored() : m.qg_total_metrics_hint()}</p></div>
+				</div>
+				<p class="hint">{m.qg_metric_triplet_hint()}</p>
 				<p class="hint">{m.qg_language_hint()}</p>
 				<button class="primary" type="submit" disabled={!valid || saving}>{saving ? m.qg_starting() : m.qg_generate()}</button>
 			</form>
@@ -190,5 +181,5 @@
 <style>
 	.question-generator { --bg:#f2f4f7; --panel:#fff; --line:#e4e6eb; --text:#111827; --muted:#6b7280; --accent:#4f46e5; background:var(--bg); color:var(--text); padding:32px; min-height:100%; user-select:text; }
 	.question-generator.dark { --bg:#171b26; --panel:#1f2333; --line:#2d3348; --text:#e2e8f0; --muted:#94a3b8; --accent:#a5b4fc; }
-	header { margin-bottom:28px; max-width:850px; } h1 { font-size:28px; font-weight:650; letter-spacing:-.6px; margin:4px 0 10px; } header p, .hint, .empty, small { color:var(--muted); } .eyebrow { font-size:11px; letter-spacing:1.6px; text-transform:uppercase; } h2 { font-size:16px; font-weight:600; margin:0 0 20px; } p { line-height:1.6; } .workspace { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr); gap:20px; align-items:start; } .panel { border:1px solid var(--line); border-radius:12px; padding:24px; background:var(--panel); min-width:0; } form { display:flex; flex-direction:column; gap:10px; } label, legend { font-size:13px; font-weight:600; } textarea, input, select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:10px 12px; width:100%; min-width:0; font:inherit; } textarea { resize:vertical; margin-bottom:8px; } input:focus, textarea:focus, select:focus, button:focus-visible, summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } button { color:var(--text); border:1px solid var(--line); border-radius:6px; padding:10px 14px; font-size:13px; cursor:pointer; background:var(--bg); } button:disabled { opacity:.5; cursor:default; } .primary { background:#4f46e5; color:white; border-color:#4f46e5; padding:12px; font-weight:600; } .record-row { display:flex; gap:8px; margin-bottom:12px; } .record-row button { white-space:nowrap; } fieldset:disabled { opacity:.6; } .progress { margin:16px 0; font-size:12px; color:var(--muted); } .progress-counts { display:flex; flex-wrap:wrap; gap:16px; } fieldset { border:0; padding:0; margin:8px 0 0; } legend { margin-bottom:10px; } .counts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; } .counts label { display:flex; flex-direction:column; gap:8px; font-size:12px; } .hint { font-size:12px; margin:8px 0; } .run-list { display:grid; gap:10px; max-height:610px; overflow-y:auto; } .run { display:flex; flex-direction:column; gap:8px; text-align:left; width:100%; padding:14px; } .run.active { border-color:var(--accent); } .run-top { display:flex; justify-content:space-between; align-items:center; gap:8px; } .run-purpose { overflow-wrap:anywhere; } .badge { font-size:11px; border:1px solid var(--line); border-radius:4px; padding:3px 7px; color:var(--accent); white-space:nowrap; } .failed, .error { color:#ef7373; } .results { margin-top:20px; } .result-meta { display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:12px; color:var(--muted); } .purpose { font-weight:600; } .question { border-top:1px solid var(--line); margin-top:24px; padding-top:24px; } .question-heading { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .index { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; } h3 { font-size:17px; font-weight:600; line-height:1.6; margin:10px 0 20px; } h4 { color:var(--muted); font-size:12px; font-weight:600; margin:16px 0 8px; } .answer { white-space:pre-wrap; } summary { cursor:pointer; font-size:13px; color:var(--accent); margin:16px 0; } .step-lines { display:block; } ol { padding-left:24px; } li { padding:4px 0; line-height:1.6; } blockquote { border-left:2px solid var(--accent); padding:4px 16px; margin:12px 0; font-size:13px; } blockquote span { color:var(--muted); font-size:11px; } blockquote p { white-space:pre-wrap; } pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; } @media(max-width:900px) { .workspace { grid-template-columns:1fr; } .question-generator { padding:20px; } .panel { padding:18px; } }
+	header { margin-bottom:28px; max-width:850px; } h1 { font-size:28px; font-weight:650; letter-spacing:-.6px; margin:4px 0 10px; } header p, .hint, .empty, small { color:var(--muted); } .eyebrow { font-size:11px; letter-spacing:1.6px; text-transform:uppercase; } h2 { font-size:16px; font-weight:600; margin:0 0 20px; } p { line-height:1.6; } .workspace { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr); gap:20px; align-items:start; } .panel { border:1px solid var(--line); border-radius:12px; padding:24px; background:var(--panel); min-width:0; } form { display:flex; flex-direction:column; gap:10px; } label { font-size:13px; font-weight:600; } textarea, input, select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:10px 12px; width:100%; min-width:0; font:inherit; } textarea { resize:vertical; margin-bottom:8px; } input:focus, textarea:focus, select:focus, button:focus-visible, summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } button { color:var(--text); border:1px solid var(--line); border-radius:6px; padding:10px 14px; font-size:13px; cursor:pointer; background:var(--bg); } button:disabled { opacity:.5; cursor:default; } .primary { background:#4f46e5; color:white; border-color:#4f46e5; padding:12px; font-weight:600; } .record-row { display:flex; gap:8px; margin-bottom:12px; } .record-row button { white-space:nowrap; } input:disabled { opacity:.6; } .progress { margin:16px 0; font-size:12px; color:var(--muted); } .progress-counts { display:flex; flex-wrap:wrap; gap:16px; } .counts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:8px; } .metric-count { display:flex; flex-direction:column; gap:8px; } .metric-count .hint { margin:0; } .counts label { font-size:12px; } .hint { font-size:12px; margin:8px 0; } .run-list { display:grid; gap:10px; max-height:610px; overflow-y:auto; } .run { display:flex; flex-direction:column; gap:8px; text-align:left; width:100%; padding:14px; } .run.active { border-color:var(--accent); } .run-top { display:flex; justify-content:space-between; align-items:center; gap:8px; } .run-purpose { overflow-wrap:anywhere; } .badge { font-size:11px; border:1px solid var(--line); border-radius:4px; padding:3px 7px; color:var(--accent); white-space:nowrap; } .failed, .error { color:#ef7373; } .results { margin-top:20px; } .result-meta { display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:12px; color:var(--muted); } .purpose { font-weight:600; } .question { border-top:1px solid var(--line); margin-top:24px; padding-top:24px; } .question-heading { display:flex; flex-wrap:wrap; align-items:center; gap:12px; } .index { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; } h3 { font-size:17px; font-weight:600; line-height:1.6; margin:10px 0 20px; } h4 { color:var(--muted); font-size:12px; font-weight:600; margin:16px 0 8px; } .answer { white-space:pre-wrap; } summary { cursor:pointer; font-size:13px; color:var(--accent); margin:16px 0; } .step-lines { display:block; } ol { padding-left:24px; } li { padding:4px 0; line-height:1.6; } blockquote { border-left:2px solid var(--accent); padding:4px 16px; margin:12px 0; font-size:13px; } blockquote span { color:var(--muted); font-size:11px; } blockquote p { white-space:pre-wrap; } pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; } @media(max-width:900px) { .workspace { grid-template-columns:1fr; } .question-generator { padding:20px; } .panel { padding:18px; } }
 </style>

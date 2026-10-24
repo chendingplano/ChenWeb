@@ -33,8 +33,9 @@ type metricQuestionTarget struct {
 }
 type questionGenerationMetric struct {
 	metricReviewInputMetric
-	Context        string `json:"context"`
-	ContextLineIDs []int  `json:"context_line_ids"`
+	Context           string   `json:"context"`
+	ContextLineIDs    []int    `json:"-"`
+	ContextLineRanges []string `json:"context_line_ranges"`
 }
 
 type metricQuestionSet struct {
@@ -48,30 +49,51 @@ func makeMetricQuestionSets(metrics []metricReviewInputMetric, counts questionCo
 	if len(metrics) == 0 {
 		return nil, fmt.Errorf("document has no metrics")
 	}
-	sets := make([]metricQuestionSet, 0, counts.total())
+	if counts.OneHop < 1 || counts.OneHop != counts.TwoHop || counts.OneHop != counts.MultiHop {
+		return nil, fmt.Errorf("each metric requires one question of each hop type")
+	}
+	sets := make([]metricQuestionSet, 0, counts.OneHop)
 	var pool []int
-	for _, target := range []struct {
-		hop   string
-		count int
-	}{{"one_hop", counts.OneHop}, {"two_hop", counts.TwoHop}, {"multi_hop", counts.MultiHop}} {
-		for range target.count {
-			if len(pool) == 0 {
-				pool = make([]int, len(metrics))
-				for i := range pool {
-					pool[i] = i
-				}
+	for range counts.OneHop {
+		if len(pool) == 0 {
+			pool = make([]int, len(metrics))
+			for i := range pool {
+				pool[i] = i
 			}
-			index := questionGenerationRandomInt(len(pool))
-			metric := metrics[pool[index]]
-			pool = append(pool[:index], pool[index+1:]...)
+		}
+		index := questionGenerationRandomInt(len(pool))
+		metric := metrics[pool[index]]
+		pool = append(pool[:index], pool[index+1:]...)
+		targets := make([]metricQuestionTarget, 0, 3)
+		for _, hop := range []string{"one_hop", "two_hop", "multi_hop"} {
 			lang := "en"
 			if questionGenerationRandomInt(2) == 1 {
 				lang = "zh-cn"
 			}
-			sets = append(sets, metricQuestionSet{SetNo: len(sets) + 1, Metric: questionGenerationMetric{metricReviewInputMetric: metric}, Questions: []metricQuestionTarget{{HopType: target.hop, Lang: lang}}})
+			targets = append(targets, metricQuestionTarget{HopType: hop, Lang: lang})
 		}
+		sets = append(sets, metricQuestionSet{SetNo: len(sets) + 1, Metric: questionGenerationMetric{metricReviewInputMetric: metric}, Questions: targets})
 	}
 	return sets, nil
+}
+
+// metricContextLineRanges preserves gaps in the sorted canonical line IDs.
+func metricContextLineRanges(ids []int) []string {
+	ranges := make([]string, 0)
+	for i := 0; i < len(ids); {
+		start, end := ids[i], ids[i]
+		i++
+		for i < len(ids) && ids[i] == end+1 {
+			end = ids[i]
+			i++
+		}
+		span := strconv.Itoa(start)
+		if end != start {
+			span += ":" + strconv.Itoa(end)
+		}
+		ranges = append(ranges, span)
+	}
+	return ranges
 }
 
 // Build contexts from actual canonical lines, counting neighbors by position rather
@@ -138,6 +160,7 @@ func buildMetricQuestionContexts(lines []docprocessing.Line, sets []metricQuesti
 			}
 		}
 		result[i].Metric.ContextLineIDs = contextIDs
+		result[i].Metric.ContextLineRanges = metricContextLineRanges(contextIDs)
 	}
 	subset := make([]docprocessing.Line, 0, len(selected))
 	for _, id := range ids {

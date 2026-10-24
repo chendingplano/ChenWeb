@@ -20,6 +20,8 @@ const (
 )
 
 type questionGenerationRequest struct {
+	MetricsPerDocument *int   `json:"metrics_per_document"`
+	TotalMetrics       *int   `json:"total_metrics"`
 	InputRecordID      int64  `json:"input_record_id"`
 	Purpose            string `json:"purpose"`
 	Description        string `json:"description"`
@@ -46,40 +48,48 @@ func (r *questionGenerationRequest) normalize() error {
 	// Question languages are independently chosen by the server, rather than
 	// following the UI locale. Retain the request field for old clients.
 	r.Lang = "mixed"
-	total := 0
-	for _, p := range []**int{&r.OneHopCount, &r.TwoHopCount, &r.MultiHopCount} {
-		if *p == nil {
-			n := 10
-			*p = &n
+	// Keep the existing per-hop storage fields balanced for triplet runs. Legacy
+	// clients may submit equal hop counts; unequal counts cannot describe triplets.
+	resolve := func(value *int, legacy []*int, maximum int, name string) (int, error) {
+		n := 10
+		if value != nil {
+			n = *value
+		} else {
+			found := false
+			for _, count := range legacy {
+				if count == nil {
+					continue
+				}
+				if found && n != *count {
+					return 0, fmt.Errorf("%s: legacy hop counts must be equal; each metric generates three questions", name)
+				}
+				n, found = *count, true
+			}
 		}
-		if **p < 0 || **p > 50 {
-			return fmt.Errorf("each question count must be between 0 and 50")
+		if n < 1 || n > maximum {
+			return 0, fmt.Errorf("%s must be between 1 and %d", name, maximum)
 		}
-		total += **p
+		return n, nil
 	}
-	if total == 0 {
-		return fmt.Errorf("request at least one question")
+	perDocument, err := resolve(r.MetricsPerDocument, []*int{r.OneHopCount, r.TwoHopCount, r.MultiHopCount}, 50, "metrics_per_document")
+	if err != nil {
+		return err
 	}
-	perDocument := []*int{r.OneHopCount, r.TwoHopCount, r.MultiHopCount}
-	for i, p := range []**int{&r.TotalOneHopCount, &r.TotalTwoHopCount, &r.TotalMultiHopCount} {
-		if r.InputRecordID > 0 {
-			n := *perDocument[i]
-			*p = &n
-			continue
-		}
-		if *p == nil {
-			n := 10
-			*p = &n
-		}
-		if **p < 0 || **p > 1000 {
-			return fmt.Errorf("each total count must be between 0 and 1000")
-		}
-		if **p > 0 && *perDocument[i] == 0 {
-			return fmt.Errorf("a positive total count requires a positive per-document count")
+	total := perDocument
+	if r.InputRecordID == 0 {
+		total, err = resolve(r.TotalMetrics, []*int{r.TotalOneHopCount, r.TotalTwoHopCount, r.TotalMultiHopCount}, 1000, "total_metrics")
+		if err != nil {
+			return err
 		}
 	}
-	if *r.TotalOneHopCount+*r.TotalTwoHopCount+*r.TotalMultiHopCount == 0 {
-		return fmt.Errorf("request at least one question in total")
+	r.MetricsPerDocument, r.TotalMetrics = &perDocument, &total
+	for _, field := range []**int{&r.OneHopCount, &r.TwoHopCount, &r.MultiHopCount} {
+		n := perDocument
+		*field = &n
+	}
+	for _, field := range []**int{&r.TotalOneHopCount, &r.TotalTwoHopCount, &r.TotalMultiHopCount} {
+		n := total
+		*field = &n
 	}
 	return nil
 }

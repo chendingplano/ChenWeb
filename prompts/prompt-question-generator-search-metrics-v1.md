@@ -9,24 +9,27 @@ The JSON input begins with document_metadata (document title, document number,
 filename, publication date, and extracted metadata), followed by:
 - run_id: the saved generator run ID, shared with LLM usage logs.
 - input_record_id: the selected document's ID.
-- sets: the sampled metric listing. There is one entry per requested question,
-  with set_no, one metric, and exactly one questions entry assigning hop_type/lang.
+- sets: the sampled metric listing. There is one entry per sampled metric,
+  with set_no, one metric, and exactly three questions entries: one_hop, two_hop,
+  and multi_hop, each assigning its own language.
   Metric attributes include name, subject, value/unit, conditions, formulas,
-  source_line_spans, context, and context_line_ids. These are the only metrics
+  source_line_spans, context, and context_line_ranges. These are the only metrics
   supplied for generation; the complete document and metric inventory are absent.
 - Each metric.context concatenates its relevant source-line content with newline
   separators: up to ten actual lines preceding its first metric line, its metric
   source lines, and up to ten actual lines following its last metric line. Gaps
-  between disjoint metric spans are excluded. context_line_ids gives the canonical
-  IDs in the same order. A canonical line, especially a table, may contain internal
-  newlines or numbered rows; do not infer source IDs by counting physical newlines.
+  between disjoint metric spans are excluded. context_line_ranges gives canonical
+  IDs in the same order, compressing consecutive IDs into inclusive ranges: ["124:128", "130", "132:144"]. Missing
+  IDs between ranges are unavailable evidence. A canonical line, especially a table,
+  may contain internal newlines or numbered rows; do not infer source IDs by counting physical newlines.
 - previous_questions: questions already saved in this run. Never repeat one of
   these, including case-only or whitespace-only changes. Choose a different
   quantitative angle or a genuinely different query when reusing a metric.
 
-For EACH set, generate exactly one question for its assigned hop type and language.
-Do not add missing hop types or extra questions. Every question must target its
-selected metric and use only that metric's own context for factual support. Other
+For EACH set, generate exactly THREE questions: one one-hop, one two-hop, and
+one multi-hop question, following each entry's assigned language. Thus N metric
+sets require exactly 3 × N questions. Do not omit a hop type or add extra questions.
+Every question must target its selected metric and use only that metric's own context for factual support. Other
 selected metrics' contexts are not evidence for this question. Document metadata
 provides orientation; it cannot substitute for cited quantitative source evidence.
 The selected metric's source_line_spans must overlap the cited evidence.
@@ -65,7 +68,8 @@ Return only a JSON object with a questions array. Each item must have:
 - answer: an explicit reference answer supported entirely by source evidence.
 - reasoning_steps: ordered, nonempty explanations (at least 1/2/3 for the hop type).
 - step_line_ids: one nonempty array of integer source IDs per reasoning step,
-  aligned with reasoning_steps. All IDs must belong to this metric's context_line_ids.
+  aligned with reasoning_steps. All IDs must be integers within this metric's context_line_ranges.
+  Output citations remain integer IDs, never range strings.
 - line_ids: the unique union of step_line_ids. Cite only the assigned metric's context lines and
   include evidence for the selected metric. Do not add unused evidence.
 

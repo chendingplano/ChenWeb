@@ -20,27 +20,27 @@ import (
 )
 
 func TestQuestionGenerationMetricBatchRequest(t *testing.T) {
-	req := questionRequest(t, `{"purpose":"search_metrics","one_hop_count":3,"two_hop_count":2,"multi_hop_count":1,"total_one_hop_count":7,"total_two_hop_count":5,"total_multi_hop_count":0}`)
+	req := questionRequest(t, `{"purpose":"search_metrics","metrics_per_document":3,"total_metrics":7}`)
 	if err := req.normalize(); err != nil {
 		t.Fatal(err)
 	}
 	if req.InputRecordID != 0 || req.Lang != "mixed" || *req.TotalOneHopCount != 7 {
 		t.Fatalf("batch request: %+v", req)
 	}
-	next := questionDocumentCounts(req, questionCounts{OneHop: 6, TwoHop: 4})
-	if next != (questionCounts{OneHop: 1, TwoHop: 1}) {
+	next := questionDocumentCounts(req, questionCounts{OneHop: 6, TwoHop: 6, MultiHop: 6})
+	if next != (questionCounts{OneHop: 1, TwoHop: 1, MultiHop: 1}) {
 		t.Fatalf("last document exceeded targets: %+v", next)
 	}
-	single := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0,"total_one_hop_count":-99,"total_two_hop_count":500000}`)
+	single := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","metrics_per_document":1,"total_metrics":-99}`)
 	if err := single.normalize(); err != nil {
 		t.Fatalf("single did not ignore totals: %v", err)
 	}
-	if *single.TotalOneHopCount != 1 || *single.TotalTwoHopCount != 0 || single.Lang != "mixed" {
+	if *single.TotalOneHopCount != 1 || *single.TotalTwoHopCount != 1 || single.Lang != "mixed" {
 		t.Fatalf("totals not overridden: %+v", single)
 	}
 	for _, body := range []string{
 		`{"purpose":"other"}`, `{"input_record_id":-1,"purpose":"search_metrics"}`,
-		`{"purpose":"search_metrics","total_one_hop_count":1001}`,
+		`{"purpose":"search_metrics","total_metrics":1001}`, `{"purpose":"search_metrics","metrics_per_document":51}`, `{"purpose":"search_metrics","metrics_per_document":-1}`, `{"purpose":"search_metrics","metrics_per_document":0}`, `{"purpose":"search_metrics","total_metrics":0}`, `{"purpose":"search_metrics","one_hop_count":3,"two_hop_count":2,"multi_hop_count":1}`,
 		`{"purpose":"search_metrics","one_hop_count":0,"total_one_hop_count":1}`,
 		`{"purpose":"search_metrics","total_one_hop_count":0,"total_two_hop_count":0,"total_multi_hop_count":0}`,
 	} {
@@ -49,11 +49,58 @@ func TestQuestionGenerationMetricBatchRequest(t *testing.T) {
 			t.Errorf("accepted %s", body)
 		}
 	}
+	for _, body := range []string{
+		`{"purpose":"search_metrics"}`,
+		`{"purpose":"search_metrics","metrics_per_document":50,"total_metrics":1000}`,
+		`{"purpose":"search_metrics","one_hop_count":2,"two_hop_count":2,"multi_hop_count":2,"total_one_hop_count":7,"total_two_hop_count":7,"total_multi_hop_count":7}`,
+	} {
+		r := questionRequest(t, body)
+		if err := r.normalize(); err != nil {
+			t.Fatalf("rejected valid metric counts %s: %v", body, err)
+		}
+		if *r.OneHopCount != *r.TwoHopCount || *r.OneHopCount != *r.MultiHopCount || *r.MetricsPerDocument != *r.OneHopCount || *r.TotalMetrics != *r.TotalOneHopCount {
+			t.Fatalf("unbalanced triplet counts: %+v", r)
+		}
+	}
 	if prompt, err := questionPurposePrompt("search_metrics"); err != nil || prompt != "prompt-question-generator-search-metrics-v1.md" {
 		t.Fatalf("purpose prompt=%q %v", prompt, err)
 	}
 	if _, err := questionPurposePrompt("free text"); err == nil {
 		t.Fatal("unknown purpose has no dedicated prompt")
+	}
+}
+
+func TestQuestionGenerationMetricCountContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, body         string
+		perDocument, total int
+	}{
+		{"defaults", `{"purpose":"search_metrics"}`, 10, 10},
+		{"lower bounds", `{"purpose":"search_metrics","metrics_per_document":1,"total_metrics":1}`, 1, 1},
+		{"upper bounds", `{"purpose":"search_metrics","metrics_per_document":50,"total_metrics":1000}`, 50, 1000},
+		{"legacy balanced", `{"purpose":"search_metrics","one_hop_count":2,"two_hop_count":2,"multi_hop_count":2,"total_one_hop_count":7,"total_two_hop_count":7,"total_multi_hop_count":7}`, 2, 7},
+		{"new fields take precedence", `{"purpose":"search_metrics","metrics_per_document":3,"total_metrics":8,"one_hop_count":-1,"two_hop_count":9,"multi_hop_count":0,"total_one_hop_count":-99,"total_two_hop_count":50000}`, 3, 8},
+		{"single ignores totals", `{"purpose":"search_metrics","input_record_id":416,"metrics_per_document":2,"total_metrics":100000,"total_one_hop_count":-99,"total_two_hop_count":50000}`, 2, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := questionRequest(t, tc.body)
+			if err := req.normalize(); err != nil {
+				t.Fatal(err)
+			}
+			if *req.MetricsPerDocument != tc.perDocument || *req.TotalMetrics != tc.total || *req.OneHopCount != tc.perDocument || *req.TwoHopCount != tc.perDocument || *req.MultiHopCount != tc.perDocument || *req.TotalOneHopCount != tc.total || *req.TotalTwoHopCount != tc.total || *req.TotalMultiHopCount != tc.total {
+				t.Fatalf("wrong normalized counts: %+v", req)
+			}
+		})
+	}
+	for _, body := range []string{
+		`{"purpose":"search_metrics","total_metrics":-1}`,
+		`{"purpose":"search_metrics","total_one_hop_count":1,"total_two_hop_count":2,"total_multi_hop_count":1}`,
+		`{"purpose":"search_metrics","metrics_per_document":0,"one_hop_count":2,"two_hop_count":2,"multi_hop_count":2}`,
+	} {
+		req := questionRequest(t, body)
+		if req.normalize() == nil {
+			t.Errorf("accepted invalid metric counts: %s", body)
+		}
 	}
 }
 
@@ -117,29 +164,29 @@ func TestQuestionGeneratorBatchSkipsAndHitsExactTargets(t *testing.T) {
 					questions = append(questions, map[string]any{"set_no": set.SetNo, "hop_type": target.HopType, "lang": target.Lang, "question": fmt.Sprintf("Question %d/%d/%s?", calls, set.SetNo, target.HopType), "answer": "20 kg", "reasoning_steps": steps, "step_line_ids": stepLines, "line_ids": []int{7}})
 				}
 			}
-			if calls == 1 && (count["one_hop"] != 2 || count["two_hop"] != 1 || count["multi_hop"] != 1) {
+			if calls == 1 && (count["one_hop"] != 2 || count["two_hop"] != 2 || count["multi_hop"] != 2) {
 				t.Errorf("first doc counts=%v", count)
 			}
-			if calls == 2 && (count["one_hop"] != 1 || count["two_hop"] != 1 || count["multi_hop"] != 0) {
+			if calls == 2 && (count["one_hop"] != 1 || count["two_hop"] != 1 || count["multi_hop"] != 1) {
 				t.Errorf("last doc exceeded targets: %v", count)
 			}
 			return map[string]any{"questions": questions}, nil
 		}), nil
 	}
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
-	for i, n := range []int{4, 2} {
+	for i, n := range []int{6, 3} {
 		mock.ExpectBegin()
 		for j := 0; j < n; j++ {
 			mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
 		}
 		if i == 0 {
-			mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), false, 2, 1, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), false, 2, 2, 2).WillReturnResult(sqlmock.NewResult(0, 1))
 		} else {
-			mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 1, 0).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 1, 1).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
 		mock.ExpectCommit()
 	}
-	req := questionRequest(t, `{"purpose":"search_metrics","one_hop_count":2,"two_hop_count":1,"multi_hop_count":1,"total_one_hop_count":3,"total_two_hop_count":2,"total_multi_hop_count":1}`)
+	req := questionRequest(t, `{"purpose":"search_metrics","metrics_per_document":2,"total_metrics":3}`)
 	if err := req.normalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -203,10 +250,10 @@ func TestStartQuestionGenerationBatchWithoutInput(t *testing.T) {
 	for i := range cols {
 		cols[i] = strings.TrimSpace(cols[i])
 	}
-	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(0), "search_metrics", "", 10, 10, 10, "mixed", "deepseek-flash-processor", questionGenerationPrompt, "", 7, 10, 10, 3600).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, nil, "search_metrics", "", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 7, 10, 10, 0, 0, 0, 0, time.Now().Add(time.Hour)))
+	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(0), "search_metrics", "", 10, 10, 10, "mixed", "deepseek-flash-processor", questionGenerationPrompt, "", 7, 7, 7, 3600).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, nil, "search_metrics", "", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 7, 7, 7, 0, 0, 0, 0, time.Now().Add(time.Hour)))
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"purpose":"search_metrics","total_one_hop_count":7}`)), rec)
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"purpose":"search_metrics","total_metrics":7}`)), rec)
 	if err := StartQuestionGeneration(c); err != nil {
 		t.Fatal(err)
 	}
@@ -250,30 +297,43 @@ func TestQuestionGeneratorBatchRetriesDuplicateOutput(t *testing.T) {
 					if err := json.Unmarshal([]byte(in.InputText), &input); err != nil {
 						t.Fatal(err)
 					}
-					if calls > 1 && (len(input.Previous) != 1 || input.Previous[0] != "What is the limit?") {
+					if calls > 1 && (len(input.Previous) != 3 || input.Previous[0] != "What is the limit? one_hop") {
 						t.Errorf("lost prior question context: %+v", input)
 					}
 					question := "What is the limit?"
 					if calls >= 3 && !alwaysDuplicate {
 						question = "Which weight must not be exceeded?"
 					}
-					return map[string]any{"questions": []any{map[string]any{"set_no": 1, "lang": "en", "hop_type": "one_hop", "question": question, "answer": "20 kg", "reasoning_steps": []string{"Read limit"}, "step_line_ids": [][]int{{7}}, "line_ids": []int{7}}}}, nil
+					questions := []any{}
+					for i, hop := range []string{"one_hop", "two_hop", "multi_hop"} {
+						steps, ids := []string{}, [][]int{}
+						for step := 0; step <= i; step++ {
+							steps = append(steps, "Read limit")
+							ids = append(ids, []int{7})
+						}
+						questions = append(questions, map[string]any{"set_no": 1, "lang": "en", "hop_type": hop, "question": question + " " + hop, "answer": "20 kg", "reasoning_steps": steps, "step_line_ids": ids, "line_ids": []int{7}})
+					}
+					return map[string]any{"questions": questions}, nil
 				}), nil
 			}
 			mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectBegin()
-			mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
-			mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), false, 1, 0, 0).WillReturnResult(sqlmock.NewResult(0, 1))
+			for range 3 {
+				mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
+			}
+			mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), false, 1, 1, 1).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectCommit()
 			if alwaysDuplicate {
 				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "no eligible document could generate the remaining questions: model repeated a previously generated question").WillReturnResult(sqlmock.NewResult(0, 1))
 			} else {
 				mock.ExpectBegin()
-				mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
-				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 0, 0).WillReturnResult(sqlmock.NewResult(0, 1))
+				for range 3 {
+					mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
+				}
+				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 1, 1).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectCommit()
 			}
-			req := questionRequest(t, `{"purpose":"search_metrics","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0,"total_one_hop_count":2,"total_two_hop_count":0,"total_multi_hop_count":0}`)
+			req := questionRequest(t, `{"purpose":"search_metrics","metrics_per_document":1,"total_metrics":2}`)
 			if err := req.normalize(); err != nil {
 				t.Fatal(err)
 			}
@@ -298,11 +358,11 @@ func TestMetricQuestionSetsAndLanguages(t *testing.T) {
 	counter := 0
 	questionGenerationRandomInt = func(n int) int { v := (counter / 2) % n; counter++; return v }
 	metrics := []metricReviewInputMetric{{MetricID: "m1", MetricName: "Weight", SourceLineSpans: json.RawMessage(`["2"]`)}, {MetricID: "m2", MetricName: "Time", SourceLineSpans: json.RawMessage(`["8"]`)}}
-	sets, err := makeMetricQuestionSets(metrics, questionCounts{OneHop: 3, TwoHop: 2, MultiHop: 1})
+	sets, err := makeMetricQuestionSets(metrics, questionCounts{OneHop: 3, TwoHop: 3, MultiHop: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sets) != 6 {
+	if len(sets) != 3 {
 		t.Fatalf("sets=%+v", sets)
 	}
 	count := map[string]int{}
@@ -316,8 +376,13 @@ func TestMetricQuestionSetsAndLanguages(t *testing.T) {
 			langs[q.Lang] = true
 		}
 	}
-	if count["one_hop"] != 3 || count["two_hop"] != 2 || count["multi_hop"] != 1 || !langs["en"] || !langs["zh-cn"] {
+	if count["one_hop"] != 3 || count["two_hop"] != 3 || count["multi_hop"] != 3 || !langs["en"] || !langs["zh-cn"] {
 		t.Fatalf("counts=%v languages=%v", count, langs)
+	}
+	for _, counts := range []questionCounts{{}, {OneHop: 2, TwoHop: 1, MultiHop: 1}, {OneHop: 1, TwoHop: 1}, {OneHop: -1, TwoHop: -1, MultiHop: -1}} {
+		if _, err := makeMetricQuestionSets(metrics, counts); err == nil {
+			t.Errorf("accepted non-triplet counts: %+v", counts)
+		}
 	}
 	if _, err := makeMetricQuestionSets(nil, questionCounts{OneHop: 1}); err == nil {
 		t.Fatal("empty metrics accepted")
@@ -326,9 +391,6 @@ func TestMetricQuestionSetsAndLanguages(t *testing.T) {
 
 func TestMetricQuestionValidationBindsAnchorAndLanguage(t *testing.T) {
 	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
-	if err := req.normalize(); err != nil {
-		t.Fatal(err)
-	}
 	sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", SourceLineSpans: json.RawMessage(`["2"]`)}, ContextLineIDs: []int{2}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "zh-cn"}}}}
 	valid := `{"questions":[{"set_no":1,"lang":"zh-cn","hop_type":"one_hop","question":"限重是多少？","answer":"20公斤","reasoning_steps":["读取限重。"],"step_line_ids":[[2]],"line_ids":[2]}]}`
 	decode := func(body string) map[string]any {

@@ -10,7 +10,7 @@ import (
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
-func TestMetricQuestionSamplingUsesOneDistinctMetricPerQuestion(t *testing.T) {
+func TestMetricQuestionSamplingUsesThreeQuestionsPerDistinctMetric(t *testing.T) {
 	original := questionGenerationRandomInt
 	t.Cleanup(func() { questionGenerationRandomInt = original })
 	calls := 0
@@ -19,28 +19,35 @@ func TestMetricQuestionSamplingUsesOneDistinctMetricPerQuestion(t *testing.T) {
 	for i := range metrics {
 		metrics[i].MetricID = fmt.Sprintf("m%d", i)
 	}
-	sets, err := makeMetricQuestionSets(metrics, questionCounts{OneHop: 3, TwoHop: 2, MultiHop: 1})
+	sets, err := makeMetricQuestionSets(metrics, questionCounts{OneHop: 3, TwoHop: 3, MultiHop: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sets) != 6 {
-		t.Fatalf("got %d sets, want six independently sampled metrics", len(sets))
+	if len(sets) != 3 {
+		t.Fatalf("got %d sets, want three independently sampled metrics", len(sets))
 	}
 	seen := map[string]bool{}
 	hops := map[string]int{}
 	langs := map[string]bool{}
 	for i, s := range sets {
-		if s.SetNo != i+1 || len(s.Questions) != 1 || seen[s.Metric.MetricID] {
-			t.Fatalf("set is not a distinct single-question anchor: %+v", s)
+		if s.SetNo != i+1 || len(s.Questions) != 3 || seen[s.Metric.MetricID] {
+			t.Fatalf("set is not a distinct three-question anchor: %+v", s)
 		}
 		seen[s.Metric.MetricID] = true
-		hops[s.Questions[0].HopType]++
-		langs[s.Questions[0].Lang] = true
+		setHops := map[string]int{}
+		for _, target := range s.Questions {
+			setHops[target.HopType]++
+			hops[target.HopType]++
+			langs[target.Lang] = true
+		}
+		if setHops["one_hop"] != 1 || setHops["two_hop"] != 1 || setHops["multi_hop"] != 1 {
+			t.Fatalf("metric does not have one question per hop: %+v", s)
+		}
 	}
-	if hops["one_hop"] != 3 || hops["two_hop"] != 2 || hops["multi_hop"] != 1 || !langs["en"] || !langs["zh-cn"] {
+	if hops["one_hop"] != 3 || hops["two_hop"] != 3 || hops["multi_hop"] != 3 || !langs["en"] || !langs["zh-cn"] {
 		t.Fatalf("hops=%v langs=%v", hops, langs)
 	}
-	sets, err = makeMetricQuestionSets(metrics[:2], questionCounts{OneHop: 5})
+	sets, err = makeMetricQuestionSets(metrics[:2], questionCounts{OneHop: 5, TwoHop: 5, MultiHop: 5})
 	if err != nil || len(sets) != 5 {
 		t.Fatalf("shortage sets=%v err=%v", sets, err)
 	}
@@ -114,9 +121,6 @@ func TestMetricQuestionContextsClampAndRejectMissingEvidence(t *testing.T) {
 
 func TestMetricQuestionRejectsAnotherMetricsContext(t *testing.T) {
 	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
-	if err := req.normalize(); err != nil {
-		t.Fatal(err)
-	}
 	set := metricQuestionSet{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m", SourceLineSpans: json.RawMessage(`["2"]`)}, Context: "20 kg", ContextLineIDs: []int{2}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "en"}}}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(`{"questions":[{"set_no":1,"lang":"en","hop_type":"one_hop","question":"What is the weight?","answer":"20 kg","reasoning_steps":["Read both lines."],"step_line_ids":[[2,8]],"line_ids":[2,8]}]}`), &payload); err != nil {

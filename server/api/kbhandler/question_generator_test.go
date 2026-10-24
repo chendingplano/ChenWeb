@@ -93,9 +93,9 @@ func TestQuestionGenerationRequest(t *testing.T) {
 			t.Errorf("accepted %s", body)
 		}
 	}
-	req = questionRequest(t, `{"input_record_id":1,"purpose":"search_metrics","one_hop_count":0,"lang":"zh-cn"}`)
-	if err := req.normalize(); err != nil || *req.OneHopCount != 0 {
-		t.Fatalf("explicit zero: %+v %v", req, err)
+	req = questionRequest(t, `{"input_record_id":1,"purpose":"search_metrics","metrics_per_document":1,"lang":"zh-cn"}`)
+	if err := req.normalize(); err != nil || *req.OneHopCount != 1 {
+		t.Fatalf("explicit metric count: %+v %v", req, err)
 	}
 }
 
@@ -364,20 +364,25 @@ func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
 					if err := json.Unmarshal([]byte(in.InputText), &input); err != nil {
 						t.Fatal(err)
 					}
-					if input.Purpose != "search_metrics" || input.Description != "weights" || len(input.Sets) != 1 || input.Sets[0].Metric.MetricID != "m1" || input.Sets[0].Questions[0].Lang != "zh-cn" || input.Sets[0].Metric.Context != "The limit is 20 kg." || len(input.Sets[0].Metric.ContextLineIDs) != 1 || input.Sets[0].Metric.ContextLineIDs[0] != 7 {
+					if input.Purpose != "search_metrics" || input.Description != "weights" || len(input.Sets) != 1 || input.Sets[0].Metric.MetricID != "m1" || input.Sets[0].Questions[0].Lang != "zh-cn" || input.Sets[0].Metric.Context != "The limit is 20 kg." || len(input.Sets[0].Questions) != 3 || len(input.Sets[0].Metric.ContextLineRanges) != 1 || input.Sets[0].Metric.ContextLineRanges[0] != "7" {
 						t.Errorf("wrong model input: %+v", input)
 					}
 					if modelFails {
 						return nil, fmt.Errorf("upstream failure")
 					}
-					var payload map[string]any
-					if err := json.Unmarshal([]byte(`{"questions":[{"set_no":1,"lang":"zh-cn","hop_type":"one_hop","question":"限重是多少？","answer":"20公斤","reasoning_steps":["读取重量上限。"],"line_ids":[7],"step_line_ids":[[7]]}]}`), &payload); err != nil {
-						t.Fatal(err)
+					questions := []any{}
+					for i, target := range input.Sets[0].Questions {
+						steps, ids := []string{}, [][]int{}
+						for step := 0; step <= i; step++ {
+							steps = append(steps, "读取重量上限。")
+							ids = append(ids, []int{7})
+						}
+						questions = append(questions, map[string]any{"set_no": 1, "lang": target.Lang, "hop_type": target.HopType, "question": fmt.Sprintf("限重是多少？%s", target.HopType), "answer": "20公斤", "reasoning_steps": steps, "line_ids": []int{7}, "step_line_ids": ids})
 					}
-					return payload, nil
+					return map[string]any{"questions": questions}, nil
 				}), nil
 			}
-			req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","description":"weights","lang":"zh-cn","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
+			req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","description":"weights","lang":"zh-cn","metrics_per_document":1}`)
 			if err := req.normalize(); err != nil {
 				t.Fatal(err)
 			}
@@ -386,8 +391,10 @@ func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
 				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "question generation model request failed or timed out").WillReturnResult(sqlmock.NewResult(0, 1))
 			} else {
 				mock.ExpectBegin()
-				mock.ExpectExec("INSERT INTO testbed.generated_questions").WithArgs(int64(12), int64(416), "one_hop", "限重是多少？", "20公斤", `["读取重量上限。"]`, `[[7]]`, `[{"line_id":7,"text":"The limit is 20 kg."}]`, "m1", sqlmock.AnyArg(), 1, "zh-cn", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
-				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 0, 0).WillReturnResult(sqlmock.NewResult(0, 1))
+				for range 3 {
+					mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
+				}
+				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 1, 1).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectCommit()
 			}
 			runQuestionGeneration(db, 12, req, "fixture", "admin")

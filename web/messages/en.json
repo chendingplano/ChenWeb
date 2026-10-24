@@ -7285,11 +7285,11 @@
 	"qg_source_line": "Line {line}",
 	"qg_select_run": "Select a saved run to inspect its questions.",
 	"qg_step_lines": "Source lines: {lines}",
-	"qg_record_hint": "Leave blank or enter 0 to randomly select documents with metrics until each batch total is reached.",
+	"qg_record_hint": "Leave blank or enter 0 to randomly select documents with metrics until the total metrics target is reached.",
 	"qg_search_metrics": "Search Metrics",
 	"qg_total_counts": "Total questions for the batch",
 	"qg_total_count_hint": "Each total must be 0–1,000 and at least one total must be positive. Each positive total needs a positive per-document count.",
-	"qg_totals_ignored": "Totals are ignored for a specific record ID; only the per-document counts apply.",
+	"qg_totals_ignored": "Ignored for a specific record ID; only metrics per document applies.",
 	"qg_english": "English",
 	"qg_chinese": "Chinese",
 	"qg_mixed": "English / Chinese",
@@ -7297,5 +7297,10 @@
 	"qg_metric_id": "Metric: {id}",
 	"qg_batch_run": "Batch · multiple documents",
 	"qg_documents_processed": "Documents processed: {count}",
-	"qg_progress_count": "{count} / {total}"
+	"qg_progress_count": "{count} / {total}",
+	"qg_metrics_per_document": "Metrics per document",
+	"qg_metrics_per_document_hint": "Select 1–50 metrics from each document.",
+	"qg_total_metrics": "Total metrics",
+	"qg_total_metrics_hint": "Select 1–1,000 metrics across the batch.",
+	"qg_metric_triplet_hint": "Each selected metric generates three questions: one one-hop, one two-hop, and one multi-hop."
 }
