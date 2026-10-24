@@ -241,7 +241,7 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 	}
 	// Struct field order keeps document metadata ahead of the metric listing in
 	// both the model input and the archived LLM request body.
-	input, err := json.Marshal(struct {
+	request := struct {
 		DocumentMetadata  questionDocumentMetadata `json:"document_metadata"`
 		RunID             int64                    `json:"run_id"`
 		InputRecordID     int64                    `json:"input_record_id"`
@@ -249,17 +249,36 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 		Description       string                   `json:"description"`
 		Sets              []metricQuestionSet      `json:"sets"`
 		PreviousQuestions []string                 `json:"previous_questions"`
-	}{metadata, runID, req.InputRecordID, req.Purpose, req.Description, sets, previousQuestions})
-	if err != nil {
-		return nil, fmt.Errorf("cannot format metric question input")
+		ValidationError   string                   `json:"validation_error,omitempty"`
+		PreviousResponse  map[string]any           `json:"previous_response,omitempty"`
+	}{DocumentMetadata: metadata, RunID: runID, InputRecordID: req.InputRecordID,
+		Purpose: req.Purpose, Description: req.Description, Sets: sets, PreviousQuestions: previousQuestions}
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		input, err := json.Marshal(request)
+		if err != nil {
+			return nil, fmt.Errorf("cannot format metric question input")
+		}
+		if utf8.RuneCount(input) > questionGenerationMaxInputChars {
+			return nil, fmt.Errorf("document and metric context too large after formatting")
+		}
+		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: runID, RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
+		if err != nil {
+			logger.Error("metric question model call failed", "run_id", runID, "record_id", req.InputRecordID, "error", err)
+			return nil, fmt.Errorf("question generation model request failed or timed out")
+		}
+		questions, err := validateMetricQuestions(payload, req, source, sets, hash)
+		if err == nil {
+			return questions, nil
+		}
+		// Give malformed model output one correction attempt without changing its
+		// sampled metrics, language targets, or source evidence. Never relax validation.
+		if attempt == 1 {
+			return nil, err
+		}
+		logger.Warn("metric question output invalid; requesting correction", "run_id", runID, "record_id", req.InputRecordID, "error", err)
+		request.ValidationError, request.PreviousResponse = err.Error(), payload
 	}
-	if utf8.RuneCount(input) > questionGenerationMaxInputChars {
-		return nil, fmt.Errorf("document and metric context too large after formatting")
-	}
-	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: runID, RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
-	if err != nil {
-		logger.Error("metric question model call failed", "record_id", req.InputRecordID, "error", err)
-		return nil, fmt.Errorf("question generation model request failed or timed out")
-	}
-	return validateMetricQuestions(payload, req, source, sets, hash)
 }

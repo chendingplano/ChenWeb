@@ -26,6 +26,13 @@ filename, publication date, and extracted metadata), followed by:
   these, including case-only or whitespace-only changes. Choose a different
   quantitative angle or a genuinely different query when reusing a metric.
 
+If validation_error and previous_response are present, this is a correction
+attempt. The previous response failed server validation. Correct the reported
+error and check ALL questions for the same mistake. Keep the supplied metric
+sets, hop types, languages, and evidence constraints. Return the complete corrected
+questions array, including valid questions from the previous response; do not
+return only a patch. Do not invent evidence or weaken the reasoning requirements.
+
 For EACH set, generate exactly THREE questions: one one-hop, one two-hop, and
 one multi-hop question, following each entry's assigned language. Thus N metric
 sets require exactly 3 × N questions. Do not omit a hop type or add extra questions.

@@ -225,8 +225,11 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			return nil, fmt.Errorf("question %d is empty or duplicated, or has no answer", i+1)
 		}
 		seen[key] = true
-		if len(q.ReasoningSteps) < minimum || len(q.StepLineIDs) != len(q.ReasoningSteps) {
-			return nil, fmt.Errorf("question %d lacks supported reasoning steps", i+1)
+		if len(q.ReasoningSteps) < minimum {
+			return nil, fmt.Errorf("question %d (%s) has %d reasoning steps; requires at least %d", i+1, q.HopType, len(q.ReasoningSteps), minimum)
+		}
+		if len(q.StepLineIDs) != len(q.ReasoningSteps) {
+			return nil, fmt.Errorf("question %d (%s) has %d reasoning steps but %d citation arrays; provide one step_line_ids array per reasoning step", i+1, q.HopType, len(q.ReasoningSteps), len(q.StepLineIDs))
 		}
 		cited := map[int]bool{}
 		evidence := make([]questionEvidence, 0, len(q.LineIDs))
