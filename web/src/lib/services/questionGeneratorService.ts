@@ -25,6 +25,7 @@ export type QuestionRun = {
 	finished_at?: string;
 };
 export type GeneratedQuestion = {
+	purpose: string;
 	id: number;
 	run_id: number;
 	input_record_id: number;

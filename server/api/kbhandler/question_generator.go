@@ -135,6 +135,7 @@ type questionEvidence struct {
 }
 
 type generatedQuestion struct {
+	Purpose        string             `json:"purpose"`
 	ID             int64              `json:"id"`
 	RunID          int64              `json:"run_id"`
 	InputRecordID  int64              `json:"input_record_id"`

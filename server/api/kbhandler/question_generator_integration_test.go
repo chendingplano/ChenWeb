@@ -57,7 +57,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql"} {
+	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql"} {
 		raw, err := os.ReadFile(filepath.Join("../../../project_migrations", filename))
 		if err != nil {
 			t.Fatal(err)
@@ -98,6 +98,17 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		var retained int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM testbed.generated_questions WHERE run_id=$1`, legacyID).Scan(&retained); err != nil || retained != 1 {
 			t.Fatalf("%s lost legacy row: count=%d err=%v", action.name, retained, err)
+		}
+		if action.name != "new migration down" {
+			var purpose string
+			if err := db.QueryRowContext(ctx, `SELECT purpose FROM testbed.generated_questions WHERE run_id=$1`, legacyID).Scan(&purpose); err != nil || purpose != "search" {
+				t.Fatalf("%s purpose backfill=%q error=%v", action.name, purpose, err)
+			}
+		} else {
+			var columns int
+			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='testbed' AND table_name='generated_questions' AND column_name='purpose'`).Scan(&columns); err != nil || columns != 0 {
+				t.Fatalf("purpose rollback columns=%d error=%v", columns, err)
+			}
 		}
 	}
 	legacy, legacyQuestions, err := loadQuestionRun(ctx, db, legacyID)
@@ -173,6 +184,9 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := question("one_hop", "What is A?", "en", "metric-416", "hash-416")
+	// Question purpose is authoritative run data, never supplied by the model.
+	first.Purpose = "untrusted-question-purpose"
+
 	if err := saveGeneratedQuestions(ctx, db, batchID, 416, []generatedQuestion{first}, false); err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +196,14 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	}
 	if questions[0].InputRecordID != 416 || questions[0].MetricID != "metric-416" || questions[0].Lang != "en" || questions[0].SourceSHA256 != "hash-416" || questions[0].SetNo != 2 || !strings.Contains(string(questions[0].MetricSnapshot), "temperature") {
 		t.Fatalf("question provenance round trip: %+v", questions[0])
+	}
+	var savedPurpose string
+	if err := db.QueryRowContext(ctx, `SELECT purpose FROM testbed.generated_questions WHERE run_id=$1`, batchID).Scan(&savedPurpose); err != nil || savedPurpose != "search_metrics" {
+		t.Fatalf("saved purpose=%q error=%v", savedPurpose, err)
+	}
+	encodedQuestion, err := json.Marshal(questions[0])
+	if err != nil || !strings.Contains(string(encodedQuestion), `"purpose":"search_metrics"`) {
+		t.Fatalf("API purpose missing: %s error=%v", encodedQuestion, err)
 	}
 	second := []generatedQuestion{
 		question("one_hop", "什么是 B？", "zh-cn", "metric-417", "hash-417"),
@@ -243,9 +265,17 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal("failed batch accepted late output")
 	}
 
+	// The additive purpose migration rolls back independently; restore it after
+	// checking the older migration's batch guard so API reads retain their schema.
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatalf("purpose down: %v", err)
+	}
 	// Down must refuse before mutations, leaving all batch data readable.
 	if _, err := provider.Down(ctx); err == nil || !strings.Contains(err.Error(), "while batch runs exist") {
 		t.Fatalf("unsafe batch downgrade was not refused: %v", err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("purpose re-up: %v", err)
 	}
 	run, questions, err = loadQuestionRun(ctx, db, batchID)
 	if err != nil || run.Status != "done" || len(questions) != 4 || questions[1].Lang != "zh-cn" {

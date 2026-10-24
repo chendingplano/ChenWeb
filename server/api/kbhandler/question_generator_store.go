@@ -64,7 +64,7 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 		return run, nil, err
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id, run_id, input_record_id, hop_type, question, answer,
- reasoning_steps, step_line_ids, evidence, metric_id, metric_snapshot, set_no, lang, source_sha256 FROM testbed.generated_questions WHERE run_id = $1 ORDER BY id`, id)
+ reasoning_steps, step_line_ids, evidence, metric_id, metric_snapshot, set_no, lang, source_sha256, purpose FROM testbed.generated_questions WHERE run_id = $1 ORDER BY id`, id)
 	if err != nil {
 		return run, nil, err
 	}
@@ -73,7 +73,7 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 	for rows.Next() {
 		var q generatedQuestion
 		var steps, stepLines, evidence, metricSnapshot []byte
-		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256); err != nil {
+		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256, &q.Purpose); err != nil {
 			return run, nil, err
 		}
 		for _, v := range []struct {
@@ -126,8 +126,9 @@ func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.generated_questions
    (run_id, input_record_id, hop_type, question, answer, reasoning_steps, step_line_ids, evidence,
-    metric_id, metric_snapshot, set_no, lang, source_sha256)
-   VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11,$12,$13)`,
+    metric_id, metric_snapshot, set_no, lang, source_sha256, purpose)
+   VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11,$12,$13,
+    (SELECT purpose FROM testbed.generated_question_runs WHERE id = $1))`,
 			runID, recordID, q.HopType, q.Question, q.Answer, string(steps), string(stepLines), string(evidence),
 			q.MetricID, string(metricSnapshot), q.SetNo, q.Lang, q.SourceSHA256); err != nil {
 			return err
