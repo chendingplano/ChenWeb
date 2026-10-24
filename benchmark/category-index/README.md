@@ -116,6 +116,33 @@ What we learned:
 6. **At the same scan budget, blind k-means did better.** Queries written from the metric's own
    text favour embedding methods, so human queries may narrow the gap.
 
+### Hybrid search as production runs it (`s8_hybrid.py`, 2026-10-24)
+
+The same 212 queries against the production hybrid query (ParadeDB BM25 top 200 + pgvector top 200,
+fused with Reciprocal Rank Fusion, k = 60), after the fix that lets its vector part use the HNSW
+index (ChenWeb jj `nrzl`). It runs on testbed copies of the 2,660 metrics' search rows, with the
+same BM25 index configuration. `facets` adds the `kb.metrics.metric_categories` keys to the search
+document (underscores as spaces) and re-embeds it. "BM25 weight" scales BM25's term in the fusion;
+production uses 1.0.
+
+| Variant | BM25 | Vector | Hybrid, BM25 weight 1.0 | 0.5 | 0.25 | Reach |
+|---|---|---|---|---|---|---|
+| base | 0.47 | **0.95** | 0.87 | 0.94 | 0.94 | 1.00 |
+| facets | 0.48 | 0.95 | 0.86 | 0.94 | 0.94 | 1.00 |
+
+R@10 except Reach, which is the share of queries whose target is among the 400 candidates.
+
+- **The target is always among the candidates** (reach 1.00), so what matters is the fusion.
+- **Production's equal-weight fusion is worse than vector alone** (0.87 vs 0.95): the BM25 list
+  pushes correct vector hits out of the top 10. `|||` matches any query word, so BM25 matches
+  200+ metrics for a median query, and its ranking is weak (0.47; 0.20 for English queries).
+- **Lowering BM25's weight recovers most of the loss** but never beats vector alone here.
+- **The facet keys change nothing measurable.** They are English-only snake_case keys and add
+  generic words.
+- **Caveat:** the queries were written to avoid the metric's own wording, which works against
+  BM25 by design. Queries that use exact terms (codes, symbols, defined names such as "MPE")
+  would favour BM25, and a real query log is needed before re-tuning production.
+
 Not tested: cell sizes at millions of metrics (16 documents are too few to extrapolate),
 queries written by people, a hybrid of ANN search with category filters or boosts.
 
@@ -135,6 +162,7 @@ queries written by people, a hybrid of ANN search with category filters or boost
 | `s5_eval.py` | Main evaluation |
 | `s6_misses.py` | Why the pair filter drops targets |
 | `s7_budget.py` | Recall at a fixed scan budget vs k-means IVF |
+| `s8_hybrid.py` | Production hybrid search (BM25 + vector, RRF) on testbed copies, with and without facet keys |
 | `datasets/queries-v1.json` | The 212 queries and their target metric IDs |
 | `datasets/ics-alt-labels-v1.jsonl` | The LLM-written ICS alternative labels |
 | `results/` | Evaluation outputs (file names give metric domain, query domain, facet version) |
@@ -159,6 +187,7 @@ EXP_WALK=v2 .venv/bin/python s3b_walk.py queries && EXP_WALK=v2 .venv/bin/python
 .venv/bin/python s3c_facets.py queries && .venv/bin/python s3c_facets.py metrics
 EXP_MDOMAIN=walk_v2 EXP_QDOMAIN=walk_v2 EXP_FACET=v2 .venv/bin/python s5_eval.py
 EXP_MDOMAIN=walk_v2 EXP_QDOMAIN=walk_v2 EXP_FACET=v2 .venv/bin/python s7_budget.py
+.venv/bin/python s8_hybrid.py   # rebuilds testbed.catidx_hybrid_base / _facets
 ```
 
 LLM results are cached per item in `out/*.jsonl`, so a rerun only calls models for new items;

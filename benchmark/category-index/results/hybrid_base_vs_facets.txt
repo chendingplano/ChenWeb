@@ -1,0 +1,15 @@
+queries: 212  metrics: 2660  candidates per list: 200  RRF k: 60
+
+variant  method       R@10    MRR  R@10 en  R@10 zh
+base     bm25        0.467  0.350    0.198    0.736
+base     vector      0.953  0.823    0.943    0.962
+base     rrf w=1.0   0.868  0.694    0.849    0.887
+base     rrf w=0.5   0.939  0.771    0.934    0.943
+base     rrf w=0.25  0.943  0.810    0.934    0.953
+base     reach       1.000   (target among the lexical + semantic candidates)   median BM25 matches: 200
+facets   bm25        0.481  0.360    0.217    0.745
+facets   vector      0.948  0.826    0.934    0.962
+facets   rrf w=1.0   0.863  0.702    0.840    0.887
+facets   rrf w=0.5   0.939  0.774    0.934    0.943
+facets   rrf w=0.25  0.939  0.803    0.934    0.943
+facets   reach       1.000   (target among the lexical + semantic candidates)   median BM25 matches: 200
