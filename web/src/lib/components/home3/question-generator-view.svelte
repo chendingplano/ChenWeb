@@ -326,7 +326,7 @@
 	<dialog
 		bind:this={dialog}
 		aria-labelledby="qg-config-title"
-		onclick={(event) => {
+		onpointerdown={(event) => {
 			if (event.target === dialog) {
 				const rect = dialog.getBoundingClientRect();
 				if (
