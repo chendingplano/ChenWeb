@@ -116,12 +116,14 @@ What we learned:
 6. **At the same scan budget, blind k-means did better.** Queries written from the metric's own
    text favour embedding methods, so human queries may narrow the gap.
 
-### Hybrid search as production runs it (`s8_hybrid.py`, 2026-10-24)
+### ParadeDB hybrid search (`s8_hybrid.py`, 2026-10-24)
 
-The same 212 queries against the production hybrid query (ParadeDB BM25 top 200 + pgvector top 200,
-fused with Reciprocal Rank Fusion, k = 60), after the fix that lets its vector part use the HNSW
-index (ChenWeb jj `nrzl`). It runs on testbed copies of the 2,660 metrics' search rows, with the
-same BM25 index configuration. `facets` adds the `kb.metrics.metric_categories` keys to the search
+The same 212 queries against the ParadeDB hybrid query (BM25 top 200 + pgvector top 200, fused with
+Reciprocal Rank Fusion, k = 60), after the fix that lets its vector part use the HNSW index (ChenWeb
+jj `nrzl`). It runs on testbed copies of the 2,660 metrics' search rows, with the same BM25 index
+configuration. Note: this is the hybrid search as designed, not as it then ran. Until openspec
+`search-query-keywords`, production's ParadeDB queries read the partitioned parent table, which
+pg_search rejects, so every search fell back to the tsvector path. `facets` adds the `kb.metrics.metric_categories` keys to the search
 document (underscores as spaces) and re-embeds it. "BM25 weight" scales BM25's term in the fusion;
 production uses 1.0.
 
@@ -167,6 +169,14 @@ vector list and fusion as above; vector alone is R@10 0.95.
   than a proven gain.
 - **Cost:** one LLM call per search, about 1.2 s and about 60 completion tokens with reasoning off.
 - The paraphrased-query caveat above still applies.
+
+**Production prompt** (`EXP_KW_PROMPT=prod`, `prompts/prompt-search-query-keywords-v1.md`, one query
+per call as search makes it; `results/bm25_keywords_prod_prompt.txt`): "each keyword in full" BM25
+R@10 0.80 (English 0.75, Chinese 0.85), matching a median of 111 metrics; hybrid 0.90 at BM25 weight
+1.0, 0.93 at 0.5. One query per call costs about 0.03 against batching 15 queries per call (the
+benchmark prompt drops from 0.86 to 0.83), and repeated runs vary by about ±0.03. The keywords
+clearly help BM25 alone and the hybrid at weight 1.0 (0.85 → 0.90); at weight 0.5 the gain over the
+raw query is within noise.
 
 Not tested: cell sizes at millions of metrics (16 documents are too few to extrapolate),
 queries written by people, a hybrid of ANN search with category filters or boosts.

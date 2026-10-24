@@ -9,11 +9,13 @@ Each form is fused with the same vector top 200 by RRF (k = 60) at several BM25 
 Usage: s9_keywords.py
 """
 import json
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from lib import OUT, batched_llm, db, embed, llm_json, log, prompt
+from lib import CHENWEB, OUT, batched_llm, db, embed, llm_json, log, prompt
 
 TABLE = "testbed.catidx_hybrid_base"
 RRF_K, CAND, DUP_COS, K = 60, 200, 0.95, 10
@@ -26,10 +28,32 @@ memb = np.load(OUT / "metric_emb.npy")
 queries = json.loads((OUT / "queries.json").read_text())
 qemb = embed([q["query"] for q in queries])
 
-kw = batched_llm("query_keywords", prompt("query-keywords-v1.md"), queries, 15,
-                 lambda b: {"items": [{"id": q["id"], "query": q["query"]} for q in b]})
-t = time.time()
-llm_json(prompt("query-keywords-v1.md"), {"items": [{"id": "x", "query": queries[0]["query"]}]})
+# EXP_KW_PROMPT=prod uses the production prompt (prompts/prompt-search-query-keywords-v1.md) the way
+# search does: one plain-text query per call, {"keywords": [...]} back. Default: the batched benchmark prompt.
+# EXP_KW_PROMPT=bench1: the benchmark prompt, but one query per call (isolates batching from wording).
+MODE = os.environ.get("EXP_KW_PROMPT", "")
+PROD = MODE == "prod"
+if MODE in ("prod", "bench1"):
+    if PROD:
+        sys_prompt = (CHENWEB / "prompts" / "prompt-search-query-keywords-v1.md").read_text()
+        ask = lambda q: llm_json(sys_prompt, q["query"])[0]
+    else:
+        sys_prompt = prompt("query-keywords-v1.md")
+        ask = lambda q: next(iter(llm_json(sys_prompt, {"items": [{"id": q["id"], "query": q["query"]}]})[0].get("items", [])), {})
+    cache = OUT / f"query_keywords_{MODE}{os.environ.get('EXP_KW_RUN', '')}.json"
+    kw = json.loads(cache.read_text()) if cache.exists() else {}
+    todo = [q for q in queries if q["id"] not in kw]
+    with ThreadPoolExecutor(12) as ex:
+        for q, res in zip(todo, ex.map(ask, todo)):
+            kw[q["id"]] = res
+    cache.write_text(json.dumps(kw, ensure_ascii=False))
+    t = time.time()
+    ask(queries[0])
+else:
+    kw = batched_llm("query_keywords", prompt("query-keywords-v1.md"), queries, 15,
+                     lambda b: {"items": [{"id": q["id"], "query": q["query"]} for q in b]})
+    t = time.time()
+    llm_json(prompt("query-keywords-v1.md"), {"items": [{"id": "x", "query": queries[0]["query"]}]})
 single_call_s = time.time() - t
 
 
@@ -100,6 +124,7 @@ with db() as c:
             matches[f].append(n)
             rows[f].append((q["lang"], hit_rr(lex, rel), *[hit_rr(fuse(lex, sem, w), rel) for w in LEX_WEIGHTS]))
 
+print(f"prompt: {dict(prod='production (one query per call)', bench1='benchmark (one query per call)').get(MODE, 'benchmark (batched)')}")
 print(f"queries: {len(queries)}  table: {TABLE}  avg keywords (en+zh): "
       f"{np.mean([len(keywords(q)) for q in queries]):.1f}  single keyword call: {single_call_s:.1f} s\n")
 print(f"vector alone: R@10 {np.mean([r[0] for r in vec_rows]):.3f}  MRR {np.mean([r[1] for r in vec_rows]):.3f}\n")

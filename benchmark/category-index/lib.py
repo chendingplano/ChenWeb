@@ -44,7 +44,7 @@ _http = httpx.Client(timeout=300)
 def llm_json(system, payload, retries=4):
     body = {"model": LLM["model_name"], "temperature": 0, "response_format": {"type": "json_object"},
             "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
+                         {"role": "user", "content": payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)}]}
     if THINKING != "default":
         body["thinking"] = {"type": THINKING}
     url = LLM["base_url"].rstrip("/") + "/chat/completions"
