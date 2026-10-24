@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -34,5 +35,8 @@ func installPolicyDB(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
 // behavior override these vars themselves and restore via t.Cleanup.
 func TestMain(m *testing.M) {
 	reloadProductionPipelineState = func(context.Context, *sql.DB) error { return nil }
+	// Search tests must not call a real LLM when the dev env turns query keywords on; tests of the
+	// keyword step turn it on themselves with a stub extractor.
+	os.Setenv(envSearchKeywords, "off")
 	m.Run()
 }

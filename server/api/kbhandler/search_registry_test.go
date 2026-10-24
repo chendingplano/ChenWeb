@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -406,6 +407,7 @@ func TestRegistryLexicalBackendAllowsParadeDB(t *testing.T) {
 
 func TestQueryRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
 	t.Setenv("SEARCH_LEXICAL_BACKEND", "paradedb")
+	t.Setenv(envSearchKeywords, "off")
 	t.Setenv("SEARCH_SEMANTIC_ENABLED", "")
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -439,13 +441,15 @@ func TestQueryRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
 
 func TestCountRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
 	t.Setenv("SEARCH_LEXICAL_BACKEND", "paradedb")
+	t.Setenv(envSearchKeywords, "off")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb\\.search_artifacts sa WHERE .*sa\\.search_document \\|\\|\\| \\$1").
+	// BM25 operators work only on the partitions, so a single-type count reads that partition.
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM \\(\\(SELECT 1 FROM kb\\.search_artifacts_product sa WHERE .*sa\\.search_document \\|\\|\\| \\$1").
 		WithArgs("pump", "product").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(3)))
 
@@ -465,6 +469,7 @@ func TestCountRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
 }
 
 func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
+	t.Setenv(envSearchKeywords, "off")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -475,8 +480,8 @@ func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
 	mock.ExpectExec("SET LOCAL hnsw\\.iterative_scan = relaxed_order").WillReturnResult(sqlmock.NewResult(0, 0))
 	// The semantic CTE must take its candidates with a plain ORDER BY distance LIMIT, the only
 	// shape pgvector serves from the HNSW index.
-	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200" +
-		".*COALESCE\\(0\\.25 / \\(60 \\+ l\\.rnk\\), 0\\.0\\) \\+ COALESCE\\(1 / \\(60 \\+ s\\.rnk\\), 0\\.0\\)").
+	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200"+
+		".*COALESCE\\(0\\.25::float8 / \\(60 \\+ l\\.rnk\\), 0\\.0\\) \\+ COALESCE\\(1::float8 / \\(60 \\+ s\\.rnk\\), 0\\.0\\)").
 		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
@@ -526,6 +531,112 @@ func TestHybridSearchPostgresUsesVectorIndexShape(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestBuildParadeDBSearchWhereClauseWithoutKeywordsMatchesAnyQueryToken(t *testing.T) {
+	where, args := buildParadeDBSearchWhereClause("metric", "cuff pressure", nil, artifactSearchFilters{}, 2)
+	if !strings.Contains(where, "sa.search_document ||| $1") || strings.Contains(where, "&&&") {
+		t.Fatalf("where=%s", where)
+	}
+	if len(args) != 2 || args[0] != "cuff pressure" || args[1] != "metric" {
+		t.Fatalf("args=%#v", args)
+	}
+}
+
+func TestBuildParadeDBSearchWhereClauseKeywordsPlaceholders(t *testing.T) {
+	filters := artifactSearchFilters{InputRecordID: ptrInt64(386)}
+	where, args := buildParadeDBSearchWhereClause("metric", "how high is the blood pressure cuff", []string{"blood pressure", "血压", "cuff"}, filters, 2)
+
+	// First keyword at $1; artifact type and record filter keep $2 and $3; other keywords follow.
+	for _, want := range []string{
+		"sa.search_document &&& $1", "sa.source_filename &&& $1",
+		"sa.artifact_type = $2", "sa.input_record_id = $3",
+		"sa.search_document &&& $4", "sa.search_document &&& $5",
+	} {
+		if !strings.Contains(where, want) {
+			t.Fatalf("missing %q in where=%s", want, where)
+		}
+	}
+	if strings.Contains(where, "|||") {
+		t.Fatalf("keyword clause must not match any token: %s", where)
+	}
+	want := []any{"blood pressure", "metric", int64(386), "血压", "cuff"}
+	if fmt.Sprint(args) != fmt.Sprint(want) {
+		t.Fatalf("args=%#v want %#v", args, want)
+	}
+}
+
+func TestHybridSearchParadeDBWithKeywordsKeepsPlaceholders(t *testing.T) {
+	useStubKeywordExtractor(t, &stubKeywordExtractor{payload: keywordPayload("battery", "电池", "safety", "安全")})
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	vec := kbsearch.FormatVectorLiteral([]float64{0.25, 0.75})
+	mock.ExpectBegin()
+	mock.ExpectExec("SET LOCAL hnsw\\.iterative_scan = relaxed_order").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM kb\\.search_artifacts_topic sa WHERE .*sa\\.search_document &&& \\$1.*sa\\.search_document &&& \\$4.*sa\\.embedding <=> \\$2::vector.*LIMIT \\$7 OFFSET \\$8").
+		WithArgs("battery", vec, "topic", "电池", "safety", "安全", 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
+		}).AddRow(
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, "{battery}", 0.031, "Battery safety",
+		))
+	mock.ExpectCommit()
+
+	cfg := registrySearchConfig{lexicalWeight: 1, semanticWeight: 1}
+	results, err := queryHybridSearchResultsParadeDB(db, "topic", "how safe are batteries", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20, cfg)
+	if err != nil {
+		t.Fatalf("queryHybridSearchResultsParadeDB returned error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results=%#v", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestSQLFloatRendersFloatTypedLiterals(t *testing.T) {
+	// A bare "1" would turn the RRF term 1 / (60 + rnk) into integer division (always 0).
+	for v, want := range map[float64]string{1: "1::float8", 0.25: "0.25::float8", 0: "0::float8"} {
+		if got := sqlFloat(v); got != want {
+			t.Fatalf("sqlFloat(%v)=%q want %q", v, got, want)
+		}
+	}
+}
+
+func TestParadeDBPartitions(t *testing.T) {
+	if got := paradeDBPartitions("metric", artifactSearchFilters{}); fmt.Sprint(got) != "[kb.search_artifacts_metric]" {
+		t.Fatalf("single type: %v", got)
+	}
+	if got := paradeDBPartitions("all", artifactSearchFilters{}); len(got) != len(searchArtifactPartitionTypes) {
+		t.Fatalf("all types: %v", got)
+	}
+	if got := paradeDBPartitions("", artifactSearchFilters{ArtifactTypes: []string{"metric", "provision"}}); fmt.Sprint(got) != "[kb.search_artifacts_metric kb.search_artifacts_provision]" {
+		t.Fatalf("artifact_types filter: %v", got)
+	}
+	for _, bad := range []string{"unknown", "metric; DROP TABLE kb.inputs", "metric sa, kb.inputs"} {
+		if got := paradeDBPartitions(bad, artifactSearchFilters{}); got != nil {
+			t.Fatalf("type %q must not build a table name: %v", bad, got)
+		}
+		if got := paradeDBPartitions("", artifactSearchFilters{ArtifactTypes: []string{"metric", bad}}); got != nil {
+			t.Fatalf("filter type %q must not build a table name: %v", bad, got)
+		}
+	}
+}
+
+func TestParadeDBUnion(t *testing.T) {
+	got := paradeDBUnion([]string{"kb.search_artifacts_metric", "kb.search_artifacts_topic"}, "1", "sa.x ||| $1", "LIMIT 5")
+	want := "(SELECT 1 FROM kb.search_artifacts_metric sa WHERE sa.x ||| $1 LIMIT 5)\nUNION ALL\n(SELECT 1 FROM kb.search_artifacts_topic sa WHERE sa.x ||| $1 LIMIT 5)"
+	if got != want {
+		t.Fatalf("got %q", got)
+	}
+	if got := paradeDBUnion(nil, "1", "true", ""); !strings.Contains(got, "FROM kb.search_artifacts sa") {
+		t.Fatalf("no tables should read the parent: %q", got)
 	}
 }
 
