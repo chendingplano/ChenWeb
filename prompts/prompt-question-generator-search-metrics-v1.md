@@ -28,7 +28,10 @@ filename, publication date, and extracted metadata), followed by:
 
 If validation_error and previous_response are present, this is a correction
 attempt. The previous response failed server validation. Correct the reported
-error and check ALL questions for the same mistake. Keep the supplied metric
+errors (validation_error can list errors for several questions) and check ALL
+questions for citation alignment, nonempty question text and answers, and duplicate
+questions across the entire array, ignoring case and whitespace. Replace duplicates
+with distinct supported queries. Preserve valid questions. Keep the supplied metric
 sets, hop types, languages, and evidence constraints. Return the complete corrected
 questions array, including valid questions from the previous response; do not
 return only a patch. Do not invent evidence or weaken the reasoning requirements.

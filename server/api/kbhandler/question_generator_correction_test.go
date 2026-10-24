@@ -15,6 +15,35 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
+func TestQuestionValidationReportsLaterMissingFields(t *testing.T) {
+	for _, field := range []string{"question", "answer"} {
+		t.Run(field, func(t *testing.T) {
+			req := questionRequest(t, `{"input_record_id":753,"purpose":"search_metrics","metrics_per_document":1}`)
+			if err := req.normalize(); err != nil {
+				t.Fatal(err)
+			}
+			items := []any{}
+			for i, hop := range []string{"one_hop", "two_hop", "multi_hop"} {
+				items = append(items, map[string]any{
+					"hop_type": hop, "question": hop + " question?", "answer": "Daily",
+					"reasoning_steps": []string{"Find rule.", "Read frequency.", "Apply rule."}[:i+1],
+					"step_line_ids":   [][]int{{101}, {101}, {101}}[:i+1], "line_ids": []int{101},
+				})
+			}
+			items[0].(map[string]any)["step_line_ids"] = [][]int{}
+			items[2].(map[string]any)[field] = " \t "
+			qs, err := validateGeneratedQuestions(map[string]any{"questions": items}, req, map[int]string{101: "Daily"})
+			want := "question 3 has empty question text"
+			if field == "answer" {
+				want = "question 3 has no answer"
+			}
+			if err == nil || len(qs) != 0 || !strings.Contains(err.Error(), "question 1") || !strings.Contains(err.Error(), want) {
+				t.Fatalf("questions=%d error=%v; want initial citation error and %q", len(qs), err, want)
+			}
+		})
+	}
+}
+
 // Reproduce run 6: two explanations but one citation array for its first question.
 func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 	for _, mode := range []string{"corrected", "still-invalid", "provider-error"} {
@@ -60,6 +89,9 @@ func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 					if !strings.Contains(input.ValidationError, "2 reasoning steps") || !strings.Contains(input.ValidationError, "1 citation arrays") {
 						t.Fatalf("missing precise feedback: %q", input.ValidationError)
 					}
+					if !strings.Contains(input.ValidationError, "question 3 duplicates question 2") {
+						t.Fatalf("correction did not include later duplicate: %q", input.ValidationError)
+					}
 					if !reflect.DeepEqual(input.PreviousResponse, rejected) {
 						t.Fatal("missing rejected response")
 					}
@@ -73,6 +105,7 @@ func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 				}
 				if calls == 1 || mode == "still-invalid" {
 					payload["questions"].([]any)[0].(map[string]any)["step_line_ids"] = []any{[]any{float64(101)}}
+					payload["questions"].([]any)[2].(map[string]any)["question"] = "  FOR WHICH WASTE is daily collection required?  "
 					rejected = payload
 				}
 				return payload, nil

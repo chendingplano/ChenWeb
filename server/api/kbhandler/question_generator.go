@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -216,62 +217,83 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 		return nil, fmt.Errorf("model returned the wrong total question count")
 	}
 	counts := map[string]int{}
-	seen := map[string]bool{}
+	seen := map[string]int{}
+	var validationErrors []error
 	questions := make([]generatedQuestion, 0, len(output.Questions))
 	for i, q := range output.Questions {
-		minimum, ok := minima[q.HopType]
-		if !ok {
-			return nil, fmt.Errorf("question %d has an unknown hop_type", i+1)
-		}
-		q.Question, q.Answer = strings.TrimSpace(q.Question), strings.TrimSpace(q.Answer)
-		key := strings.ToLower(strings.Join(strings.Fields(q.Question), " "))
-		if key == "" || q.Answer == "" || seen[key] {
-			return nil, fmt.Errorf("question %d is empty or duplicated, or has no answer", i+1)
-		}
-		seen[key] = true
-		if len(q.ReasoningSteps) < minimum {
-			return nil, fmt.Errorf("question %d (%s) has %d reasoning steps; requires at least %d", i+1, q.HopType, len(q.ReasoningSteps), minimum)
-		}
-		if len(q.StepLineIDs) != len(q.ReasoningSteps) {
-			return nil, fmt.Errorf("question %d (%s) has %d reasoning steps but %d citation arrays; provide one step_line_ids array per reasoning step", i+1, q.HopType, len(q.ReasoningSteps), len(q.StepLineIDs))
-		}
-		cited := map[int]bool{}
-		evidence := make([]questionEvidence, 0, len(q.LineIDs))
-		for _, id := range q.LineIDs {
-			text, exists := source[id]
-			if !exists || cited[id] {
-				return nil, fmt.Errorf("question %d cites an unknown or repeated line %d", i+1, id)
-			}
-			cited[id] = true
-			evidence = append(evidence, questionEvidence{LineID: id, Text: text})
-		}
-		// Several independently evidenced table facts can share one canonical line.
-		if len(cited) == 0 {
-			return nil, fmt.Errorf("question %d lacks source evidence", i+1)
-		}
-		used := map[int]bool{}
-		for step, text := range q.ReasoningSteps {
-			q.ReasoningSteps[step] = strings.TrimSpace(text)
-			if q.ReasoningSteps[step] == "" || len(q.StepLineIDs[step]) == 0 {
-				return nil, fmt.Errorf("question %d has an unsupported reasoning step", i+1)
-			}
-			for _, id := range q.StepLineIDs[step] {
-				if !cited[id] {
-					return nil, fmt.Errorf("question %d step cites a line outside its evidence", i+1)
-				}
-				used[id] = true
-			}
-		}
-		if len(used) != len(cited) {
-			return nil, fmt.Errorf("question %d has evidence unused by its reasoning", i+1)
-		}
 		counts[q.HopType]++
-		questions = append(questions, generatedQuestion{InputRecordID: req.InputRecordID, HopType: q.HopType, Question: q.Question, Answer: q.Answer, ReasoningSteps: q.ReasoningSteps, StepLineIDs: q.StepLineIDs, Evidence: evidence, SetNo: q.SetNo, Lang: q.Lang})
+		// Check every question so a correction request also exposes errors later
+		// in the response. A malformed question never yields saved partial output.
+		err := func() error {
+			minimum, ok := minima[q.HopType]
+			if !ok {
+				return fmt.Errorf("question %d has an unknown hop_type", i+1)
+			}
+			q.Question, q.Answer = strings.TrimSpace(q.Question), strings.TrimSpace(q.Answer)
+			key := strings.ToLower(strings.Join(strings.Fields(q.Question), " "))
+			if key == "" {
+				return fmt.Errorf("question %d has empty question text", i+1)
+			}
+			previous := seen[key]
+			if previous == 0 {
+				seen[key] = i + 1
+			}
+			if q.Answer == "" {
+				return fmt.Errorf("question %d has no answer", i+1)
+			}
+			if previous != 0 {
+				return fmt.Errorf("question %d duplicates question %d (ignoring case and whitespace); provide a distinct question", i+1, previous)
+			}
+			if len(q.ReasoningSteps) < minimum {
+				return fmt.Errorf("question %d (%s) has %d reasoning steps; requires at least %d", i+1, q.HopType, len(q.ReasoningSteps), minimum)
+			}
+			if len(q.StepLineIDs) != len(q.ReasoningSteps) {
+				return fmt.Errorf("question %d (%s) has %d reasoning steps but %d citation arrays; provide one step_line_ids array per reasoning step", i+1, q.HopType, len(q.ReasoningSteps), len(q.StepLineIDs))
+			}
+			cited := map[int]bool{}
+			evidence := make([]questionEvidence, 0, len(q.LineIDs))
+			for _, id := range q.LineIDs {
+				text, exists := source[id]
+				if !exists || cited[id] {
+					return fmt.Errorf("question %d cites an unknown or repeated line %d", i+1, id)
+				}
+				cited[id] = true
+				evidence = append(evidence, questionEvidence{LineID: id, Text: text})
+			}
+			// Several independently evidenced table facts can share one canonical line.
+			if len(cited) == 0 {
+				return fmt.Errorf("question %d lacks source evidence", i+1)
+			}
+			used := map[int]bool{}
+			for step, text := range q.ReasoningSteps {
+				q.ReasoningSteps[step] = strings.TrimSpace(text)
+				if q.ReasoningSteps[step] == "" || len(q.StepLineIDs[step]) == 0 {
+					return fmt.Errorf("question %d has an unsupported reasoning step", i+1)
+				}
+				for _, id := range q.StepLineIDs[step] {
+					if !cited[id] {
+						return fmt.Errorf("question %d step cites a line outside its evidence", i+1)
+					}
+					used[id] = true
+				}
+			}
+			if len(used) != len(cited) {
+				return fmt.Errorf("question %d has evidence unused by its reasoning", i+1)
+			}
+			questions = append(questions, generatedQuestion{InputRecordID: req.InputRecordID, HopType: q.HopType, Question: q.Question, Answer: q.Answer, ReasoningSteps: q.ReasoningSteps, StepLineIDs: q.StepLineIDs, Evidence: evidence, SetNo: q.SetNo, Lang: q.Lang})
+			return nil
+		}()
+		if err != nil {
+			validationErrors = append(validationErrors, err)
+		}
 	}
 	for hop, n := range expected {
 		if counts[hop] != n {
-			return nil, fmt.Errorf("model returned %d %s questions; expected %d", counts[hop], hop, n)
+			validationErrors = append(validationErrors, fmt.Errorf("model returned %d %s questions; expected %d", counts[hop], hop, n))
 		}
+	}
+	if err := errors.Join(validationErrors...); err != nil {
+		return nil, err
 	}
 	return questions, nil
 }
