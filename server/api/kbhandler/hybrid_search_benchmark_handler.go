@@ -155,7 +155,7 @@ func loadHybridBenchQuestions(ctx context.Context, db *sql.DB, purpose string) (
 }
 
 func loadHybridBenchResults(ctx context.Context, db *sql.DB, runID int64) ([]hybridBenchResult, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, question_id, input_record_id, hop_type, lang, question,
+	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(search_run_id, 0), question_id, input_record_id, hop_type, lang, question,
  target_artifact_id, keywords, lexical_rank, semantic_rank, hybrid_rank, hybrid_top, error_msg
  FROM testbed.hybrid_search_benchmark_results WHERE run_id = $1 ORDER BY id`, runID)
 	if err != nil {
@@ -167,7 +167,7 @@ func loadHybridBenchResults(ctx context.Context, db *sql.DB, runID int64) ([]hyb
 		var r hybridBenchResult
 		var questionID, lexical, semantic, hybrid sql.NullInt64
 		var top []byte
-		if err := rows.Scan(&r.ID, &questionID, &r.InputRecordID, &r.HopType, &r.Lang, &r.Question,
+		if err := rows.Scan(&r.ID, &r.SearchRunID, &questionID, &r.InputRecordID, &r.HopType, &r.Lang, &r.Question,
 			&r.TargetArtifactID, pq.Array(&r.Keywords), &lexical, &semantic, &hybrid, &top, &r.ErrorMsg); err != nil {
 			return nil, err
 		}

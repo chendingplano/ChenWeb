@@ -13,19 +13,19 @@ import (
 // hybrid-search-benchmark, spec doc-2026060201).
 
 const (
-	hybridBenchArtifactType      = "metric"
-	hybridBenchMaxDescription    = 500
-	hybridBenchHybridTopCount    = 10
-	hybridBenchHeartbeat         = 10 * time.Minute
-	hybridBenchQuestionTimeout   = 2 * time.Minute
-	hybridBenchModeLexical       = "lexical"
-	hybridBenchModeSemantic      = "semantic"
-	hybridBenchModeHybrid        = "hybrid"
-	hybridBenchGroupAll          = "all"
-	hybridBenchGroupHopType      = "hop_type"
-	hybridBenchGroupLang         = "lang"
-	hybridBenchErrEmbedding      = "query embedding failed"
-	hybridBenchRunListLimit      = 50
+	hybridBenchArtifactType         = "metric"
+	hybridBenchMaxDescription       = 500
+	hybridBenchHybridTopCount       = 10
+	hybridBenchHeartbeat            = 10 * time.Minute
+	hybridBenchQuestionTimeout      = 2 * time.Minute
+	hybridBenchModeLexical          = "lexical"
+	hybridBenchModeSemantic         = "semantic"
+	hybridBenchModeHybrid           = "hybrid"
+	hybridBenchGroupAll             = "all"
+	hybridBenchGroupHopType         = "hop_type"
+	hybridBenchGroupLang            = "lang"
+	hybridBenchErrEmbedding         = "query embedding failed"
+	hybridBenchRunListLimit         = 50
 	hybridBenchPurposeSearchMetrics = "search_metrics"
 )
 
@@ -85,6 +85,7 @@ type hybridBenchQuestion struct {
 
 type hybridBenchResult struct {
 	ID               int64    `json:"id"`
+	SearchRunID      int64    `json:"search_run_id"`
 	QuestionID       *int64   `json:"question_id"`
 	InputRecordID    int64    `json:"input_record_id"`
 	HopType          string   `json:"hop_type"`

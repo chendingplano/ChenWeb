@@ -308,6 +308,7 @@
 								<th>{m.hsb_col_lang()}</th>
 								{#each modes as mode}<th class="num">{modeLabel(mode)}</th>{/each}
 								<th>{m.hsb_col_keywords()}</th>
+								<th class="num">{m.hsb_col_search_run()}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -329,6 +330,7 @@
 										>
 									{/each}
 									<td class="keywords">{result.keywords.join(', ')}</td>
+									<td class="num mono">{result.search_run_id || ''}</td>
 								</tr>
 							{/each}
 						</tbody>

@@ -42,6 +42,20 @@ misses (NULL rank).
 - **THEN** its result row stores the error with NULL ranks and the run continues with the next
   question
 
+### Requirement: Search run IDs in LLM usage logs
+Every search (search API request, agent search call, benchmark question) SHALL take a run ID from
+`kb.search_run_id_seq`. Its query embedding and query keyword LLM calls SHALL record that run ID,
+and the user when known, in `public.llm_usage_event`, with call reasons `search_query_embedding`
+and `search_query_keywords`. A benchmark result SHALL store its question's search run ID.
+
+#### Scenario: One search, one run ID
+- **WHEN** a search embeds its query and extracts keywords
+- **THEN** both usage events have the same `run_id`, and a different search has a different one
+
+#### Scenario: Sequence unavailable
+- **WHEN** the run ID cannot be allocated
+- **THEN** the search still runs and its usage events have no run ID
+
 ### Requirement: Results stored in testbed
 The system SHALL store one row per question in `testbed.hybrid_search_benchmark_results` with a
 snapshot of the question (text, target artifact id, hop type, language, record id), the query

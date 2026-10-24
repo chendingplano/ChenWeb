@@ -14,13 +14,15 @@ import (
 
 type stubKeywordExtractor struct {
 	calls   int
+	last    llmclients.JSONExtractionInput
 	payload map[string]any
 	err     error
 	block   bool // wait for the context to end, as a slow model would
 }
 
-func (s *stubKeywordExtractor) ExtractJSON(ctx context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+func (s *stubKeywordExtractor) ExtractJSON(ctx context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 	s.calls++
+	s.last = in
 	if s.block {
 		<-ctx.Done()
 		return nil, ctx.Err()

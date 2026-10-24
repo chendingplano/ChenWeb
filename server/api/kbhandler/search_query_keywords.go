@@ -89,7 +89,10 @@ func searchQueryKeywords(ctx context.Context, query string) []string {
 	cctx, cancel := context.WithTimeout(ctx, searchKeywordsTimeout())
 	defer cancel()
 	start := searchKeywordsNow()
+	call := searchCallFrom(ctx)
 	payload, err := client.ExtractJSON(cctx, llmclients.JSONExtractionInput{
+		UserID:     call.userID,
+		RunID:      call.runID,
 		PromptName: llmclients.EnsurePromptName("search_query_keywords_prompt", "search_query_keywords", "MID-20261024-01", modelName),
 		PromptText: promptText,
 		ModelName:  modelName,

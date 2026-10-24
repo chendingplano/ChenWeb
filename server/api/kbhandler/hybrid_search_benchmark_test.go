@@ -108,8 +108,18 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 	logger := loggerutil.CreateDefaultLogger("20261024-745")
 	q := hybridBenchQuestion{ID: 7, InputRecordID: 416, HopType: "one_hop", Lang: "en", Question: "q", TargetArtifactID: "416_mtc_2"}
 
-	hybridBenchEmbed = func(context.Context, string) ([]float64, bool) { return []float64{1}, true }
-	hybridBenchKeywords = func(context.Context, string) []string { return []string{"k"} }
+	hybridBenchEmbed = func(ctx context.Context, _ string) ([]float64, bool) {
+		if got := searchCallFrom(ctx); got.runID != 42 || got.userID != "u1" {
+			t.Errorf("embedding search call = %+v, want run 42 user u1", got)
+		}
+		return []float64{1}, true
+	}
+	hybridBenchKeywords = func(ctx context.Context, _ string) []string {
+		if got := searchCallFrom(ctx); got.runID != 42 {
+			t.Errorf("keyword search call = %+v, want run 42", got)
+		}
+		return []string{"k"}
+	}
 	hybridBenchSearch = func(_ *sql.DB, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 		switch {
 		case cfg.semanticWeight == 0: // lexical
@@ -119,8 +129,11 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 		}
 		return benchResults("416_mtc_2", 0.03), nil
 	}
-	cfg := registrySearchConfig{lexicalWeight: 1, semanticWeight: 1}
+	cfg := registrySearchConfig{lexicalWeight: 1, semanticWeight: 1, call: searchCall{runID: 42, userID: "u1"}}
 	r := benchmarkHybridSearchQuestion(context.Background(), nil, q, cfg, logger)
+	if r.SearchRunID != 42 {
+		t.Fatalf("search run id = %d, want 42", r.SearchRunID)
+	}
 	if r.LexicalRank == nil || *r.LexicalRank != 2 || r.SemanticRank != nil || r.HybridRank == nil || *r.HybridRank != 1 {
 		t.Fatalf("ranks = %v %v %v", r.LexicalRank, r.SemanticRank, r.HybridRank)
 	}

@@ -62,6 +62,13 @@ embedding or search fails gets a result row with `error_msg` and NULL ranks (sco
 run continues. A run whose `expires_at` passes while `running` is marked failed on the next list
 call, as question runs are.
 
+**Search run IDs.** Search has no run table, so a sequence `kb.search_run_id_seq` supplies one
+ID per search: per API request, per agent search call, per benchmark question. The ID and user go
+in a `registrySearchConfig.call` field (the config already reaches every search function) and from
+there into the context of `computeQueryEmbedding` / `searchQueryKeywords`, which pass them as
+`RunID` / `UserID` to the LLM client. Alternative: a `kb.search_runs` log table — rejected for now,
+only usage-log correlation was asked for.
+
 **API** (admin only, same middleware check as the Question Generator):
 - `POST /kb/hybrid-search-benchmark/runs` `{purpose, description}` → 202 with the run.
 - `GET /kb/hybrid-search-benchmark/runs` → recent runs (50), with hybrid R@10 per run.

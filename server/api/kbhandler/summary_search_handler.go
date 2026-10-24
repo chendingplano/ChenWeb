@@ -48,6 +48,11 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 	}
 
 	cfg := loadRegistrySearchConfig()
+	userID := ""
+	if user := rc.IsAuthenticated(); user != nil {
+		userID = user.UserId
+	}
+	cfg.call = newSearchCall(c.Request().Context(), ApiTypes.ProjectDBHandle, userID)
 	page := parsePositiveInt(c.QueryParam("page"), 1)
 	pageSize := parsePositiveInt(c.QueryParam("page_size"), cfg.defaultPageSize)
 	if pageSize > cfg.maxPageSize {

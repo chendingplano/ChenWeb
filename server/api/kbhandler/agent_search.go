@@ -43,7 +43,9 @@ func SearchAgentKnowledge(ctx context.Context, db *sql.DB, query, storeID, docum
 		}
 		filters.InputRecordID = &id
 	}
-	hits, err := queryRegistrySearchResults(db, strings.TrimSpace(artifactType), strings.TrimSpace(query), filters, 1, limit, loadRegistrySearchConfig())
+	cfg := loadRegistrySearchConfig()
+	cfg.call = newSearchCall(ctx, db, "")
+	hits, err := queryRegistrySearchResults(db, strings.TrimSpace(artifactType), strings.TrimSpace(query), filters, 1, limit, cfg)
 	if err != nil {
 		return nil, err
 	}

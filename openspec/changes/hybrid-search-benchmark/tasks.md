@@ -20,3 +20,10 @@
 ## 4. Docs
 
 - [x] 4.1 Add a benchmark section to spec 2026060201 (hybrid search)
+
+## 5. Search run IDs
+
+- [x] 5.1 Migration: `kb.search_run_id_seq` and `search_run_id` on benchmark results
+- [x] 5.2 Allocate a run ID per search (API, agent, benchmark question) and pass run ID + user to the embedding and keyword calls
+- [x] 5.3 Tests and live check: both usage events of one search share its run ID; page shows the search run ID per question
+- [x] 5.4 Spec 2026060201 §8.2

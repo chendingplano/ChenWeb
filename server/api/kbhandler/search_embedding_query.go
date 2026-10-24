@@ -45,9 +45,14 @@ func computeQueryEmbedding(ctx context.Context, queryText string) ([]float64, bo
 	if !ok {
 		return nil, false
 	}
+	call := searchCallFrom(ctx)
 	vec, err := client.Embed(ctx, llmclients.EmbedInput{
-		ModelName: modelName,
-		InputText: truncateRunesForEmbedding(queryText, embeddingQueryMaxRunes),
+		UserID:     call.userID,
+		RunID:      call.runID,
+		ModelName:  modelName,
+		InputText:  truncateRunesForEmbedding(queryText, embeddingQueryMaxRunes),
+		CallReason: "search_query_embedding",
+		CallLoc:    "MID-20261024-02",
 	})
 	if err != nil {
 		return nil, false

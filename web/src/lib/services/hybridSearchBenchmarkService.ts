@@ -33,6 +33,7 @@ export type HybridBenchmarkScore = {
 };
 export type HybridBenchmarkResult = {
 	id: number;
+	search_run_id: number;
 	question_id: number | null;
 	input_record_id: number;
 	hop_type: 'one_hop' | 'two_hop' | 'multi_hop';

@@ -36,8 +36,9 @@ type registrySearchConfig struct {
 	previewMaxWords int
 	phraseFriendly  bool
 	minRank         float64
-	lexicalWeight   float64 // hybrid RRF weight of the lexical list
-	semanticWeight  float64 // hybrid RRF weight of the semantic list
+	lexicalWeight   float64    // hybrid RRF weight of the lexical list
+	semanticWeight  float64    // hybrid RRF weight of the semantic list
+	call            searchCall // run ID and user for the search's LLM usage events
 }
 
 func loadRegistrySearchConfig() registrySearchConfig {
@@ -92,7 +93,7 @@ func CheckParadeDBInstalled(db *sql.DB) error {
 
 func countRegistrySearchResults(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, cfg registrySearchConfig) (int64, error) {
 	if registryLexicalBackend() == lexicalBackendParadeDB {
-		if total, err := countRegistrySearchResultsParadeDB(db, artifactType, queryText, filters); err == nil {
+		if total, err := countRegistrySearchResultsParadeDB(db, artifactType, queryText, filters, cfg); err == nil {
 			return total, nil
 		}
 	}
@@ -148,8 +149,8 @@ func paradeDBUnion(tables []string, selectList string, where string, suffix stri
 	return strings.Join(branches, "\nUNION ALL\n")
 }
 
-func countRegistrySearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters) (int64, error) {
-	whereSQL, args := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(context.Background(), queryText), filters, 2)
+func countRegistrySearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, cfg registrySearchConfig) (int64, error) {
+	whereSQL, args := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(withSearchCall(context.Background(), cfg.call), queryText), filters, 2)
 	sqlText := fmt.Sprintf(`SELECT COUNT(*) FROM (%s) matched`, paradeDBUnion(paradeDBPartitions(artifactType, filters), "1", whereSQL, ""))
 	var total int64
 	err := db.QueryRow(sqlText, args...).Scan(&total)
@@ -163,7 +164,7 @@ func queryRegistrySearchResults(db *sql.DB, artifactType string, queryText strin
 	// via RRF. Best-effort — if the query can't be embedded or the hybrid query
 	// errors, fall through to the original lexical-only search below.
 	if kbsearch.SemanticSearchEnabled() {
-		if vec, ok := computeQueryEmbedding(context.Background(), queryText); ok {
+		if vec, ok := computeQueryEmbedding(withSearchCall(context.Background(), cfg.call), queryText); ok {
 			if backend == lexicalBackendParadeDB {
 				if results, err := queryHybridSearchResultsParadeDB(db, artifactType, queryText, vec, filters, page, pageSize, cfg); err == nil {
 					return results, nil
@@ -260,7 +261,7 @@ LIMIT $%d OFFSET $%d`,
 }
 
 func queryRegistrySearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
-	whereSQL, args := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(context.Background(), queryText), filters, 2)
+	whereSQL, args := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(withSearchCall(context.Background(), cfg.call), queryText), filters, 2)
 	offset := (page - 1) * pageSize
 	args = append(args, pageSize, offset)
 
@@ -684,7 +685,7 @@ func queryWithVectorIndexScan(db *sql.DB, sqlText string, args []any, pageSize i
 func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, vec []float64, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 	offset := (page - 1) * pageSize
 
-	lexicalWhereSQL, lexicalArgs := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(context.Background(), queryText), filters, 3)
+	lexicalWhereSQL, lexicalArgs := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(withSearchCall(context.Background(), cfg.call), queryText), filters, 3)
 	structuralClauses, _, _ := buildStructuralFilterClauses(artifactType, filters, 3)
 	structuralSQL := ""
 	if len(structuralClauses) > 0 {
