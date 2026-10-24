@@ -103,6 +103,7 @@
 <style>
 	.question {
 		min-width: 0;
+		background: color-mix(in srgb, var(--panel) 94%, white 6%);
 		border: 1px solid var(--line);
 		border-radius: 8px;
 		padding: 20px 16px;
