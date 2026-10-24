@@ -2,8 +2,11 @@ package kbhandler
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestDefaultSchedulerRegistryIncludesTerminologyRefresh(t *testing.T) {
@@ -17,6 +20,37 @@ func TestDefaultSchedulerRegistryIncludesTerminologyRefresh(t *testing.T) {
 	}
 	if desc.Run == nil {
 		t.Fatal("terminology_refresh must have a Run func")
+	}
+}
+
+func TestDefaultSchedulerRegistryIncludesBM25Maintenance(t *testing.T) {
+	desc, ok := DefaultSchedulerRegistry()["maintain_bm25_indexes"]
+	if !ok || desc.Run == nil || desc.Label != "Maintain Search BM25 Indexes" {
+		t.Fatalf("maintain_bm25_indexes descriptor = %+v (present=%v)", desc, ok)
+	}
+}
+
+func TestRunMaintainBM25IndexesJobMapsParams(t *testing.T) {
+	_, mock := installPolicyDB(t)
+	mock.ExpectQuery(regexp.QuoteMeta("NOT i.indisvalid")).WillReturnRows(sqlmock.NewRows([]string{"relname"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM pg_indexes")).WillReturnRows(sqlmock.NewRows([]string{"indexname"}).AddRow("kb_search_artifacts_topic_bm25"))
+	mock.ExpectQuery(regexp.QuoteMeta("paradedb.index_info")).
+		WillReturnRows(sqlmock.NewRows([]string{"m", "l", "d"}).AddRow(int64(361), int64(3361), int64(0)))
+
+	// Schedule params arrive JSON-decoded, so numbers are float64. 361 mutable documents exceed
+	// max_mutable_docs=300; dry_run keeps the job from rebuilding (no REINDEX is expected).
+	got, err := runMaintainBM25IndexesJob(context.Background(), map[string]any{
+		"max_mutable_docs": float64(300), "max_deleted_ratio": 0.9, "dry_run": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("runMaintainBM25IndexesJob: %v", err)
+	}
+	indexes, _ := got["indexes"].([]any)
+	if len(indexes) != 1 || indexes[0].(map[string]any)["action"] != "would_rebuild" || got["dry_run"] != true {
+		t.Fatalf("result = %#v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

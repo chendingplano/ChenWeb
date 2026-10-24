@@ -46,7 +46,32 @@ func DefaultSchedulerRegistry() scheduler.Registry {
 			Label: "Collect Coding Assistant LLM Usage",
 			Run:   runCollectLLMUsageJob,
 		},
+		"maintain_bm25_indexes": scheduler.JobDescriptor{
+			Label: "Maintain Search BM25 Indexes",
+			Run:   runMaintainBM25IndexesJob,
+		},
 	}
+}
+
+// runMaintainBM25IndexesJob rebuilds (REINDEX INDEX CONCURRENTLY) the kb.search_artifacts_<type>
+// BM25 indexes whose mutable-segment documents exceed "max_mutable_docs" (default 500) or whose
+// deleted share exceeds "max_deleted_ratio" (default 0.5); "dry_run" only reports and "limit" caps
+// rebuilds per run. See kbsearch.MaintainBM25Indexes.
+func runMaintainBM25IndexesJob(ctx context.Context, params map[string]any, logger ApiTypes.JimoLogger) (map[string]any, error) {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return nil, fmt.Errorf("db not initialized")
+	}
+	result, err := kbsearch.MaintainBM25Indexes(ctx, db, kbsearch.BM25MaintenanceOptions{
+		MaxMutableDocs:  int64(intParam(params, "max_mutable_docs", kbsearch.DefaultBM25MaxMutableDocs)),
+		MaxDeletedRatio: floatParam(params, "max_deleted_ratio", kbsearch.DefaultBM25MaxDeletedRatio),
+		DryRun:          boolParam(params, "dry_run", false),
+		Limit:           intParam(params, "limit", 0),
+	}, logger)
+	if err != nil {
+		return nil, err
+	}
+	return structToMap(result), nil
 }
 
 // runTerminologyRefreshJob re-fetches freely downloadable terminology
@@ -191,6 +216,19 @@ func intParam(params map[string]any, key string, fallback int) int {
 		return v
 	case int64:
 		return int(v)
+	default:
+		return fallback
+	}
+}
+
+func floatParam(params map[string]any, key string, fallback float64) float64 {
+	switch v := params[key].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
 	default:
 		return fallback
 	}
