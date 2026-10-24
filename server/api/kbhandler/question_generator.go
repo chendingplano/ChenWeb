@@ -17,7 +17,7 @@ const (
 	questionGenerationMaxInputChars = 600000
 	questionGenerationTimeout       = 10 * time.Minute
 	questionGenerationBatchTimeout  = time.Hour
-	questionGenerationPrompt        = "prompt-question-generator-search-metrics-v1.md"
+	questionGenerationPrompt        = "prompt-question-generator-search-metrics-v2.md"
 )
 
 type questionGenerationRequest struct {
@@ -206,6 +206,10 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			StepLineIDs    [][]int  `json:"step_line_ids"`
 			SetNo          int      `json:"set_no"`
 			Lang           string   `json:"lang"`
+			Reasoning      []struct {
+				Text    string `json:"text"`
+				LineIDs []int  `json:"line_ids"`
+			} `json:"reasoning"`
 		} `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &output); err != nil {
@@ -243,6 +247,24 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			}
 			if previous != 0 {
 				return fmt.Errorf("question %d duplicates question %d (ignoring case and whitespace); provide a distinct question", i+1, previous)
+			}
+			if q.Reasoning != nil {
+				if q.ReasoningSteps != nil || q.StepLineIDs != nil || q.LineIDs != nil {
+					return fmt.Errorf("question %d mixes reasoning formats; use only reasoning objects with text and line_ids", i+1)
+				}
+				// Pair each supplied explanation with its own supplied citations.
+				// Derive the evidence union without inventing missing step citations.
+				seenLines := map[int]bool{}
+				for _, step := range q.Reasoning {
+					q.ReasoningSteps = append(q.ReasoningSteps, step.Text)
+					q.StepLineIDs = append(q.StepLineIDs, step.LineIDs)
+					for _, id := range step.LineIDs {
+						if !seenLines[id] {
+							q.LineIDs = append(q.LineIDs, id)
+							seenLines[id] = true
+						}
+					}
+				}
 			}
 			if len(q.ReasoningSteps) < minimum {
 				return fmt.Errorf("question %d (%s) has %d reasoning steps; requires at least %d", i+1, q.HopType, len(q.ReasoningSteps), minimum)

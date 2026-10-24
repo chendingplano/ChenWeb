@@ -118,13 +118,11 @@ func TestMetricQuestionInputUsesSelectedContextsAndRunID(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, target := range set.Questions {
-				steps := []string{}
-				stepIDs := [][]int{}
+				reasoning := []any{}
 				for i := 0; i < map[string]int{"one_hop": 1, "two_hop": 2, "multi_hop": 3}[target.HopType]; i++ {
-					steps = append(steps, fmt.Sprintf("Read fact %d", i))
-					stepIDs = append(stepIDs, []int{anchor})
+					reasoning = append(reasoning, map[string]any{"text": fmt.Sprintf("Read fact %d", i), "line_ids": []int{anchor}})
 				}
-				questions = append(questions, map[string]any{"set_no": set.SetNo, "hop_type": target.HopType, "lang": target.Lang, "question": fmt.Sprintf("Question about %s/%s?", set.Metric.MetricID, target.HopType), "answer": "A supported value", "reasoning_steps": steps, "step_line_ids": stepIDs, "line_ids": []int{anchor}})
+				questions = append(questions, map[string]any{"set_no": set.SetNo, "hop_type": target.HopType, "lang": target.Lang, "question": fmt.Sprintf("Question about %s/%s?", set.Metric.MetricID, target.HopType), "answer": "A supported value", "reasoning": reasoning})
 			}
 		}
 		return map[string]any{"questions": questions}, nil

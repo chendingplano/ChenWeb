@@ -62,7 +62,7 @@ func TestQuestionGenerationMetricBatchRequest(t *testing.T) {
 			t.Fatalf("unbalanced triplet counts: %+v", r)
 		}
 	}
-	if prompt, err := questionPurposePrompt("search_metrics"); err != nil || prompt != "prompt-question-generator-search-metrics-v1.md" {
+	if prompt, err := questionPurposePrompt("search_metrics"); err != nil || prompt != "prompt-question-generator-search-metrics-v2.md" {
 		t.Fatalf("purpose prompt=%q %v", prompt, err)
 	}
 	if _, err := questionPurposePrompt("free text"); err == nil {

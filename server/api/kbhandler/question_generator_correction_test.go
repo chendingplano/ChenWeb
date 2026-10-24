@@ -107,6 +107,20 @@ func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 					payload["questions"].([]any)[0].(map[string]any)["step_line_ids"] = []any{[]any{float64(101)}}
 					payload["questions"].([]any)[2].(map[string]any)["question"] = "  FOR WHICH WASTE is daily collection required?  "
 					rejected = payload
+				} else {
+					// A version 2 correction returns paired objects even when the
+					// rejected response used malformed legacy parallel arrays.
+					for _, item := range payload["questions"].([]any) {
+						q := item.(map[string]any)
+						reasoning := []any{}
+						for i, text := range q["reasoning_steps"].([]any) {
+							reasoning = append(reasoning, map[string]any{"text": text, "line_ids": q["step_line_ids"].([]any)[i]})
+						}
+						q["reasoning"] = reasoning
+						delete(q, "reasoning_steps")
+						delete(q, "step_line_ids")
+						delete(q, "line_ids")
+					}
 				}
 				return payload, nil
 			})
