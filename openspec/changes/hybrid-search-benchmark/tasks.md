@@ -27,3 +27,10 @@
 - [x] 5.2 Allocate a run ID per search (API, agent, benchmark question) and pass run ID + user to the embedding and keyword calls
 - [x] 5.3 Tests and live check: both usage events of one search share its run ID; page shows the search run ID per question
 - [x] 5.4 Spec 2026060201 §8.2
+
+## 6. Run options, timings, viewer layout
+
+- [x] 6.1 Migration: keyword model/prompt on runs; embedding/keywords/lexical/semantic/hybrid ms on results
+- [x] 6.2 Run options (keywords, RRF weights, candidates per list) with configured defaults; per-search keyword override and fresh keyword call
+- [x] 6.3 Page: options in the start form, View button, two-group run viewer with prompt and model name, Query time column
+- [x] 6.4 Tests and live check; spec 2026060201 §13.2

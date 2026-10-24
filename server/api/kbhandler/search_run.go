@@ -13,6 +13,10 @@ import (
 type searchCall struct {
 	runID  int64
 	userID string
+	// keywords, when set, overrides SEARCH_QUERY_KEYWORDS for this search (a benchmark run chooses).
+	keywords *bool
+	// freshKeywords skips the keyword cache lookup, so the LLM call is made (and can be timed).
+	freshKeywords bool
 }
 
 type searchCallKey struct{}

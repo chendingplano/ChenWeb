@@ -27,6 +27,8 @@ const (
 	hybridBenchErrEmbedding         = "query embedding failed"
 	hybridBenchRunListLimit         = 50
 	hybridBenchPurposeSearchMetrics = "search_metrics"
+	hybridBenchMaxWeight            = 100
+	hybridBenchMaxCandidates        = 1000
 )
 
 // hybridBenchPurposes lists the question purposes a run accepts; each needs its own artifact type.
@@ -36,21 +38,58 @@ var hybridBenchModes = []string{hybridBenchModeLexical, hybridBenchModeSemantic,
 
 var hybridBenchHopOrder = []string{"one_hop", "two_hop", "multi_hop"}
 
-type hybridBenchRequest struct {
-	Purpose     string `json:"purpose"`
-	Description string `json:"description"`
+// hybridBenchOptions are the search settings a run can choose; the defaults are the configured
+// live-search settings.
+type hybridBenchOptions struct {
+	QueryKeywords  bool    `json:"query_keywords"`
+	LexicalWeight  float64 `json:"lexical_weight"`
+	SemanticWeight float64 `json:"semantic_weight"`
+	CandidateLimit int     `json:"candidate_limit"`
 }
 
-func (r *hybridBenchRequest) normalize() error {
+func hybridBenchDefaults(cfg registrySearchConfig, keywords bool) hybridBenchOptions {
+	return hybridBenchOptions{QueryKeywords: keywords, LexicalWeight: cfg.lexicalWeight, SemanticWeight: cfg.semanticWeight, CandidateLimit: cfg.candidates()}
+}
+
+// Omitted options take the defaults.
+type hybridBenchRequest struct {
+	Purpose        string   `json:"purpose"`
+	Description    string   `json:"description"`
+	QueryKeywords  *bool    `json:"query_keywords"`
+	LexicalWeight  *float64 `json:"lexical_weight"`
+	SemanticWeight *float64 `json:"semantic_weight"`
+	CandidateLimit *int     `json:"candidate_limit"`
+}
+
+func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBenchOptions, error) {
 	r.Purpose = strings.TrimSpace(r.Purpose)
 	r.Description = strings.TrimSpace(r.Description)
-	if !slices.Contains(hybridBenchPurposes, r.Purpose) {
-		return errors.New("unsupported purpose")
+	opts := defaults
+	if r.QueryKeywords != nil {
+		opts.QueryKeywords = *r.QueryKeywords
 	}
-	if utf8.RuneCountInString(r.Description) > hybridBenchMaxDescription {
-		return errors.New("description is too long")
+	if r.LexicalWeight != nil {
+		opts.LexicalWeight = *r.LexicalWeight
 	}
-	return nil
+	if r.SemanticWeight != nil {
+		opts.SemanticWeight = *r.SemanticWeight
+	}
+	if r.CandidateLimit != nil {
+		opts.CandidateLimit = *r.CandidateLimit
+	}
+	switch {
+	case !slices.Contains(hybridBenchPurposes, r.Purpose):
+		return opts, errors.New("unsupported purpose")
+	case utf8.RuneCountInString(r.Description) > hybridBenchMaxDescription:
+		return opts, errors.New("description is too long")
+	case opts.LexicalWeight < 0 || opts.LexicalWeight > hybridBenchMaxWeight || opts.SemanticWeight < 0 || opts.SemanticWeight > hybridBenchMaxWeight:
+		return opts, errors.New("RRF weights must be between 0 and 100")
+	case opts.LexicalWeight+opts.SemanticWeight <= 0:
+		return opts, errors.New("at least one RRF weight must be above 0")
+	case opts.CandidateLimit < 1 || opts.CandidateLimit > hybridBenchMaxCandidates:
+		return opts, errors.New("candidates per list must be between 1 and 1000")
+	}
+	return opts, nil
 }
 
 type hybridBenchRun struct {
@@ -64,6 +103,8 @@ type hybridBenchRun struct {
 	LexicalBackend string     `json:"lexical_backend"`
 	QueryKeywords  bool       `json:"query_keywords"`
 	EmbeddingModel string     `json:"embedding_model"`
+	KeywordsModel  string     `json:"keywords_model"`
+	KeywordsPrompt string     `json:"keywords_prompt"`
 	LexicalWeight  float64    `json:"lexical_weight"`
 	SemanticWeight float64    `json:"semantic_weight"`
 	CandidateLimit int        `json:"candidate_limit"`
@@ -98,6 +139,11 @@ type hybridBenchResult struct {
 	HybridRank       *int     `json:"hybrid_rank"`
 	HybridTop        []string `json:"hybrid_top"`
 	ErrorMsg         string   `json:"error_msg"`
+	EmbeddingMs      *int     `json:"embedding_ms"`
+	KeywordsMs       *int     `json:"keywords_ms"`
+	LexicalMs        *int     `json:"lexical_ms"`
+	SemanticMs       *int     `json:"semantic_ms"`
+	HybridMs         *int     `json:"hybrid_ms"`
 }
 
 func (r hybridBenchResult) rank(mode string) *int {

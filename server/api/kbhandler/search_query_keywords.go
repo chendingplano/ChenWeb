@@ -73,10 +73,15 @@ func searchQueryKeywords(ctx context.Context, query string) []string {
 		return nil
 	}
 	logger := loggerutil.CreateDefaultLogger("20261024-617")
-	if !searchKeywordsEnabled(logger) {
+	call := searchCallFrom(ctx)
+	enabled := searchKeywordsEnabled(logger)
+	if call.keywords != nil {
+		enabled = *call.keywords
+	}
+	if !enabled {
 		return nil
 	}
-	if kws, ok := searchKeywords.get(query); ok {
+	if kws, ok := searchKeywords.get(query); ok && !call.freshKeywords {
 		logger.Debug("search query keywords cache hit", "query_len", len([]rune(query)), "keywords", len(kws))
 		return kws
 	}
@@ -89,7 +94,6 @@ func searchQueryKeywords(ctx context.Context, query string) []string {
 	cctx, cancel := context.WithTimeout(ctx, searchKeywordsTimeout())
 	defer cancel()
 	start := searchKeywordsNow()
-	call := searchCallFrom(ctx)
 	payload, err := client.ExtractJSON(cctx, llmclients.JSONExtractionInput{
 		UserID:     call.userID,
 		RunID:      call.runID,

@@ -13,6 +13,8 @@ export type HybridBenchmarkRun = {
 	lexical_backend: string;
 	query_keywords: boolean;
 	embedding_model: string;
+	keywords_model: string;
+	keywords_prompt: string;
 	lexical_weight: number;
 	semantic_weight: number;
 	candidate_limit: number;
@@ -46,6 +48,18 @@ export type HybridBenchmarkResult = {
 	hybrid_rank: number | null;
 	hybrid_top: string[];
 	error_msg: string;
+	embedding_ms: number | null;
+	keywords_ms: number | null;
+	lexical_ms: number | null;
+	semantic_ms: number | null;
+	hybrid_ms: number | null;
+};
+// Search settings a run can choose; the server's defaults are the live search configuration.
+export type HybridBenchmarkOptions = {
+	query_keywords: boolean;
+	lexical_weight: number;
+	semantic_weight: number;
+	candidate_limit: number;
 };
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -54,7 +68,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 	return response.json();
 }
 export function startBenchmarkRun(
-	payload: { purpose: string; description: string },
+	payload: { purpose: string; description: string } & HybridBenchmarkOptions,
 	signal?: AbortSignal
 ) {
 	return request<{ run: HybridBenchmarkRun }>(BASE, {
@@ -65,7 +79,11 @@ export function startBenchmarkRun(
 	});
 }
 export function listBenchmarkRuns(signal?: AbortSignal) {
-	return request<{ runs: HybridBenchmarkRun[]; purposes: string[] }>(BASE, { signal });
+	return request<{
+		runs: HybridBenchmarkRun[];
+		purposes: string[];
+		defaults: HybridBenchmarkOptions;
+	}>(BASE, { signal });
 }
 export function getBenchmarkRun(id: number, signal?: AbortSignal) {
 	return request<{

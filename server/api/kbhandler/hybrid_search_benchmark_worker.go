@@ -19,24 +19,28 @@ var (
 	hybridBenchKeywords = searchQueryKeywords
 	hybridBenchSearch   = func(db *sql.DB, query string, vec []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 		if registryLexicalBackend() == lexicalBackendParadeDB {
-			return queryHybridSearchResultsParadeDB(db, hybridBenchArtifactType, query, vec, artifactSearchFilters{}, 1, hybridCandidateLimit, cfg)
+			return queryHybridSearchResultsParadeDB(db, hybridBenchArtifactType, query, vec, artifactSearchFilters{}, 1, cfg.candidates(), cfg)
 		}
-		return queryHybridSearchResults(db, hybridBenchArtifactType, query, vec, artifactSearchFilters{}, 1, hybridCandidateLimit, cfg)
+		return queryHybridSearchResults(db, hybridBenchArtifactType, query, vec, artifactSearchFilters{}, 1, cfg.candidates(), cfg)
 	}
 )
 
 // runHybridSearchBenchmark processes the questions one at a time (the shared embedding host times
 // out under concurrent load). Each question is one search with its own search run ID, which its
-// embedding and keyword calls carry in the LLM usage logs. Each stored result extends the run's deadline; a run that stops
-// heartbeating is marked failed by the next run listing.
+// embedding and keyword calls carry in the LLM usage logs. The run's own settings (query keywords,
+// weights, candidates per list) replace the configured ones. Each stored result extends the run's
+// deadline; a run that stops heartbeating is marked failed by the next run listing.
 func runHybridSearchBenchmark(db *sql.DB, run hybridBenchRun, questions []hybridBenchQuestion) {
 	logger := loggerutil.CreateDefaultLogger("20261024-744")
 	cfg := loadRegistrySearchConfig()
 	cfg.lexicalWeight, cfg.semanticWeight = run.LexicalWeight, run.SemanticWeight
+	cfg.candidateLimit = run.CandidateLimit
+	keywords := run.QueryKeywords
 	for _, q := range questions {
 		ctx, cancel := context.WithTimeout(context.Background(), hybridBenchQuestionTimeout)
 		qcfg := cfg
 		qcfg.call = newSearchCall(ctx, db, run.CreatedBy)
+		qcfg.call.keywords = &keywords
 		result := benchmarkHybridSearchQuestion(ctx, db, q, qcfg, logger)
 		alive, err := saveHybridBenchResult(ctx, db, run.ID, result)
 		cancel()
@@ -65,21 +69,40 @@ func benchmarkHybridSearchQuestion(ctx context.Context, db *sql.DB, q hybridBenc
 		SearchRunID: cfg.call.runID, QuestionID: &questionID, InputRecordID: q.InputRecordID, HopType: q.HopType, Lang: q.Lang,
 		Question: q.Question, TargetArtifactID: q.TargetArtifactID, Keywords: []string{}, HybridTop: []string{},
 	}
+	start := time.Now()
 	vec, ok := hybridBenchEmbed(ctx, q.Question)
+	result.EmbeddingMs = msSince(start)
 	if !ok {
 		result.ErrorMsg = hybridBenchErrEmbedding
 		logger.Warn("benchmark question embedding failed", "question_id", q.ID)
 		return result
 	}
-	// The searches extract keywords again; the per-query cache makes that a lookup.
-	if kws := hybridBenchKeywords(ctx, q.Question); kws != nil {
-		result.Keywords = kws
+	// Keywords are extracted fresh (not from the cache) so the call is timed and logged; the searches
+	// extract them again, and the cache this call fills makes that a lookup.
+	if cfg.call.keywords == nil || *cfg.call.keywords {
+		fresh := cfg.call
+		fresh.freshKeywords = true
+		start = time.Now()
+		if kws := hybridBenchKeywords(withSearchCall(ctx, fresh), q.Question); kws != nil {
+			result.Keywords = kws
+		}
+		result.KeywordsMs = msSince(start)
 	}
 	errs := []string{}
 	for _, mode := range hybridBenchModes {
 		modeCfg := cfg
 		modeCfg.lexicalWeight, modeCfg.semanticWeight = hybridBenchModeWeights(mode, cfg)
+		start = time.Now()
 		results, err := hybridBenchSearch(db, q.Question, vec, modeCfg)
+		elapsed := msSince(start)
+		switch mode {
+		case hybridBenchModeLexical:
+			result.LexicalMs = elapsed
+		case hybridBenchModeSemantic:
+			result.SemanticMs = elapsed
+		default:
+			result.HybridMs = elapsed
+		}
 		if err != nil {
 			errs = append(errs, mode+": "+err.Error())
 			logger.Warn("benchmark search failed", "question_id", q.ID, "mode", mode, "error", err)
@@ -123,13 +146,20 @@ func saveHybridBenchResult(ctx context.Context, db *sql.DB, runID int64, r hybri
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.hybrid_search_benchmark_results
  (run_id, question_id, input_record_id, hop_type, lang, question, target_artifact_id, keywords,
-  lexical_rank, semantic_rank, hybrid_rank, hybrid_top, error_msg, search_run_id)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,0))`,
+  lexical_rank, semantic_rank, hybrid_rank, hybrid_top, error_msg, search_run_id,
+  embedding_ms, keywords_ms, lexical_ms, semantic_ms, hybrid_ms)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,0),$15,$16,$17,$18,$19)`,
 		runID, r.QuestionID, r.InputRecordID, r.HopType, r.Lang, r.Question, r.TargetArtifactID, pq.Array(r.Keywords),
-		r.LexicalRank, r.SemanticRank, r.HybridRank, top, r.ErrorMsg, r.SearchRunID); err != nil {
+		r.LexicalRank, r.SemanticRank, r.HybridRank, top, r.ErrorMsg, r.SearchRunID,
+		r.EmbeddingMs, r.KeywordsMs, r.LexicalMs, r.SemanticMs, r.HybridMs); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+func msSince(start time.Time) *int {
+	ms := int(time.Since(start).Milliseconds())
+	return &ms
 }
 
 func failHybridBenchRun(db *sql.DB, runID int64, msg string, logger ApiTypes.JimoLogger) {

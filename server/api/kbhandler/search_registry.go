@@ -39,6 +39,14 @@ type registrySearchConfig struct {
 	lexicalWeight   float64    // hybrid RRF weight of the lexical list
 	semanticWeight  float64    // hybrid RRF weight of the semantic list
 	call            searchCall // run ID and user for the search's LLM usage events
+	candidateLimit  int        // hybrid candidates per list; 0 = hybridCandidateLimit
+}
+
+func (c registrySearchConfig) candidates() int {
+	if c.candidateLimit > 0 {
+		return c.candidateLimit
+	}
+	return hybridCandidateLimit
 }
 
 func loadRegistrySearchConfig() registrySearchConfig {
@@ -635,9 +643,9 @@ LIMIT $%d OFFSET $%d`,
 		tsQueryExpr, cfg.dictionary,
 		lexScore,
 		ftsClause, structuralSQL,
-		hybridCandidateLimit,
+		cfg.candidates(),
 		structuralSQL,
-		hybridCandidateLimit,
+		cfg.candidates(),
 		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 		cfg.dictionary,
 		escapedSnippetOptions,
@@ -753,10 +761,10 @@ JOIN kb.search_artifacts sa
 	ON sa.artifact_type = f.artifact_type AND sa.artifact_id = f.artifact_id
 ORDER BY f.score DESC, sa.artifact_id ASC
 LIMIT $%d OFFSET $%d`,
-		paradeDBUnion(paradeDBPartitions(artifactType, filters), "sa.artifact_type, sa.artifact_id, pdb.score(sa.artifact_id) AS score", lexicalWhereSQL, fmt.Sprintf("ORDER BY pdb.score(sa.artifact_id) DESC LIMIT %d", hybridCandidateLimit)),
-		hybridCandidateLimit,
+		paradeDBUnion(paradeDBPartitions(artifactType, filters), "sa.artifact_type, sa.artifact_id, pdb.score(sa.artifact_id) AS score", lexicalWhereSQL, fmt.Sprintf("ORDER BY pdb.score(sa.artifact_id) DESC LIMIT %d", cfg.candidates())),
+		cfg.candidates(),
 		structuralSQL,
-		hybridCandidateLimit,
+		cfg.candidates(),
 		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 		pageSizeArg, offsetArg,
 	)

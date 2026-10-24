@@ -56,6 +56,30 @@ and `search_query_keywords`. A benchmark result SHALL store its question's searc
 - **WHEN** the run ID cannot be allocated
 - **THEN** the search still runs and its usage events have no run ID
 
+### Requirement: Run search options
+A run SHALL accept query keywords on/off, the lexical and semantic RRF weights (each 0–100, not
+both 0) and candidates per list (1–1000); omitted options SHALL default to the live search
+configuration, which the run list returns as `defaults`. The run SHALL use its options for every
+question regardless of the server configuration, and SHALL store them with the keyword model and
+prompt used.
+
+#### Scenario: Keywords switched on for a run
+- **WHEN** a run is started with query keywords on while `SEARCH_QUERY_KEYWORDS` is off
+- **THEN** every question makes one keyword LLM call and the run shows the keyword model and prompt
+
+#### Scenario: Invalid options
+- **WHEN** both weights are 0 or candidates per list is outside 1–1000
+- **THEN** the request is rejected with HTTP 400
+
+### Requirement: Query timings
+Each result SHALL store the query embedding, keyword extraction (a fresh LLM call, not the cache)
+and each mode's search time in milliseconds. The page SHALL show a Query time column equal to
+embedding + keywords + hybrid query, with the parts on hover.
+
+#### Scenario: Timed question
+- **WHEN** a question has been processed with keywords on
+- **THEN** its result has all five timings and its Query time is their embedding + keywords + hybrid sum
+
 ### Requirement: Results stored in testbed
 The system SHALL store one row per question in `testbed.hybrid_search_benchmark_results` with a
 snapshot of the question (text, target artifact id, hop type, language, record id), the query
@@ -80,8 +104,9 @@ questions and grouped by hop type and by language. Misses SHALL count as 0 in MR
 
 ### Requirement: Run Benchmark page
 The development page SHALL show **System Admin → Benchmark → Hybrid Search Benchmark → Run
-Benchmark**. The page SHALL start runs, list past runs and show a selected run's settings, scores
-and per-question ranks, refreshing while the run is in progress. All text SHALL be available in
+Benchmark**. The page SHALL start runs, list past runs with a View button, and show a selected
+run's attributes in two groups (run; search settings including the keyword prompt and model name),
+scores and per-question ranks, refreshing while the run is in progress. All text SHALL be available in
 English and Chinese, and page text SHALL be selectable.
 
 #### Scenario: Start and watch a run

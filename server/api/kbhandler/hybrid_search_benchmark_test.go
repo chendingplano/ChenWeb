@@ -21,17 +21,37 @@ func benchResults(pairs ...any) []artifactSearchResult {
 func intPtr(v int) *int { return &v }
 
 func TestHybridBenchRequestNormalize(t *testing.T) {
+	defaults := hybridBenchOptions{QueryKeywords: true, LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200}
 	ok := hybridBenchRequest{Purpose: " search_metrics ", Description: " baseline "}
-	if err := ok.normalize(); err != nil || ok.Purpose != "search_metrics" || ok.Description != "baseline" {
-		t.Fatalf("normalize = %+v, %v", ok, err)
+	opts, err := ok.normalize(defaults)
+	if err != nil || ok.Purpose != "search_metrics" || ok.Description != "baseline" || opts != defaults {
+		t.Fatalf("normalize = %+v %+v, %v", ok, opts, err)
 	}
-	bad := hybridBenchRequest{Purpose: "search_provisions"}
-	if err := bad.normalize(); err == nil {
-		t.Fatal("unsupported purpose accepted")
+	off, half, fifty := false, 0.5, 50
+	custom := hybridBenchRequest{Purpose: "search_metrics", QueryKeywords: &off, LexicalWeight: &half, CandidateLimit: &fifty}
+	if opts, err := custom.normalize(defaults); err != nil || opts.QueryKeywords || opts.LexicalWeight != 0.5 || opts.SemanticWeight != 1 || opts.CandidateLimit != 50 {
+		t.Fatalf("custom options = %+v, %v", opts, err)
 	}
-	long := hybridBenchRequest{Purpose: "search_metrics", Description: strings.Repeat("长", hybridBenchMaxDescription+1)}
-	if err := long.normalize(); err == nil {
-		t.Fatal("over-long description accepted")
+	zero, negative, tooMany := 0.0, -1.0, 1001
+	for name, req := range map[string]hybridBenchRequest{
+		"purpose":     {Purpose: "search_provisions"},
+		"description": {Purpose: "search_metrics", Description: strings.Repeat("长", hybridBenchMaxDescription+1)},
+		"negative":    {Purpose: "search_metrics", SemanticWeight: &negative},
+		"both zero":   {Purpose: "search_metrics", LexicalWeight: &zero, SemanticWeight: &zero},
+		"candidates":  {Purpose: "search_metrics", CandidateLimit: &tooMany},
+	} {
+		if _, err := req.normalize(defaults); err == nil {
+			t.Errorf("%s: invalid request accepted", name)
+		}
+	}
+}
+
+func TestRegistrySearchConfigCandidates(t *testing.T) {
+	if got := (registrySearchConfig{}).candidates(); got != hybridCandidateLimit {
+		t.Fatalf("default candidates = %d", got)
+	}
+	if got := (registrySearchConfig{candidateLimit: 50}).candidates(); got != 50 {
+		t.Fatalf("candidates = %d, want 50", got)
 	}
 }
 
@@ -114,13 +134,18 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 		}
 		return []float64{1}, true
 	}
+	keywordCalls := 0
 	hybridBenchKeywords = func(ctx context.Context, _ string) []string {
-		if got := searchCallFrom(ctx); got.runID != 42 {
-			t.Errorf("keyword search call = %+v, want run 42", got)
+		keywordCalls++
+		if got := searchCallFrom(ctx); got.runID != 42 || !got.freshKeywords {
+			t.Errorf("keyword search call = %+v, want run 42, fresh", got)
 		}
 		return []string{"k"}
 	}
 	hybridBenchSearch = func(_ *sql.DB, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+		if cfg.call.freshKeywords {
+			t.Error("searches must read the keyword cache")
+		}
 		switch {
 		case cfg.semanticWeight == 0: // lexical
 			return benchResults("416_mtc_1", 0.02, "416_mtc_2", 0.01), nil
@@ -139,6 +164,18 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 	}
 	if !strings.Contains(r.ErrorMsg, "semantic: boom") || len(r.Keywords) != 1 || len(r.HybridTop) != 1 || *r.QuestionID != 7 {
 		t.Fatalf("result = %+v", r)
+	}
+	if r.EmbeddingMs == nil || r.KeywordsMs == nil || r.LexicalMs == nil || r.SemanticMs == nil || r.HybridMs == nil {
+		t.Fatalf("timings missing: %+v", r)
+	}
+
+	// Keywords off for the run: no keyword call and no keyword time.
+	off := false
+	cfg.call.keywords = &off
+	keywordCalls = 0
+	r = benchmarkHybridSearchQuestion(context.Background(), nil, q, cfg, logger)
+	if keywordCalls != 0 || r.KeywordsMs != nil || len(r.Keywords) != 0 {
+		t.Fatalf("keywords off: calls=%d result=%+v", keywordCalls, r)
 	}
 
 	hybridBenchEmbed = func(context.Context, string) ([]float64, bool) { return nil, false }
