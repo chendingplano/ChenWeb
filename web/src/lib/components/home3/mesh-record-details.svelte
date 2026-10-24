@@ -7,6 +7,8 @@
 		MeshRecordTreeNode
 	} from '$lib/services/meshService';
 	import { buildRecordDetails, valuesOf } from '$lib/services/meshRecord';
+	import NameValueVisualizer from '$lib/components/shared-ui/name-value/name-value-visualizer.svelte';
+	import type { NameValueInput } from '$lib/components/shared-ui/name-value/name-value';
 
 	let { record, onOpenRecord }: { record: MeshRecord; onOpenRecord: (id: string) => void } =
 		$props();
@@ -64,6 +66,21 @@
 	function labelFor(predicate: string) {
 		return labels[predicate]?.() ?? predicate.replace(/([a-z])([A-Z])/g, '$1 $2');
 	}
+	function toFields(properties: MeshProperty[]): NameValueInput[] {
+		return properties.map((property) => ({
+			key: property.predicate,
+			label: labelFor(property.predicate),
+			values: property.values.map((value) => {
+				if (property.predicate === 'rdfIdentifier')
+					return { text: value.text ?? '', href: value.text };
+				if (property.predicate === 'treeNumber' && value.id)
+					return { text: value.id, onClick: () => (activeTab = 'trees') };
+				if (value.id)
+					return { text: value.label || value.id, onClick: () => onOpenRecord(value.id!) };
+				return { text: value.text ?? '', lang: value.lang };
+			})
+		}));
+	}
 	function keyboardTab(event: KeyboardEvent) {
 		const index = tabs.findIndex(
 			(tab) => `mesh-record-tab-${tab.id}` === (event.currentTarget as HTMLElement).id
@@ -96,31 +113,6 @@
 			}));
 	}
 </script>
-
-{#snippet pairs(properties: MeshProperty[])}
-	<dl class="record-pairs">
-		{#each properties as property (property.predicate)}
-			<dt>{labelFor(property.predicate)}</dt>
-			<dd>
-				{#each property.values as value}
-					<div>
-						{#if property.predicate === 'rdfIdentifier'}
-							<a href={value.text} target="_blank" rel="noreferrer">{value.text}</a>
-						{:else if property.predicate === 'treeNumber' && value.id}
-							<button class="text-link" type="button" onclick={() => (activeTab = 'trees')}
-								>{value.id}</button
-							>
-						{:else if value.id}
-							<button class="text-link" type="button" onclick={() => onOpenRecord(value.id!)}
-								>{value.label || value.id}</button
-							>
-						{:else}<span lang={value.lang || undefined}>{value.text}</span>{/if}
-					</div>
-				{/each}
-			</dd>
-		{/each}
-	</dl>
-{/snippet}
 
 {#snippet treeNode(node: MeshRecordTreeNode, selected = false)}
 	<span class:current={selected}>
@@ -164,7 +156,7 @@
 		>
 			{#if activeTab === tab.id}
 				{#if activeTab === 'details'}
-					{@render pairs(details)}
+					<NameValueVisualizer fields={toFields(details)} />
 				{:else if activeTab === 'qualifiers'}
 					<h3>{m.mesh_record_allowable_qualifiers()}</h3>
 					<ul class="qualifiers">
@@ -197,7 +189,7 @@
 								{#if concept.preferred}<span class="badge">{m.mesh_record_preferred()}</span
 									>{/if}</summary
 							>
-							{@render pairs(metadata(concept.entity))}
+							<NameValueVisualizer fields={toFields(metadata(concept.entity))} />
 							<h3>{m.mesh_record_terms()}</h3>
 							{#each concept.terms as term (term.id)}
 								<div class="term">
@@ -207,7 +199,7 @@
 												class="badge">{m.mesh_record_preferred_term()}</span
 											>{/if}
 									</h4>
-									{@render pairs(metadata(term))}
+									<NameValueVisualizer fields={toFields(metadata(term))} />
 								</div>
 							{/each}
 						</details>
@@ -265,30 +257,10 @@
 	.record-panel {
 		padding: 1.25rem 0 0.5rem;
 	}
-	.record-pairs {
-		display: grid;
-		grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr);
-		gap: 0.35rem 1.25rem;
-		margin: 0;
-		font-size: 0.875rem;
-		line-height: 1.6;
-	}
-	dt {
-		text-align: right;
-		font-weight: 650;
-	}
-	dd {
-		text-align: left;
-		margin: 0;
-		min-width: 0;
-		white-space: pre-wrap;
-	}
-	a,
 	.text-link {
 		color: var(--accent);
 		text-decoration: none;
 	}
-	a:hover,
 	.text-link:hover {
 		text-decoration: underline;
 	}
@@ -301,7 +273,6 @@
 		cursor: pointer;
 	}
 	button:focus-visible,
-	a:focus-visible,
 	summary:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 3px;
@@ -383,10 +354,6 @@
 		list-style: none;
 	}
 	@media (max-width: 600px) {
-		.record-pairs {
-			grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
-			gap: 0.4rem 0.75rem;
-		}
 		.qualifiers {
 			columns: 1;
 		}
