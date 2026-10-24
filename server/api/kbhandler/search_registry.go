@@ -35,6 +35,8 @@ type registrySearchConfig struct {
 	previewMaxWords int
 	phraseFriendly  bool
 	minRank         float64
+	lexicalWeight   float64 // hybrid RRF weight of the lexical list
+	semanticWeight  float64 // hybrid RRF weight of the semantic list
 }
 
 func loadRegistrySearchConfig() registrySearchConfig {
@@ -46,6 +48,8 @@ func loadRegistrySearchConfig() registrySearchConfig {
 		previewMaxWords: cfg.PreviewMaxWords,
 		phraseFriendly:  cfg.PhraseFriendly,
 		minRank:         cfg.MinRank,
+		lexicalWeight:   cfg.HybridLexicalWeight,
+		semanticWeight:  cfg.HybridSemanticWeight,
 	}
 }
 
@@ -119,7 +123,7 @@ func queryRegistrySearchResults(db *sql.DB, artifactType string, queryText strin
 	if kbsearch.SemanticSearchEnabled() {
 		if vec, ok := computeQueryEmbedding(context.Background(), queryText); ok {
 			if backend == lexicalBackendParadeDB {
-				if results, err := queryHybridSearchResultsParadeDB(db, artifactType, queryText, vec, filters, page, pageSize); err == nil {
+				if results, err := queryHybridSearchResultsParadeDB(db, artifactType, queryText, vec, filters, page, pageSize, cfg); err == nil {
 					return results, nil
 				}
 			}
@@ -528,7 +532,7 @@ fused AS (
 	SELECT
 		COALESCE(l.artifact_type, s.artifact_type) AS artifact_type,
 		COALESCE(l.artifact_id, s.artifact_id) AS artifact_id,
-		COALESCE(1.0 / (%d + l.rnk), 0.0) + COALESCE(1.0 / (%d + s.rnk), 0.0) AS score
+		COALESCE(%s / (%d + l.rnk), 0.0) + COALESCE(%s / (%d + s.rnk), 0.0) AS score
 	FROM lexical l
 	FULL OUTER JOIN semantic s
 		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
@@ -563,7 +567,7 @@ LIMIT $%d OFFSET $%d`,
 		hybridCandidateLimit,
 		structuralSQL,
 		hybridCandidateLimit,
-		rrfK, rrfK,
+		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 		cfg.dictionary,
 		escapedSnippetOptions,
 		pageSizeArg, offsetArg,
@@ -575,6 +579,11 @@ LIMIT $%d OFFSET $%d`,
 	args = append(args, pageSize, offset)
 
 	return queryWithVectorIndexScan(db, sqlText, args, pageSize)
+}
+
+// sqlFloat renders a configured fusion weight as a SQL numeric literal (never user input).
+func sqlFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // queryWithVectorIndexScan runs a hybrid query whose semantic CTE takes its candidates with a plain
@@ -604,7 +613,7 @@ func queryWithVectorIndexScan(db *sql.DB, sqlText string, args []any, pageSize i
 	return results, tx.Commit()
 }
 
-func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, vec []float64, filters artifactSearchFilters, page int, pageSize int) ([]artifactSearchResult, error) {
+func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, vec []float64, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 	offset := (page - 1) * pageSize
 
 	lexicalWhereSQL, lexicalArgs := buildParadeDBSearchWhereClause(artifactType, queryText, filters, 3)
@@ -641,7 +650,7 @@ fused AS (
 	SELECT
 		COALESCE(l.artifact_type, s.artifact_type) AS artifact_type,
 		COALESCE(l.artifact_id, s.artifact_id) AS artifact_id,
-		COALESCE(1.0 / (%d + l.rnk), 0.0) + COALESCE(1.0 / (%d + s.rnk), 0.0) AS score
+		COALESCE(%s / (%d + l.rnk), 0.0) + COALESCE(%s / (%d + s.rnk), 0.0) AS score
 	FROM lexical l
 	FULL OUTER JOIN semantic s
 		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
@@ -668,7 +677,7 @@ LIMIT $%d OFFSET $%d`,
 		hybridCandidateLimit,
 		structuralSQL,
 		hybridCandidateLimit,
-		rrfK, rrfK,
+		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 		pageSizeArg, offsetArg,
 	)
 

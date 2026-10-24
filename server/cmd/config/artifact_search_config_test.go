@@ -93,6 +93,36 @@ func TestGetArtifactSearchConfigFallsBackToLegacyMetricSearchSection(t *testing.
 	}
 }
 
+func TestGetArtifactSearchConfigHybridWeights(t *testing.T) {
+	oldConfig := AppConfig
+	oldViper := appConfigViper
+	t.Cleanup(func() {
+		AppConfig = oldConfig
+		appConfigViper = oldViper
+		viper.Reset()
+	})
+
+	// Unset: both default to 1.0 (equal-weight RRF).
+	viper.Reset()
+	appConfigViper = viper.GetViper()
+	AppConfig = AppConfigDef{ArtifactSearch: legacyArtifactSearchConfig{Dictionary: "simple"}}
+	cfg := GetArtifactSearchConfig()
+	if cfg.HybridLexicalWeight != 1.0 || cfg.HybridSemanticWeight != 1.0 {
+		t.Fatalf("defaults: lexical=%v semantic=%v", cfg.HybridLexicalWeight, cfg.HybridSemanticWeight)
+	}
+
+	// Set: an explicit 0 is kept (drops the list); a negative weight falls back to 1.0.
+	viper.Reset()
+	appConfigViper = viper.GetViper()
+	AppConfig = AppConfigDef{ArtifactSearch: legacyArtifactSearchConfig{Dictionary: "simple", HybridLexicalWeight: 0, HybridSemanticWeight: -2}}
+	viper.Set("artifact_search.hybrid_lexical_weight", 0)
+	viper.Set("artifact_search.hybrid_semantic_weight", -2)
+	cfg = GetArtifactSearchConfig()
+	if cfg.HybridLexicalWeight != 0 || cfg.HybridSemanticWeight != 1.0 {
+		t.Fatalf("configured: lexical=%v semantic=%v", cfg.HybridLexicalWeight, cfg.HybridSemanticWeight)
+	}
+}
+
 func TestGetMetricSearchWeightsConfigPrefersTopLevelBlock(t *testing.T) {
 	oldConfig := AppConfig
 	t.Cleanup(func() {

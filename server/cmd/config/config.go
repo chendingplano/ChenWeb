@@ -106,6 +106,10 @@ type ArtifactSearchConfig struct {
 	PreviewMaxWords int     `mapstructure:"preview_max_words"`
 	PhraseFriendly  bool    `mapstructure:"phrase_friendly"`
 	MinRank         float64 `mapstructure:"min_rank"`
+	// Weights of the lexical (BM25 / full-text) and semantic (vector) lists in the hybrid
+	// search's Reciprocal Rank Fusion: score = lexical/(k+rank) + semantic/(k+rank). Default 1.0 each.
+	HybridLexicalWeight  float64 `mapstructure:"hybrid_lexical_weight"`
+	HybridSemanticWeight float64 `mapstructure:"hybrid_semantic_weight"`
 }
 
 type legacyArtifactSearchConfig struct {
@@ -116,6 +120,9 @@ type legacyArtifactSearchConfig struct {
 	PhraseFriendly  bool                        `mapstructure:"phrase_friendly"`
 	MinRank         float64                     `mapstructure:"min_rank"`
 	Weights         ArtifactSearchWeightsConfig `mapstructure:"weights"`
+	// See ArtifactSearchConfig.
+	HybridLexicalWeight  float64 `mapstructure:"hybrid_lexical_weight"`
+	HybridSemanticWeight float64 `mapstructure:"hybrid_semantic_weight"`
 }
 
 type LLMConfig struct {
@@ -694,6 +701,13 @@ func GetArtifactSearchConfig() ArtifactSearchConfig {
 	if !appConfigViper.IsSet("artifact_search.phrase_friendly") && !appConfigViper.IsSet("metric_search.phrase_friendly") {
 		cfg.PhraseFriendly = true
 	}
+	// 0 is a valid weight (drops that list), so only an unset or negative weight takes the default.
+	if cfg.HybridLexicalWeight < 0 || !appConfigViper.IsSet("artifact_search.hybrid_lexical_weight") && !appConfigViper.IsSet("metric_search.hybrid_lexical_weight") {
+		cfg.HybridLexicalWeight = 1.0
+	}
+	if cfg.HybridSemanticWeight < 0 || !appConfigViper.IsSet("artifact_search.hybrid_semantic_weight") && !appConfigViper.IsSet("metric_search.hybrid_semantic_weight") {
+		cfg.HybridSemanticWeight = 1.0
+	}
 	return cfg
 }
 
@@ -913,6 +927,9 @@ func toArtifactSearchConfig(cfg legacyArtifactSearchConfig) ArtifactSearchConfig
 		PreviewMaxWords: cfg.PreviewMaxWords,
 		PhraseFriendly:  cfg.PhraseFriendly,
 		MinRank:         cfg.MinRank,
+
+		HybridLexicalWeight:  cfg.HybridLexicalWeight,
+		HybridSemanticWeight: cfg.HybridSemanticWeight,
 	}
 }
 
@@ -922,7 +939,9 @@ func isArtifactSearchConfigZero(cfg ArtifactSearchConfig) bool {
 		cfg.MaxPageSize == 0 &&
 		cfg.PreviewMaxWords == 0 &&
 		!cfg.PhraseFriendly &&
-		cfg.MinRank == 0
+		cfg.MinRank == 0 &&
+		cfg.HybridLexicalWeight == 0 &&
+		cfg.HybridSemanticWeight == 0
 }
 
 func NormalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {

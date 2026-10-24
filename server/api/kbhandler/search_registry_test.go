@@ -475,7 +475,8 @@ func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
 	mock.ExpectExec("SET LOCAL hnsw\\.iterative_scan = relaxed_order").WillReturnResult(sqlmock.NewResult(0, 0))
 	// The semantic CTE must take its candidates with a plain ORDER BY distance LIMIT, the only
 	// shape pgvector serves from the HNSW index.
-	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200").
+	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200" +
+		".*COALESCE\\(0\\.25 / \\(60 \\+ l\\.rnk\\), 0\\.0\\) \\+ COALESCE\\(1 / \\(60 \\+ s\\.rnk\\), 0\\.0\\)").
 		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
@@ -484,7 +485,8 @@ func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
 		))
 	mock.ExpectCommit()
 
-	results, err := queryHybridSearchResultsParadeDB(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20)
+	cfg := registrySearchConfig{lexicalWeight: 0.25, semanticWeight: 1}
+	results, err := queryHybridSearchResultsParadeDB(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20, cfg)
 	if err != nil {
 		t.Fatalf("queryHybridSearchResultsParadeDB returned error: %v", err)
 	}
@@ -514,7 +516,7 @@ func TestHybridSearchPostgresUsesVectorIndexShape(t *testing.T) {
 		))
 	mock.ExpectCommit()
 
-	cfg := registrySearchConfig{dictionary: "simple", previewMaxWords: 30}
+	cfg := registrySearchConfig{dictionary: "simple", previewMaxWords: 30, lexicalWeight: 1, semanticWeight: 1}
 	results, err := queryHybridSearchResults(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20, cfg)
 	if err != nil {
 		t.Fatalf("queryHybridSearchResults returned error: %v", err)
