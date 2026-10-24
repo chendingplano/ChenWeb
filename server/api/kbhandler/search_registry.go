@@ -514,12 +514,15 @@ lexical AS (
 	LIMIT %d
 ),
 semantic AS (
-	SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id,
-		ROW_NUMBER() OVER (ORDER BY sa.embedding <=> $2::vector ASC, sa.artifact_id ASC) AS rnk
-	FROM kb.search_artifacts sa
-	WHERE sa.embedding IS NOT NULL%s
-	ORDER BY rnk
-	LIMIT %d
+	SELECT nn.artifact_type, nn.artifact_id,
+		ROW_NUMBER() OVER (ORDER BY nn.distance ASC, nn.artifact_id ASC) AS rnk
+	FROM (
+		SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, sa.embedding <=> $2::vector AS distance
+		FROM kb.search_artifacts sa
+		WHERE sa.embedding IS NOT NULL%s
+		ORDER BY sa.embedding <=> $2::vector
+		LIMIT %d
+	) nn
 ),
 fused AS (
 	SELECT
@@ -571,12 +574,34 @@ LIMIT $%d OFFSET $%d`,
 	args = append(args, structuralArgs...)
 	args = append(args, pageSize, offset)
 
-	rows, err := db.Query(sqlText, args...)
+	return queryWithVectorIndexScan(db, sqlText, args, pageSize)
+}
+
+// queryWithVectorIndexScan runs a hybrid query whose semantic CTE takes its candidates with a plain
+// ORDER BY distance LIMIT, the only shape pgvector serves from a vector index (a window function over
+// the table would compute every distance first). Without iterative scans an HNSW index scan returns
+// at most hnsw.ef_search rows (40 by default), fewer than hybridCandidateLimit, and filtered queries
+// can lose rows after the index scan; relaxed_order keeps scanning until the LIMIT is met. The order
+// may then be slightly off, which is harmless because the CTE re-ranks by distance.
+func queryWithVectorIndexScan(db *sql.DB, sqlText string, args []any, pageSize int) ([]artifactSearchResult, error) {
+	tx, err := db.Begin()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	return scanArtifactSearchRows(rows, pageSize)
+	defer tx.Rollback()
+	if _, err := tx.Exec("SET LOCAL hnsw.iterative_scan = relaxed_order"); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	results, err := scanArtifactSearchRows(rows, pageSize)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return results, tx.Commit()
 }
 
 func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, vec []float64, filters artifactSearchFilters, page int, pageSize int) ([]artifactSearchResult, error) {
@@ -602,12 +627,15 @@ WITH lexical AS (
 	LIMIT %d
 ),
 semantic AS (
-	SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id,
-		ROW_NUMBER() OVER (ORDER BY sa.embedding <=> $2::vector ASC, sa.artifact_id ASC) AS rnk
-	FROM kb.search_artifacts sa
-	WHERE sa.embedding IS NOT NULL%s
-	ORDER BY rnk
-	LIMIT %d
+	SELECT nn.artifact_type, nn.artifact_id,
+		ROW_NUMBER() OVER (ORDER BY nn.distance ASC, nn.artifact_id ASC) AS rnk
+	FROM (
+		SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, sa.embedding <=> $2::vector AS distance
+		FROM kb.search_artifacts sa
+		WHERE sa.embedding IS NOT NULL%s
+		ORDER BY sa.embedding <=> $2::vector
+		LIMIT %d
+	) nn
 ),
 fused AS (
 	SELECT
@@ -649,10 +677,5 @@ LIMIT $%d OFFSET $%d`,
 	args = append(args, lexicalArgs[1:]...)
 	args = append(args, pageSize, offset)
 
-	rows, err := db.Query(sqlText, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanArtifactSearchRows(rows, pageSize)
+	return queryWithVectorIndexScan(db, sqlText, args, pageSize)
 }

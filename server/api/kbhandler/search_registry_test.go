@@ -471,17 +471,53 @@ func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*sa\\.embedding <=> \\$2::vector").
+	mock.ExpectBegin()
+	mock.ExpectExec("SET LOCAL hnsw\\.iterative_scan = relaxed_order").WillReturnResult(sqlmock.NewResult(0, 0))
+	// The semantic CTE must take its candidates with a plain ORDER BY distance LIMIT, the only
+	// shape pgvector serves from the HNSW index.
+	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200").
 		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
 			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, "{battery}", 0.031, "Battery safety",
 		))
+	mock.ExpectCommit()
 
 	results, err := queryHybridSearchResultsParadeDB(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20)
 	if err != nil {
 		t.Fatalf("queryHybridSearchResultsParadeDB returned error: %v", err)
+	}
+	if len(results) != 1 || results[0].ArtifactID != "9_tpc_1" {
+		t.Fatalf("results=%#v", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestHybridSearchPostgresUsesVectorIndexShape(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("SET LOCAL hnsw\\.iterative_scan = relaxed_order").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("WITH query_input AS .*ts_rank_cd.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200").
+		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
+		}).AddRow(
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, "{battery}", 0.031, "Battery safety",
+		))
+	mock.ExpectCommit()
+
+	cfg := registrySearchConfig{dictionary: "simple", previewMaxWords: 30}
+	results, err := queryHybridSearchResults(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20, cfg)
+	if err != nil {
+		t.Fatalf("queryHybridSearchResults returned error: %v", err)
 	}
 	if len(results) != 1 || results[0].ArtifactID != "9_tpc_1" {
 		t.Fatalf("results=%#v", results)
