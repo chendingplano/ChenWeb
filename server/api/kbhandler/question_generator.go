@@ -15,33 +15,37 @@ import (
 const (
 	questionGenerationMaxInputChars = 600000
 	questionGenerationTimeout       = 10 * time.Minute
-	questionGenerationPrompt        = "prompt-question-generator-v1.md"
+	questionGenerationBatchTimeout  = time.Hour
+	questionGenerationPrompt        = "prompt-question-generator-search-metrics-v1.md"
 )
 
 type questionGenerationRequest struct {
-	InputRecordID int64  `json:"input_record_id"`
-	Purpose       string `json:"purpose"`
-	Description   string `json:"description"`
-	OneHopCount   *int   `json:"one_hop_count"`
-	TwoHopCount   *int   `json:"two_hop_count"`
-	MultiHopCount *int   `json:"multi_hop_count"`
-	Lang          string `json:"lang"`
+	InputRecordID      int64  `json:"input_record_id"`
+	Purpose            string `json:"purpose"`
+	Description        string `json:"description"`
+	OneHopCount        *int   `json:"one_hop_count"`
+	TwoHopCount        *int   `json:"two_hop_count"`
+	MultiHopCount      *int   `json:"multi_hop_count"`
+	TotalOneHopCount   *int   `json:"total_one_hop_count"`
+	TotalTwoHopCount   *int   `json:"total_two_hop_count"`
+	TotalMultiHopCount *int   `json:"total_multi_hop_count"`
+	Lang               string `json:"lang"`
 }
 
 func (r *questionGenerationRequest) normalize() error {
 	r.Purpose, r.Description = strings.TrimSpace(r.Purpose), strings.TrimSpace(r.Description)
-	if r.InputRecordID <= 0 || r.Purpose == "" {
-		return fmt.Errorf("positive input_record_id and purpose are required")
+	if r.InputRecordID < 0 {
+		return fmt.Errorf("input_record_id must be positive or omitted")
 	}
-	if utf8.RuneCountInString(r.Purpose) > 2000 || utf8.RuneCountInString(r.Description) > 10000 {
-		return fmt.Errorf("purpose or description is too long")
+	if _, err := questionPurposePrompt(r.Purpose); err != nil {
+		return err
 	}
-	if r.Lang == "" {
-		r.Lang = "en"
+	if utf8.RuneCountInString(r.Description) > 10000 {
+		return fmt.Errorf("description is too long")
 	}
-	if r.Lang != "en" && r.Lang != "zh-cn" {
-		return fmt.Errorf("unsupported lang")
-	}
+	// Question languages are independently chosen by the server, rather than
+	// following the UI locale. Retain the request field for old clients.
+	r.Lang = "mixed"
 	total := 0
 	for _, p := range []**int{&r.OneHopCount, &r.TwoHopCount, &r.MultiHopCount} {
 		if *p == nil {
@@ -56,25 +60,63 @@ func (r *questionGenerationRequest) normalize() error {
 	if total == 0 {
 		return fmt.Errorf("request at least one question")
 	}
+	perDocument := []*int{r.OneHopCount, r.TwoHopCount, r.MultiHopCount}
+	for i, p := range []**int{&r.TotalOneHopCount, &r.TotalTwoHopCount, &r.TotalMultiHopCount} {
+		if r.InputRecordID > 0 {
+			n := *perDocument[i]
+			*p = &n
+			continue
+		}
+		if *p == nil {
+			n := 10
+			*p = &n
+		}
+		if **p < 0 || **p > 1000 {
+			return fmt.Errorf("each total count must be between 0 and 1000")
+		}
+		if **p > 0 && *perDocument[i] == 0 {
+			return fmt.Errorf("a positive total count requires a positive per-document count")
+		}
+	}
+	if *r.TotalOneHopCount+*r.TotalTwoHopCount+*r.TotalMultiHopCount == 0 {
+		return fmt.Errorf("request at least one question in total")
+	}
 	return nil
 }
 
+func questionPurposePrompt(purpose string) (string, error) {
+	switch purpose {
+	case "search_metrics":
+		return questionGenerationPrompt, nil
+	default:
+		return "", fmt.Errorf("unsupported purpose: select Search Metrics")
+	}
+}
+
 type questionGenerationRun struct {
-	ID            int64      `json:"id"`
-	InputRecordID int64      `json:"input_record_id"`
-	Purpose       string     `json:"purpose"`
-	Description   string     `json:"description"`
-	OneHopCount   int        `json:"one_hop_count"`
-	TwoHopCount   int        `json:"two_hop_count"`
-	MultiHopCount int        `json:"multi_hop_count"`
-	Lang          string     `json:"lang"`
-	Status        string     `json:"status"`
-	ErrorMsg      string     `json:"error_msg"`
-	ModelName     string     `json:"model_name"`
-	PromptName    string     `json:"prompt_name"`
-	SourceSHA256  string     `json:"source_sha256"`
-	CreatedAt     time.Time  `json:"created_at"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	ID                     int64      `json:"id"`
+	InputRecordID          int64      `json:"input_record_id"`
+	Purpose                string     `json:"purpose"`
+	Description            string     `json:"description"`
+	OneHopCount            int        `json:"one_hop_count"`
+	TwoHopCount            int        `json:"two_hop_count"`
+	MultiHopCount          int        `json:"multi_hop_count"`
+	TotalOneHopCount       int        `json:"total_one_hop_count"`
+	TotalTwoHopCount       int        `json:"total_two_hop_count"`
+	TotalMultiHopCount     int        `json:"total_multi_hop_count"`
+	GeneratedOneHopCount   int        `json:"generated_one_hop_count"`
+	GeneratedTwoHopCount   int        `json:"generated_two_hop_count"`
+	GeneratedMultiHopCount int        `json:"generated_multi_hop_count"`
+	DocumentsProcessed     int        `json:"documents_processed"`
+	ExpiresAt              time.Time  `json:"expires_at"`
+	Lang                   string     `json:"lang"`
+	Status                 string     `json:"status"`
+	ErrorMsg               string     `json:"error_msg"`
+	ModelName              string     `json:"model_name"`
+	PromptName             string     `json:"prompt_name"`
+	SourceSHA256           string     `json:"source_sha256"`
+	CreatedAt              time.Time  `json:"created_at"`
+	FinishedAt             *time.Time `json:"finished_at,omitempty"`
 }
 
 type questionEvidence struct {
@@ -92,6 +134,11 @@ type generatedQuestion struct {
 	ReasoningSteps []string           `json:"reasoning_steps"`
 	StepLineIDs    [][]int            `json:"step_line_ids"`
 	Evidence       []questionEvidence `json:"evidence"`
+	SetNo          int                `json:"set_no"`
+	Lang           string             `json:"lang"`
+	MetricID       string             `json:"metric_id"`
+	MetricSnapshot json.RawMessage    `json:"metric_snapshot,omitempty"`
+	SourceSHA256   string             `json:"source_sha256"`
 }
 
 // buildQuestionGenerationSource uses the entire canonical file and preserves its
@@ -142,6 +189,8 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			ReasoningSteps []string `json:"reasoning_steps"`
 			LineIDs        []int    `json:"line_ids"`
 			StepLineIDs    [][]int  `json:"step_line_ids"`
+			SetNo          int      `json:"set_no"`
+			Lang           string   `json:"lang"`
 		} `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &output); err != nil {
@@ -179,8 +228,9 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			cited[id] = true
 			evidence = append(evidence, questionEvidence{LineID: id, Text: text})
 		}
-		if len(cited) < minimum {
-			return nil, fmt.Errorf("question %d lacks distinct source lines for its hop type", i+1)
+		// Several independently evidenced table facts can share one canonical line.
+		if len(cited) == 0 {
+			return nil, fmt.Errorf("question %d lacks source evidence", i+1)
 		}
 		used := map[int]bool{}
 		for step, text := range q.ReasoningSteps {
@@ -199,7 +249,7 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			return nil, fmt.Errorf("question %d has evidence unused by its reasoning", i+1)
 		}
 		counts[q.HopType]++
-		questions = append(questions, generatedQuestion{InputRecordID: req.InputRecordID, HopType: q.HopType, Question: q.Question, Answer: q.Answer, ReasoningSteps: q.ReasoningSteps, StepLineIDs: q.StepLineIDs, Evidence: evidence})
+		questions = append(questions, generatedQuestion{InputRecordID: req.InputRecordID, HopType: q.HopType, Question: q.Question, Answer: q.Answer, ReasoningSteps: q.ReasoningSteps, StepLineIDs: q.StepLineIDs, Evidence: evidence, SetNo: q.SetNo, Lang: q.Lang})
 	}
 	for hop, n := range expected {
 		if counts[hop] != n {

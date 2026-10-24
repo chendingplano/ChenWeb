@@ -5,15 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
 )
@@ -21,7 +18,6 @@ import (
 // Dependencies are replaced in worker/handler tests; production uses the existing
 // canonical file loader and configured LLM provider client, including usage logs.
 var (
-	loadQuestionGenerationLines = docprocessing.LoadRecordLinesByID
 	newQuestionGenerationClient = func(modelRef string, logger ApiTypes.JimoLogger) (ApiTypes.LLMModelDef, metricJSONExtractor, error) {
 		cfg, client, err := newMetricReviewLLMClient(logger, modelRef)
 		return cfg, client, err
@@ -67,20 +63,29 @@ func StartQuestionGeneration(c echo.Context) error {
 		return questionGenerationError(c, http.StatusBadRequest, err.Error())
 	}
 	db, ctx := ApiTypes.ProjectDBHandle, c.Request().Context()
-	var exists bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.inputs WHERE id = $1)`, req.InputRecordID).Scan(&exists); err != nil {
-		logger.Error("question generation record lookup failed", "error", err)
-		return questionGenerationError(c, http.StatusInternalServerError, "failed to load input record")
-	}
-	if !exists {
-		return questionGenerationError(c, http.StatusNotFound, "input record not found")
+	if req.InputRecordID > 0 {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.inputs WHERE id = $1)`, req.InputRecordID).Scan(&exists); err != nil {
+			logger.Error("question generation record lookup failed", "error", err)
+			return questionGenerationError(c, http.StatusInternalServerError, "failed to load input record")
+		}
+		if !exists {
+			return questionGenerationError(c, http.StatusNotFound, "input record not found")
+		}
 	}
 	modelRef := envOrDefault("QUESTION_GEN_MODEL_NAME", "deepseek-flash-processor")
 	userID, _ := c.Get("question-generator-user-id").(string)
+	promptName, _ := questionPurposePrompt(req.Purpose)
+	timeout := questionGenerationTimeout
+	if req.InputRecordID == 0 {
+		timeout = questionGenerationBatchTimeout
+	}
 	run, err := scanQuestionRun(db.QueryRowContext(ctx, `INSERT INTO testbed.generated_question_runs
-  (input_record_id,purpose,description,one_hop_count,two_hop_count,multi_hop_count,lang,model_ref,prompt_name,created_by)
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+questionRunColumns,
-		req.InputRecordID, req.Purpose, req.Description, *req.OneHopCount, *req.TwoHopCount, *req.MultiHopCount, req.Lang, modelRef, questionGenerationPrompt, userID))
+  (input_record_id,purpose,description,one_hop_count,two_hop_count,multi_hop_count,lang,model_ref,prompt_name,created_by,
+   total_one_hop_count,total_two_hop_count,total_multi_hop_count,expires_at)
+  VALUES (NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW()+$14*INTERVAL '1 second') RETURNING `+questionRunColumns,
+		req.InputRecordID, req.Purpose, req.Description, *req.OneHopCount, *req.TwoHopCount, *req.MultiHopCount, req.Lang, modelRef, promptName, userID,
+		*req.TotalOneHopCount, *req.TotalTwoHopCount, *req.TotalMultiHopCount, int(timeout.Seconds())))
 	if err != nil {
 		logger.Error("question generation run insert failed", "record_id", req.InputRecordID, "error", err)
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to create generation run")
@@ -91,8 +96,12 @@ func StartQuestionGeneration(c echo.Context) error {
 }
 
 func ListQuestionGenerationRuns(c echo.Context) error {
-	id, err := strconv.ParseInt(c.QueryParam("input_record_id"), 10, 64)
-	if err != nil || id <= 0 {
+	var id int64
+	var err error
+	if raw := c.QueryParam("input_record_id"); raw != "" {
+		id, err = strconv.ParseInt(raw, 10, 64)
+	}
+	if err != nil || id < 0 {
 		return questionGenerationError(c, http.StatusBadRequest, "invalid input_record_id")
 	}
 	runs, err := loadQuestionRuns(c.Request().Context(), ApiTypes.ProjectDBHandle, id)
@@ -121,7 +130,11 @@ func GetQuestionGenerationRun(c echo.Context) error {
 
 func runQuestionGeneration(db *sql.DB, id int64, req questionGenerationRequest, modelRef, userID string) {
 	logger := loggerutil.CreateDefaultLogger("20261024-685")
-	ctx, cancel := context.WithTimeout(context.Background(), questionGenerationTimeout)
+	timeout := questionGenerationTimeout
+	if req.InputRecordID == 0 {
+		timeout = questionGenerationBatchTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	err := generateQuestionsForRun(ctx, db, id, req, modelRef, userID, logger)
 	if err == nil {
@@ -137,54 +150,4 @@ func runQuestionGeneration(db *sql.DB, id int64, req questionGenerationRequest, 
   SET status = 'failed', error_msg = $2, finished_at = NOW() WHERE id = $1 AND status = 'running'`, id, err.Error()); saveErr != nil {
 		logger.Error("save question generation failure failed", "run_id", id, "error", saveErr)
 	}
-}
-
-func generateQuestionsForRun(ctx context.Context, db *sql.DB, id int64, req questionGenerationRequest, modelRef, userID string, logger ApiTypes.JimoLogger) error {
-	lines, err := loadQuestionGenerationLines(ctx, db, req.InputRecordID)
-	if err != nil {
-		logger.Error("load question source failed", "run_id", id, "error", err)
-		return fmt.Errorf("cannot read this record's canonical line file")
-	}
-	sourceText, source, hash, err := buildQuestionGenerationSource(lines)
-	if err != nil {
-		return err
-	}
-	cfg, client, err := newQuestionGenerationClient(modelRef, logger)
-	if err != nil {
-		logger.Error("configure question model failed", "run_id", id, "error", err)
-		return fmt.Errorf("cannot configure question generation model %q", modelRef)
-	}
-	prompt, _, _, err := docprocessing.LoadPromptByRef(questionGenerationPrompt)
-	if err != nil {
-		logger.Error("load question prompt failed", "run_id", id, "error", err)
-		return fmt.Errorf("cannot load question generation prompt")
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE testbed.generated_question_runs SET source_sha256 = $2, model_name = $3 WHERE id = $1 AND status = 'running'`, id, hash, cfg.ModelName); err != nil {
-		return fmt.Errorf("cannot save source provenance")
-	}
-	input, err := json.Marshal(map[string]any{
-		"input_record_id": req.InputRecordID, "purpose": req.Purpose, "description": req.Description, "lang": req.Lang,
-		"counts":       map[string]int{"one_hop": *req.OneHopCount, "two_hop": *req.TwoHopCount, "multi_hop": *req.MultiHopCount},
-		"source_lines": json.RawMessage(sourceText),
-	})
-	if err != nil {
-		return fmt.Errorf("cannot format question generation input")
-	}
-	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		UserID: userID, PromptName: questionGenerationPrompt, PromptText: prompt, ModelName: cfg.ModelName,
-		InputText: string(input), CallReason: "question_generation", CallLoc: "20261024-685",
-	})
-	if err != nil {
-		logger.Error("question generation model call failed", "run_id", id, "error", err)
-		return fmt.Errorf("question generation model request failed or timed out")
-	}
-	questions, err := validateGeneratedQuestions(payload, req, source)
-	if err != nil {
-		return err
-	}
-	if err := saveGeneratedQuestions(ctx, db, id, req.InputRecordID, questions); err != nil {
-		logger.Error("save generated questions failed", "run_id", id, "error", err)
-		return fmt.Errorf("cannot save questions: run expired or database write failed")
-	}
-	return nil
 }

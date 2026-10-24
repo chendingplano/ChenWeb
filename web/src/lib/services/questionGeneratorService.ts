@@ -8,7 +8,14 @@ export type QuestionRun = {
 	one_hop_count: number;
 	two_hop_count: number;
 	multi_hop_count: number;
-	lang: 'en' | 'zh-cn';
+	total_one_hop_count: number;
+	total_two_hop_count: number;
+	total_multi_hop_count: number;
+	generated_one_hop_count: number;
+	generated_two_hop_count: number;
+	generated_multi_hop_count: number;
+	documents_processed: number;
+	lang: 'mixed' | 'en' | 'zh-cn';
 	status: 'running' | 'done' | 'failed';
 	error_msg: string;
 	model_name: string;
@@ -21,6 +28,11 @@ export type GeneratedQuestion = {
 	id: number;
 	run_id: number;
 	input_record_id: number;
+	lang: 'en' | 'zh-cn';
+	metric_id: string;
+	metric_snapshot: Record<string, unknown>;
+	set_no: number;
+	source_sha256: string;
 	hop_type: 'one_hop' | 'two_hop' | 'multi_hop';
 	question: string;
 	answer: string;
@@ -28,7 +40,7 @@ export type GeneratedQuestion = {
 	step_line_ids?: number[][];
 	evidence: { line_id: number; text: string }[];
 };
-export type QuestionRequest = Pick<QuestionRun, 'input_record_id' | 'purpose' | 'description' | 'one_hop_count' | 'two_hop_count' | 'multi_hop_count' | 'lang'>;
+export type QuestionRequest = Pick<QuestionRun, 'input_record_id' | 'purpose' | 'description' | 'one_hop_count' | 'two_hop_count' | 'multi_hop_count' | 'total_one_hop_count' | 'total_two_hop_count' | 'total_multi_hop_count'>;
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 	const response = await fetch(url, { credentials: 'same-origin', ...options });
@@ -41,8 +53,8 @@ export function createQuestionRun(payload: QuestionRequest, signal?: AbortSignal
 		body: JSON.stringify(payload), signal
 	});
 }
-export function listQuestionRuns(recordID: number, signal?: AbortSignal) {
-	return request<{ runs: QuestionRun[] }>(`${BASE}?input_record_id=${recordID}`, { signal });
+export function listQuestionRuns(recordID?: number, signal?: AbortSignal) {
+	return request<{ runs: QuestionRun[] }>(recordID ? `${BASE}?input_record_id=${recordID}` : BASE, { signal });
 }
 export function getQuestionRun(runID: number, signal?: AbortSignal) {
 	return request<{ run: QuestionRun; questions: GeneratedQuestion[] }>(`${BASE}/${runID}`, { signal });

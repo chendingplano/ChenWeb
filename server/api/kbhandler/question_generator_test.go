@@ -30,11 +30,11 @@ func questionRequest(t *testing.T, body string) questionGenerationRequest {
 }
 
 func TestQuestionGenerationRequest(t *testing.T) {
-	req := questionRequest(t, `{"input_record_id":416,"purpose":"  Search benchmark ","description":" context "}`)
+	req := questionRequest(t, `{"input_record_id":416,"purpose":"  search_metrics ","description":" context "}`)
 	if err := req.normalize(); err != nil {
 		t.Fatal(err)
 	}
-	if *req.OneHopCount != 10 || *req.TwoHopCount != 10 || *req.MultiHopCount != 10 || req.Lang != "en" || req.Purpose != "Search benchmark" || req.Description != "context" {
+	if *req.OneHopCount != 10 || *req.TwoHopCount != 10 || *req.MultiHopCount != 10 || req.Lang != "mixed" || req.Purpose != "search_metrics" || req.Description != "context" {
 		t.Fatalf("incorrect defaults: %+v", req)
 	}
 	for _, body := range []string{
@@ -47,14 +47,14 @@ func TestQuestionGenerationRequest(t *testing.T) {
 			t.Errorf("accepted %s", body)
 		}
 	}
-	req = questionRequest(t, `{"input_record_id":1,"purpose":"x","one_hop_count":0,"lang":"zh-cn"}`)
+	req = questionRequest(t, `{"input_record_id":1,"purpose":"search_metrics","one_hop_count":0,"lang":"zh-cn"}`)
 	if err := req.normalize(); err != nil || *req.OneHopCount != 0 {
 		t.Fatalf("explicit zero: %+v %v", req, err)
 	}
 }
 
 func TestQuestionGenerationOutput(t *testing.T) {
-	req := questionRequest(t, `{"input_record_id":416,"purpose":"search","one_hop_count":1,"two_hop_count":1,"multi_hop_count":1}`)
+	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","one_hop_count":1,"two_hop_count":1,"multi_hop_count":1}`)
 	if err := req.normalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -125,10 +125,10 @@ func TestSaveGeneratedQuestionsAtomic(t *testing.T) {
 				mock.ExpectRollback()
 			} else {
 				insert.WillReturnResult(sqlmock.NewResult(1, 1))
-				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 0, 0).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectCommit()
 			}
-			err := saveGeneratedQuestions(context.Background(), db, 12, 416, qs)
+			err := saveGeneratedQuestions(context.Background(), db, 12, 416, qs, true)
 			if (err != nil) != fail {
 				t.Fatalf("error=%v fail=%v", err, fail)
 			}
@@ -143,9 +143,9 @@ func TestQuestionGenerationExpiredResultRollsBack(t *testing.T) {
 	db, mock := installPolicyDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO testbed.generated_questions").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 0, 0, 0).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
-	err := saveGeneratedQuestions(context.Background(), db, 12, 416, []generatedQuestion{{Question: "Q", Answer: "A"}})
+	err := saveGeneratedQuestions(context.Background(), db, 12, 416, []generatedQuestion{{Question: "Q", Answer: "A"}}, true)
 	if err == nil {
 		t.Fatal("late completion was accepted")
 	}
@@ -196,10 +196,10 @@ func TestStartQuestionGenerationPersistsBeforeLaunch(t *testing.T) {
 	for i := range columns {
 		columns[i] = strings.TrimSpace(columns[i])
 	}
-	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(416), "search", "context", 10, 10, 10, "en", "deepseek-flash-processor", questionGenerationPrompt, "admin").WillReturnRows(sqlmock.NewRows(columns).AddRow(12, 416, "search", "context", 10, 10, 10, "en", "running", "", "", questionGenerationPrompt, "", time.Now(), nil))
+	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(416), "search_metrics", "context", 10, 10, 10, "mixed", "deepseek-flash-processor", questionGenerationPrompt, "admin", 10, 10, 10, 600).WillReturnRows(sqlmock.NewRows(columns).AddRow(12, 416, "search_metrics", "context", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 10, 10, 10, 0, 0, 0, 0, time.Now().Add(time.Hour)))
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"input_record_id":416,"purpose":"search","description":"context"}`)), rec)
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"input_record_id":416,"purpose":"search_metrics","description":"context"}`)), rec)
 	c.Set("question-generator-user-id", "admin")
 	if err := StartQuestionGeneration(c); err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestQuestionGeneratorInvalidRequests(t *testing.T) {
 	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"input_record_id":416,"purpose":"x"}`)), rec)
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"input_record_id":416,"purpose":"search_metrics"}`)), rec)
 	if err := StartQuestionGeneration(c); err != nil {
 		t.Fatal(err)
 	}
@@ -242,13 +242,27 @@ func TestQuestionGeneratorInvalidRequests(t *testing.T) {
 
 func TestQuestionGeneratorWorkerPersistsSourceFailure(t *testing.T) {
 	db, mock := installPolicyDB(t)
-	original := loadQuestionGenerationLines
-	t.Cleanup(func() { loadQuestionGenerationLines = original })
+	original, originalMetrics, originalClient := loadQuestionGenerationLines, loadQuestionGenerationMetrics, newQuestionGenerationClient
+	t.Cleanup(func() {
+		loadQuestionGenerationLines, loadQuestionGenerationMetrics, newQuestionGenerationClient = original, originalMetrics, originalClient
+	})
+	promptDir, err := filepath.Abs("../../../prompts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROMPT_DIR", promptDir)
+	loadQuestionGenerationMetrics = func(context.Context, *sql.DB, int64) ([]metricReviewInputMetric, error) {
+		return []metricReviewInputMetric{{MetricID: "m1"}}, nil
+	}
+	newQuestionGenerationClient = func(string, ApiTypes.JimoLogger) (ApiTypes.LLMModelDef, metricJSONExtractor, error) {
+		return ApiTypes.LLMModelDef{ModelName: "fixture-model"}, nil, nil
+	}
 	loadQuestionGenerationLines = func(context.Context, *sql.DB, int64) ([]docprocessing.Line, error) {
 		return nil, fmt.Errorf("file missing")
 	}
+	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture-model").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "cannot read this record's canonical line file").WillReturnResult(sqlmock.NewResult(0, 1))
-	req := questionRequest(t, `{"input_record_id":416,"purpose":"search"}`)
+	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics"}`)
 	if err := req.normalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -268,8 +282,14 @@ func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
 	for _, modelFails := range []bool{false, true} {
 		t.Run(fmt.Sprint(modelFails), func(t *testing.T) {
 			db, mock := installPolicyDB(t)
-			originalLines, originalClient := loadQuestionGenerationLines, newQuestionGenerationClient
-			t.Cleanup(func() { loadQuestionGenerationLines, newQuestionGenerationClient = originalLines, originalClient })
+			originalLines, originalClient, originalMetrics, originalRand := loadQuestionGenerationLines, newQuestionGenerationClient, loadQuestionGenerationMetrics, questionGenerationRandomInt
+			t.Cleanup(func() {
+				loadQuestionGenerationLines, newQuestionGenerationClient, loadQuestionGenerationMetrics, questionGenerationRandomInt = originalLines, originalClient, originalMetrics, originalRand
+			})
+			loadQuestionGenerationMetrics = func(context.Context, *sql.DB, int64) ([]metricReviewInputMetric, error) {
+				return []metricReviewInputMetric{{MetricID: "m1", SourceLineSpans: json.RawMessage(`["7"]`)}}, nil
+			}
+			questionGenerationRandomInt = func(n int) int { return n - 1 }
 			promptDir, err := filepath.Abs("../../../prompts")
 			if err != nil {
 				t.Fatal(err)
@@ -290,38 +310,38 @@ func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
 						t.Errorf("missing call provenance: %+v", in)
 					}
 					var input struct {
-						Purpose     string             `json:"purpose"`
-						Description string             `json:"description"`
-						Lang        string             `json:"lang"`
-						SourceLines []questionEvidence `json:"source_lines"`
+						Purpose     string              `json:"purpose"`
+						Description string              `json:"description"`
+						Sets        []metricQuestionSet `json:"sets"`
+						SourceLines []questionEvidence  `json:"source_lines"`
 					}
 					if err := json.Unmarshal([]byte(in.InputText), &input); err != nil {
 						t.Fatal(err)
 					}
-					if input.Purpose != "evaluate retrieval" || input.Description != "weights" || input.Lang != "zh-cn" || len(input.SourceLines) != 1 || input.SourceLines[0].LineID != 7 {
+					if input.Purpose != "search_metrics" || input.Description != "weights" || len(input.Sets) != 1 || input.Sets[0].Metric.MetricID != "m1" || input.Sets[0].Questions[0].Lang != "zh-cn" || len(input.SourceLines) != 1 || input.SourceLines[0].LineID != 7 {
 						t.Errorf("wrong model input: %+v", input)
 					}
 					if modelFails {
 						return nil, fmt.Errorf("upstream failure")
 					}
 					var payload map[string]any
-					if err := json.Unmarshal([]byte(`{"questions":[{"hop_type":"one_hop","question":"限重是多少？","answer":"20公斤","reasoning_steps":["读取重量上限。"],"line_ids":[7],"step_line_ids":[[7]]}]}`), &payload); err != nil {
+					if err := json.Unmarshal([]byte(`{"questions":[{"set_no":1,"lang":"zh-cn","hop_type":"one_hop","question":"限重是多少？","answer":"20公斤","reasoning_steps":["读取重量上限。"],"line_ids":[7],"step_line_ids":[[7]]}]}`), &payload); err != nil {
 						t.Fatal(err)
 					}
 					return payload, nil
 				}), nil
 			}
-			req := questionRequest(t, `{"input_record_id":416,"purpose":"evaluate retrieval","description":"weights","lang":"zh-cn","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
+			req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","description":"weights","lang":"zh-cn","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
 			if err := req.normalize(); err != nil {
 				t.Fatal(err)
 			}
-			mock.ExpectExec("UPDATE testbed.generated_question_runs SET source_sha256").WithArgs(int64(12), sqlmock.AnyArg(), "fixture-model").WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture-model").WillReturnResult(sqlmock.NewResult(0, 1))
 			if modelFails {
 				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "question generation model request failed or timed out").WillReturnResult(sqlmock.NewResult(0, 1))
 			} else {
 				mock.ExpectBegin()
-				mock.ExpectExec("INSERT INTO testbed.generated_questions").WithArgs(int64(12), int64(416), "one_hop", "限重是多少？", "20公斤", `["读取重量上限。"]`, `[[7]]`, `[{"line_id":7,"text":"The limit is 20 kg."}]`).WillReturnResult(sqlmock.NewResult(1, 1))
-				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("INSERT INTO testbed.generated_questions").WithArgs(int64(12), int64(416), "one_hop", "限重是多少？", "20公斤", `["读取重量上限。"]`, `[[7]]`, `[{"line_id":7,"text":"The limit is 20 kg."}]`, "m1", sqlmock.AnyArg(), 1, "zh-cn", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), true, 1, 0, 0).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectCommit()
 			}
 			runQuestionGeneration(db, 12, req, "fixture", "admin")
@@ -339,7 +359,7 @@ func TestQuestionGeneratorRunReadHandlers(t *testing.T) {
 		cols[i] = strings.TrimSpace(cols[i])
 	}
 	mock.ExpectExec("UPDATE testbed.generated_question_runs").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("SELECT .* FROM testbed.generated_question_runs").WithArgs(int64(416)).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, 416, "search", "", 1, 0, 0, "en", "done", "", "model", questionGenerationPrompt, "hash", time.Now(), time.Now()))
+	mock.ExpectQuery("SELECT .* FROM testbed.generated_question_runs").WithArgs(int64(416)).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, 416, "search", "", 1, 0, 0, "en", "done", "", "model", questionGenerationPrompt, "hash", time.Now(), time.Now(), 1, 0, 0, 1, 0, 0, 1, time.Now().Add(time.Hour)))
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/?input_record_id=416", nil), rec)

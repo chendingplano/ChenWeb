@@ -9,20 +9,26 @@ import (
 
 const questionRunColumns = `id, input_record_id, purpose, description,
  one_hop_count, two_hop_count, multi_hop_count, lang, status, error_msg,
- model_name, prompt_name, source_sha256, created_at, finished_at`
+ model_name, prompt_name, source_sha256, created_at, finished_at,
+ total_one_hop_count, total_two_hop_count, total_multi_hop_count,
+ generated_one_hop_count, generated_two_hop_count, generated_multi_hop_count, documents_processed, expires_at`
 
 func scanQuestionRun(row interface{ Scan(...any) error }) (questionGenerationRun, error) {
 	var run questionGenerationRun
-	err := row.Scan(&run.ID, &run.InputRecordID, &run.Purpose, &run.Description,
+	var inputID sql.NullInt64
+	err := row.Scan(&run.ID, &inputID, &run.Purpose, &run.Description,
 		&run.OneHopCount, &run.TwoHopCount, &run.MultiHopCount, &run.Lang, &run.Status,
-		&run.ErrorMsg, &run.ModelName, &run.PromptName, &run.SourceSHA256, &run.CreatedAt, &run.FinishedAt)
+		&run.ErrorMsg, &run.ModelName, &run.PromptName, &run.SourceSHA256, &run.CreatedAt, &run.FinishedAt,
+		&run.TotalOneHopCount, &run.TotalTwoHopCount, &run.TotalMultiHopCount,
+		&run.GeneratedOneHopCount, &run.GeneratedTwoHopCount, &run.GeneratedMultiHopCount, &run.DocumentsProcessed, &run.ExpiresAt)
+	run.InputRecordID = inputID.Int64
 	return run, err
 }
 
 func expireQuestionRuns(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `UPDATE testbed.generated_question_runs
  SET status = 'failed', error_msg = 'generation interrupted or timed out', finished_at = NOW()
- WHERE status = 'running' AND created_at <= NOW() - INTERVAL '10 minutes'`)
+ WHERE status = 'running' AND expires_at <= NOW()`)
 	return err
 }
 
@@ -31,7 +37,9 @@ func loadQuestionRuns(ctx context.Context, db *sql.DB, recordID int64) ([]questi
 		return nil, err
 	}
 	rows, err := db.QueryContext(ctx, `SELECT `+questionRunColumns+` FROM testbed.generated_question_runs
- WHERE input_record_id = $1 ORDER BY id DESC LIMIT 50`, recordID)
+ WHERE $1::bigint = 0 OR input_record_id = $1 OR (input_record_id IS NULL AND EXISTS
+ (SELECT 1 FROM testbed.generated_questions q WHERE q.run_id = generated_question_runs.id AND q.input_record_id = $1))
+ ORDER BY id DESC LIMIT 50`, recordID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +64,7 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 		return run, nil, err
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id, run_id, input_record_id, hop_type, question, answer,
- reasoning_steps, step_line_ids, evidence FROM testbed.generated_questions WHERE run_id = $1 ORDER BY id`, id)
+ reasoning_steps, step_line_ids, evidence, metric_id, metric_snapshot, set_no, lang, source_sha256 FROM testbed.generated_questions WHERE run_id = $1 ORDER BY id`, id)
 	if err != nil {
 		return run, nil, err
 	}
@@ -64,8 +72,8 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 	questions := []generatedQuestion{}
 	for rows.Next() {
 		var q generatedQuestion
-		var steps, stepLines, evidence []byte
-		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence); err != nil {
+		var steps, stepLines, evidence, metricSnapshot []byte
+		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256); err != nil {
 			return run, nil, err
 		}
 		for _, v := range []struct {
@@ -76,20 +84,30 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 				return run, nil, err
 			}
 		}
+		q.MetricSnapshot = json.RawMessage(metricSnapshot)
 		questions = append(questions, q)
 	}
 	return run, questions, rows.Err()
 }
 
-// All questions and the terminal state commit together. A worker that loses the
-// race to expiration cannot resurrect an interrupted run or save partial output.
-func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int64, questions []generatedQuestion) error {
+// Each document and its progress commit together. A late worker cannot change a
+// terminal run; documents committed before a later failure remain available.
+func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int64, questions []generatedQuestion, done bool) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	oneHop, twoHop, multiHop := 0, 0, 0
 	for _, q := range questions {
+		switch q.HopType {
+		case "one_hop":
+			oneHop++
+		case "two_hop":
+			twoHop++
+		case "multi_hop":
+			multiHop++
+		}
 		steps, err := json.Marshal(q.ReasoningSteps)
 		if err != nil {
 			return err
@@ -102,14 +120,27 @@ func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int
 		if err != nil {
 			return err
 		}
+		metricSnapshot := q.MetricSnapshot
+		if len(metricSnapshot) == 0 {
+			metricSnapshot = json.RawMessage(`{}`)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.generated_questions
-   (run_id, input_record_id, hop_type, question, answer, reasoning_steps, step_line_ids, evidence)
-   VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb)`, runID, recordID, q.HopType, q.Question, q.Answer, string(steps), string(stepLines), string(evidence)); err != nil {
+   (run_id, input_record_id, hop_type, question, answer, reasoning_steps, step_line_ids, evidence,
+    metric_id, metric_snapshot, set_no, lang, source_sha256)
+   VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11,$12,$13)`,
+			runID, recordID, q.HopType, q.Question, q.Answer, string(steps), string(stepLines), string(evidence),
+			q.MetricID, string(metricSnapshot), q.SetNo, q.Lang, q.SourceSHA256); err != nil {
 			return err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE testbed.generated_question_runs SET status = 'done', finished_at = NOW()
- WHERE id = $1 AND status = 'running' AND created_at > NOW() - INTERVAL '10 minutes'`, runID)
+	result, err := tx.ExecContext(ctx, `UPDATE testbed.generated_question_runs SET
+ status = CASE WHEN $2 THEN 'done' ELSE 'running' END,
+ finished_at = CASE WHEN $2 THEN NOW() ELSE finished_at END,
+ generated_one_hop_count = generated_one_hop_count + $3,
+ generated_two_hop_count = generated_two_hop_count + $4,
+ generated_multi_hop_count = generated_multi_hop_count + $5,
+ documents_processed = documents_processed + 1
+ WHERE id = $1 AND status = 'running' AND expires_at > NOW()`, runID, done, oneHop, twoHop, multiHop)
 	if err != nil {
 		return err
 	}
