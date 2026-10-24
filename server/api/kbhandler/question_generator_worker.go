@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -28,6 +29,55 @@ type questionDocumentMetadata struct {
 	FileName      string          `json:"file_name"`
 	PublishDate   string          `json:"publish_date"`
 	Metadata      json.RawMessage `json:"metadata"`
+}
+
+// MarshalJSON removes empty metadata only from model input, leaving stored data
+// untouched. Decode numbers losslessly before traversing the nested metadata.
+func (meta questionDocumentMetadata) MarshalJSON() ([]byte, error) {
+	type plainMetadata questionDocumentMetadata
+	raw, err := json.Marshal(plainMetadata(meta))
+	if err != nil {
+		return nil, err
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(pruneQuestionMetadata(value))
+}
+
+func pruneQuestionMetadata(value any) any {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+	case map[string]any:
+		for key, item := range v {
+			if cleaned := pruneQuestionMetadata(item); cleaned != nil {
+				v[key] = cleaned
+			} else {
+				delete(v, key)
+			}
+		}
+		if len(v) == 0 {
+			return nil
+		}
+	case []any:
+		items := make([]any, 0, len(v))
+		for _, item := range v {
+			if cleaned := pruneQuestionMetadata(item); cleaned != nil {
+				items = append(items, cleaned)
+			}
+		}
+		if len(items) == 0 {
+			return nil
+		}
+		return items
+	}
+	return value
 }
 
 func readQuestionDocumentMetadata(ctx context.Context, db *sql.DB, id int64) (questionDocumentMetadata, error) {

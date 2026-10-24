@@ -8,6 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,6 +17,35 @@ import (
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
+
+func TestQuestionDocumentMetadataOmitsEmptyFields(t *testing.T) {
+	for _, raw := range []string{
+		`{"doc_no":"","authors":[],"metadata":{"notes":["Keep this",null," ",{},[]],"source":{"url":null},"version":null,"keywords":[],"language":"zh","nested":{"empty":{"items":[null,""]}},"zero":0,"flag":false,"large":9007199254740993}}`,
+		`{}`, `null`,
+	} {
+		meta := questionDocumentMetadata{InputRecordID: 753, Title: "Title", DocNo: " \t ", Metadata: json.RawMessage(raw)}
+		body, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"input_record_id": float64(753), "title": "Title"}
+		if strings.Contains(raw, "Keep this") {
+			want["metadata"] = map[string]any{"metadata": map[string]any{
+				"notes": []any{"Keep this"}, "language": "zh", "zero": float64(0), "flag": false, "large": float64(9007199254740993),
+			}}
+			if !strings.Contains(string(body), "9007199254740993") {
+				t.Fatalf("metadata number lost precision: %s", body)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("metadata=%s; want %+v", body, want)
+		}
+	}
+}
 
 func TestMetricQuestionPromptEnvironment(t *testing.T) {
 	t.Setenv("PROMPT_GENERATE_METRIC_QUESTIONS", "prompt-custom-metric-questions-v1.md")
