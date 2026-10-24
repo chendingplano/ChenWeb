@@ -143,6 +143,31 @@ R@10 except Reach, which is the share of queries whose target is among the 400 c
   BM25 by design. Queries that use exact terms (codes, symbols, defined names such as "MPE")
   would favour BM25, and a real query log is needed before re-tuning production.
 
+### BM25 with LLM-extracted query keywords (`s9_keywords.py`, 2026-10-24)
+
+Instead of matching any word of the raw query, an LLM (DeepSeek Flash, reasoning off,
+`prompt-catidx-query-keywords-v1.md`) turns each query into 2 to 6 keywords, each in English and
+Chinese (7.6 strings per query on average), dropping question words and filler. Two BM25 forms:
+"any" joins the keywords' words with `|||`; "each" requires every word of one keyword to match
+(`&&&`) and ORs the keywords, so metrics matching more keywords score higher. Same testbed table,
+vector list and fusion as above; vector alone is R@10 0.95.
+
+| BM25 query | Matched (median) | BM25 R@10 | English | Chinese | Hybrid w=1.0 | w=0.5 | w=0.25 |
+|---|---|---|---|---|---|---|---|
+| Raw query, any word (production) | 2,660 (all) | 0.47 | 0.20 | 0.74 | 0.85 | 0.94 | 0.94 |
+| Keywords, any word | 2,660 | 0.84 | 0.80 | 0.88 | 0.93 | 0.94 | 0.95 |
+| **Keywords, each keyword in full** | **162** | **0.86** | **0.82** | **0.90** | 0.93 | **0.96** | 0.95 |
+
+- **Keywords nearly double BM25** (0.47 → 0.86) and fix English queries (0.20 → 0.82). The raw
+  query's filler words ("how", "much") were matching everything.
+- **"Each keyword in full" also narrows the match set** from all 2,660 metrics to a median of 162,
+  which is what makes BM25 a usable candidate filter.
+- **Hybrid with keywords at BM25 weight 0.5 is the first configuration to beat vector alone**
+  (0.96 vs 0.95). The margin is about one query in 212, so treat it as "no longer harmful" rather
+  than a proven gain.
+- **Cost:** one LLM call per search, about 1.2 s and about 60 completion tokens with reasoning off.
+- The paraphrased-query caveat above still applies.
+
 Not tested: cell sizes at millions of metrics (16 documents are too few to extrapolate),
 queries written by people, a hybrid of ANN search with category filters or boosts.
 
@@ -163,6 +188,7 @@ queries written by people, a hybrid of ANN search with category filters or boost
 | `s6_misses.py` | Why the pair filter drops targets |
 | `s7_budget.py` | Recall at a fixed scan budget vs k-means IVF |
 | `s8_hybrid.py` | Production hybrid search (BM25 + vector, RRF) on testbed copies, with and without facet keys |
+| `s9_keywords.py` | BM25 with LLM-extracted query keywords, alone and fused with the vector list |
 | `datasets/queries-v1.json` | The 212 queries and their target metric IDs |
 | `datasets/ics-alt-labels-v1.jsonl` | The LLM-written ICS alternative labels |
 | `results/` | Evaluation outputs (file names give metric domain, query domain, facet version) |
@@ -188,6 +214,7 @@ EXP_WALK=v2 .venv/bin/python s3b_walk.py queries && EXP_WALK=v2 .venv/bin/python
 EXP_MDOMAIN=walk_v2 EXP_QDOMAIN=walk_v2 EXP_FACET=v2 .venv/bin/python s5_eval.py
 EXP_MDOMAIN=walk_v2 EXP_QDOMAIN=walk_v2 EXP_FACET=v2 .venv/bin/python s7_budget.py
 .venv/bin/python s8_hybrid.py   # rebuilds testbed.catidx_hybrid_base / _facets
+.venv/bin/python s9_keywords.py # needs testbed.catidx_hybrid_base from s8
 ```
 
 LLM results are cached per item in `out/*.jsonl`, so a rerun only calls models for new items;

@@ -1,0 +1,10 @@
+queries: 212  table: testbed.catidx_hybrid_base  avg keywords (en+zh): 7.6  single keyword call: 1.2 s
+
+vector alone: R@10 0.953  MRR 0.823
+
+BM25 query  matches   BM25     en     zh  rrf w=1.0  rrf w=0.5 rrf w=0.25
+raw            2660  0.467  0.198  0.736      0.854      0.939      0.943
+kw-any         2660  0.840  0.802  0.877      0.925      0.939      0.948
+kw-each         162  0.858  0.821  0.896      0.925      0.958      0.948
+
+(matches = median number of metrics the BM25 query matches; other columns R@10)
