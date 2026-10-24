@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
@@ -32,6 +32,7 @@
 	let detailController: AbortController | undefined;
 	let startController: AbortController | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let detailPanel = $state<HTMLElement | undefined>();
 
 	let groupScores = $derived(scores.filter((s) => s.group === scoreGroup));
 	let running = $derived(runs.some((r) => r.status === 'running'));
@@ -108,6 +109,14 @@
 		} catch {
 			if (alive && !controller.signal.aborted) detailError = true;
 		}
+	}
+
+	// Opens a run's details and scrolls to them.
+	async function view(id: number) {
+		await loadRun(id);
+		await tick();
+		if (alive && selected?.id === id)
+			detailPanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
 	async function start(event: SubmitEvent) {
@@ -191,13 +200,14 @@
 							<th>{m.hsb_col_progress()}</th>
 							<th>{m.hsb_col_hybrid_r10()}</th>
 							<th>{m.qg_description()}</th>
+							<th><span class="sr-only">{m.hsb_col_actions()}</span></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each runs as run (run.id)}
 							<tr class:active={selected?.id === run.id}>
 								<td
-									><button type="button" class="link" onclick={() => void loadRun(run.id)}
+									><button type="button" class="link" onclick={() => void view(run.id)}
 										>{m.qg_run_number({ id: run.id })}</button
 									></td
 								>
@@ -206,6 +216,13 @@
 								<td>{m.qg_progress_count({ count: run.done_count, total: run.question_count })}</td>
 								<td class="num">{ratio(run.hybrid_r10)}</td>
 								<td>{run.description}</td>
+								<td class="actions"
+									><button
+										type="button"
+										aria-label={m.hsb_view_run({ id: run.id })}
+										onclick={() => void view(run.id)}>{m.hsb_view()}</button
+									></td
+								>
 							</tr>
 						{/each}
 					</tbody>
@@ -215,7 +232,7 @@
 	</section>
 
 	{#if selected}
-		<section class="panel detail" aria-labelledby="hsb-detail-title">
+		<section class="panel detail" aria-labelledby="hsb-detail-title" bind:this={detailPanel}>
 			<div class="heading">
 				<h2 id="hsb-detail-title">{m.qg_run_number({ id: selected.id })}</h2>
 				<span class="badge">{statusLabel(selected.status)}</span>
@@ -486,6 +503,24 @@
 		border-color: #4f46e5;
 		padding: 11px 20px;
 		font-weight: 600;
+	}
+	.actions {
+		text-align: right;
+		white-space: nowrap;
+	}
+	.actions button {
+		padding: 4px 12px;
+	}
+	.detail {
+		scroll-margin-top: 16px;
+	}
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
 	}
 	.link {
 		border: none;
