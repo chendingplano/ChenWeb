@@ -39,7 +39,7 @@ func installQuestionMetadataFixture(t *testing.T) {
 
 func TestMetricQuestionLoadsDocumentMetadata(t *testing.T) {
 	db, mock := installPolicyDB(t)
-	mock.ExpectQuery("SELECT id,").WithArgs(int64(416)).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "doc_no", "file_name", "publish_date", "doc_metadata"}).AddRow(416, "Document title", "DOC-416", "document.pdf", "2026-10-24", []byte(`{"authors":["Author"],"language":"zh-cn"}`)))
+	mock.ExpectQuery(`COALESCE\(doc_metadata,'\{\}'::jsonb\) - 'drafting_persons' - 'drafting_organizations'`).WithArgs(int64(416)).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "doc_no", "file_name", "publish_date", "doc_metadata"}).AddRow(416, "Document title", "DOC-416", "document.pdf", "2026-10-24", []byte(`{"authors":["Author"],"language":"zh-cn"}`)))
 	meta, err := readQuestionDocumentMetadata(context.Background(), db, 416)
 	if err != nil || meta.InputRecordID != 416 || meta.Title != "Document title" || meta.DocNo != "DOC-416" || meta.FileName != "document.pdf" || !strings.Contains(string(meta.Metadata), "Author") {
 		t.Fatalf("metadata=%+v error=%v", meta, err)

@@ -34,7 +34,8 @@ func readQuestionDocumentMetadata(ctx context.Context, db *sql.DB, id int64) (qu
 	var meta questionDocumentMetadata
 	var raw []byte
 	err := db.QueryRowContext(ctx, `SELECT id, COALESCE(title,''), COALESCE(doc_no,''),
- COALESCE(file_name,''), COALESCE(publish_date::text,''), COALESCE(doc_metadata,'{}'::jsonb)
+ COALESCE(file_name,''), COALESCE(publish_date::text,''),
+ COALESCE(doc_metadata,'{}'::jsonb) - 'drafting_persons' - 'drafting_organizations'
  FROM kb.inputs WHERE id = $1`, id).Scan(&meta.InputRecordID, &meta.Title, &meta.DocNo, &meta.FileName, &meta.PublishDate, &raw)
 	meta.Metadata = json.RawMessage(raw)
 	return meta, err
