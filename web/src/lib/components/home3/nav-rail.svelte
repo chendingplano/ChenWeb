@@ -341,7 +341,18 @@
 					label: m.nav_sysadmin_benchmark(),
 					children: [
 						{ id: 'sysadmin-benchmark-setup', label: m.nav_sysadmin_benchmark_setup() },
-						{ id: 'sysadmin-question-generator', label: m.nav_sysadmin_question_generator() }
+						{ id: 'sysadmin-question-generator', label: m.nav_sysadmin_question_generator() },
+						...(pageKey === 'development'
+							? [
+									{
+										id: 'sysadmin-hybrid-search-benchmark',
+										label: m.nav_sysadmin_hybrid_search_benchmark(),
+										children: [
+											{ id: 'sysadmin-hybrid-search-benchmark-run', label: m.nav_sysadmin_hybrid_search_benchmark_run() }
+										]
+									}
+								]
+							: [])
 					]
 				},
 				{

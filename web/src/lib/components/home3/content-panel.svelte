@@ -57,6 +57,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import AccessControlsView from '$lib/components/home3/access-controls-view.svelte';
 	import BenchmarkSetupView from '$lib/components/home3/benchmark-setup-view.svelte';
 	import QuestionGeneratorView from '$lib/components/home3/question-generator-view.svelte';
+	import HybridSearchBenchmarkView from '$lib/components/home3/hybrid-search-benchmark-view.svelte';
 	import PiHarnessAdminView from '$lib/components/home3/pi-harness-admin-view.svelte';
 	import PageConfigAdminView from '$lib/components/home3/page-config-admin-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
@@ -417,6 +418,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<AccessControlsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-question-generator'}
 			<QuestionGeneratorView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-hybrid-search-benchmark-run'}
+			<HybridSearchBenchmarkView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-benchmark-setup'}
 			<BenchmarkSetupView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-page-config'}
