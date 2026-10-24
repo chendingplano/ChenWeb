@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import QuestionRecord from './question-record.svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
@@ -74,8 +75,6 @@
 		lang === 'en' ? m.qg_english() : lang === 'zh-cn' ? m.qg_chinese() : lang || m.qg_mixed();
 	const statusLabel = (status: QuestionRun['status']) =>
 		status === 'running' ? m.qg_running() : status === 'done' ? m.qg_done() : m.qg_failed();
-	const hopLabel = (hop: GeneratedQuestion['hop_type']) =>
-		hop === 'one_hop' ? m.qg_one_hop() : hop === 'two_hop' ? m.qg_two_hop() : m.qg_multi_hop();
 	const progress = (run: QuestionRun, hop: GeneratedQuestion['hop_type']) =>
 		m.qg_progress_count({
 			count: run[`generated_${hop}_count`] ?? runQuestions.filter((q) => q.hop_type === hop).length,
@@ -307,48 +306,13 @@
 		{:else if loadError}<p class="error" role="alert">{m.qg_load_error()}</p>
 			<button onclick={() => void loadQuestions(page)}>{m.qg_retry()}</button>
 		{:else if questions.length === 0}<p class="empty">{m.qg_no_questions()}</p>
-		{:else}{#each questions as question, index (question.id)}
-				<article class="question">
-					<div class="question-heading">
-						<span class="index">{(page - 1) * pageSize + index + 1}</span><span class="badge"
-							>{hopLabel(question.hop_type)}</span
-						><span class="badge">{languageLabel(question.lang)}</span><small
-							>{m.qg_source_record({ id: question.input_record_id })}</small
-						>{#if question.metric_id}<small>{m.qg_metric_id({ id: question.metric_id })}</small
-							>{/if}
-					</div>
-					<div class="question-meta">
-						<span>{m.qg_run_number({ id: question.run_id })}</span><span
-							>{purposeLabel(question.purpose)}</span
-						><span>{m.qg_model({ value: question.model_name })}</span><span
-							>{m.qg_prompt({ value: question.prompt_name })}</span
-						><time datetime={question.created_at}
-							>{new Date(question.created_at).toLocaleString(getLocale())}</time
-						>
-					</div>
-					<h3>{question.question}</h3>
-					<h4>{m.qg_answer()}</h4>
-					<p class="answer">{question.answer}</p>
-					<details>
-						<summary>{m.qg_reasoning_evidence()}</summary>
-						<h4>{m.qg_reasoning()}</h4>
-						<ol>
-							{#each question.reasoning_steps ?? [] as step, stepIndex}<li>
-									{step}{#if question.step_line_ids?.[stepIndex]?.length}<small class="step-lines"
-											>{m.qg_step_lines({
-												lines: question.step_line_ids[stepIndex].join(', ')
-											})}</small
-										>{/if}
-								</li>{/each}
-						</ol>
-						<h4>{m.qg_evidence()}</h4>
-						{#each question.evidence ?? [] as evidence}<blockquote>
-								<span>{m.qg_source_line({ line: evidence.line_id })}</span>
-								<p>{evidence.text}</p>
-							</blockquote>{/each}
-					</details>
-				</article>
-			{/each}{/if}
+		{:else}
+			<div class="question-grid">
+				{#each questions as question, index (question.id)}
+					<QuestionRecord {question} index={(page - 1) * pageSize + index + 1} />
+				{/each}
+			</div>
+		{/if}
 		<nav class="pagination" aria-label={m.qg_pagination()}>
 			<button disabled={loading || page <= 1} onclick={() => void loadQuestions(page - 1)}
 				>{m.qg_previous()}</button
@@ -486,8 +450,7 @@
 	}
 	header p,
 	.hint,
-	.empty,
-	small {
+	.empty {
 		color: var(--muted);
 	}
 	.eyebrow {
@@ -615,6 +578,24 @@
 	}
 	.results {
 		margin-top: 20px;
+		container-type: inline-size;
+	}
+	.question-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 16px;
+		align-items: start;
+		margin-top: 24px;
+	}
+	@container (max-width: 1100px) {
+		.question-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@container (max-width: 720px) {
+		.question-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 	.result-meta {
 		display: flex;
@@ -624,65 +605,11 @@
 		font-size: 12px;
 		color: var(--muted);
 	}
-	.question {
-		border-top: 1px solid var(--line);
-		margin-top: 24px;
-		padding-top: 24px;
-	}
-	.question-heading {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 12px;
-	}
-	.index {
-		font-size: 12px;
-		color: var(--muted);
-		font-variant-numeric: tabular-nums;
-	}
-	h3 {
-		font-size: 17px;
-		font-weight: 600;
-		line-height: 1.6;
-		margin: 10px 0 20px;
-	}
-	h4 {
-		color: var(--muted);
-		font-size: 12px;
-		font-weight: 600;
-		margin: 16px 0 8px;
-	}
-	.answer {
-		white-space: pre-wrap;
-	}
 	summary {
 		cursor: pointer;
 		font-size: 13px;
 		color: var(--accent);
 		margin: 16px 0;
-	}
-	.step-lines {
-		display: block;
-	}
-	ol {
-		padding-left: 24px;
-	}
-	li {
-		padding: 4px 0;
-		line-height: 1.6;
-	}
-	blockquote {
-		border-left: 2px solid var(--accent);
-		padding: 4px 16px;
-		margin: 12px 0;
-		font-size: 13px;
-	}
-	blockquote span {
-		color: var(--muted);
-		font-size: 11px;
-	}
-	blockquote p {
-		white-space: pre-wrap;
 	}
 	pre {
 		white-space: pre-wrap;
@@ -745,18 +672,6 @@
 	.pagination {
 		color: var(--muted);
 		font-size: 12px;
-	}
-	.question-meta {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px 18px;
-		margin-top: 12px;
-		font-size: 11px;
-		color: var(--muted);
-		overflow-wrap: anywhere;
-	}
-	.question {
-		overflow-wrap: anywhere;
 	}
 	.pagination {
 		display: flex;

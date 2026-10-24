@@ -7324,5 +7324,12 @@
 	"qg_page_status": "Page {page} of {pages}",
 	"qg_close": "Close",
 	"qg_model": "Model: {value}",
-	"qg_prompt": "Prompt: {value}"
+	"qg_prompt": "Prompt: {value}",
+	"qg_question_number": "Question {number}",
+	"qg_field_question": "Question",
+	"qg_field_hop_type": "Hop type",
+	"qg_field_metric": "Metric ID",
+	"qg_field_model": "Model",
+	"qg_field_prompt": "Prompt",
+	"qg_field_created_at": "Created at"
 }

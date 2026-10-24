@@ -7324,5 +7324,12 @@
 	"qg_page_status": "第 {page} 页，共 {pages} 页",
 	"qg_close": "关闭",
 	"qg_model": "模型：{value}",
-	"qg_prompt": "提示词：{value}"
+	"qg_prompt": "提示词：{value}",
+	"qg_question_number": "问题 {number}",
+	"qg_field_question": "问题",
+	"qg_field_hop_type": "跳数类型",
+	"qg_field_metric": "指标 ID",
+	"qg_field_model": "模型",
+	"qg_field_prompt": "提示词",
+	"qg_field_created_at": "创建时间"
 }
