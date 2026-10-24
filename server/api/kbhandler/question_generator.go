@@ -1,0 +1,210 @@
+package kbhandler
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+)
+
+const (
+	questionGenerationMaxInputChars = 600000
+	questionGenerationTimeout       = 10 * time.Minute
+	questionGenerationPrompt        = "prompt-question-generator-v1.md"
+)
+
+type questionGenerationRequest struct {
+	InputRecordID int64  `json:"input_record_id"`
+	Purpose       string `json:"purpose"`
+	Description   string `json:"description"`
+	OneHopCount   *int   `json:"one_hop_count"`
+	TwoHopCount   *int   `json:"two_hop_count"`
+	MultiHopCount *int   `json:"multi_hop_count"`
+	Lang          string `json:"lang"`
+}
+
+func (r *questionGenerationRequest) normalize() error {
+	r.Purpose, r.Description = strings.TrimSpace(r.Purpose), strings.TrimSpace(r.Description)
+	if r.InputRecordID <= 0 || r.Purpose == "" {
+		return fmt.Errorf("positive input_record_id and purpose are required")
+	}
+	if utf8.RuneCountInString(r.Purpose) > 2000 || utf8.RuneCountInString(r.Description) > 10000 {
+		return fmt.Errorf("purpose or description is too long")
+	}
+	if r.Lang == "" {
+		r.Lang = "en"
+	}
+	if r.Lang != "en" && r.Lang != "zh-cn" {
+		return fmt.Errorf("unsupported lang")
+	}
+	total := 0
+	for _, p := range []**int{&r.OneHopCount, &r.TwoHopCount, &r.MultiHopCount} {
+		if *p == nil {
+			n := 10
+			*p = &n
+		}
+		if **p < 0 || **p > 50 {
+			return fmt.Errorf("each question count must be between 0 and 50")
+		}
+		total += **p
+	}
+	if total == 0 {
+		return fmt.Errorf("request at least one question")
+	}
+	return nil
+}
+
+type questionGenerationRun struct {
+	ID            int64      `json:"id"`
+	InputRecordID int64      `json:"input_record_id"`
+	Purpose       string     `json:"purpose"`
+	Description   string     `json:"description"`
+	OneHopCount   int        `json:"one_hop_count"`
+	TwoHopCount   int        `json:"two_hop_count"`
+	MultiHopCount int        `json:"multi_hop_count"`
+	Lang          string     `json:"lang"`
+	Status        string     `json:"status"`
+	ErrorMsg      string     `json:"error_msg"`
+	ModelName     string     `json:"model_name"`
+	PromptName    string     `json:"prompt_name"`
+	SourceSHA256  string     `json:"source_sha256"`
+	CreatedAt     time.Time  `json:"created_at"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+}
+
+type questionEvidence struct {
+	LineID int    `json:"line_id"`
+	Text   string `json:"text"`
+}
+
+type generatedQuestion struct {
+	ID             int64              `json:"id"`
+	RunID          int64              `json:"run_id"`
+	InputRecordID  int64              `json:"input_record_id"`
+	HopType        string             `json:"hop_type"`
+	Question       string             `json:"question"`
+	Answer         string             `json:"answer"`
+	ReasoningSteps []string           `json:"reasoning_steps"`
+	StepLineIDs    [][]int            `json:"step_line_ids"`
+	Evidence       []questionEvidence `json:"evidence"`
+}
+
+// buildQuestionGenerationSource uses the entire canonical file and preserves its
+// line IDs. Reject oversized input rather than silently dropping document sections.
+func buildQuestionGenerationSource(lines []docprocessing.Line) (string, map[int]string, string, error) {
+	source := make(map[int]string, len(lines))
+	numbered := make([]questionEvidence, 0, len(lines))
+	chars := 0
+	for _, line := range lines {
+		if line.LineNo <= 0 || strings.TrimSpace(line.Content) == "" {
+			continue
+		}
+		if _, ok := source[line.LineNo]; ok {
+			return "", nil, "", fmt.Errorf("duplicate source line %d", line.LineNo)
+		}
+		text := docprocessing.LLMLineContent(line.LineType, line.LineNo, line.Content)
+		chars += utf8.RuneCountInString(text)
+		if chars > questionGenerationMaxInputChars {
+			return "", nil, "", fmt.Errorf("document too large (limit %d characters)", questionGenerationMaxInputChars)
+		}
+		source[line.LineNo] = text
+		numbered = append(numbered, questionEvidence{LineID: line.LineNo, Text: text})
+	}
+	if len(numbered) == 0 {
+		return "", nil, "", fmt.Errorf("document has no usable source lines")
+	}
+	raw, err := json.Marshal(numbered)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if utf8.RuneCount(raw) > questionGenerationMaxInputChars {
+		return "", nil, "", fmt.Errorf("document too large after formatting")
+	}
+	sum := sha256.Sum256(raw)
+	return string(raw), source, hex.EncodeToString(sum[:]), nil
+}
+
+func validateGeneratedQuestions(payload map[string]any, req questionGenerationRequest, source map[int]string) ([]generatedQuestion, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var output struct {
+		Questions []struct {
+			HopType        string   `json:"hop_type"`
+			Question       string   `json:"question"`
+			Answer         string   `json:"answer"`
+			ReasoningSteps []string `json:"reasoning_steps"`
+			LineIDs        []int    `json:"line_ids"`
+			StepLineIDs    [][]int  `json:"step_line_ids"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(raw, &output); err != nil {
+		return nil, fmt.Errorf("invalid question output: %w", err)
+	}
+	expected := map[string]int{"one_hop": *req.OneHopCount, "two_hop": *req.TwoHopCount, "multi_hop": *req.MultiHopCount}
+	minima := map[string]int{"one_hop": 1, "two_hop": 2, "multi_hop": 3}
+	if len(output.Questions) != *req.OneHopCount+*req.TwoHopCount+*req.MultiHopCount {
+		return nil, fmt.Errorf("model returned the wrong total question count")
+	}
+	counts := map[string]int{}
+	seen := map[string]bool{}
+	questions := make([]generatedQuestion, 0, len(output.Questions))
+	for i, q := range output.Questions {
+		minimum, ok := minima[q.HopType]
+		if !ok {
+			return nil, fmt.Errorf("question %d has an unknown hop_type", i+1)
+		}
+		q.Question, q.Answer = strings.TrimSpace(q.Question), strings.TrimSpace(q.Answer)
+		key := strings.ToLower(strings.Join(strings.Fields(q.Question), " "))
+		if key == "" || q.Answer == "" || seen[key] {
+			return nil, fmt.Errorf("question %d is empty or duplicated, or has no answer", i+1)
+		}
+		seen[key] = true
+		if len(q.ReasoningSteps) < minimum || len(q.StepLineIDs) != len(q.ReasoningSteps) {
+			return nil, fmt.Errorf("question %d lacks supported reasoning steps", i+1)
+		}
+		cited := map[int]bool{}
+		evidence := make([]questionEvidence, 0, len(q.LineIDs))
+		for _, id := range q.LineIDs {
+			text, exists := source[id]
+			if !exists || cited[id] {
+				return nil, fmt.Errorf("question %d cites an unknown or repeated line %d", i+1, id)
+			}
+			cited[id] = true
+			evidence = append(evidence, questionEvidence{LineID: id, Text: text})
+		}
+		if len(cited) < minimum {
+			return nil, fmt.Errorf("question %d lacks distinct source lines for its hop type", i+1)
+		}
+		used := map[int]bool{}
+		for step, text := range q.ReasoningSteps {
+			q.ReasoningSteps[step] = strings.TrimSpace(text)
+			if q.ReasoningSteps[step] == "" || len(q.StepLineIDs[step]) == 0 {
+				return nil, fmt.Errorf("question %d has an unsupported reasoning step", i+1)
+			}
+			for _, id := range q.StepLineIDs[step] {
+				if !cited[id] {
+					return nil, fmt.Errorf("question %d step cites a line outside its evidence", i+1)
+				}
+				used[id] = true
+			}
+		}
+		if len(used) != len(cited) {
+			return nil, fmt.Errorf("question %d has evidence unused by its reasoning", i+1)
+		}
+		counts[q.HopType]++
+		questions = append(questions, generatedQuestion{InputRecordID: req.InputRecordID, HopType: q.HopType, Question: q.Question, Answer: q.Answer, ReasoningSteps: q.ReasoningSteps, StepLineIDs: q.StepLineIDs, Evidence: evidence})
+	}
+	for hop, n := range expected {
+		if counts[hop] != n {
+			return nil, fmt.Errorf("model returned %d %s questions; expected %d", counts[hop], hop, n)
+		}
+	}
+	return questions, nil
+}

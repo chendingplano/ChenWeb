@@ -339,7 +339,10 @@
 				{
 					id: 'sysadmin-benchmark',
 					label: m.nav_sysadmin_benchmark(),
-					children: [{ id: 'sysadmin-benchmark-setup', label: m.nav_sysadmin_benchmark_setup() }]
+					children: [
+						{ id: 'sysadmin-benchmark-setup', label: m.nav_sysadmin_benchmark_setup() },
+						{ id: 'sysadmin-question-generator', label: m.nav_sysadmin_question_generator() }
+					]
 				},
 				{
 					id: 'sysadmin-resources',
