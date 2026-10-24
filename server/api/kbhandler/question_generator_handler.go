@@ -20,6 +20,12 @@ import (
 var (
 	newQuestionGenerationClient = func(modelRef string, logger ApiTypes.JimoLogger) (ApiTypes.LLMModelDef, metricJSONExtractor, error) {
 		cfg, client, err := newMetricReviewLLMClient(logger, modelRef)
+		if err != nil {
+			return cfg, nil, err
+		}
+		// Override the per-client setting without changing the shared model profile.
+		cfg.ThinkingType = "disabled"
+		client.ThinkingType = cfg.ThinkingType
 		return cfg, client, err
 	}
 	launchQuestionGeneration = func(db *sql.DB, runID int64, req questionGenerationRequest, modelRef, userID string) {

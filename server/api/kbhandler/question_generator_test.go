@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,8 +18,53 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
 )
+
+func TestQuestionGenerationClientDisablesReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Thinking.Type != "disabled" {
+			t.Errorf("outgoing thinking.type=%q, want disabled", body.Thinking.Type)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": `{"questions":[]}`}, "finish_reason": "stop"}}})
+	}))
+	defer server.Close()
+	modelFile := filepath.Join(t.TempDir(), "models.toml")
+	profile := fmt.Sprintf("[question-reasoning-fixture]\nmodel_name='fixture-model'\nmodel_type='llm'\napi_key='test-only'\nbase_url='%s'\nthinking_type='enabled'\nmax_output_tokens=2048\ntimeout_sec=10\n", server.URL)
+	if err := os.WriteFile(modelFile, []byte(profile), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MODEL_DEF_FILE", modelFile)
+	logger := loggerutil.CreateDefaultLogger("20261024-852")
+	defer logger.Close()
+	cfg, client, err := newQuestionGenerationClient("question-reasoning-fixture", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ThinkingType != "disabled" {
+		t.Errorf("generator thinking_type=%q, want disabled", cfg.ThinkingType)
+	}
+	if cfg.MaxOutputTokens != 2048 {
+		t.Errorf("max_output_tokens=%d", cfg.MaxOutputTokens)
+	}
+	if _, err := client.ExtractJSON(context.Background(), llmclients.JSONExtractionInput{UserID: "fixture-user", CallReason: "question_generation_search_metrics", CallLoc: "20261024-852", ModelName: cfg.ModelName, PromptName: questionGenerationPrompt, PromptText: "test fixture", InputText: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := loadModelDefByRef("question-reasoning-fixture")
+	if err != nil || unchanged.ThinkingType != "enabled" {
+		t.Fatalf("profile mutated: thinking_type=%q error=%v", unchanged.ThinkingType, err)
+	}
+}
 
 func questionRequest(t *testing.T, body string) questionGenerationRequest {
 	t.Helper()
