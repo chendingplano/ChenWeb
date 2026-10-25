@@ -402,7 +402,9 @@
 					id: 'sysadmin-system',
 					label: m.nav_sysadmin_system(),
 					children: [
-						{ id: 'sysadmin-system-code-monitor', label: m.nav_sysadmin_system_code_monitor() },
+						...(pageKey === 'development'
+							? []
+							: [{ id: 'sysadmin-system-code-monitor', label: m.nav_sysadmin_system_code_monitor() }]),
 						{ id: 'sysadmin-system-build-info', label: m.nav_sysadmin_system_build_info() },
 						{ id: 'sysadmin-system-calendar', label: m.nav_sysadmin_system_calendar() },
 						{ id: 'sysadmin-system-peak-hours', label: m.nav_sysadmin_system_peak_hours() },
@@ -462,6 +464,7 @@
 			icon: FlaskConicalIcon,
 			group: 'Development',
 			children: [
+				{ id: 'sysadmin-system-code-monitor', label: m.nav_sysadmin_system_code_monitor() },
 				{
 					id: 'dev-demos',
 					label: m.nav_dev_demos(),
