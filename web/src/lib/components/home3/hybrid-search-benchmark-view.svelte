@@ -499,6 +499,9 @@
 <style>
 	.hsb {
 		color-scheme: light;
+		/* One height for every control in the start form (and the Tests to run button), so fields
+		   aligned on their bottom edge also have their labels on one line. */
+		--control-height: 44px;
 		--bg: #f2f4f7;
 		--panel: #fff;
 		--line: #e4e6eb;
@@ -642,6 +645,14 @@
 		padding: 11px 20px;
 		font-weight: 600;
 	}
+	.start input:not([type='checkbox']),
+	.start select,
+	.start .primary {
+		height: var(--control-height);
+		box-sizing: border-box;
+		padding-top: 0;
+		padding-bottom: 0;
+	}
 	.actions {
 		text-align: right;
 		white-space: nowrap;
@@ -752,7 +763,8 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		margin: 0 8px 10px 0;
+		height: var(--control-height);
+		margin: 0 8px 0 0;
 		cursor: pointer;
 	}
 	label.check input {

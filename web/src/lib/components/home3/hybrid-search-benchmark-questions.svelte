@@ -301,7 +301,9 @@
 		white-space: nowrap;
 	}
 	.tests-button {
-		padding: 10px 16px;
+		height: var(--control-height, 44px);
+		box-sizing: border-box;
+		padding: 0 16px;
 		white-space: nowrap;
 	}
 	dialog {
