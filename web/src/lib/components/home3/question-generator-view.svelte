@@ -354,8 +354,9 @@
 	{#if activeRun}
 		<section class="panel generation-status" aria-label={m.qg_generation_status()}>
 			<div class="result-meta">
-				<strong>{m.qg_run_number({ id: activeRun.id })}</strong><span class="badge"
-					>{statusLabel(activeRun.status)}</span
+				<strong>{m.qg_run_number({ id: activeRun.id })}</strong><span
+					class="badge"
+					class:running={activeRun.status === 'running'}>{statusLabel(activeRun.status)}</span
 				><span>{activeRun.model_name}</span><span>{activeRun.prompt_name}</span>
 			</div>
 			<div class="progress" role="status">
@@ -801,6 +802,32 @@
 		padding: 3px 7px;
 		color: var(--accent);
 		white-space: nowrap;
+	}
+	.badge.running {
+		--running-background: #fef3c7;
+		--running-highlight: #fcd34d;
+		color: #78350f;
+		background: var(--running-background);
+		border-color: #d97706;
+		font-weight: 700;
+		animation: running-flash 1.4s ease-in-out infinite;
+	}
+	.dark .badge.running {
+		--running-background: #78350f;
+		--running-highlight: #92400e;
+		color: #fef3c7;
+		border-color: #f59e0b;
+	}
+	@keyframes running-flash {
+		50% {
+			background: var(--running-highlight);
+			box-shadow: 0 0 0 3px #f59e0b40;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.badge.running {
+			animation: none;
+		}
 	}
 	.error {
 		color: #ef7373;
