@@ -57,3 +57,11 @@ The system SHALL provide a bilingual Code Monitor page under Development → Sys
 - **THEN** the page displays the project's available daily rows for that range
 
 Supported ranges are `today`, `yesterday`, `last_7_days` (today and six prior dates), `last_month` (30 local dates ending today), `last_6_months`, and `last_12_months`. Calendar ranges SHALL use inclusive local dates and clamp month boundaries to the last valid day.
+
+#### Scenario: Total bars use an automatic baseline
+
+- **WHEN** the page displays a chart for a selected range
+- **THEN** Total bar heights SHALL equal `total − N`, and the left axis SHALL identify the baseline subtraction in the selected language
+- **AND** the maximum visible total SHALL determine a rounding step of `max(1, 10^(floor(log10(maximum)) − 1))`; N SHALL be the largest nonnegative multiple strictly below the minimum visible total
+- **AND** empty histories or ranges containing zero SHALL use N = 0
+- **AND** tooltips SHALL retain actual totals, while Delta values and their axis SHALL remain unchanged

@@ -7034,6 +7034,7 @@
 	"code_monitor_frontend_delta": "前端",
 	"code_monitor_backend_delta": "后端",
 	"code_monitor_total": "总量",
+	"code_monitor_total_baseline": "总量 − {baseline}",
 	"code_monitor_delta": "变化量",
 	"code_monitor_loading": "正在加载代码历史记录…",
 	"code_monitor_load_error": "无法加载代码历史记录。",

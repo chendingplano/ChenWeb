@@ -7,6 +7,7 @@
 	import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import { m } from '$lib/paraglide/messages.js';
+	import { codeMonitorTotalBaseline } from './code-monitor-chart';
 	import { createLatestCodeMonitorLoader, type CodeMonitorProject, type CodeMonitorRange } from './code-monitor-client';
 
 	use([BarChart, AriaComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
@@ -54,21 +55,23 @@
 		const rows = [...project.rows].sort((a, b) => a.collection_date.localeCompare(b.collection_date));
 		const dates = rows.map((row) => row.collection_date);
 		const totals = rows.map((row) => row[metric]);
+		const baseline = codeMonitorTotalBaseline(totals);
+		const totalAxisName = m.code_monitor_total_baseline({ baseline: baseline.toLocaleString() });
 		const deltas = rows.map((row) => row[deltaMetric]);
 		return {
 			backgroundColor: 'transparent',
-			aria: { enabled: true, label: { description: m.code_monitor_chart_description({ metric: name, project: project.project_path }) } },
+			aria: { enabled: true, label: { description: `${m.code_monitor_chart_description({ metric: name, project: project.project_path })} ${totalAxisName}` } },
 			textStyle: { color: colors.muted },
 			tooltip: { trigger: 'axis' },
 			legend: { data: [m.code_monitor_total(), m.code_monitor_delta()], textStyle: { color: colors.muted }, top: 0 },
-			grid: { left: 84, right: 64, top: 42, bottom: 36, containLabel: true },
+			grid: { left: 84, right: 64, top: 64, bottom: 36, containLabel: true },
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
 			yAxis: [
-				{ type: 'value', position: 'left', axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+				{ type: 'value', position: 'left', min: 0, name: totalAxisName, nameTextStyle: { color: colors.muted, align: 'left' }, axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
 				{ type: 'value', position: 'right', axisLabel: { color: colors.muted }, splitLine: { show: false } }
 			],
 			series: [
-				{ name: m.code_monitor_total(), type: 'bar', yAxisIndex: 0, data: totals, itemStyle: { color: colors.accent, opacity: 0.8 } },
+				{ name: m.code_monitor_total(), type: 'bar', yAxisIndex: 0, data: totals.map((total) => total - baseline), tooltip: { valueFormatter: (value) => (Number(value) + baseline).toLocaleString() }, itemStyle: { color: colors.accent, opacity: 0.8 } },
 				{ name: m.code_monitor_delta(), type: 'bar', yAxisIndex: 1, data: deltas, itemStyle: { color: darkMode ? '#34D399' : '#059669', opacity: 0.85 } }
 			]
 		};

@@ -7034,6 +7034,7 @@
 	"code_monitor_frontend_delta": "Frontend",
 	"code_monitor_backend_delta": "Backend",
 	"code_monitor_total": "Total",
+	"code_monitor_total_baseline": "Total − {baseline}",
 	"code_monitor_delta": "Delta",
 	"code_monitor_loading": "Loading code history…",
 	"code_monitor_load_error": "Unable to load code history.",
