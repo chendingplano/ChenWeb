@@ -1,5 +1,43 @@
 ## ADDED Requirements
 
+### Requirement: Questions and generation jobs tabs
+The Question Generator results panel SHALL have Generated questions and Question generation jobs
+tabs, available in English and Chinese with keyboard navigation. Generated questions SHALL be
+selected initially and retain the existing filtering, selection, archiving, and List/Cards views.
+Switching tabs SHALL preserve the question browser state. Question-only filters SHALL be hidden
+while viewing jobs.
+
+#### Scenario: Switch back to questions
+- **WHEN** a user selects questions, opens jobs, and returns to Generated questions
+- **THEN** the question selection, filters, and List/Cards view remain unchanged
+
+### Requirement: List all generation jobs
+The jobs tab SHALL list saved generation runs across all documents, newest first, using pagination
+of 25 jobs per page. Each row SHALL show Run ID, document ID or random-batch label, status,
+generated/target question counts, start time, completed duration, description, and View action.
+View SHALL load the selected job into the existing generation status panel, including any failure
+details. Running jobs SHALL use the flashing amber status badge, respecting reduced motion.
+The list SHALL offer manual refresh and refresh every 2.5 seconds while its displayed page has
+running jobs. Leaving the jobs tab SHALL cancel its pending list requests and timers.
+
+#### Scenario: More than fifty jobs
+- **WHEN** 61 jobs exist
+- **THEN** all jobs are reachable in three pages, including the oldest 11 on page 3
+
+#### Scenario: Running job completes
+- **WHEN** a displayed job finishes
+- **THEN** the next list refresh shows its terminal status, final progress and duration
+
+### Requirement: Paginated runs API
+GET `/kb/question-generator/runs` SHALL accept optional `page` (1–1,000,000, default 1) and
+`page_size` (1–100, default 50). Requests specifying either SHALL return
+`{runs, total, page, page_size}`, preserving the optional document filter. Unpaginated calls SHALL
+retain the legacy `{runs}` response with the latest 50 runs. Invalid pagination SHALL return 400.
+
+#### Scenario: Invalid page
+- **WHEN** page is zero, negative, non-integer, or above 1,000,000
+- **THEN** the server rejects the request with HTTP 400 before querying jobs
+
 ### Requirement: Requested questions select distinct metrics
 For a specified document, the page SHALL accept a requested question count from 1 to 3,000
 as `num_questions_to_generate`, rather than a metric count. The server SHALL retrieve all primary

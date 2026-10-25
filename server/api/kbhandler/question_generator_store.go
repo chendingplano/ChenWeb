@@ -55,13 +55,18 @@ func expireQuestionRuns(ctx context.Context, db *sql.DB) error {
 }
 
 func loadQuestionRuns(ctx context.Context, db *sql.DB, recordID int64) ([]questionGenerationRun, error) {
+	return loadQuestionRunWindow(ctx, db, recordID, 50, 0)
+}
+
+const questionRunFilter = ` WHERE $1::bigint = 0 OR input_record_id = $1 OR (input_record_id IS NULL AND EXISTS
+ (SELECT 1 FROM testbed.generated_questions q WHERE q.run_id = generated_question_runs.id AND q.input_record_id = $1))`
+
+func loadQuestionRunWindow(ctx context.Context, db *sql.DB, recordID int64, limit, offset int) ([]questionGenerationRun, error) {
 	if err := expireQuestionRuns(ctx, db); err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT `+questionRunColumns+` FROM testbed.generated_question_runs
- WHERE $1::bigint = 0 OR input_record_id = $1 OR (input_record_id IS NULL AND EXISTS
- (SELECT 1 FROM testbed.generated_questions q WHERE q.run_id = generated_question_runs.id AND q.input_record_id = $1))
- ORDER BY id DESC LIMIT 50`, recordID)
+	rows, err := db.QueryContext(ctx, `SELECT `+questionRunColumns+` FROM testbed.generated_question_runs`+questionRunFilter+`
+ ORDER BY id DESC LIMIT $2 OFFSET $3`, recordID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

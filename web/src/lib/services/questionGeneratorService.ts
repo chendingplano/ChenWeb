@@ -90,6 +90,13 @@ export function listQuestionRuns(recordID?: number, signal?: AbortSignal) {
 		signal
 	});
 }
+export function listQuestionJobs(page: number, pageSize: number, signal?: AbortSignal) {
+	const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+	return request<{ runs: QuestionRun[]; total: number; page: number; page_size: number }>(
+		`${BASE}?${params}`,
+		{ signal }
+	);
+}
 export function getQuestionRun(runID: number, signal?: AbortSignal) {
 	return request<{ run: QuestionRun; questions: GeneratedQuestion[] }>(`${BASE}/${runID}`, {
 		signal

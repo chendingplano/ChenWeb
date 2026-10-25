@@ -126,6 +126,22 @@ func StartQuestionGeneration(c echo.Context) error {
 }
 
 func ListQuestionGenerationRuns(c echo.Context) error {
+	page, pageSize := 1, 50
+	for _, field := range []struct {
+		name    string
+		value   *int
+		maximum int
+	}{
+		{"page", &page, 1000000}, {"page_size", &pageSize, 100},
+	} {
+		if raw := c.QueryParam(field.name); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || value > field.maximum {
+				return questionGenerationError(c, http.StatusBadRequest, "invalid "+field.name)
+			}
+			*field.value = value
+		}
+	}
 	var id int64
 	var err error
 	if raw := c.QueryParam("input_record_id"); raw != "" {
@@ -134,12 +150,21 @@ func ListQuestionGenerationRuns(c echo.Context) error {
 	if err != nil || id < 0 {
 		return questionGenerationError(c, http.StatusBadRequest, "invalid input_record_id")
 	}
-	runs, err := loadQuestionRuns(c.Request().Context(), ApiTypes.ProjectDBHandle, id)
+	runs, err := loadQuestionRunWindow(c.Request().Context(), ApiTypes.ProjectDBHandle, id, pageSize, (page-1)*pageSize)
 	if err != nil {
 		loggerutil.CreateDefaultLogger("20261024-683").Error("list question generation runs failed", "record_id", id, "error", err)
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load generation runs")
 	}
-	return c.JSON(http.StatusOK, map[string]any{"runs": runs})
+	response := map[string]any{"runs": runs}
+	if c.QueryParam("page") != "" || c.QueryParam("page_size") != "" {
+		var total int64
+		if err := ApiTypes.ProjectDBHandle.QueryRowContext(c.Request().Context(), `SELECT COUNT(*) FROM testbed.generated_question_runs`+questionRunFilter, id).Scan(&total); err != nil {
+			loggerutil.CreateDefaultLogger("20261025-516").Error("count question generation jobs failed", "error", err)
+			return questionGenerationError(c, http.StatusInternalServerError, "failed to load generation runs")
+		}
+		response["total"], response["page"], response["page_size"] = total, page, pageSize
+	}
+	return c.JSON(http.StatusOK, response)
 }
 
 func GetQuestionGenerationRun(c echo.Context) error {

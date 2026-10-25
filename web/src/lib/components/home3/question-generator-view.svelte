@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import QuestionRecord from './question-record.svelte';
+	import QuestionGenerationJobs from './question-generation-jobs.svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
@@ -35,6 +36,9 @@
 	});
 	let questions = $state<GeneratedQuestion[]>([]);
 	let view = $state<'list' | 'cards'>('cards');
+	let contentTab = $state<'questions' | 'jobs'>('questions');
+	let jobsPanel = $state<ReturnType<typeof QuestionGenerationJobs>>();
+	let statusPanel = $state<HTMLElement>();
 	let selected = $state<number[]>([]);
 	let allSelected = $derived(
 		questions.length > 0 && questions.every((q) => selected.includes(q.id))
@@ -132,6 +136,19 @@
 						: 'list';
 		document.getElementById(`qg-tab-${view}`)?.focus();
 	}
+	function changeContentTab(event: KeyboardEvent) {
+		if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+		event.preventDefault();
+		contentTab =
+			event.key === 'Home'
+				? 'questions'
+				: event.key === 'End'
+					? 'jobs'
+					: contentTab === 'questions'
+						? 'jobs'
+						: 'questions';
+		document.getElementById(`qg-content-tab-${contentTab}`)?.focus();
+	}
 	async function deleteSelected() {
 		if (deleting || loading || selected.length === 0) return;
 		if (!confirm(m.qg_delete_confirm({ count: selected.length }))) return;
@@ -200,6 +217,13 @@
 		void loadQuestions(1);
 		void loadOptions();
 	}
+	async function viewJob(job: QuestionRun) {
+		activeRun = job;
+		runQuestions = [];
+		void poll(job.id);
+		await tick();
+		statusPanel?.scrollIntoView({ block: 'start' });
+	}
 	async function poll(id: number) {
 		pollController?.abort();
 		clearTimeout(timer);
@@ -264,6 +288,7 @@
 			if (!alive) return;
 			activeRun = run;
 			runQuestions = [];
+			jobsPanel?.refresh();
 			dialog.close();
 			void poll(run.id);
 		} catch {
@@ -290,7 +315,12 @@
 			}}>{m.qg_generate()}</button
 		>
 	</header>
-	<form class="panel filters" onsubmit={search} aria-label={m.qg_filter_questions()}>
+	<form
+		class="panel filters"
+		hidden={contentTab !== 'questions'}
+		onsubmit={search}
+		aria-label={m.qg_filter_questions()}
+	>
 		<div>
 			<label for="qg-filter-purpose">{m.qg_filter_purpose()}</label><select
 				id="qg-filter-purpose"
@@ -352,7 +382,11 @@
 			</p>{/if}
 	</form>
 	{#if activeRun}
-		<section class="panel generation-status" aria-label={m.qg_generation_status()}>
+		<section
+			class="panel generation-status"
+			aria-label={m.qg_generation_status()}
+			bind:this={statusPanel}
+		>
 			<div class="result-meta">
 				<strong>{m.qg_run_number({ id: activeRun.id })}</strong><span
 					class="badge"
@@ -385,149 +419,194 @@
 					</details>{/if}{/if}
 		</section>
 	{/if}
-	<section class="panel results" aria-labelledby="qg-results-title" aria-busy={loading}>
-		<div class="results-heading">
-			<h2 id="qg-results-title">{m.qg_results()}</h2>
-			<span>{m.qg_result_count({ count: total })}</span>
-		</div>
-		<p class="hint">{m.qg_review_hint()}</p>
-		<div class="results-toolbar">
-			<div class="view-tabs" role="tablist" aria-label={m.qg_results()}>
-				<button
-					id="qg-tab-list"
-					role="tab"
-					aria-selected={view === 'list'}
-					aria-controls="qg-panel-list"
-					tabindex={view === 'list' ? 0 : -1}
-					onkeydown={changeTab}
-					onclick={() => (view = 'list')}>{m.qg_list()}</button
-				>
-				<button
-					id="qg-tab-cards"
-					role="tab"
-					aria-selected={view === 'cards'}
-					aria-controls="qg-panel-cards"
-					tabindex={view === 'cards' ? 0 : -1}
-					onkeydown={changeTab}
-					onclick={() => (view = 'cards')}>{m.qg_cards()}</button
-				>
-			</div>
-			<div class="selection-actions">
-				{#if view === 'cards'}{@render selectAllControl()}{/if}
-				<span>{m.qg_selected_count({ count: selected.length })}</span>
-				<button
-					class="delete"
-					disabled={deleting || loading || selected.length === 0}
-					title={m.qg_delete_hint()}
-					onclick={deleteSelected}>{deleting ? m.qg_deleting() : m.qg_delete()}</button
-				>
-			</div>
-		</div>
-		{#if deleteError}<p class="error" role="alert">{m.qg_delete_error()}</p>{/if}
-		{#if archivedCount !== null}<p class="hint" role="status">
-				{m.qg_archived_count({ count: archivedCount })}
-			</p>{/if}
-		<div
-			id="qg-panel-list"
-			role="tabpanel"
-			aria-labelledby="qg-tab-list"
-			hidden={view !== 'list'}
-			tabindex="0"
-		>
-			{#if view === 'list'}{@render results()}{/if}
-		</div>
-		<div
-			id="qg-panel-cards"
-			role="tabpanel"
-			aria-labelledby="qg-tab-cards"
-			hidden={view !== 'cards'}
-			tabindex="0"
-		>
-			{#if view === 'cards'}{@render results()}{/if}
-		</div>
-		{#snippet selectAllControl()}
-			<label class="select-all" title={m.qg_select_all_hint()}>
-				<input
-					type="checkbox"
-					checked={allSelected}
-					indeterminate={partiallySelected}
-					disabled={loading || deleting || loadError || questions.length === 0}
-					onchange={(event) => selectAll(event.currentTarget.checked)}
-				/>
-				{m.qg_select_all()}
-			</label>
-		{/snippet}
-		{#snippet results()}
-			{#if loading}<p role="status">{m.qg_loading()}</p>
-			{:else if loadError}<p class="error" role="alert">{m.qg_load_error()}</p>
-				<button onclick={() => void loadQuestions(page)}>{m.qg_retry()}</button>
-			{:else if questions.length === 0}<p class="empty">{m.qg_no_questions()}</p>
-			{:else if view === 'cards'}
-				<div class="question-grid">
-					{#each questions as question, index (question.id)}
-						<QuestionRecord
-							{question}
-							index={(page - 1) * pageSize + index + 1}
-							selected={selected.includes(question.id)}
-							disabled={deleting}
-							onselect={(checked) => selectQuestion(question.id, checked)}
-						/>
-					{/each}
-				</div>
-			{:else}
-				<div class="question-list">
-					<table>
-						<thead
-							><tr>
-								<th>{@render selectAllControl()}</th><th>{m.qg_field_question()}</th><th
-									>{m.qg_answer()}</th
-								>
-								<th>{m.qg_filter_run()}</th><th>{m.qg_filter_record()}</th><th
-									>{m.qg_filter_language()}</th
-								><th>{m.qg_reasoning_evidence()}</th>
-							</tr></thead
-						>
-						<tbody
-							>{#each questions as question, index (question.id)}<tr>
-									<td
-										><input
-											type="checkbox"
-											checked={selected.includes(question.id)}
-											disabled={deleting}
-											aria-label={m.qg_select_question({
-												number: (page - 1) * pageSize + index + 1
-											})}
-											onchange={(event) => selectQuestion(question.id, event.currentTarget.checked)}
-										/></td
-									>
-									<td lang={question.lang}>{question.question}</td><td lang={question.lang}
-										>{question.answer}</td
-									>
-									<td>{question.run_id}</td><td>{question.input_record_id}</td><td
-										>{languageLabel(question.lang)}</td
-									>
-									<td
-										><details>
-											<summary>{m.qg_details()}</summary>
-											<QuestionRecord {question} index={(page - 1) * pageSize + index + 1} />
-										</details></td
-									>
-								</tr>{/each}</tbody
-						>
-					</table>
-				</div>
-			{/if}
-		{/snippet}
-		<nav class="pagination" aria-label={m.qg_pagination()}>
+	<section class="panel results" aria-label={m.qg_content_tabs()}>
+		<div class="content-tabs" role="tablist" aria-label={m.qg_content_tabs()}>
 			<button
-				disabled={loading || deleting || page <= 1}
-				onclick={() => void loadQuestions(page - 1)}>{m.qg_previous()}</button
-			><span>{m.qg_page_status({ page, pages: Math.max(1, Math.ceil(total / pageSize)) })}</span
-			><button
-				disabled={loading || deleting || page * pageSize >= total}
-				onclick={() => void loadQuestions(page + 1)}>{m.qg_next()}</button
+				id="qg-content-tab-questions"
+				type="button"
+				role="tab"
+				aria-selected={contentTab === 'questions'}
+				aria-controls="qg-content-panel-questions"
+				tabindex={contentTab === 'questions' ? 0 : -1}
+				onkeydown={changeContentTab}
+				onclick={() => (contentTab = 'questions')}>{m.qg_results()}</button
 			>
-		</nav>
+			<button
+				id="qg-content-tab-jobs"
+				type="button"
+				role="tab"
+				aria-selected={contentTab === 'jobs'}
+				aria-controls="qg-content-panel-jobs"
+				tabindex={contentTab === 'jobs' ? 0 : -1}
+				onkeydown={changeContentTab}
+				onclick={() => (contentTab = 'jobs')}>{m.qg_jobs()}</button
+			>
+		</div>
+		<div
+			id="qg-content-panel-questions"
+			role="tabpanel"
+			aria-labelledby="qg-content-tab-questions"
+			hidden={contentTab !== 'questions'}
+			aria-busy={loading}
+			tabindex="0"
+		>
+			<div class="results-heading">
+				<h2 id="qg-results-title">{m.qg_results()}</h2>
+				<span>{m.qg_result_count({ count: total })}</span>
+			</div>
+			<p class="hint">{m.qg_review_hint()}</p>
+			<div class="results-toolbar">
+				<div class="view-tabs" role="tablist" aria-label={m.qg_results()}>
+					<button
+						id="qg-tab-list"
+						role="tab"
+						aria-selected={view === 'list'}
+						aria-controls="qg-panel-list"
+						tabindex={view === 'list' ? 0 : -1}
+						onkeydown={changeTab}
+						onclick={() => (view = 'list')}>{m.qg_list()}</button
+					>
+					<button
+						id="qg-tab-cards"
+						role="tab"
+						aria-selected={view === 'cards'}
+						aria-controls="qg-panel-cards"
+						tabindex={view === 'cards' ? 0 : -1}
+						onkeydown={changeTab}
+						onclick={() => (view = 'cards')}>{m.qg_cards()}</button
+					>
+				</div>
+				<div class="selection-actions">
+					{#if view === 'cards'}{@render selectAllControl()}{/if}
+					<span>{m.qg_selected_count({ count: selected.length })}</span>
+					<button
+						class="delete"
+						disabled={deleting || loading || selected.length === 0}
+						title={m.qg_delete_hint()}
+						onclick={deleteSelected}>{deleting ? m.qg_deleting() : m.qg_delete()}</button
+					>
+				</div>
+			</div>
+			{#if deleteError}<p class="error" role="alert">{m.qg_delete_error()}</p>{/if}
+			{#if archivedCount !== null}<p class="hint" role="status">
+					{m.qg_archived_count({ count: archivedCount })}
+				</p>{/if}
+			<div
+				id="qg-panel-list"
+				role="tabpanel"
+				aria-labelledby="qg-tab-list"
+				hidden={view !== 'list'}
+				tabindex="0"
+			>
+				{#if view === 'list'}{@render results()}{/if}
+			</div>
+			<div
+				id="qg-panel-cards"
+				role="tabpanel"
+				aria-labelledby="qg-tab-cards"
+				hidden={view !== 'cards'}
+				tabindex="0"
+			>
+				{#if view === 'cards'}{@render results()}{/if}
+			</div>
+			{#snippet selectAllControl()}
+				<label class="select-all" title={m.qg_select_all_hint()}>
+					<input
+						type="checkbox"
+						checked={allSelected}
+						indeterminate={partiallySelected}
+						disabled={loading || deleting || loadError || questions.length === 0}
+						onchange={(event) => selectAll(event.currentTarget.checked)}
+					/>
+					{m.qg_select_all()}
+				</label>
+			{/snippet}
+			{#snippet results()}
+				{#if loading}<p role="status">{m.qg_loading()}</p>
+				{:else if loadError}<p class="error" role="alert">{m.qg_load_error()}</p>
+					<button onclick={() => void loadQuestions(page)}>{m.qg_retry()}</button>
+				{:else if questions.length === 0}<p class="empty">{m.qg_no_questions()}</p>
+				{:else if view === 'cards'}
+					<div class="question-grid">
+						{#each questions as question, index (question.id)}
+							<QuestionRecord
+								{question}
+								index={(page - 1) * pageSize + index + 1}
+								selected={selected.includes(question.id)}
+								disabled={deleting}
+								onselect={(checked) => selectQuestion(question.id, checked)}
+							/>
+						{/each}
+					</div>
+				{:else}
+					<div class="question-list">
+						<table>
+							<thead
+								><tr>
+									<th>{@render selectAllControl()}</th><th>{m.qg_field_question()}</th><th
+										>{m.qg_answer()}</th
+									>
+									<th>{m.qg_filter_run()}</th><th>{m.qg_filter_record()}</th><th
+										>{m.qg_filter_language()}</th
+									><th>{m.qg_reasoning_evidence()}</th>
+								</tr></thead
+							>
+							<tbody
+								>{#each questions as question, index (question.id)}<tr>
+										<td
+											><input
+												type="checkbox"
+												checked={selected.includes(question.id)}
+												disabled={deleting}
+												aria-label={m.qg_select_question({
+													number: (page - 1) * pageSize + index + 1
+												})}
+												onchange={(event) =>
+													selectQuestion(question.id, event.currentTarget.checked)}
+											/></td
+										>
+										<td lang={question.lang}>{question.question}</td><td lang={question.lang}
+											>{question.answer}</td
+										>
+										<td>{question.run_id}</td><td>{question.input_record_id}</td><td
+											>{languageLabel(question.lang)}</td
+										>
+										<td
+											><details>
+												<summary>{m.qg_details()}</summary>
+												<QuestionRecord {question} index={(page - 1) * pageSize + index + 1} />
+											</details></td
+										>
+									</tr>{/each}</tbody
+							>
+						</table>
+					</div>
+				{/if}
+			{/snippet}
+			<nav class="pagination" aria-label={m.qg_pagination()}>
+				<button
+					disabled={loading || deleting || page <= 1}
+					onclick={() => void loadQuestions(page - 1)}>{m.qg_previous()}</button
+				><span>{m.qg_page_status({ page, pages: Math.max(1, Math.ceil(total / pageSize)) })}</span
+				><button
+					disabled={loading || deleting || page * pageSize >= total}
+					onclick={() => void loadQuestions(page + 1)}>{m.qg_next()}</button
+				>
+			</nav>
+		</div>
+		<div
+			id="qg-content-panel-jobs"
+			role="tabpanel"
+			aria-labelledby="qg-content-tab-jobs"
+			hidden={contentTab !== 'jobs'}
+			tabindex="0"
+		>
+			{#if contentTab === 'jobs'}<QuestionGenerationJobs
+					bind:this={jobsPanel}
+					{darkMode}
+					onview={viewJob}
+				/>{/if}
+		</div>
 	</section>
 	<dialog
 		bind:this={dialog}
@@ -837,6 +916,7 @@
 		container-type: inline-size;
 	}
 	.results-toolbar,
+	.content-tabs,
 	.selection-actions,
 	.view-tabs {
 		display: flex;
@@ -864,6 +944,29 @@
 	.view-tabs [aria-selected='true'] {
 		color: var(--accent);
 		border-color: var(--accent);
+	}
+	.filters[hidden] {
+		display: none;
+	}
+	.content-tabs {
+		gap: 24px;
+		border-bottom: 1px solid var(--line);
+		margin-bottom: 24px;
+		overflow-x: auto;
+	}
+	.content-tabs button {
+		border: none;
+		border-bottom: 2px solid transparent;
+		border-radius: 0;
+		padding: 12px 0;
+		background: none;
+		color: var(--muted);
+		white-space: nowrap;
+		font-weight: 600;
+	}
+	.content-tabs button[aria-selected='true'] {
+		color: var(--accent);
+		border-bottom-color: var(--accent);
 	}
 	.delete {
 		color: #dc2626;

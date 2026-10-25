@@ -412,7 +412,7 @@ func TestQuestionGeneratorRunReadHandlers(t *testing.T) {
 		cols[i] = strings.TrimSpace(cols[i])
 	}
 	mock.ExpectExec("UPDATE testbed.generated_question_runs").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("SELECT .* FROM testbed.generated_question_runs").WithArgs(int64(416)).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, 416, "search", "", 1, 0, 0, "en", "done", "", "model", questionGenerationPrompt, "hash", time.Now(), time.Now(), 1, 0, 0, 1, 0, 0, 1, time.Now().Add(time.Hour)))
+	mock.ExpectQuery("SELECT .* FROM testbed.generated_question_runs").WithArgs(int64(416), 50, 0).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, 416, "search", "", 1, 0, 0, "en", "done", "", "model", questionGenerationPrompt, "hash", time.Now(), time.Now(), 1, 0, 0, 1, 0, 0, 1, time.Now().Add(time.Hour)))
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/?input_record_id=416", nil), rec)
