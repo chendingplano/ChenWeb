@@ -363,22 +363,35 @@
 		color: var(--accent);
 		white-space: nowrap;
 	}
+	/* Lists wrap; a list the user resizes keeps its size and the others flow around it. */
 	.lists {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
 		gap: 14px 18px;
 		margin-top: 8px;
 	}
-	/* Each list: a rounded frame with a header bar (title, count) over its entries. */
+	/* Each list: a rounded frame with a header bar (title, count) over its entries, a fixed
+	   height with its own scroll bars, and the browser's resize grip (bottom-right corner) to drag
+	   its width and height. */
 	section {
-		min-width: 0;
-		align-self: start;
+		flex: 0 0 auto;
+		box-sizing: border-box;
+		width: max(260px, calc(50% - 9px));
+		max-width: 100%;
+		min-width: 220px;
+		height: 340px;
+		min-height: 120px;
+		display: flex;
+		flex-direction: column;
 		border: 1px solid var(--list-line);
 		border-radius: 10px;
 		overflow: hidden;
+		resize: both;
 		background: var(--list-body);
 	}
 	.list-head {
+		flex: 0 0 auto;
 		padding: 7px 10px;
 		background: var(--list-head);
 		border-bottom: 1px solid var(--list-line);
@@ -387,8 +400,17 @@
 		margin: 2px 0 0;
 	}
 	.list-body {
-		overflow-x: auto;
-		padding: 2px 4px 6px;
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow: auto;
+		padding: 0 4px 10px;
+	}
+	/* Column headings stay visible while the entries scroll. */
+	.list-body thead th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--list-body);
 	}
 	h4 {
 		margin: 0;
