@@ -48,6 +48,14 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		})
 	}
 
+	effort, err := parseSearchEffort(c.QueryParam("effort"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("%v (CWB_KB_GSR_015)", err),
+		})
+	}
+
 	cfg := loadRegistrySearchConfig()
 	userID := ""
 	if user := rc.IsAuthenticated(); user != nil {
@@ -94,6 +102,10 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		}
 	}
 
+	if effort != searchEffortLow {
+		return searchRegistryArtifactsWithEffort(c, logger, artifactType, queryText, filters, page, pageSize, cfg, effort)
+	}
+
 	total, err := countRegistrySearchResults(ApiTypes.ProjectDBHandle, artifactType, queryText, filters, cfg)
 	if err != nil {
 		logger.Error("count registry search failed", "artifact_type", artifactType, "err", err)
@@ -121,5 +133,32 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		Total:          total,
 		AppliedFilters: filters,
 		Results:        results,
+	})
+}
+
+// searchRegistryArtifactsWithEffort answers a medium/high-effort search. The loop returns one ranked
+// list (up to the candidate limit); total is its length and the page is cut from it.
+func searchRegistryArtifactsWithEffort(c echo.Context, logger ApiTypes.JimoLogger, artifactType, queryText string, filters artifactSearchFilters, page, pageSize int, cfg registrySearchConfig, effort string) error {
+	results, trace, err := searchWithEffort(c.Request().Context(), ApiTypes.ProjectDBHandle, artifactType, queryText, filters, cfg.candidates(), cfg, effort)
+	if err != nil {
+		logger.Error("effort registry search failed", "artifact_type", artifactType, "effort", effort, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to search artifacts (CWB_KB_GSR_016)",
+		})
+	}
+	from := min(len(results), (page-1)*pageSize)
+	to := min(len(results), from+pageSize)
+	return c.JSON(http.StatusOK, artifactSearchResponse{
+		Status:         true,
+		Query:          queryText,
+		ArtifactType:   strings.TrimSpace(artifactType),
+		Page:           page,
+		PageSize:       pageSize,
+		Total:          int64(len(results)),
+		AppliedFilters: filters,
+		Results:        results[from:to],
+		Effort:         effort,
+		EffortTrace:    trace,
 	})
 }

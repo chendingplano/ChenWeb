@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -21,6 +22,7 @@ const (
 	hybridBenchModeLexical          = "lexical"
 	hybridBenchModeSemantic         = "semantic"
 	hybridBenchModeHybrid           = "hybrid"
+	hybridBenchModeEffort           = "effort" // medium/high runs: the effort loop's final list
 	hybridBenchGroupAll             = "all"
 	hybridBenchGroupHopType         = "hop_type"
 	hybridBenchGroupLang            = "lang"
@@ -49,11 +51,12 @@ type hybridBenchOptions struct {
 	SemanticWeight float64 `json:"semantic_weight"`
 	CandidateLimit int     `json:"candidate_limit"`
 	Parallelism    int     `json:"parallelism"` // questions searched at the same time
+	Effort         string  `json:"effort"`      // low, medium or high
 }
 
 func hybridBenchDefaults(cfg registrySearchConfig, keywords bool) hybridBenchOptions {
 	return hybridBenchOptions{QueryKeywords: keywords, LexicalWeight: cfg.lexicalWeight, SemanticWeight: cfg.semanticWeight,
-		CandidateLimit: cfg.candidates(), Parallelism: hybridBenchDefaultParallelism}
+		CandidateLimit: cfg.candidates(), Parallelism: hybridBenchDefaultParallelism, Effort: searchEffortLow}
 }
 
 // Omitted options take the defaults.
@@ -65,6 +68,7 @@ type hybridBenchRequest struct {
 	SemanticWeight *float64 `json:"semantic_weight"`
 	CandidateLimit *int     `json:"candidate_limit"`
 	Parallelism    *int     `json:"parallelism"`
+	Effort         *string  `json:"effort"`
 	QuestionIDs    []int64  `json:"question_ids"` // empty: every question of the purpose
 }
 
@@ -88,6 +92,13 @@ func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBench
 	}
 	if r.Parallelism != nil {
 		opts.Parallelism = *r.Parallelism
+	}
+	if r.Effort != nil {
+		effort, err := parseSearchEffort(*r.Effort)
+		if err != nil {
+			return opts, err
+		}
+		opts.Effort = effort
 	}
 	switch {
 	case !slices.Contains(hybridBenchPurposes, r.Purpose):
@@ -127,6 +138,8 @@ type hybridBenchRun struct {
 	SemanticWeight float64    `json:"semantic_weight"`
 	CandidateLimit int        `json:"candidate_limit"`
 	Parallelism    int        `json:"parallelism"`
+	Effort         string     `json:"effort"`
+	MaxEfforts     int        `json:"max_efforts"`
 	CreatedBy      string     `json:"created_by"`
 	CreatedAt      time.Time  `json:"created_at"`
 	FinishedAt     *time.Time `json:"finished_at"`
@@ -163,6 +176,12 @@ type hybridBenchResult struct {
 	LexicalMs        *int     `json:"lexical_ms"`
 	SemanticMs       *int     `json:"semantic_ms"`
 	HybridMs         *int     `json:"hybrid_ms"`
+	// Effort loop (medium/high runs only).
+	EffortRank     *int            `json:"effort_rank"`
+	EffortFound    *bool           `json:"effort_found"`
+	EffortAttempts *int            `json:"effort_attempts"`
+	EffortMs       *int            `json:"effort_ms"`
+	EffortTrace    json.RawMessage `json:"effort_trace"`
 }
 
 func (r hybridBenchResult) rank(mode string) *int {
@@ -171,6 +190,8 @@ func (r hybridBenchResult) rank(mode string) *int {
 		return r.LexicalRank
 	case hybridBenchModeSemantic:
 		return r.SemanticRank
+	case hybridBenchModeEffort:
+		return r.EffortRank
 	}
 	return r.HybridRank
 }
@@ -249,7 +270,11 @@ func scoreHybridBench(results []hybridBenchResult) []hybridBenchScore {
 	if len(results) == 0 {
 		return scores
 	}
-	for _, mode := range hybridBenchModes {
+	modes := hybridBenchModes
+	if slices.ContainsFunc(results, func(r hybridBenchResult) bool { return r.EffortAttempts != nil }) {
+		modes = append(slices.Clone(modes), hybridBenchModeEffort)
+	}
+	for _, mode := range modes {
 		for _, g := range groups {
 			s := hybridBenchScore{Mode: mode, Group: g.name, Value: g.value}
 			for _, r := range results {

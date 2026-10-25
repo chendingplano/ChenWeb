@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -205,5 +206,42 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 	r = benchmarkHybridSearchQuestion(context.Background(), nil, q, cfg, logger)
 	if r.ErrorMsg != hybridBenchErrEmbedding || r.LexicalRank != nil || r.HybridRank != nil {
 		t.Fatalf("embedding failure result = %+v", r)
+	}
+}
+
+func TestBenchmarkHybridSearchEffort(t *testing.T) {
+	old := hybridBenchEffort
+	t.Cleanup(func() { hybridBenchEffort = old })
+	hybridBenchEffort = func(_ context.Context, _ *sql.DB, query string, _ registrySearchConfig, effort string) ([]artifactSearchResult, *searchEffortTrace, error) {
+		if query != "q" || effort != searchEffortHigh {
+			t.Errorf("effort search got %q/%q", query, effort)
+		}
+		trace := &searchEffortTrace{Effort: effort, Found: true, Attempts: []searchEffortAttempt{{}, {}}}
+		return benchResults("other", 0.02, "416_mtc_2", 0.01), trace, nil
+	}
+	logger := loggerutil.CreateDefaultLogger("20261025-749")
+	q := hybridBenchQuestion{ID: 1, HopType: "two_hop", Lang: "en", Question: "q", TargetArtifactID: "416_mtc_2"}
+	result := hybridBenchResult{HybridRank: intPtr(5)}
+	benchmarkHybridSearchEffort(context.Background(), nil, q, registrySearchConfig{}, searchEffortHigh, &result, logger)
+	if result.EffortRank == nil || *result.EffortRank != 2 || *result.EffortAttempts != 2 || !*result.EffortFound || result.EffortMs == nil || len(result.EffortTrace) == 0 {
+		t.Fatalf("effort result = %+v", result)
+	}
+	scores := scoreHybridBench([]hybridBenchResult{result})
+	if !slices.ContainsFunc(scores, func(s hybridBenchScore) bool { return s.Mode == hybridBenchModeEffort && s.Group == "all" && s.R5 == 1 }) {
+		t.Fatalf("no effort score: %+v", scores)
+	}
+	if slices.ContainsFunc(scoreHybridBench([]hybridBenchResult{{HybridRank: intPtr(1)}}), func(s hybridBenchScore) bool { return s.Mode == hybridBenchModeEffort }) {
+		t.Fatal("effort mode scored for a low-effort run")
+	}
+
+	effort := "medium"
+	req := hybridBenchRequest{Purpose: "search_metrics", Effort: &effort}
+	if opts, err := req.normalize(hybridBenchOptions{LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200, Parallelism: 8, Effort: "low"}); err != nil || opts.Effort != "medium" {
+		t.Fatalf("effort option = %+v, %v", opts, err)
+	}
+	bad := "max"
+	req.Effort = &bad
+	if _, err := req.normalize(hybridBenchOptions{LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200, Parallelism: 8}); err == nil {
+		t.Fatal("effort max accepted")
 	}
 }

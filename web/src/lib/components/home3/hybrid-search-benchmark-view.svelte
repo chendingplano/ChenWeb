@@ -11,7 +11,8 @@
 		type HybridBenchmarkRun,
 		type HybridBenchmarkScore,
 		type HybridBenchmarkResult,
-		type HybridBenchmarkOptions
+		type HybridBenchmarkOptions,
+		type SearchEffort
 	} from '$lib/services/hybridSearchBenchmarkService';
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -25,7 +26,8 @@
 		lexical_weight: 1,
 		semantic_weight: 1,
 		candidate_limit: 200,
-		parallelism: 8
+		parallelism: 8,
+		effort: 'low'
 	});
 	let optionsLoaded = false;
 	// Questions picked in "Tests to run"; empty = every question of the purpose.
@@ -71,7 +73,16 @@
 			? m.hsb_mode_lexical()
 			: mode === 'semantic'
 				? m.hsb_mode_semantic()
-				: m.hsb_mode_hybrid();
+				: mode === 'effort'
+					? m.hsb_mode_effort()
+					: m.hsb_mode_hybrid();
+	const effortLabel = (effort: SearchEffort) =>
+		effort === 'high'
+			? m.hsb_effort_high()
+			: effort === 'medium'
+				? m.hsb_effort_medium()
+				: m.hsb_effort_low();
+	let effortRun = $derived(!!selected && selected.effort !== 'low');
 	const valueLabel = (score: HybridBenchmarkScore) => {
 		if (score.group === 'all') return m.hsb_all_questions();
 		if (score.value === 'one_hop') return m.qg_one_hop();
@@ -276,6 +287,14 @@
 					disabled={starting}
 				/>
 			</div>
+			<div>
+				<label for="hsb-effort">{m.hsb_effort()}</label>
+				<select id="hsb-effort" bind:value={options.effort} disabled={starting}>
+					<option value="low">{m.hsb_effort_low()}</option>
+					<option value="medium">{m.hsb_effort_medium()}</option>
+					<option value="high">{m.hsb_effort_high()}</option>
+				</select>
+			</div>
 			<div class="tests-option">
 				<HybridSearchBenchmarkQuestions {purpose} bind:selected={questionIds} disabled={starting} />
 			</div>
@@ -389,6 +408,15 @@
 						<dd>{selected.candidate_limit}</dd>
 						<dt>{m.hsb_parallelism()}</dt>
 						<dd>{selected.parallelism}</dd>
+						<dt>{m.hsb_effort()}</dt>
+						<dd>
+							{effortRun
+								? m.hsb_effort_value({
+										effort: effortLabel(selected.effort),
+										max: selected.max_efforts
+									})
+								: effortLabel(selected.effort ?? 'low')}
+						</dd>
 					</dl>
 				</section>
 			</div>
@@ -457,6 +485,7 @@
 								<th>{m.hsb_col_hop()}</th>
 								<th>{m.hsb_col_lang()}</th>
 								{#each modes as mode}<th class="num">{modeLabel(mode)}</th>{/each}
+								{#if effortRun}<th class="num">{m.hsb_mode_effort()}</th>{/if}
 								<th class="num">{m.hsb_col_query_time()}</th>
 								<th>{m.hsb_col_keywords()}</th>
 								<th class="num">{m.hsb_col_search_run()}</th>
@@ -469,7 +498,22 @@
 									<td class="question"
 										>{result.question}{#if result.error_msg}<span class="error row-error"
 												>{result.error_msg}</span
-											>{/if}</td
+											>{/if}{#if result.effort_trace && result.effort_trace.attempts.length > 0}<details
+												class="trace"
+											>
+												<summary>{m.hsb_queries_tried()}</summary>
+												{#if result.effort_trace.need}<p>
+														{m.hsb_effort_need({ need: result.effort_trace.need })}
+													</p>{/if}
+												<ol>
+													{#each result.effort_trace.attempts as attempt}
+														<li>
+															{attempt.queries.join(' | ')}
+															<span class="reason">{attempt.reason}</span>
+														</li>
+													{/each}
+												</ol>
+											</details>{/if}</td
 									>
 									<td class="mono">{result.target_artifact_id}</td>
 									<td>{hopLabel(result.hop_type)}</td>
@@ -481,6 +525,20 @@
 											class:miss={rank === null}>{rank ?? m.hsb_miss()}</td
 										>
 									{/each}
+									{#if effortRun}
+										<td
+											class="num"
+											class:hit={result.effort_rank !== null && result.effort_rank <= 10}
+											class:miss={result.effort_rank === null}
+											>{result.effort_rank ??
+												m.hsb_miss()}{#if result.effort_attempts !== null}<span class="attempts"
+													>{m.hsb_attempts({ count: result.effort_attempts })} · {result.effort_found
+														? m.hsb_effort_found()
+														: m.hsb_effort_not_found()}{#if result.effort_ms !== null}
+														· {ms(result.effort_ms)}{/if}</span
+												>{/if}</td
+										>
+									{/if}
 									<td class="num" title={total === null ? undefined : queryTimeDetail(result)}
 										>{total === null ? '' : ms(total)}</td
 									>
@@ -730,6 +788,30 @@
 	.questions .question {
 		min-width: 280px;
 		max-width: 520px;
+	}
+	.attempts {
+		display: block;
+		font-size: 11px;
+		font-weight: 400;
+		color: var(--muted);
+		white-space: nowrap;
+	}
+	.trace {
+		margin-top: 6px;
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.trace summary {
+		cursor: pointer;
+		color: var(--accent);
+	}
+	.trace ol {
+		margin: 4px 0 0;
+		padding-left: 18px;
+	}
+	.trace .reason {
+		display: block;
+		font-style: italic;
 	}
 	.row-error {
 		display: block;

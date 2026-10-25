@@ -50,6 +50,8 @@ type artifactSearchResponse struct {
 	Total          int64                  `json:"total"`
 	AppliedFilters artifactSearchFilters  `json:"applied_filters"`
 	Results        []artifactSearchResult `json:"results"`
+	Effort         string                 `json:"effort,omitempty"`       // medium or high only
+	EffortTrace    *searchEffortTrace     `json:"effort_trace,omitempty"` // analysis and attempts
 }
 
 func parseRequiredSearchQuery(raw string) (string, error) {

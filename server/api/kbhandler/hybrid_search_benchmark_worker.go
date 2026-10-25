@@ -19,7 +19,10 @@ import (
 var (
 	hybridBenchEmbed    = computeQueryEmbedding
 	hybridBenchKeywords = searchQueryKeywords
-	hybridBenchSearch   = func(db *sql.DB, query string, vec []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+	hybridBenchEffort   = func(ctx context.Context, db *sql.DB, query string, cfg registrySearchConfig, effort string) ([]artifactSearchResult, *searchEffortTrace, error) {
+		return searchWithEffort(ctx, db, hybridBenchArtifactType, query, artifactSearchFilters{}, cfg.candidates(), cfg, effort)
+	}
+	hybridBenchSearch = func(db *sql.DB, query string, vec []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 		if registryLexicalBackend() == lexicalBackendParadeDB {
 			return queryHybridSearchResultsParadeDB(db, hybridBenchArtifactType, query, vec, artifactSearchFilters{}, 1, cfg.candidates(), cfg)
 		}
@@ -56,6 +59,9 @@ func runHybridSearchBenchmark(db *sql.DB, run hybridBenchRun, questions []hybrid
 				qcfg.call = newSearchCall(ctx, db, run.CreatedBy)
 				qcfg.call.keywords = &keywords
 				result := benchmarkHybridSearchQuestion(ctx, db, q, qcfg, logger)
+				if run.Effort != "" && run.Effort != searchEffortLow {
+					benchmarkHybridSearchEffort(ctx, db, q, qcfg, run.Effort, &result, logger)
+				}
 				alive, err := saveHybridBenchResult(ctx, db, run.ID, result)
 				cancel()
 				if err != nil {
@@ -181,14 +187,49 @@ func saveHybridBenchResult(ctx context.Context, db *sql.DB, runID int64, r hybri
 	if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.hybrid_search_benchmark_results
  (run_id, question_id, input_record_id, hop_type, lang, question, target_artifact_id, keywords,
   lexical_rank, semantic_rank, hybrid_rank, hybrid_top, error_msg, search_run_id,
-  embedding_ms, keywords_ms, lexical_ms, semantic_ms, hybrid_ms)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,0),$15,$16,$17,$18,$19)`,
+  embedding_ms, keywords_ms, lexical_ms, semantic_ms, hybrid_ms,
+  effort_rank, effort_found, effort_attempts, effort_ms, effort_trace)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,0),$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
 		runID, r.QuestionID, r.InputRecordID, r.HopType, r.Lang, r.Question, r.TargetArtifactID, pq.Array(r.Keywords),
 		r.LexicalRank, r.SemanticRank, r.HybridRank, top, r.ErrorMsg, r.SearchRunID,
-		r.EmbeddingMs, r.KeywordsMs, r.LexicalMs, r.SemanticMs, r.HybridMs); err != nil {
+		r.EmbeddingMs, r.KeywordsMs, r.LexicalMs, r.SemanticMs, r.HybridMs,
+		r.EffortRank, r.EffortFound, r.EffortAttempts, r.EffortMs, nullJSON(r.EffortTrace)); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// benchmarkHybridSearchEffort runs the effort loop for one question. The loop never sees the
+// target; the target's rank in its final list is scored like the other modes.
+func benchmarkHybridSearchEffort(ctx context.Context, db *sql.DB, q hybridBenchQuestion, cfg registrySearchConfig, effort string, result *hybridBenchResult, logger ApiTypes.JimoLogger) {
+	start := time.Now()
+	results, trace, err := hybridBenchEffort(ctx, db, q.Question, cfg, effort)
+	result.EffortMs = msSince(start)
+	if err != nil {
+		logger.Warn("benchmark effort search failed", "question_id", q.ID, "effort", effort, "error", err)
+		result.ErrorMsg = strings.TrimPrefix(result.ErrorMsg+"; effort: "+err.Error(), "; ")
+		return
+	}
+	result.EffortRank = hybridBenchTargetRank(results, q.TargetArtifactID)
+	attempts, found := 0, false
+	if trace != nil {
+		attempts, found = len(trace.Attempts), trace.Found
+		if trace.Error != "" {
+			result.ErrorMsg = strings.TrimPrefix(result.ErrorMsg+"; effort: "+trace.Error, "; ")
+		}
+		if raw, err := json.Marshal(trace); err == nil {
+			result.EffortTrace = raw
+		}
+	}
+	result.EffortAttempts, result.EffortFound = &attempts, &found
+}
+
+// nullJSON stores an empty raw message as NULL.
+func nullJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return []byte(raw)
 }
 
 func msSince(start time.Time) *int {

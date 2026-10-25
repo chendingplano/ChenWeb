@@ -1,6 +1,7 @@
 const BASE = '/api/v1/kb/hybrid-search-benchmark/runs';
 
-export type BenchmarkMode = 'lexical' | 'semantic' | 'hybrid';
+export type BenchmarkMode = 'lexical' | 'semantic' | 'hybrid' | 'effort';
+export type SearchEffort = 'low' | 'medium' | 'high';
 
 export type HybridBenchmarkRun = {
 	id: number;
@@ -19,6 +20,8 @@ export type HybridBenchmarkRun = {
 	semantic_weight: number;
 	candidate_limit: number;
 	parallelism: number;
+	effort: SearchEffort;
+	max_efforts: number;
 	created_by: string;
 	created_at: string;
 	finished_at?: string | null;
@@ -54,6 +57,28 @@ export type HybridBenchmarkResult = {
 	lexical_ms: number | null;
 	semantic_ms: number | null;
 	hybrid_ms: number | null;
+	effort_rank: number | null;
+	effort_found: boolean | null;
+	effort_attempts: number | null;
+	effort_ms: number | null;
+	effort_trace: EffortTrace | null;
+};
+// The effort loop's analysis and attempts (medium/high runs).
+export type EffortTrace = {
+	effort: SearchEffort;
+	max_attempts: number;
+	strategy: string;
+	need: string;
+	found: boolean;
+	attempts: {
+		queries: string[];
+		found: boolean;
+		matching_ids: string[];
+		reason: string;
+		error?: string;
+		ms: number;
+	}[];
+	error?: string;
 };
 // Search settings a run can choose; the server's defaults are the live search configuration.
 export type HybridBenchmarkOptions = {
@@ -62,6 +87,7 @@ export type HybridBenchmarkOptions = {
 	semantic_weight: number;
 	candidate_limit: number;
 	parallelism: number;
+	effort: SearchEffort;
 };
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
