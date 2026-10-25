@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolveSelection } from './navigation-state';
+	import { foldersFirst } from './navigation-order';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
@@ -28,6 +29,7 @@
 	import BookMarkedIcon from '@lucide/svelte/icons/book-marked';
 	import BrainIcon from '@lucide/svelte/icons/brain';
 	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import VideoIcon from '@lucide/svelte/icons/video';
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
@@ -593,7 +595,7 @@
 					children.push({
 						...child,
 						label: labelFor(child.id, child.label),
-						...(grandchildren ? { children: grandchildren } : {})
+						...(grandchildren ? { children: foldersFirst(grandchildren) } : {})
 					});
 				}
 				if (children.length === 0) continue; // parent collapses when all children hid
@@ -601,10 +603,10 @@
 			out.push({
 				...item,
 				label: labelFor(item.id, item.label),
-				...(children ? { children } : {})
+				...(children ? { children: foldersFirst(children) } : {})
 			});
 		}
-		return out;
+		return foldersFirst(out);
 	}
 
 	const displayMainNav = $derived(buildVisible(activeMainNav));
@@ -869,6 +871,7 @@
 										}
 									}}
 								>
+									<FolderIcon class="h-4 w-4 flex-shrink-0" />
 									<span class="flex-1 truncate text-left">{child.label}</span>
 									<ChevronDownIcon
 										class="flex-shrink-0 transition-transform duration-200"
@@ -887,6 +890,7 @@
 									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
 									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:12px;"
 								>
+									<FolderIcon class="h-4 w-4 flex-shrink-0" />
 									<span class="flex-1 truncate">{gc.label}</span>
 									<ChevronDownIcon class="h-3 w-3" style="transform:rotate({subAccordionOpen[gc.id] ? '180deg' : '0deg'});" />
 								</button>
@@ -898,7 +902,7 @@
 												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
 												style="color:{activeMenu?.childId === ggc.id ? accent : textMuted};background:{activeMenu?.childId === ggc.id ? accentTint : 'transparent'};font-size:12px;"
 											>
-												<span class="h-1 w-1 rounded-full" style="background:currentColor;opacity:.5;"></span>
+												<FileTextIcon class="h-4 w-4 flex-shrink-0" />
 												{ggc.label}
 											</button>
 										{/each}
@@ -910,7 +914,7 @@
 									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
 									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:{child.id === 'sysadmin-llm-metrics' ? '11px' : '13px'};"
 								>
-									<span class="h-1 w-1 flex-shrink-0 rounded-full" style="background:currentColor;opacity:.5;"></span>
+									<FileTextIcon class="h-4 w-4 flex-shrink-0" />
 									{gc.label}
 								</button>
 							{/if}
@@ -942,10 +946,7 @@
 										}
 									}}
 								>
-									<div
-										class="h-1 w-1 flex-shrink-0 rounded-full"
-										style="background:currentColor; opacity:0.5;"
-									></div>
+									<FileTextIcon class="h-4 w-4 flex-shrink-0" />
 									{child.label}
 								</button>
 							{/if}

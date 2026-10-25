@@ -75,6 +75,10 @@ Every page must work in English and Chinese. Decision and rationale: ADR
 * **Do not add `kb.page_config` rows to translate text.** `kb.page_config` is only for
   operator-controlled visibility, role-based access, and runtime label overrides.
 * **New menu item** in `nav-rail.svelte`: `label: m.nav_<id>()` (id with `-` → `_`) plus both keys.
+* **Menu tree presentation:** folders precede non-folder siblings at every level, within each
+  top-level section. Preserve configured order within folders and within pages. Every entry
+  displays an icon: keep the top-level feature icons; nested folders use a folder icon and
+  nested pages use a file icon. Apply ordering after visibility filtering.
 * **Verify with `bun run check`** (from `web/`). It fails when the two message files differ or when a
   `.svelte` file has more hard-coded text than `web/i18n-baseline.json` allows (new files: zero).
   Hard-coded text = markup text, `placeholder`/`title`/`aria-label`/`alt`/`label` text, text props
