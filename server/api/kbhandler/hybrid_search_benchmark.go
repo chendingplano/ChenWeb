@@ -28,6 +28,9 @@ const (
 	hybridBenchGroupLang            = "lang"
 	hybridBenchErrEmbedding         = "query embedding failed"
 	hybridBenchErrKeywords          = "query keywords failed or empty (see LLM Usage Logs); lexical used the raw query"
+	hybridBenchErrNoTrace           = "no trace: the search failed or fell back to lexical-only"
+	hybridBenchSourceQuestion       = "question"
+	hybridBenchSourceEffort         = "effort"
 	hybridBenchRunListLimit         = 50
 	hybridBenchPurposeSearchMetrics = "search_metrics"
 	hybridBenchMaxWeight            = 100
@@ -182,6 +185,20 @@ type hybridBenchResult struct {
 	EffortAttempts *int            `json:"effort_attempts"`
 	EffortMs       *int            `json:"effort_ms"`
 	EffortTrace    json.RawMessage `json:"effort_trace"`
+	// Queries and their candidate lists, saved with the result; read through the trace endpoint.
+	Queries []hybridBenchQuery `json:"-"`
+}
+
+// hybridBenchQuery is one query a question searched: the question itself (seq 1), then each query
+// of the effort loop, with the candidate lists of its hybrid search.
+type hybridBenchQuery struct {
+	Seq        int
+	Source     string // hybridBenchSourceQuestion or hybridBenchSourceEffort
+	Attempt    *int   // effort attempt; nil for the question and for a fallback search
+	Text       string
+	Keywords   []string
+	ErrorMsg   string
+	Candidates []searchTraceCandidate
 }
 
 func (r hybridBenchResult) rank(mode string) *int {

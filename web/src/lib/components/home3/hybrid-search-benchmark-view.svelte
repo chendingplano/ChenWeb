@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import HybridSearchBenchmarkQuestions from './hybrid-search-benchmark-questions.svelte';
+	import HybridSearchBenchmarkAnalyze from './hybrid-search-benchmark-analyze.svelte';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
 		startBenchmarkRun,
@@ -48,6 +49,7 @@
 	let startController: AbortController | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let detailPanel = $state<HTMLElement | undefined>();
+	let analyzer = $state<ReturnType<typeof HybridSearchBenchmarkAnalyze>>();
 
 	let groupScores = $derived(scores.filter((s) => s.group === scoreGroup));
 	let running = $derived(runs.some((r) => r.status === 'running'));
@@ -489,6 +491,7 @@
 								<th class="num">{m.hsb_col_query_time()}</th>
 								<th>{m.hsb_col_keywords()}</th>
 								<th class="num">{m.hsb_col_search_run()}</th>
+								<th><span class="sr-only">{m.hsb_col_actions()}</span></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -544,12 +547,18 @@
 									>
 									<td class="keywords">{result.keywords.join(', ')}</td>
 									<td class="num mono">{result.search_run_id || ''}</td>
+									<td class="actions"
+										><button type="button" onclick={() => analyzer?.open(result)}
+											>{m.hsba_button()}</button
+										></td
+									>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
 			{/if}
+			<HybridSearchBenchmarkAnalyze bind:this={analyzer} backend={selected.lexical_backend} />
 		</section>
 	{/if}
 </div>

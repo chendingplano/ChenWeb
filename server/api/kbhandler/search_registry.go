@@ -40,6 +40,8 @@ type registrySearchConfig struct {
 	semanticWeight  float64    // hybrid RRF weight of the semantic list
 	call            searchCall // run ID and user for the search's LLM usage events
 	candidateLimit  int        // hybrid candidates per list; 0 = hybridCandidateLimit
+	// trace, when set, collects each hybrid search's candidate lists (benchmark runs only).
+	trace *searchTraceSink
 }
 
 func (c registrySearchConfig) candidates() int {
@@ -142,9 +144,15 @@ func paradeDBPartitions(artifactType string, filters artifactSearchFilters) []st
 		if !slices.Contains(searchArtifactPartitionTypes, strings.TrimSpace(t)) {
 			return nil
 		}
-		tables = append(tables, "kb.search_artifacts_"+strings.TrimSpace(t))
+		tables = append(tables, searchArtifactPartition(strings.TrimSpace(t)))
 	}
 	return tables
+}
+
+// searchArtifactPartition names the kb.search_artifacts partition of an artifact type (the table is
+// LIST partitioned by artifact_type).
+func searchArtifactPartition(artifactType string) string {
+	return "kb.search_artifacts_" + artifactType
 }
 
 // paradeDBUnion renders `SELECT <selectList> FROM <table> sa WHERE <where> <suffix>` for each table,
@@ -583,12 +591,12 @@ func queryHybridSearchResults(db *sql.DB, artifactType string, queryText string,
 	pageSizeArg := nextArg
 	offsetArg := nextArg + 1
 
-	sqlText := fmt.Sprintf(`
+	ctes := fmt.Sprintf(`
 WITH query_input AS (
 	SELECT %s('%s', $1) AS query
 ),
 lexical AS (
-	SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id,
+	SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, %s AS score,
 		ROW_NUMBER() OVER (ORDER BY %s DESC, sa.artifact_id ASC) AS rnk
 	FROM kb.search_artifacts sa
 	CROSS JOIN query_input
@@ -596,26 +604,14 @@ lexical AS (
 	ORDER BY rnk
 	LIMIT %d
 ),
-semantic AS (
-	SELECT nn.artifact_type, nn.artifact_id,
-		ROW_NUMBER() OVER (ORDER BY nn.distance ASC, nn.artifact_id ASC) AS rnk
-	FROM (
-		SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, sa.embedding <=> $2::vector AS distance
-		FROM kb.search_artifacts sa
-		WHERE sa.embedding IS NOT NULL%s
-		ORDER BY sa.embedding <=> $2::vector
-		LIMIT %d
-	) nn
-),
-fused AS (
-	SELECT
-		COALESCE(l.artifact_type, s.artifact_type) AS artifact_type,
-		COALESCE(l.artifact_id, s.artifact_id) AS artifact_id,
-		COALESCE(%s / (%d + l.rnk), 0.0) + COALESCE(%s / (%d + s.rnk), 0.0) AS score
-	FROM lexical l
-	FULL OUTER JOIN semantic s
-		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
-)
+%s`,
+		tsQueryExpr, cfg.dictionary,
+		lexScore, lexScore,
+		ftsClause, structuralSQL,
+		cfg.candidates(),
+		hybridSemanticAndFusedCTEs(structuralSQL, cfg),
+	)
+	sqlText := ctes + fmt.Sprintf(`
 SELECT
 	sa.artifact_type,
 	sa.artifact_id,
@@ -640,13 +636,6 @@ JOIN kb.search_artifacts sa
 CROSS JOIN query_input
 ORDER BY f.score DESC, sa.artifact_id ASC
 LIMIT $%d OFFSET $%d`,
-		tsQueryExpr, cfg.dictionary,
-		lexScore,
-		ftsClause, structuralSQL,
-		cfg.candidates(),
-		structuralSQL,
-		cfg.candidates(),
-		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 		cfg.dictionary,
 		escapedSnippetOptions,
 		pageSizeArg, offsetArg,
@@ -657,7 +646,43 @@ LIMIT $%d OFFSET $%d`,
 	args = append(args, structuralArgs...)
 	args = append(args, pageSize, offset)
 
-	return queryWithVectorIndexScan(db, sqlText, args, pageSize)
+	var trace *hybridTraceQuery
+	if cfg.trace != nil {
+		// tsvector reads the parent table in one pass: there are no per-partition lists.
+		trace = &hybridTraceQuery{sink: cfg.trace, sql: ctes + hybridTraceSelect(false), args: args[:len(args)-2], offset: offset, query: queryText}
+	}
+	return queryWithVectorIndexScan(db, sqlText, args, pageSize, trace)
+}
+
+// hybridSemanticAndFusedCTEs renders the semantic and fused CTEs both hybrid queries share. $2 is
+// the query vector; structuralSQL holds the structural filters (" AND ..." or empty).
+func hybridSemanticAndFusedCTEs(structuralSQL string, cfg registrySearchConfig) string {
+	return fmt.Sprintf(`semantic AS (
+	SELECT nn.artifact_type, nn.artifact_id, nn.distance,
+		ROW_NUMBER() OVER (ORDER BY nn.distance ASC, nn.artifact_id ASC) AS rnk
+	FROM (
+		SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, sa.embedding <=> $2::vector AS distance
+		FROM kb.search_artifacts sa
+		WHERE sa.embedding IS NOT NULL%s
+		ORDER BY sa.embedding <=> $2::vector
+		LIMIT %d
+	) nn
+),
+fused AS (
+	SELECT
+		COALESCE(l.artifact_type, s.artifact_type) AS artifact_type,
+		COALESCE(l.artifact_id, s.artifact_id) AS artifact_id,
+		l.rnk AS lexical_rnk,
+		s.rnk AS semantic_rnk,
+		COALESCE(%s / (%d + l.rnk), 0.0) + COALESCE(%s / (%d + s.rnk), 0.0) AS score
+	FROM lexical l
+	FULL OUTER JOIN semantic s
+		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
+)`,
+		structuralSQL,
+		cfg.candidates(),
+		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
+	)
 }
 
 // sqlFloat renders a configured fusion weight as a SQL float literal (never user input). The cast
@@ -672,8 +697,16 @@ func sqlFloat(v float64) string {
 // at most hnsw.ef_search rows (40 by default), fewer than hybridCandidateLimit, and filtered queries
 // can lose rows after the index scan; relaxed_order keeps scanning until the LIMIT is met. The order
 // may then be slightly off, which is harmless because the CTE re-ranks by distance.
-func queryWithVectorIndexScan(db *sql.DB, sqlText string, args []any, pageSize int) ([]artifactSearchResult, error) {
-	tx, err := db.Begin()
+//
+// With a trace, the transaction is a read-only REPEATABLE READ snapshot and the trace statement
+// (the same CTEs) runs after the search, so it reads the lists the results came from. A failed
+// trace is recorded in the sink; it never fails the search.
+func queryWithVectorIndexScan(db *sql.DB, sqlText string, args []any, pageSize int, trace *hybridTraceQuery) ([]artifactSearchResult, error) {
+	var opts *sql.TxOptions
+	if trace != nil {
+		opts = &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
+	}
+	tx, err := db.BeginTx(context.Background(), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -690,13 +723,17 @@ func queryWithVectorIndexScan(db *sql.DB, sqlText string, args []any, pageSize i
 	if err != nil {
 		return nil, err
 	}
+	if trace != nil && !trace.run(tx, results) {
+		return results, nil
+	}
 	return results, tx.Commit()
 }
 
 func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, vec []float64, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 	offset := (page - 1) * pageSize
 
-	lexicalWhereSQL, lexicalArgs := buildParadeDBSearchWhereClause(artifactType, queryText, searchQueryKeywords(withSearchCall(context.Background(), cfg.call), queryText), filters, 3)
+	keywords := searchQueryKeywords(withSearchCall(context.Background(), cfg.call), queryText)
+	lexicalWhereSQL, lexicalArgs := buildParadeDBSearchWhereClause(artifactType, queryText, keywords, filters, 3)
 	structuralClauses, _, _ := buildStructuralFilterClauses(artifactType, filters, 3)
 	structuralSQL := ""
 	if len(structuralClauses) > 0 {
@@ -713,36 +750,24 @@ func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText
 	offsetArg := len(args) + 2
 	args = append(args, pageSize, offset)
 
-	sqlText := fmt.Sprintf(`
-WITH lexical AS (
-	SELECT bm.artifact_type, bm.artifact_id,
-		ROW_NUMBER() OVER (ORDER BY bm.score DESC, bm.artifact_id ASC) AS rnk
-	FROM (
+	// lexical_partitions holds each partition's BM25 candidates; lexical merges them by raw score.
+	ctes := fmt.Sprintf(`
+WITH lexical_partitions AS (
 %s
-	) bm
+),
+lexical AS (
+	SELECT bm.artifact_type, bm.artifact_id, bm.score,
+		ROW_NUMBER() OVER (ORDER BY bm.score DESC, bm.artifact_id ASC) AS rnk
+	FROM lexical_partitions bm
 	ORDER BY rnk
 	LIMIT %d
 ),
-semantic AS (
-	SELECT nn.artifact_type, nn.artifact_id,
-		ROW_NUMBER() OVER (ORDER BY nn.distance ASC, nn.artifact_id ASC) AS rnk
-	FROM (
-		SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, sa.embedding <=> $2::vector AS distance
-		FROM kb.search_artifacts sa
-		WHERE sa.embedding IS NOT NULL%s
-		ORDER BY sa.embedding <=> $2::vector
-		LIMIT %d
-	) nn
-),
-fused AS (
-	SELECT
-		COALESCE(l.artifact_type, s.artifact_type) AS artifact_type,
-		COALESCE(l.artifact_id, s.artifact_id) AS artifact_id,
-		COALESCE(%s / (%d + l.rnk), 0.0) + COALESCE(%s / (%d + s.rnk), 0.0) AS score
-	FROM lexical l
-	FULL OUTER JOIN semantic s
-		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
-)
+%s`,
+		paradeDBUnion(paradeDBPartitions(artifactType, filters), "sa.artifact_type, sa.artifact_id, pdb.score(sa.artifact_id) AS score", lexicalWhereSQL, fmt.Sprintf("ORDER BY pdb.score(sa.artifact_id) DESC LIMIT %d", cfg.candidates())),
+		cfg.candidates(),
+		hybridSemanticAndFusedCTEs(structuralSQL, cfg),
+	)
+	sqlText := ctes + fmt.Sprintf(`
 SELECT
 	sa.artifact_type,
 	sa.artifact_id,
@@ -761,13 +786,12 @@ JOIN kb.search_artifacts sa
 	ON sa.artifact_type = f.artifact_type AND sa.artifact_id = f.artifact_id
 ORDER BY f.score DESC, sa.artifact_id ASC
 LIMIT $%d OFFSET $%d`,
-		paradeDBUnion(paradeDBPartitions(artifactType, filters), "sa.artifact_type, sa.artifact_id, pdb.score(sa.artifact_id) AS score", lexicalWhereSQL, fmt.Sprintf("ORDER BY pdb.score(sa.artifact_id) DESC LIMIT %d", cfg.candidates())),
-		cfg.candidates(),
-		structuralSQL,
-		cfg.candidates(),
-		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 		pageSizeArg, offsetArg,
 	)
 
-	return queryWithVectorIndexScan(db, sqlText, args, pageSize)
+	var trace *hybridTraceQuery
+	if cfg.trace != nil {
+		trace = &hybridTraceQuery{sink: cfg.trace, sql: ctes + hybridTraceSelect(true), args: args[:len(args)-2], offset: offset, query: queryText, keywords: keywords}
+	}
+	return queryWithVectorIndexScan(db, sqlText, args, pageSize, trace)
 }

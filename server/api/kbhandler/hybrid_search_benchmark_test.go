@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -243,5 +245,107 @@ func TestBenchmarkHybridSearchEffort(t *testing.T) {
 	req.Effort = &bad
 	if _, err := req.normalize(hybridBenchOptions{LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200, Parallelism: 8}); err == nil {
 		t.Fatal("effort max accepted")
+	}
+}
+
+func TestBenchmarkHybridSearchTrace(t *testing.T) {
+	oldEmbed, oldSearch, oldEffort := hybridBenchEmbed, hybridBenchSearch, hybridBenchEffort
+	t.Cleanup(func() { hybridBenchEmbed, hybridBenchSearch, hybridBenchEffort = oldEmbed, oldSearch, oldEffort })
+	logger := loggerutil.CreateDefaultLogger("20261025-751")
+	q := hybridBenchQuestion{ID: 7, Question: "q", TargetArtifactID: "416_mtc_2"}
+	fused := []searchTraceCandidate{{Stage: searchTraceStageFused, ArtifactType: "metric", ArtifactID: "416_mtc_2", Rank: 1}}
+
+	hybridBenchEmbed = func(context.Context, string) ([]float64, bool) { return []float64{1}, true }
+	traced := 0
+	hybridBenchSearch = func(_ *sql.DB, query string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+		time.Sleep(25 * time.Millisecond)
+		if cfg.trace != nil {
+			traced++
+			cfg.trace.entries = append(cfg.trace.entries, searchTrace{Query: query, Keywords: []string{"k"}, Candidates: fused, Ms: 25})
+		}
+		return benchResults("416_mtc_2", 0.03), nil
+	}
+	off := false
+	cfg := registrySearchConfig{lexicalWeight: 1, semanticWeight: 1, call: searchCall{keywords: &off}}
+	r := benchmarkHybridSearchQuestion(context.Background(), nil, q, cfg, logger)
+	if traced != 1 {
+		t.Fatalf("traced searches = %d, want only the hybrid one", traced)
+	}
+	if len(r.Queries) != 1 || r.Queries[0].Seq != 1 || r.Queries[0].Source != hybridBenchSourceQuestion || r.Queries[0].Text != "q" ||
+		r.Queries[0].ErrorMsg != "" || len(r.Queries[0].Candidates) != 1 || r.Queries[0].Keywords[0] != "k" {
+		t.Fatalf("question query = %+v", r.Queries)
+	}
+	if *r.HybridMs >= 25 || *r.LexicalMs < 25 {
+		t.Fatalf("hybrid_ms must exclude the trace: hybrid=%d lexical=%d", *r.HybridMs, *r.LexicalMs)
+	}
+
+	// Effort: queries follow the attempts; an untraced attempt query keeps a row with an error, and a
+	// traced search outside the attempts comes last without an attempt.
+	hybridBenchEffort = func(_ context.Context, _ *sql.DB, _ string, cfg registrySearchConfig, _ string) ([]artifactSearchResult, *searchEffortTrace, error) {
+		for _, text := range []string{"q", "fallback", "a2"} {
+			cfg.trace.entries = append(cfg.trace.entries, searchTrace{Query: text, Keywords: []string{}, Candidates: fused, Ms: 1})
+		}
+		trace := &searchEffortTrace{Attempts: []searchEffortAttempt{{Queries: []string{"q"}}, {Queries: []string{"a2", "missing"}}}}
+		return benchResults("416_mtc_2", 0.03), trace, nil
+	}
+	benchmarkHybridSearchEffort(context.Background(), nil, q, cfg, searchEffortHigh, &r, logger)
+	type row struct {
+		seq     int
+		text    string
+		attempt int
+		traced  bool
+	}
+	got := []row{}
+	for _, qr := range r.Queries {
+		attempt := 0
+		if qr.Attempt != nil {
+			attempt = *qr.Attempt
+		}
+		got = append(got, row{qr.Seq, qr.Text, attempt, qr.ErrorMsg == "" && len(qr.Candidates) == 1})
+	}
+	want := []row{{1, "q", 0, true}, {2, "q", 1, true}, {3, "a2", 2, true}, {4, "missing", 2, false}, {5, "fallback", 0, true}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("queries = %+v, want %+v", got, want)
+	}
+	if r.Queries[3].ErrorMsg != hybridBenchErrNoTrace || r.Queries[1].Source != hybridBenchSourceEffort {
+		t.Fatalf("effort rows = %+v", r.Queries[1:])
+	}
+}
+
+func TestSaveHybridBenchResultStoresTrace(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+	attempt := 1
+	r := hybridBenchResult{Keywords: []string{}, HybridTop: []string{}, Queries: []hybridBenchQuery{
+		{Seq: 1, Source: hybridBenchSourceQuestion, Text: "q", Keywords: []string{"k"}, Candidates: []searchTraceCandidate{
+			{Stage: searchTraceStageLexical, PartitionName: "kb.search_artifacts_metric", ArtifactType: "metric", ArtifactID: "a", Rank: 1, Score: 3.5, PartitionRank: intPtr(1)},
+		}},
+		{Seq: 2, Source: hybridBenchSourceEffort, Attempt: &attempt, Text: "x", Keywords: []string{}, ErrorMsg: hybridBenchErrNoTrace},
+	}}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE testbed\\.hybrid_search_benchmark_runs").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("INSERT INTO testbed\\.hybrid_search_benchmark_results .*RETURNING id").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(5)))
+	mock.ExpectQuery("INSERT INTO testbed\\.hybrid_search_benchmark_queries").
+		WithArgs(int64(5), 1, hybridBenchSourceQuestion, nil, "q", sqlmock.AnyArg(), "").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(9)))
+	mock.ExpectExec("INSERT INTO testbed\\.hybrid_search_benchmark_candidates .*unnest").
+		WithArgs(int64(9), "{\"lexical\"}", "{\"kb.search_artifacts_metric\"}", "{\"metric\"}", "{\"a\"}", "{1}", "{3.5}", "{1}", "{NULL}", "{NULL}").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// No candidates: the query row only.
+	mock.ExpectQuery("INSERT INTO testbed\\.hybrid_search_benchmark_queries").
+		WithArgs(int64(5), 2, hybridBenchSourceEffort, 1, "x", sqlmock.AnyArg(), hybridBenchErrNoTrace).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
+	mock.ExpectCommit()
+
+	alive, err := saveHybridBenchResult(context.Background(), db, 3, r)
+	if err != nil || !alive {
+		t.Fatalf("alive=%v err=%v", alive, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
 	}
 }

@@ -480,7 +480,7 @@ func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
 	mock.ExpectExec("SET LOCAL hnsw\\.iterative_scan = relaxed_order").WillReturnResult(sqlmock.NewResult(0, 0))
 	// The semantic CTE must take its candidates with a plain ORDER BY distance LIMIT, the only
 	// shape pgvector serves from the HNSW index.
-	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200"+
+	mock.ExpectQuery("WITH lexical_partitions AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*ORDER BY sa\\.embedding <=> \\$2::vector\\s+LIMIT 200"+
 		".*COALESCE\\(0\\.25::float8 / \\(60 \\+ l\\.rnk\\), 0\\.0\\) \\+ COALESCE\\(1::float8 / \\(60 \\+ s\\.rnk\\), 0\\.0\\)").
 		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{

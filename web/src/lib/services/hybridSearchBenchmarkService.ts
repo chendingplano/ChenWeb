@@ -125,6 +125,40 @@ export function getBenchmarkRun(id: number, signal?: AbortSignal) {
 	}>(`${BASE}/${id}`, { signal });
 }
 
+// One result's trace (Analyze dialog): every query the question searched and the candidate lists
+// of its hybrid search — per stage the first `limit` rows plus the target's rows.
+export type TraceStage = 'lexical_partition' | 'lexical' | 'semantic' | 'fused';
+export type TraceCandidate = {
+	rank: number;
+	partition_name: string;
+	artifact_type: string;
+	artifact_id: string;
+	label: string;
+	score: number;
+	partition_rank: number | null;
+	lexical_rank: number | null;
+	semantic_rank: number | null;
+};
+export type TraceQuery = {
+	id: number;
+	seq: number;
+	source: 'question' | 'effort';
+	attempt: number | null;
+	query_text: string;
+	keywords: string[];
+	error_msg: string;
+	stages: Partial<Record<TraceStage, TraceCandidate[]>>;
+	counts: Partial<Record<TraceStage, number>>;
+};
+export function getBenchmarkTrace(resultId: number, signal?: AbortSignal) {
+	return request<{
+		result_id: number;
+		target_artifact_id: string;
+		limit: number;
+		queries: TraceQuery[];
+	}>(`/api/v1/kb/hybrid-search-benchmark/results/${resultId}/trace`, { signal });
+}
+
 // Questions of one purpose matching the "Tests to run" filters (all matches up to `limit`).
 export type BenchmarkQuestionFilters = {
 	purpose: string;
