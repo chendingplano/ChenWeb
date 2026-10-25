@@ -112,3 +112,12 @@ export function getQuestionFilters(signal?: AbortSignal) {
 		signal
 	});
 }
+
+export function archiveQuestions(ids: number[], signal?: AbortSignal) {
+	return request<{ archived_count: number }>('/api/v1/kb/question-generator/questions/archive', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ids }),
+		signal
+	});
+}

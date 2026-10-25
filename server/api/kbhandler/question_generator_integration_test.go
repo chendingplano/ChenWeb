@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +58,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql"} {
+	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql", "20261025000001_archive_generated_questions.sql"} {
 		raw, err := os.ReadFile(filepath.Join("../../../project_migrations", filename))
 		if err != nil {
 			t.Fatal(err)
@@ -115,9 +116,9 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		name string
 		run  func(context.Context) error
 	}{
-		{"metadata up", func(ctx context.Context) error { _, err := provider.Up(ctx); return err }},
+		{"metadata up", func(ctx context.Context) error { _, err := provider.UpTo(ctx, 20261024000013); return err }},
 		{"metadata down", func(ctx context.Context) error { _, err := provider.Down(ctx); return err }},
-		{"metadata re-up", func(ctx context.Context) error { _, err := provider.Up(ctx); return err }},
+		{"metadata re-up", func(ctx context.Context) error { _, err := provider.UpTo(ctx, 20261024000013); return err }},
 	} {
 		if err := action.run(ctx); err != nil {
 			t.Fatalf("%s: %v", action.name, err)
@@ -335,11 +336,83 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	if _, err := provider.Down(ctx); err == nil || !strings.Contains(err.Error(), "while batch runs exist") {
 		t.Fatalf("unsafe batch downgrade was not refused: %v", err)
 	}
-	if _, err := provider.Up(ctx); err != nil {
+	if _, err := provider.UpTo(ctx, 20261024000013); err != nil {
 		t.Fatalf("purpose re-up: %v", err)
 	}
 	run, questions, err = loadQuestionRun(ctx, db, batchID)
 	if err != nil || run.Status != "done" || len(questions) != 4 || questions[1].Lang != "zh-cn" {
 		t.Fatalf("refused downgrade changed data: %+v questions=%+v error=%v", run, questions, err)
 	}
+	t.Run("archive questions atomically and restore on rollback", func(t *testing.T) {
+		if _, err := provider.Up(ctx); err != nil {
+			t.Fatal(err)
+		}
+		before, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Page: 1, PageSize: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []int64{before.Questions[0].ID, before.Questions[1].ID}
+		// A failed insert must preserve all active questions.
+		if _, err := db.ExecContext(ctx, `ALTER TABLE testbed.generated_questions_archive ADD CONSTRAINT reject_archive CHECK (archived_by <> 'reject')`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := archiveGeneratedQuestions(ctx, db, ids, "reject"); err == nil {
+			t.Fatal("expected archive failure")
+		}
+		unchanged, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Page: 1, PageSize: 100})
+		if err != nil || !reflect.DeepEqual(before, unchanged) {
+			t.Fatalf("failed archive changed active questions: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `ALTER TABLE testbed.generated_questions_archive DROP CONSTRAINT reject_archive`); err != nil {
+			t.Fatal(err)
+		}
+		oldDB := ApiTypes.ProjectDBHandle
+		ApiTypes.ProjectDBHandle = db
+		defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+		body := fmt.Sprintf(`{"ids":[%d,%d,%d,999999999]}`, ids[0], ids[1], ids[0])
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), rec)
+		c.Set("question-generator-user-id", "archive-admin")
+		if err := ArchiveGeneratedQuestions(c); err != nil || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"archived_count":2`) {
+			t.Fatalf("archive HTTP status=%d body=%s error=%v", rec.Code, rec.Body.String(), err)
+		}
+		for _, original := range before.Questions[:2] {
+			archived, err := scanGeneratedQuestion(db.QueryRowContext(ctx, `SELECT `+generatedQuestionColumns+` FROM testbed.generated_questions_archive WHERE id=$1`, original.ID))
+			if err != nil || !reflect.DeepEqual(original, archived) {
+				t.Fatalf("archive lost question data: %+v error=%v", archived, err)
+			}
+			var actor string
+			var at time.Time
+			if err := db.QueryRowContext(ctx, `SELECT archived_by, archived_at FROM testbed.generated_questions_archive WHERE id=$1`, original.ID).Scan(&actor, &at); err != nil || actor != "archive-admin" || at.IsZero() {
+				t.Fatalf("missing audit metadata: actor=%q at=%v error=%v", actor, at, err)
+			}
+			_, active, err := loadQuestionRun(ctx, db, original.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range active {
+				if q.ID == original.ID {
+					t.Fatal("archived question remains in run results")
+				}
+			}
+		}
+		after, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Page: 1, PageSize: 100})
+		if err != nil || after.Total != before.Total-2 {
+			t.Fatalf("active total=%d error=%v", after.Total, err)
+		}
+		if n, err := archiveGeneratedQuestions(ctx, db, ids, "archive-admin"); err != nil || n != 0 {
+			t.Fatalf("repeat archive count=%d error=%v", n, err)
+		}
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatalf("archive rollback: %v", err)
+		}
+		restored, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Page: 1, PageSize: 100})
+		if err != nil || !reflect.DeepEqual(before, restored) {
+			t.Fatalf("rollback lost questions: %v", err)
+		}
+		if _, err := provider.Up(ctx); err != nil {
+			t.Fatalf("archive re-up: %v", err)
+		}
+	})
+
 }

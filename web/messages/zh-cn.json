@@ -7431,5 +7431,16 @@
 	"qg_field_metric": "指标 ID",
 	"qg_field_model": "模型",
 	"qg_field_prompt": "提示词",
-	"qg_field_created_at": "创建时间"
+	"qg_field_created_at": "创建时间",
+	"qg_list": "列表",
+	"qg_cards": "卡片",
+	"qg_select": "选择",
+	"qg_select_question": "选择问题 {number}",
+	"qg_selected_count": "已选择 {count} 项",
+	"qg_delete": "删除",
+	"qg_deleting": "正在删除…",
+	"qg_delete_hint": "将所选问题移至归档表",
+	"qg_delete_error": "无法归档所选问题，请重试。",
+	"qg_archived_count": "已将 {count} 个问题移至归档表。",
+	"qg_details": "详情"
 }

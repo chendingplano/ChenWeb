@@ -5,7 +5,19 @@
 	import type { NameValueInput } from '$lib/components/shared-ui/name-value/name-value';
 	import type { GeneratedQuestion } from '$lib/services/questionGeneratorService';
 
-	let { question, index }: { question: GeneratedQuestion; index: number } = $props();
+	let {
+		question,
+		index,
+		selected = false,
+		disabled = false,
+		onselect
+	}: {
+		question: GeneratedQuestion;
+		index: number;
+		selected?: boolean;
+		disabled?: boolean;
+		onselect?: (checked: boolean) => void;
+	} = $props();
 	const title = $derived(m.qg_question_number({ number: index }));
 	const fields: NameValueInput[] = $derived([
 		{
@@ -88,7 +100,16 @@
 </script>
 
 <article class="question select-text" aria-label={title}>
-	<h3 class="question-heading">{title}</h3>
+	<h3 class="question-heading">
+		{#if onselect}<input
+				type="checkbox"
+				checked={selected}
+				{disabled}
+				aria-label={m.qg_select_question({ number: index })}
+				onchange={(event) => onselect?.(event.currentTarget.checked)}
+			/>{/if}
+		{title}
+	</h3>
 	<NameValueVisualizer {fields} labelWidth="9rem" ariaLabel={title} />
 	<details>
 		<summary>{m.qg_reasoning_evidence()}</summary>

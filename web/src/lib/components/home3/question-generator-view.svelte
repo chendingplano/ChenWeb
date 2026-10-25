@@ -4,6 +4,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
+		archiveQuestions,
 		createQuestionRun,
 		getQuestionRun,
 		listQuestions,
@@ -31,6 +32,12 @@
 		languages: []
 	});
 	let questions = $state<GeneratedQuestion[]>([]);
+	let view = $state<'list' | 'cards'>('cards');
+	let selected = $state<number[]>([]);
+	let deleting = $state(false);
+	let deleteError = $state(false);
+	let archivedCount = $state<number | null>(null);
+	let archiveController: AbortController | undefined;
 	let total = $state(0);
 	let page = $state(1);
 	const pageSize = 50;
@@ -87,17 +94,57 @@
 	onDestroy(() => {
 		alive = false;
 		listController?.abort();
+		archiveController?.abort();
 		filterController?.abort();
 		createController?.abort();
 		pollController?.abort();
 		clearTimeout(timer);
 	});
+	function selectQuestion(id: number, checked: boolean) {
+		selected = checked ? [...new Set([...selected, id])] : selected.filter((value) => value !== id);
+	}
+	function changeTab(event: KeyboardEvent) {
+		if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+		event.preventDefault();
+		view =
+			event.key === 'Home'
+				? 'list'
+				: event.key === 'End'
+					? 'cards'
+					: view === 'list'
+						? 'cards'
+						: 'list';
+		document.getElementById(`qg-tab-${view}`)?.focus();
+	}
+	async function deleteSelected() {
+		if (deleting || loading || selected.length === 0) return;
+		archiveController = new AbortController();
+		deleting = true;
+		deleteError = false;
+		archivedCount = null;
+		listController?.abort();
+		try {
+			const result = await archiveQuestions([...selected], archiveController.signal);
+			if (!alive) return;
+			selected = [];
+			archivedCount = result.archived_count;
+			await loadQuestions(
+				Math.min(page, Math.max(1, Math.ceil((total - result.archived_count) / pageSize)))
+			);
+			void loadOptions();
+		} catch {
+			if (alive && !archiveController.signal.aborted) deleteError = true;
+		} finally {
+			if (alive) deleting = false;
+		}
+	}
 	async function loadQuestions(nextPage: number) {
 		listController?.abort();
 		const controller = new AbortController();
 		listController = controller;
 		const current = ++version;
 		loading = true;
+		selected = [];
 		loadError = false;
 		try {
 			const result = await listQuestions(applied, nextPage, pageSize, controller.signal);
@@ -125,11 +172,12 @@
 	}
 	function search(event: SubmitEvent) {
 		event.preventDefault();
-		if (!validDates) return;
+		if (!validDates || deleting) return;
 		applied = { ...draft };
 		void loadQuestions(1);
 	}
 	function reset() {
+		if (deleting) return;
 		draft = emptyFilters();
 		applied = emptyFilters();
 		void loadQuestions(1);
@@ -148,7 +196,7 @@
 			runQuestions = result.questions ?? [];
 			if (result.run.status === 'running') timer = setTimeout(() => void poll(id), 2500);
 			else {
-				void loadQuestions(page);
+				if (!deleting) void loadQuestions(page);
 				void loadOptions();
 			}
 		} catch {
@@ -253,10 +301,9 @@
 			/>
 		</div>
 		<div class="filter-actions">
-			<button class="primary" type="submit" disabled={!validDates}>{m.qg_search()}</button><button
-				type="button"
-				onclick={reset}>{m.qg_reset()}</button
-			>
+			<button class="primary" type="submit" disabled={!validDates || deleting}
+				>{m.qg_search()}</button
+			><button type="button" disabled={deleting} onclick={reset}>{m.qg_reset()}</button>
 		</div>
 		{#if !validDates}<p class="error" role="alert">{m.qg_invalid_dates()}</p>{/if}
 		{#if filtersError}<p class="error" role="alert">
@@ -302,23 +349,125 @@
 			<span>{m.qg_result_count({ count: total })}</span>
 		</div>
 		<p class="hint">{m.qg_review_hint()}</p>
-		{#if loading}<p role="status">{m.qg_loading()}</p>
-		{:else if loadError}<p class="error" role="alert">{m.qg_load_error()}</p>
-			<button onclick={() => void loadQuestions(page)}>{m.qg_retry()}</button>
-		{:else if questions.length === 0}<p class="empty">{m.qg_no_questions()}</p>
-		{:else}
-			<div class="question-grid">
-				{#each questions as question, index (question.id)}
-					<QuestionRecord {question} index={(page - 1) * pageSize + index + 1} />
-				{/each}
+		<div class="results-toolbar">
+			<div class="view-tabs" role="tablist" aria-label={m.qg_results()}>
+				<button
+					id="qg-tab-list"
+					role="tab"
+					aria-selected={view === 'list'}
+					aria-controls="qg-panel-list"
+					tabindex={view === 'list' ? 0 : -1}
+					onkeydown={changeTab}
+					onclick={() => (view = 'list')}>{m.qg_list()}</button
+				>
+				<button
+					id="qg-tab-cards"
+					role="tab"
+					aria-selected={view === 'cards'}
+					aria-controls="qg-panel-cards"
+					tabindex={view === 'cards' ? 0 : -1}
+					onkeydown={changeTab}
+					onclick={() => (view = 'cards')}>{m.qg_cards()}</button
+				>
 			</div>
-		{/if}
+			<div class="selection-actions">
+				<span>{m.qg_selected_count({ count: selected.length })}</span>
+				<button
+					class="delete"
+					disabled={deleting || loading || selected.length === 0}
+					title={m.qg_delete_hint()}
+					onclick={deleteSelected}>{deleting ? m.qg_deleting() : m.qg_delete()}</button
+				>
+			</div>
+		</div>
+		{#if deleteError}<p class="error" role="alert">{m.qg_delete_error()}</p>{/if}
+		{#if archivedCount !== null}<p class="hint" role="status">
+				{m.qg_archived_count({ count: archivedCount })}
+			</p>{/if}
+		<div
+			id="qg-panel-list"
+			role="tabpanel"
+			aria-labelledby="qg-tab-list"
+			hidden={view !== 'list'}
+			tabindex="0"
+		>
+			{#if view === 'list'}{@render results()}{/if}
+		</div>
+		<div
+			id="qg-panel-cards"
+			role="tabpanel"
+			aria-labelledby="qg-tab-cards"
+			hidden={view !== 'cards'}
+			tabindex="0"
+		>
+			{#if view === 'cards'}{@render results()}{/if}
+		</div>
+		{#snippet results()}
+			{#if loading}<p role="status">{m.qg_loading()}</p>
+			{:else if loadError}<p class="error" role="alert">{m.qg_load_error()}</p>
+				<button onclick={() => void loadQuestions(page)}>{m.qg_retry()}</button>
+			{:else if questions.length === 0}<p class="empty">{m.qg_no_questions()}</p>
+			{:else if view === 'cards'}
+				<div class="question-grid">
+					{#each questions as question, index (question.id)}
+						<QuestionRecord
+							{question}
+							index={(page - 1) * pageSize + index + 1}
+							selected={selected.includes(question.id)}
+							disabled={deleting}
+							onselect={(checked) => selectQuestion(question.id, checked)}
+						/>
+					{/each}
+				</div>
+			{:else}
+				<div class="question-list">
+					<table>
+						<thead
+							><tr>
+								<th>{m.qg_select()}</th><th>{m.qg_field_question()}</th><th>{m.qg_answer()}</th>
+								<th>{m.qg_filter_run()}</th><th>{m.qg_filter_record()}</th><th
+									>{m.qg_filter_language()}</th
+								><th>{m.qg_reasoning_evidence()}</th>
+							</tr></thead
+						>
+						<tbody
+							>{#each questions as question, index (question.id)}<tr>
+									<td
+										><input
+											type="checkbox"
+											checked={selected.includes(question.id)}
+											disabled={deleting}
+											aria-label={m.qg_select_question({
+												number: (page - 1) * pageSize + index + 1
+											})}
+											onchange={(event) => selectQuestion(question.id, event.currentTarget.checked)}
+										/></td
+									>
+									<td lang={question.lang}>{question.question}</td><td lang={question.lang}
+										>{question.answer}</td
+									>
+									<td>{question.run_id}</td><td>{question.input_record_id}</td><td
+										>{languageLabel(question.lang)}</td
+									>
+									<td
+										><details>
+											<summary>{m.qg_details()}</summary>
+											<QuestionRecord {question} index={(page - 1) * pageSize + index + 1} />
+										</details></td
+									>
+								</tr>{/each}</tbody
+						>
+					</table>
+				</div>
+			{/if}
+		{/snippet}
 		<nav class="pagination" aria-label={m.qg_pagination()}>
-			<button disabled={loading || page <= 1} onclick={() => void loadQuestions(page - 1)}
-				>{m.qg_previous()}</button
+			<button
+				disabled={loading || deleting || page <= 1}
+				onclick={() => void loadQuestions(page - 1)}>{m.qg_previous()}</button
 			><span>{m.qg_page_status({ page, pages: Math.max(1, Math.ceil(total / pageSize)) })}</span
 			><button
-				disabled={loading || page * pageSize >= total}
+				disabled={loading || deleting || page * pageSize >= total}
 				onclick={() => void loadQuestions(page + 1)}>{m.qg_next()}</button
 			>
 		</nav>
@@ -579,6 +728,71 @@
 	.results {
 		margin-top: 20px;
 		container-type: inline-size;
+	}
+	.results-toolbar,
+	.selection-actions,
+	.view-tabs {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.results-toolbar {
+		justify-content: space-between;
+		flex-wrap: wrap;
+		margin-top: 20px;
+	}
+	.selection-actions {
+		font-size: 13px;
+	}
+	.view-tabs {
+		gap: 4px;
+	}
+	.view-tabs [aria-selected='true'] {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.delete {
+		color: #dc2626;
+	}
+	.dark .delete {
+		color: #fca5a5;
+	}
+	input[type='checkbox'] {
+		width: 16px;
+		height: 16px;
+		padding: 0;
+		accent-color: #4f46e5;
+	}
+	.question-list {
+		overflow-x: auto;
+		margin-top: 24px;
+	}
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 13px;
+	}
+	th,
+	td {
+		padding: 12px;
+		text-align: start;
+		vertical-align: top;
+		border-bottom: 1px solid var(--line);
+	}
+	th {
+		color: var(--muted);
+		white-space: nowrap;
+	}
+	td {
+		min-width: 70px;
+		overflow-wrap: anywhere;
+	}
+	td:nth-child(2),
+	td:nth-child(3) {
+		min-width: 220px;
+	}
+	td details[open] {
+		min-width: 360px;
 	}
 	.question-grid {
 		display: grid;

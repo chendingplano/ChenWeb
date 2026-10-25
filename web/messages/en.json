@@ -7431,5 +7431,16 @@
 	"qg_field_metric": "Metric ID",
 	"qg_field_model": "Model",
 	"qg_field_prompt": "Prompt",
-	"qg_field_created_at": "Created at"
+	"qg_field_created_at": "Created at",
+	"qg_list": "List",
+	"qg_cards": "Cards",
+	"qg_select": "Select",
+	"qg_select_question": "Select question {number}",
+	"qg_selected_count": "{count} selected",
+	"qg_delete": "Delete",
+	"qg_deleting": "Deleting…",
+	"qg_delete_hint": "Move selected questions to the archive",
+	"qg_delete_error": "Could not archive the selected questions. Please try again.",
+	"qg_archived_count": "{count} questions moved to the archive.",
+	"qg_details": "Details"
 }
