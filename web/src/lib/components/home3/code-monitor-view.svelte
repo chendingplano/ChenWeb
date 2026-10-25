@@ -74,7 +74,7 @@
 					axisLabel: { color: colors.muted, formatter: (value: number) => (value + baseline).toLocaleString() },
 					splitLine: { lineStyle: { color: colors.border } }
 				},
-				{ type: 'value', position: 'right', axisLabel: { color: colors.muted }, splitLine: { show: false } }
+				{ type: 'value', position: 'right', minInterval: 100, axisLabel: { color: colors.muted }, splitLine: { show: false } }
 			],
 			series: [
 				{ name: m.code_monitor_total(), type: 'bar', yAxisIndex: 0, data: totals.map((total) => total - baseline), tooltip: { valueFormatter: (value) => (Number(value) + baseline).toLocaleString() }, itemStyle: { color: colors.accent, opacity: 0.8 } },

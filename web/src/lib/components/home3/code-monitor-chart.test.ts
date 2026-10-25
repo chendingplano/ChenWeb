@@ -12,7 +12,10 @@ describe('codeMonitorTotalScale', () => {
 		test(`encloses ${JSON.stringify(totals)} with about eight gridlines`, () => {
 			const { baseline, interval, maximum } = codeMonitorTotalScale(totals);
 			expect(baseline).toBeGreaterThanOrEqual(0);
-			expect(interval).toBeGreaterThanOrEqual(1);
+			expect(interval).toBeGreaterThanOrEqual(100);
+			expect(interval % 100).toBe(0);
+			expect(baseline % 100).toBe(0);
+			expect(maximum % 100).toBe(0);
 			expect(Number.isInteger(interval)).toBe(true);
 			expect(maximum / interval + 1).toBeGreaterThanOrEqual(6);
 			expect(maximum / interval + 1).toBeLessThanOrEqual(10);

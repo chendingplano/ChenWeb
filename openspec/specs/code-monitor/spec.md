@@ -62,7 +62,7 @@ Supported ranges are `today`, `yesterday`, `last_7_days` (today and six prior da
 
 - **WHEN** the page displays a chart for a selected range
 - **THEN** Total bar heights SHALL equal `total − N`, and the Total axis SHALL display actual totals starting at N with increment M
-- **AND** each chart SHALL choose its own N and M from its visible totals, using rounded positive integer increments to produce approximately eight gridlines
+- **AND** each chart SHALL choose its own N and M from its visible totals, using baselines and positive increments that are multiples of 100 or larger to produce approximately eight gridlines
 - **AND** the scale SHALL enclose all visible totals, keeping positive minimum totals above the baseline and leaving headroom above the maximum
 - **AND** constant totals SHALL use a small window around their value; empty or zero-only histories SHALL use a small scale starting at zero
-- **AND** tooltips SHALL retain actual totals, while Delta values and their axis SHALL remain unchanged
+- **AND** tooltips SHALL retain actual totals, while Delta values SHALL remain unchanged and the Delta axis SHALL use tick increments of at least 100
