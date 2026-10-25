@@ -11,3 +11,17 @@ test('normalizeFields wraps strings and drops blank values and empty fields', ()
 		{ key: 'a', label: 'A', values: [{ text: 'x' }, { text: 'y', mono: true }] }
 	]);
 });
+
+test('normalizeFields keeps fields without values when keepEmpty is set', () => {
+	const out = normalizeFields(
+		[
+			{ key: 'a', label: 'A', values: ['x'] },
+			{ key: 'b', label: 'B', values: [null, ' '] }
+		],
+		true
+	);
+	assert.deepEqual(out, [
+		{ key: 'a', label: 'A', values: [{ text: 'x' }] },
+		{ key: 'b', label: 'B', values: [] }
+	]);
+});

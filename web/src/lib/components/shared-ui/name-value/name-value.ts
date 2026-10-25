@@ -28,8 +28,9 @@ export type NameValueInput = {
 	values: (NameValueItem | string | null | undefined)[];
 };
 
-// Wraps bare strings, drops blank values, then drops fields left without values.
-export function normalizeFields(fields: NameValueInput[]): NameValueField[] {
+// Wraps bare strings, drops blank values, then drops fields left without values
+// unless keepEmpty is set.
+export function normalizeFields(fields: NameValueInput[], keepEmpty = false): NameValueField[] {
 	return fields
 		.map((field) => ({
 			key: field.key,
@@ -38,5 +39,5 @@ export function normalizeFields(fields: NameValueInput[]): NameValueField[] {
 				.map((v) => (typeof v === 'string' ? { text: v } : v))
 				.filter((v): v is NameValueItem => !!v && v.text.trim() !== '')
 		}))
-		.filter((field) => field.values.length > 0);
+		.filter((field) => keepEmpty || field.values.length > 0);
 }

@@ -23,32 +23,24 @@
 	import GoldRunFilters from './gold-run-filters.svelte';
 	import { clipTableCell, splitTableContextRows } from './metric-table-context';
 	import {
-		buildMetricGroupAttrs,
 		normalizeMetricSpans,
 		confidencePct,
-		type AttrDef,
 		type LineEntry,
 		type NormalizedSpan
 	} from './metric-detail-groups';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import MetricDetailVisualizer from '$lib/components/shared-ui/metric-detail/metric-detail-visualizer.svelte';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
-	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
-	import ActivityIcon from '@lucide/svelte/icons/activity';
-	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
-	import TagIcon from '@lucide/svelte/icons/tag';
-	import MapPinIcon from '@lucide/svelte/icons/map-pin';
 	import TypeIcon from '@lucide/svelte/icons/type';
-	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import HashIcon from '@lucide/svelte/icons/hash';
 	import FileIcon from '@lucide/svelte/icons/file';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
@@ -220,10 +212,6 @@
 
 	let pdfNumPages = $state(0);
 	let pdfZoom = $state(0.5);
-	let canvasW = $state(0);
-	let canvasH = $state(0);
-	let hoveredCanvasAttr = $state<string | null>(null);
-	let activeGroupKey = $state<string | null>(null);
 
 	// ---------- Focus-mode chart/PDF split (chart 2/3, PDF 1/3, draggable) ----------
 	const FOCUS_PDF_MIN = 280;
@@ -456,193 +444,6 @@
 			for (const kw of m.metric_keywords_en ?? []) set.add(kw);
 		}
 		return [...set].sort((a, b) => a.localeCompare(b));
-	});
-
-	type SatelliteNode = AttrDef & {
-		x: number;
-		y: number;
-		wire: { x1: number; y1: number; x2: number; y2: number };
-	};
-	type GroupNode = {
-		key: string;
-		label: string;
-		icon: any;
-		count: number; // total number of attributes in the group
-		filledCount: number; // number of attributes with a value
-		hasValue: boolean;
-		x: number;
-		y: number;
-		wire: { x1: number; y1: number; x2: number; y2: number };
-		satellites: SatelliteNode[];
-		attrs: AttrDef[];
-	};
-	type MetricsCanvas = {
-		W: number;
-		H: number;
-		Rc: number;
-		Rgn: number;
-		Rsn: number;
-		cx: number;
-		cy: number;
-		metricLabel: string;
-		metricSubLabel: string;
-		groups: GroupNode[];
-	};
-
-	let metricsMap = $derived.by((): MetricsCanvas | null => {
-		const W = canvasW,
-			H = canvasH;
-		if (W < 100 || H < 100) return null;
-		const m = selectedMetric;
-		if (!m) return null;
-		const base = Math.min(W, H);
-		const cx = W / 2,
-			cy = H / 2;
-
-		// Center disc, group node, and attribute-satellite radii (modeled after
-		// the Scene Blocks chart in `kb-extraction-view.svelte`).
-		const Rc = Math.max(54, Math.min(94, base * 0.115));
-		const Rgn = Math.max(42, Math.min(58, base * 0.072));
-		const Rsn = 21;
-
-		// Distance from the center to each group node, and from each group node
-		// to its attribute satellites — clamped so satellite labels stay inside
-		// the canvas.
-		const reachY = cy - 12 - Rsn - 34;
-		const reachX = cx - 12 - 66;
-		const reach = Math.max(120, Math.min(reachY, reachX));
-		let Rs = Math.max(90, Math.min(200, base * 0.22));
-		let Rg = Math.max(Rc + Rgn + 26, Math.min(330, base * 0.34, reach - Rs));
-		if (reach - Rs < Rc + Rgn + 26) {
-			Rs = Math.max(56, reach - (Rc + Rgn + 28));
-			Rg = Rc + Rgn + 28;
-		}
-
-		const spans = normalizeMetricSpans(m, lineNumToPage);
-		const attrsByGroup = buildMetricGroupAttrs(m, spans, rawLineByKey);
-
-		type GroupSpec = {
-			key: string;
-			label: string;
-			icon: any;
-			angleDeg: number;
-			attrs: AttrDef[];
-		};
-
-		// 5 groups evenly spaced around the metric center (every 72°), starting
-		// at the top so the layout reads like the Scene Blocks chart.
-		const groupSpecs: GroupSpec[] = [
-			{
-				key: 'g_metric',
-				label: i18n.metric_mgmt_metric_2(),
-				icon: TrendingUpIcon,
-				angleDeg: -90,
-				attrs: attrsByGroup.metric
-			},
-			{
-				key: 'g_metadata',
-				label: i18n.metric_mgmt_metadata(),
-				icon: BookOpenIcon,
-				angleDeg: -18,
-				attrs: attrsByGroup.metadata
-			},
-			{
-				key: 'g_context',
-				label: i18n.metric_mgmt_context(),
-				icon: TagIcon,
-				angleDeg: 54,
-				attrs: attrsByGroup.context
-			},
-			{
-				key: 'g_grounding',
-				label: i18n.metric_mgmt_grounding(),
-				icon: MapPinIcon,
-				angleDeg: 126,
-				attrs: attrsByGroup.grounding
-			},
-			{
-				key: 'g_reasoning',
-				label: i18n.metric_mgmt_reasoning(),
-				icon: ActivityIcon,
-				angleDeg: 198,
-				attrs: attrsByGroup.reasoning
-			}
-		];
-
-		const groups: GroupNode[] = groupSpecs.map((spec) => {
-			const ang = (spec.angleDeg * Math.PI) / 180;
-			const ux = Math.cos(ang),
-				uy = Math.sin(ang);
-			const gx = cx + ux * Rg;
-			const gy = cy + uy * Rg;
-			const baseAng = Math.atan2(uy, ux);
-			const k = spec.attrs.length;
-			const span = k > 1 ? Math.min(Math.PI * 0.62, (k - 1) * 0.44) : 0;
-			const satellites: SatelliteNode[] = spec.attrs.map((def, i) => {
-				const sAng = baseAng + (k > 1 ? (i - (k - 1) / 2) * (span / (k - 1)) : 0);
-				const sx = gx + Math.cos(sAng) * Rs;
-				const sy = gy + Math.sin(sAng) * Rs;
-				return {
-					...def,
-					x: sx,
-					y: sy,
-					wire: shortenLine(gx, gy, sx, sy, Rgn + 3, Rsn + 3)
-				};
-			});
-			const filled = spec.attrs.filter((a) => a.hasValue).length;
-			return {
-				key: spec.key,
-				label: spec.label,
-				icon: spec.icon,
-				count: spec.attrs.length,
-				filledCount: filled,
-				hasValue: filled > 0,
-				x: gx,
-				y: gy,
-				wire: shortenLine(cx, cy, gx, gy, Rc + 5, Rgn + 3),
-				satellites,
-				attrs: spec.attrs
-			};
-		});
-
-		return {
-			W,
-			H,
-			Rc,
-			Rgn,
-			Rsn,
-			cx,
-			cy,
-			metricLabel: m.metric_name?.trim() || m.metric_subject?.trim() || i18n.metric_mgmt_metric_3({ id: m.id }),
-			metricSubLabel: m.metric_name_en?.trim() || m.metric_subject_en?.trim() || '',
-			groups
-		};
-	});
-
-	let hoveredSatelliteInfo = $derived.by(() => {
-		if (!hoveredCanvasAttr || !metricsMap) return null;
-		for (const g of metricsMap.groups) {
-			const s = g.satellites.find((sn) => sn.key === hoveredCanvasAttr);
-			if (s) return { group: g, sat: s };
-		}
-		return null;
-	});
-
-	const ALL_METRIC_KEY = '__all_metric__';
-	let activeGroup = $derived.by(() => {
-		if (!activeGroupKey || activeGroupKey === ALL_METRIC_KEY || !metricsMap) return null;
-		return metricsMap.groups.find((g) => g.key === activeGroupKey) ?? null;
-	});
-	let showAllMetricAttrs = $derived(activeGroupKey === ALL_METRIC_KEY && metricsMap != null);
-	let totalAttrCount = $derived.by(() => {
-		if (!metricsMap) return { filled: 0, total: 0 };
-		let filled = 0,
-			total = 0;
-		for (const g of metricsMap.groups) {
-			filled += g.filledCount;
-			total += g.count;
-		}
-		return { filled, total };
 	});
 
 	let filteredMetrics = $derived.by(() => {
@@ -957,16 +758,6 @@
 		} else if (reportMiss) {
 			metricIdError = i18n.metric_mgmt_no_metric_in_the_current({ q });
 		}
-	}
-
-	function shortenLine(x1: number, y1: number, x2: number, y2: number, d1: number, d2: number) {
-		const dx = x2 - x1,
-			dy = y2 - y1;
-		const len = Math.sqrt(dx * dx + dy * dy);
-		if (len < 1) return { x1, y1, x2, y2 };
-		const ux = dx / len,
-			uy = dy / len;
-		return { x1: x1 + ux * d1, y1: y1 + uy * d1, x2: x2 - ux * d2, y2: y2 - uy * d2 };
 	}
 
 	function droppedTitle(m: KbMetricRecord): string {
@@ -1478,113 +1269,24 @@
 
 {#snippet metricDetails()}
 	<div class="metric-shelf-details select-text" style="--page-bg:{pageBg}; --panel-bg:{panelBg}; --panel-bg-alt:{panelBgAlt}; --ink-line:{inkLine}; --ink-line-soft:{inkLineSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --brass:{brass}; --crimson:{crimson}; --font-serif:{fontSerif}; --font-mono:{fontMono}; --font-sans:{fontSans};">
-		<div class="canvas-toolbar">
-			<button type="button" class="toolbar-back" onclick={goBack} title={i18n.metric_mgmt_close_metric_info()}>
-				<ArrowLeftIcon class="toolbar-icon" />
-				<span>{i18n.metric_mgmt_close()}</span>
-			</button>
-			<div class="toolbar-nav">
-				<button
-					type="button"
-					class="toolbar-nav-btn"
-					disabled={!prevMetric}
-					onclick={goToPrevMetric}
-					title={i18n.metric_mgmt_previous_metric()}><ChevronLeftIcon class="toolbar-icon" /></button
-				>
-				<span class="toolbar-nav-pos">
-					{selectedMetricInFilteredIndex >= 0
-						? `${selectedMetricInFilteredIndex + 1} / ${filteredMetrics.length}`
-						: `— / ${filteredMetrics.length}`}
-				</span>
-				<button
-					type="button"
-					class="toolbar-nav-btn"
-					disabled={!nextMetric}
-					onclick={goToNextMetric}
-					title={i18n.metric_mgmt_next_metric()}><ChevronRightIcon class="toolbar-icon" /></button
-				>
+		{#if selectedMetric}
+			<MetricDetailVisualizer
+				metric={selectedMetric}
+				{rawLines}
+				position={{ index: selectedMetricInFilteredIndex, total: filteredMetrics.length }}
+				onClose={goBack}
+				onPrev={prevMetric ? goToPrevMetric : undefined}
+				onNext={nextMetric ? goToNextMetric : undefined}
+			/>
+		{:else}
+			<div class="canvas-empty">
+				<div class="canvas-empty-mark">◎</div>
+				<div class="canvas-empty-title">{i18n.metric_mgmt_select_a_metric()}</div>
+				<div class="canvas-empty-sub">
+					{i18n.metric_mgmt_click_a_metric_from_the()}
+				</div>
 			</div>
-		</div>
-		<div class="metric-canvas" bind:clientWidth={canvasW} bind:clientHeight={canvasH}>
-			{#if metricsMap}
-				{@const map = metricsMap}
-				<div class="attr-view">
-					<div class="attr-view-header">
-						<div class="attr-view-name">{map.metricLabel}</div>
-						{#if map.metricSubLabel}
-							<div class="attr-view-subname">{map.metricSubLabel}</div>
-						{/if}
-					</div>
-					{#each map.groups as g (g.key)}
-						{@const GIcon = g.icon}
-						<section class="attr-group" class:attr-group-empty={!g.hasValue}>
-							<div class="attr-group-head">
-								<span class="attr-group-ic"><GIcon class="h-4 w-4" /></span>
-								<span class="attr-group-label">{g.label}</span>
-								<span class="attr-group-count">{g.filledCount}/{g.count}</span>
-							</div>
-							<div class="attr-group-body">
-								{#each g.attrs as a (a.key)}
-									<div
-										class="gip-row"
-										class:gip-row-col={a.kind !== 'text'}
-										class:gip-row-empty={!a.hasValue}
-									>
-										<span class="gip-label">{a.label}</span>
-										{#if !a.hasValue}
-											<span class="gip-empty">—</span>
-										{:else if a.kind === 'text'}
-											<span class="gip-val">{a.value}</span>
-										{:else if a.kind === 'chips'}
-											<div class="gip-chips">
-												{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip"
-														>{item}</span
-													>{/each}
-											</div>
-										{:else if a.kind === 'json'}
-											<div class="gip-json">
-												{#each a.jsonEntries ?? [] as entry, i (`${a.key}-${i}`)}
-													<div class="gip-json-row" style={`padding-left:${entry.depth * 16}px`}>
-														<span class="gip-json-key">{entry.key}</span>
-														{#if entry.value !== null}
-															<span class="gip-json-value">{entry.value}</span>
-														{/if}
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<div class="gip-line-cards">
-												{#each a.entries as entry, i (`${a.key}-${i}`)}
-													<div class="gip-line-card">
-														<div class="gip-line-head">
-															<span class="gip-line-loc">{entry.head}</span>
-															{#if entry.lineType}
-																<span class="gip-line-type">{entry.lineType}</span>
-															{/if}
-														</div>
-														{#if entry.content}
-															<div class="gip-line-body">{entry.content}</div>
-														{/if}
-													</div>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								{/each}
-							</div>
-						</section>
-					{/each}
-				</div>
-			{:else}
-				<div class="canvas-empty">
-					<div class="canvas-empty-mark">◎</div>
-					<div class="canvas-empty-title">{i18n.metric_mgmt_select_a_metric()}</div>
-					<div class="canvas-empty-sub">
-						{i18n.metric_mgmt_click_a_metric_from_the()}
-					</div>
-				</div>
-			{/if}
-		</div>
+		{/if}
 	</div>
 {/snippet}
 
@@ -4441,6 +4143,9 @@
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
+		background:
+			radial-gradient(ellipse at 30% 50%, rgba(212, 162, 76, 0.06), transparent 55%),
+			radial-gradient(ellipse at 70% 50%, rgba(200, 85, 61, 0.05), transparent 55%), var(--page-bg);
 		font-family: var(--font-sans);
 		color: var(--text-primary);
 	}
@@ -4450,38 +4155,6 @@
 		top: 0;
 		bottom: 0;
 		width: 14px;
-	}
-	.canvas-toolbar {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px 12px;
-		border-bottom: 1px solid var(--ink-line);
-		background: var(--panel-bg-alt);
-		flex-shrink: 0;
-		flex-wrap: wrap;
-	}
-	.toolbar-back {
-		all: unset;
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 4px 10px 4px 6px;
-		border-radius: 6px;
-		border: 1px solid var(--ink-line);
-		font-family: var(--font-mono);
-		font-size: 11px;
-		letter-spacing: 0.06em;
-		color: var(--text-secondary);
-		background: var(--panel-bg);
-		transition:
-			border-color 120ms,
-			color 120ms;
-	}
-	.toolbar-back:hover {
-		border-color: var(--brass);
-		color: var(--brass);
 	}
 	:global(.toolbar-icon) {
 		width: 13px;
@@ -4538,63 +4211,6 @@
 	.toolbar-kw-clear:hover {
 		color: var(--brass);
 	}
-	.toolbar-nav {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		flex-shrink: 0;
-	}
-	.toolbar-nav-btn {
-		all: unset;
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 26px;
-		height: 26px;
-		border-radius: 6px;
-		border: 1px solid var(--ink-line);
-		color: var(--text-secondary);
-		background: var(--panel-bg);
-		transition:
-			border-color 120ms,
-			color 120ms,
-			opacity 120ms;
-	}
-	.toolbar-nav-btn:disabled {
-		opacity: 0.35;
-		cursor: not-allowed;
-	}
-	.toolbar-nav-btn:not(:disabled):hover {
-		border-color: var(--brass);
-		color: var(--brass);
-	}
-	.toolbar-nav-pos {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--text-muted);
-		padding: 0 6px;
-		min-width: 56px;
-		text-align: center;
-	}
-	.metric-canvas {
-		flex: 1 1 0;
-		min-width: 0;
-		min-height: 0;
-		overflow-y: auto;
-		overflow-x: hidden;
-		background:
-			radial-gradient(ellipse at 30% 50%, rgba(212, 162, 76, 0.06), transparent 55%),
-			radial-gradient(ellipse at 70% 50%, rgba(200, 85, 61, 0.05), transparent 55%), var(--page-bg);
-		scrollbar-width: thin;
-		scrollbar-color: var(--ink-line) transparent;
-	}
-	.metric-canvas::-webkit-scrollbar {
-		width: 8px;
-	}
-	.metric-canvas::-webkit-scrollbar-thumb {
-		background: var(--ink-line);
-	}
 	.gip-resize-handle {
 		flex: 0 0 14px;
 		position: relative;
@@ -4644,193 +4260,6 @@
 	.gip-resize-handle:hover .gip-resize-grip,
 	.gip-resize-handle:focus-visible .gip-resize-grip {
 		border-color: var(--brass);
-	}
-	.gip-row {
-		display: flex;
-		align-items: baseline;
-		gap: 10px;
-	}
-	.gip-row-col {
-		flex-direction: column;
-		align-items: stretch;
-		gap: 5px;
-	}
-	.gip-row-empty {
-		opacity: 0.55;
-	}
-	.gip-label {
-		font-family: var(--font-mono);
-		font-size: 9px;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-		flex-shrink: 0;
-		min-width: 80px;
-	}
-	.gip-val {
-		font-family: var(--font-sans);
-		font-size: 12px;
-		color: var(--text-primary);
-		line-height: 1.45;
-		word-break: break-word;
-		flex: 1 1 auto;
-		min-width: 0;
-	}
-	.gip-json {
-		display: grid;
-		gap: 4px;
-	}
-	.gip-json-row {
-		display: grid;
-		grid-template-columns: minmax(72px, 25%) minmax(0, 1fr);
-		gap: 8px;
-		align-items: baseline;
-		font-size: 12px;
-		line-height: 1.45;
-	}
-	.gip-json-key {
-		color: var(--text-muted);
-		font-family: var(--font-mono);
-		word-break: break-word;
-	}
-	.gip-json-value {
-		color: var(--text-primary);
-		word-break: break-word;
-		min-width: 0;
-	}
-	.gip-empty {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--text-muted);
-	}
-	.gip-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-	}
-	.gip-chip {
-		display: inline-flex;
-		align-items: center;
-		padding: 2px 8px;
-		border-radius: 999px;
-		border: 1px solid var(--ink-line);
-		background: var(--panel-bg-alt);
-		color: var(--text-primary);
-		font-size: 11px;
-		line-height: 1.4;
-		font-family: var(--font-sans);
-	}
-	.gip-line-cards {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-	.gip-line-card {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		padding: 8px 10px;
-		border: 1px solid var(--ink-line);
-		border-radius: 6px;
-		background: var(--panel-bg-alt);
-		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-	}
-	.gip-line-head {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		flex-wrap: wrap;
-	}
-	.gip-line-loc {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--brass);
-	}
-	.gip-line-type {
-		font-family: var(--font-mono);
-		font-size: 9px;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-		padding: 1px 6px;
-		border: 1px solid var(--ink-line);
-		border-radius: 999px;
-		background: var(--panel-bg);
-	}
-	.gip-line-body {
-		font-family: var(--font-sans);
-		font-size: 12px;
-		color: var(--text-primary);
-		line-height: 1.5;
-		word-break: break-word;
-	}
-	/* ---- Attribute text view ---- */
-	.attr-view {
-		padding: 16px 20px 40px;
-		display: flex;
-		flex-direction: column;
-	}
-	.attr-view-header {
-		padding-bottom: 16px;
-		border-bottom: 1px solid var(--ink-line);
-		margin-bottom: 4px;
-	}
-	.attr-view-name {
-		font-family: var(--font-serif);
-		font-size: 22px;
-		font-weight: 500;
-		line-height: 1.25;
-		color: var(--text-primary);
-	}
-	.attr-view-subname {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--text-muted);
-		margin-top: 4px;
-		letter-spacing: 0.04em;
-	}
-	.attr-group {
-		background: color-mix(in srgb, var(--panel-bg-alt) 95%, white);
-		border: 1px solid var(--ink-line-soft);
-		border-radius: 10px;
-		padding: 12px 14px;
-		margin-top: 10px;
-	}
-	.attr-group-empty {
-		opacity: 0.55;
-	}
-	.attr-group-head {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 10px;
-	}
-	.attr-group-ic {
-		display: inline-flex;
-		color: var(--brass);
-		flex-shrink: 0;
-	}
-	.attr-group-label {
-		font-family: var(--font-serif);
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--brass);
-		flex: 1;
-		letter-spacing: 0.01em;
-	}
-	.attr-group-count {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		color: var(--text-muted);
-		letter-spacing: 0.06em;
-	}
-	.attr-group-body {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		padding-left: 8px;
 	}
 
 	.canvas-empty {

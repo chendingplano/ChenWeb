@@ -1,8 +1,9 @@
 // Shared "Metric / Metadata / Context / Grounding / Reasoning" attribute-group
 // builder for a single kb.metrics row — the canonical field set behind the
-// Metrics workspace's info panel (metric-mgmt-view.svelte) and the Product
-// Review "Full Details" dialog (product-metric-review-view.svelte). Keeping
-// this in one place means both views show the same fields for the same metric.
+// Metric Detail Visualizer (shared-ui/metric-detail/, shown in the Metrics
+// workspace's info panel) and the Product Review "Full Details" dialog
+// (product-metric-review-view.svelte). Keeping this in one place means both
+// views show the same fields for the same metric.
 import type { KbMetricRecord, RawLine } from '$lib/services/kbService';
 import { m as msg } from '$lib/paraglide/messages.js';
 import { classifyMetricStatement } from '$lib/metric-statement-kind';
@@ -214,48 +215,48 @@ export function buildMetricGroupAttrs(
 		.join(' · ');
 
 	const metadata: AttrDef[] = [
-		textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
-		textAttr('input_record_id', 'Document ID', HashIcon, String(m.input_record_id), true),
+		textAttr('metric_id', msg.metric_detail_id(), HashIcon, String(m.id), true),
+		textAttr('input_record_id', msg.metric_detail_document_id(), HashIcon, String(m.input_record_id), true),
 		...(m.run_id ? [textAttr('run_id', msg.metric_mgmt_run_id(), HashIcon, m.run_id, true)] : []),
 		textAttr(
 			'confidence',
-			'Confidence',
+			msg.metric_detail_confidence(),
 			ActivityIcon,
 			confidencePct(m.confidence),
 			m.confidence != null
 		),
-		textAttr('desc', 'Desc', FileTextIcon, fmt(m.metric_desc), has(m.metric_desc)),
+		textAttr('desc', msg.metric_detail_desc(), FileTextIcon, fmt(m.metric_desc), has(m.metric_desc)),
 		textAttr(
 			'formula',
-			'Formula',
+			msg.metric_detail_formula(),
 			HashIcon,
 			fmt(m.formula_or_definition),
 			has(m.formula_or_definition)
 		),
 		textAttr(
 			'explicit',
-			'Explicit',
+			msg.metric_detail_explicit(),
 			CalendarIcon,
 			m.is_explicit_metric == null ? '' : m.is_explicit_metric ? 'true' : 'false',
 			m.is_explicit_metric != null
 		),
 		textAttr(
 			'keyword_concept_id',
-			'Keyword Concept ID',
+			msg.metric_detail_keyword_concept_id(),
 			HashIcon,
 			fmt(m.keyword_concept_id),
 			has(m.keyword_concept_id)
 		),
 		textAttr(
 			'metric_definition_term_id',
-			'Definition Term ID',
+			msg.metric_detail_definition_term_id(),
 			HashIcon,
 			fmt(m.metric_definition_term_id),
 			has(m.metric_definition_term_id)
 		),
 		textAttr(
 			'value_range_type_error',
-			'Range Type Error',
+			msg.metric_detail_range_type_error(),
 			HashIcon,
 			fmt(m.value_range_type_error),
 			has(m.value_range_type_error)
@@ -265,21 +266,21 @@ export function buildMetricGroupAttrs(
 	const context: AttrDef[] = [
 		textAttr(
 			'document_title',
-			'Document Title',
+			msg.metric_detail_document_title(),
 			FileIcon,
 			fmt(m.document_title),
 			has(m.document_title)
 		),
-		textAttr('document_doc_no', 'Doc No', HashIcon, fmt(m.document_doc_no), has(m.document_doc_no)),
+		textAttr('document_doc_no', msg.metric_detail_doc_no(), HashIcon, fmt(m.document_doc_no), has(m.document_doc_no)),
 		textAttr(
 			'table_section',
-			'Section',
+			msg.metric_detail_section(),
 			ListIcon,
 			fmt(m.table_name_or_section),
 			has(m.table_name_or_section)
 		),
-		textAttr('context', 'Context', BookOpenIcon, fmt(m.metric_context), has(m.metric_context)),
-		chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', ')),
+		textAttr('context', msg.metric_detail_context(), BookOpenIcon, fmt(m.metric_context), has(m.metric_context)),
+		chipsAttr('keywords', msg.metric_detail_keywords(), TagIcon, kwItems, kwItems.join(', ')),
 		textAttr(
 			'search_document',
 			msg.metric_mgmt_search_document(),
@@ -290,9 +291,9 @@ export function buildMetricGroupAttrs(
 	];
 
 	const metric: AttrDef[] = [
-		textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
-		textAttr('metric_artifact_id', 'Metric ID', HashIcon, fmt(m.metric_id), has(m.metric_id)),
-		textAttr('subject', 'Subject', TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
+		textAttr('name', msg.metric_detail_name(), TypeIcon, fmt(m.metric_name), has(m.metric_name)),
+		textAttr('metric_artifact_id', msg.metric_detail_metric_id(), HashIcon, fmt(m.metric_id), has(m.metric_id)),
+		textAttr('subject', msg.metric_detail_subject(), TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
 		textAttr('condition', msg.metric_mgmt_condition(), MapPinIcon, fmt(m.condition), has(m.condition)),
 		textAttr(
 			'condition_en',
@@ -304,24 +305,24 @@ export function buildMetricGroupAttrs(
 		chipsAttr('frame_uses', msg.metric_frame_uses(), TagIcon, useItems, useItems.join('; ')),
 		chipsAttr('frame_method', msg.metric_frame_method(), TagIcon, methodItems, methodItems.join('; ')),
 		textAttr('frame_procedure', msg.metric_frame_procedure(), ListIcon, procedureText, procedureText !== ''),
-		textAttr('object_name', 'Object', FileIcon, fmt(m.object_name), has(m.object_name)),
+		textAttr('object_name', msg.metric_detail_object(), FileIcon, fmt(m.object_name), has(m.object_name)),
 		textAttr(
 			'frequency',
-			'Frequency',
+			msg.metric_detail_frequency(),
 			CalendarIcon,
 			fmt(m.measurement_frequency),
 			has(m.measurement_frequency)
 		),
-		textAttr('value', 'Value', TrendingUpIcon, fmt(m.metric_value), has(m.metric_value)),
+		textAttr('value', msg.metric_detail_value(), TrendingUpIcon, fmt(m.metric_value), has(m.metric_value)),
 		textAttr(
 			'threshold',
-			'Threshold',
+			msg.metric_detail_threshold(),
 			TrendingUpIcon,
 			fmt(m.threshold_or_target),
 			has(m.threshold_or_target)
 		),
-		textAttr('unit', 'Unit', HashIcon, fmt(m.metric_unit), has(m.metric_unit)),
-		textAttr('value_class', 'Class', TagIcon, fmt(m.value_class), has(m.value_class)),
+		textAttr('unit', msg.metric_detail_unit(), HashIcon, fmt(m.metric_unit), has(m.metric_unit)),
+		textAttr('value_class', msg.metric_detail_class(), TagIcon, fmt(m.value_class), has(m.value_class)),
 		textAttr(
 			'statement_kind',
 			msg.metric_statement_kind_label(),
@@ -331,19 +332,19 @@ export function buildMetricGroupAttrs(
 		),
 		textAttr(
 			'value_data_type',
-			'Data Type',
+			msg.metric_detail_data_type(),
 			ListIcon,
 			fmt(m.value_data_type),
 			has(m.value_data_type)
 		),
 		textAttr(
 			'value_range_type',
-			'Range Type',
+			msg.metric_detail_range_type(),
 			TrendingUpIcon,
 			fmt(m.value_range_type),
 			has(m.value_range_type)
 		),
-		textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type)),
+		textAttr('location_type', msg.metric_detail_location(), MapPinIcon, fmt(m.location_type), has(m.location_type)),
 		{
 			key: 'frame_json',
 			label: msg.metric_frame_json(),
@@ -360,7 +361,7 @@ export function buildMetricGroupAttrs(
 		}
 	];
 
-	const reasoning: AttrDef[] = [chipsAttr('reasoning_tags', 'Tags', TagIcon, tags, tags.join(', '))];
+	const reasoning: AttrDef[] = [chipsAttr('reasoning_tags', msg.metric_detail_tags(), TagIcon, tags, tags.join(', '))];
 
 	const groundingEntries: LineEntry[] = spans.flatMap((span) => {
 		const rawLine = lineByKey.get(`${span.page_number}:${span.line_number}`);
@@ -375,7 +376,7 @@ export function buildMetricGroupAttrs(
 			lineType: i === 0 ? lineType : ''
 		}));
 	});
-	const grounding: AttrDef[] = [linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries)];
+	const grounding: AttrDef[] = [linesAttr('source_line_spans', msg.metric_detail_lines(), FileTextIcon, groundingEntries)];
 
 	return { metadata, context, metric, reasoning, grounding };
 }

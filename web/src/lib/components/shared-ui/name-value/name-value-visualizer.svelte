@@ -6,37 +6,51 @@
 	let {
 		fields,
 		labelWidth = '13rem',
+		emptyText,
 		ariaLabel
 	}: {
 		fields: NameValueInput[];
 		// Upper bound of the name column; it shrinks to 9rem before wrapping.
 		labelWidth?: string;
+		// When set, fields without values stay in the list, dimmed, showing this text.
+		emptyText?: string;
 		ariaLabel?: string;
 	} = $props();
 
-	const visible = $derived(normalizeFields(fields));
+	const visible = $derived(normalizeFields(fields, emptyText != null));
 </script>
 
-<dl class="name-value select-text" style={`--nv-label-width:${labelWidth}`} aria-label={ariaLabel}>
-	{#each visible as field (field.key)}
-		<dt>{field.label}</dt>
-		<dd>
-			{#each field.values as item, index (index)}
-				<div class:mono={item.mono}>
-					{#if item.href}
-						<a href={item.href} target="_blank" rel="noreferrer">{item.text}</a>
-					{:else if item.onClick}
-						<button class="text-link" type="button" onclick={item.onClick}>{item.text}</button>
-					{:else}
-						<span lang={item.lang || undefined}>{item.text}</span>
-					{/if}
-				</div>
-			{/each}
-		</dd>
-	{/each}
-</dl>
+<div class="name-value-box">
+	<dl class="name-value select-text" style={`--nv-label-width:${labelWidth}`} aria-label={ariaLabel}>
+		{#each visible as field (field.key)}
+			{@const empty = field.values.length === 0}
+			<dt class:empty>{field.label}</dt>
+			<dd class:empty>
+				{#if empty}
+					<span>{emptyText}</span>
+				{:else}
+					{#each field.values as item, index (index)}
+						<div class:mono={item.mono}>
+							{#if item.href}
+								<a href={item.href} target="_blank" rel="noreferrer">{item.text}</a>
+							{:else if item.onClick}
+								<button class="text-link" type="button" onclick={item.onClick}>{item.text}</button>
+							{:else}
+								<span lang={item.lang || undefined}>{item.text}</span>
+							{/if}
+						</div>
+					{/each}
+				{/if}
+			</dd>
+		{/each}
+	</dl>
+</div>
 
 <style>
+	/* The compact layout follows the list's own width, so it also applies in side panels. */
+	.name-value-box {
+		container-type: inline-size;
+	}
 	.name-value {
 		display: grid;
 		grid-template-columns: minmax(9rem, var(--nv-label-width)) minmax(0, 1fr);
@@ -55,6 +69,9 @@
 		margin: 0;
 		min-width: 0;
 		white-space: pre-wrap;
+	}
+	.empty {
+		opacity: 0.55;
 	}
 	.mono {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -82,7 +99,7 @@
 		outline: 2px solid var(--accent, currentColor);
 		outline-offset: 3px;
 	}
-	@media (max-width: 600px) {
+	@container (max-width: 600px) {
 		.name-value {
 			grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
 			gap: 0.4rem 0.75rem;
