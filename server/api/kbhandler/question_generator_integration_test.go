@@ -58,7 +58,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql", "20261025000001_archive_generated_questions.sql"} {
+	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql", "20261025000003_archive_generated_questions.sql"} {
 		raw, err := os.ReadFile(filepath.Join("../../../project_migrations", filename))
 		if err != nil {
 			t.Fatal(err)
