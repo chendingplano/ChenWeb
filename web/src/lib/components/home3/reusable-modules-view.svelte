@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SearchIcon, BoxesIcon, ArrowUpRightIcon, GripHorizontalIcon, XIcon } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
@@ -14,6 +14,25 @@
 	let dialog: HTMLDialogElement;
 	let drag: { pointerId: number; offsetX: number; offsetY: number } | null = null;
 
+	async function openDetails(module: ReusableModule, button: HTMLButtonElement) {
+		const anchor = button.getBoundingClientRect();
+		selected = module;
+		await tick();
+		dialog.removeAttribute('style');
+		dialog.showModal();
+		const rect = dialog.getBoundingClientRect();
+		const gap = 12;
+		if (anchor.right + gap + rect.width <= window.innerWidth - 8) {
+			positionDialog(anchor.right + gap, anchor.top);
+		} else if (anchor.left - gap - rect.width >= 8) {
+			positionDialog(anchor.left - gap - rect.width, anchor.top);
+		} else {
+			const top = anchor.bottom + gap + rect.height <= window.innerHeight - 8
+				? anchor.bottom + gap : anchor.top - gap - rect.height;
+			positionDialog(anchor.left, top);
+		}
+	}
+
 	function positionDialog(left: number, top: number) {
 		const rect = dialog.getBoundingClientRect();
 		dialog.style.margin = '0';
@@ -24,6 +43,7 @@
 
 	function startDrag(event: PointerEvent) {
 		if (event.button !== 0) return;
+		if ((event.target as Element).closest('button:not(.dialog-drag-handle)')) return;
 		const rect = dialog.getBoundingClientRect();
 		drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -109,7 +129,7 @@
 						<h2 title={module.module_name}>{module.module_name}</h2>
 						<div class="tags"><span>{typeLabel(module.module_type)}</span><span>{module.prog_language}</span><span>{m.modules_version({ version: module.version })}</span></div>
 						<p class="description">{module.description || m.modules_no_description()}</p>
-						<footer><span>{m.modules_file_count({ count: module.files.length })}</span><button aria-label={m.modules_details_for({ name: module.module_name })} onclick={() => { selected = module; dialog.removeAttribute('style'); dialog.showModal(); }}>{m.modules_details()}<ArrowUpRightIcon size={15} /></button></footer>
+						<footer><span>{m.modules_file_count({ count: module.files.length })}</span><button aria-label={m.modules_details_for({ name: module.module_name })} onclick={(event) => openDetails(module, event.currentTarget)}>{m.modules_details()}<ArrowUpRightIcon size={15} /></button></footer>
 					</article>
 				{/each}
 			</div>
@@ -118,10 +138,13 @@
 
 	<dialog bind:this={dialog} onclose={() => { selected = null; drag = null; }} aria-labelledby="module-detail-title">
 		{#if selected}
-			<div class="detail-header">
-				<button class="dialog-drag-handle" aria-label={m.modules_move_dialog()} title={m.modules_move_dialog()} onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onlostpointercapture={() => drag = null} onkeydown={moveWithKeyboard}><GripHorizontalIcon size={20} /></button>
-				<div class="detail-title"><p class="module-id">{selected.module_id}</p><h2 id="module-detail-title">{selected.module_name}</h2></div><button aria-label={m.modules_close()} onclick={() => dialog.close()}><XIcon size={20} /></button>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="detail-header" onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onlostpointercapture={() => drag = null}>
+				<button class="dialog-drag-handle" aria-label={m.modules_move_dialog()} title={m.modules_move_dialog()} onkeydown={moveWithKeyboard}><GripHorizontalIcon size={20} /></button>
+				<p class="module-id">{selected.module_id}</p><button aria-label={m.modules_close()} onclick={() => dialog.close()}><XIcon size={20} /></button>
 			</div>
+			<div class="detail-body">
+			<h2 id="module-detail-title">{selected.module_name}</h2>
 			<p class="detail-description">{selected.description || m.modules_no_description()}</p>
 			<dl>
 				<dt>{m.modules_type()}</dt><dd>{typeLabel(selected.module_type)}</dd>
@@ -135,6 +158,7 @@
 			<h3>{m.modules_files()}</h3>
 			{#if selected.files.length}<ul>{#each selected.files as file}<li><code>{file}</code></li>{/each}</ul>{:else}<p>{m.modules_no_files()}</p>{/if}
 			<h3>{m.modules_configuration()}</h3><pre>{JSON.stringify(selected.config_json, null, 2)}</pre>
+			</div>
 		{/if}
 	</dialog>
 </div>
@@ -172,13 +196,16 @@
 	button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
 	.state { padding: 64px 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--muted); }
 	.state h2 { font-size: 18px; color: var(--text); }
-	dialog { width: min(680px, calc(100vw - 32px)); max-height: 85vh; box-sizing: border-box; padding: 28px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); user-select: text; }
+	dialog { position: fixed; width: min(680px, calc(100vw - 32px)); max-height: 85vh; box-sizing: border-box; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); user-select: text; }
 	dialog::backdrop { background: #080e1bb3; }
-	.detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
-	.detail-title { flex: 1; min-width: 0; }
+	.detail-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: #34485c; border-bottom: 1px solid var(--accent); cursor: grab; touch-action: none; }
+	.light .detail-header { background: #e0f2f1; }
+	.detail-header:active { cursor: grabbing; }
+	.detail-header .module-id { flex: 1; color: var(--text); }
+	.detail-body { padding: 24px 28px; }
 	.dialog-drag-handle { cursor: grab; touch-action: none; padding: 6px; user-select: none; }
 	.dialog-drag-handle:active { cursor: grabbing; }
-	.detail-header h2 { font-size: 23px; font-weight: 600; margin-top: 6px; overflow-wrap: anywhere; }
+	.detail-body h2 { font-size: 23px; font-weight: 600; overflow-wrap: anywhere; }
 	.detail-description { margin: 18px 0; color: var(--muted); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 	dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; font-size: 13px; }
 	dt { color: var(--muted); }
