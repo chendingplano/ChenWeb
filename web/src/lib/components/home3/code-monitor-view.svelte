@@ -67,7 +67,13 @@
 			grid: { left: 84, right: 64, top: 64, bottom: 36, containLabel: true },
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
 			yAxis: [
-				{ type: 'value', position: 'left', min: 0, name: totalAxisName, nameTextStyle: { color: colors.muted, align: 'left' }, axisLabel: { color: colors.muted }, splitLine: { lineStyle: { color: colors.border } } },
+				{
+					type: 'value', position: 'left', min: 0, interval: 2000,
+					max: ({ max }) => Math.max(2000, Math.ceil(max / 2000) * 2000),
+					name: m.code_monitor_total(), nameTextStyle: { color: colors.muted, align: 'left' },
+					axisLabel: { color: colors.muted, formatter: (value: number) => (value + baseline).toLocaleString() },
+					splitLine: { lineStyle: { color: colors.border } }
+				},
 				{ type: 'value', position: 'right', axisLabel: { color: colors.muted }, splitLine: { show: false } }
 			],
 			series: [
