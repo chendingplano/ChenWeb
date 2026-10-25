@@ -106,12 +106,17 @@
 	}
 </script>
 
-<button type="button" class="tests-button" {disabled} onclick={open}>{m.hsbq_button()}</button>
-<span class="summary"
-	>{selected.length === 0
-		? m.hsbq_summary_all()
-		: m.hsbq_summary_selected({ count: selected.length })}</span
->
+<!-- A form field like its neighbours in the options row: the selection summary is the label on top. -->
+<div class="tests-field">
+	<label for="hsbq-open"
+		>{selected.length === 0
+			? m.hsbq_summary_all()
+			: m.hsbq_summary_selected({ count: selected.length })}</label
+	>
+	<button id="hsbq-open" type="button" class="primary tests-button" {disabled} onclick={open}
+		>{m.hsbq_button()}</button
+	>
+</div>
 
 <dialog
 	bind:this={dialog}
@@ -288,14 +293,16 @@
 </dialog>
 
 <style>
-	.summary {
-		font-size: 12px;
-		color: var(--muted);
-		align-self: center;
-		margin-bottom: 12px;
+	.tests-field label {
+		display: block;
+		font-size: 13px;
+		font-weight: 600;
+		margin-bottom: 8px;
+		white-space: nowrap;
 	}
 	.tests-button {
-		align-self: end;
+		padding: 10px 16px;
+		white-space: nowrap;
 	}
 	dialog {
 		color: var(--text);

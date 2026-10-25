@@ -220,9 +220,6 @@
 				>{starting ? m.qg_starting() : m.hsb_run()}</button
 			>
 		</div>
-		<div class="tests">
-			<HybridSearchBenchmarkQuestions {purpose} bind:selected={questionIds} disabled={starting} />
-		</div>
 		<div class="options">
 			<label class="check"
 				><input
@@ -278,6 +275,9 @@
 					bind:value={options.parallelism}
 					disabled={starting}
 				/>
+			</div>
+			<div class="tests-option">
+				<HybridSearchBenchmarkQuestions {purpose} bind:selected={questionIds} disabled={starting} />
 			</div>
 		</div>
 		<p class="hint">{m.hsb_options_hint()}</p>
@@ -735,13 +735,6 @@
 		font-size: 12px;
 		min-width: 160px;
 	}
-	.tests {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 12px;
-		align-items: center;
-		margin-top: 16px;
-	}
 	.options {
 		display: flex;
 		flex-wrap: wrap;
@@ -751,6 +744,9 @@
 	}
 	.options > div {
 		flex: 0 1 160px;
+	}
+	.options > .tests-option {
+		flex: 0 0 auto;
 	}
 	label.check {
 		display: flex;
