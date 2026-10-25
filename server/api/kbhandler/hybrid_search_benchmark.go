@@ -25,10 +25,13 @@ const (
 	hybridBenchGroupHopType         = "hop_type"
 	hybridBenchGroupLang            = "lang"
 	hybridBenchErrEmbedding         = "query embedding failed"
+	hybridBenchErrKeywords          = "query keywords failed or empty (see LLM Usage Logs); lexical used the raw query"
 	hybridBenchRunListLimit         = 50
 	hybridBenchPurposeSearchMetrics = "search_metrics"
 	hybridBenchMaxWeight            = 100
 	hybridBenchMaxCandidates        = 1000
+	hybridBenchDefaultParallelism   = 8
+	hybridBenchMaxParallelism       = 32
 )
 
 // hybridBenchPurposes lists the question purposes a run accepts; each needs its own artifact type.
@@ -45,10 +48,12 @@ type hybridBenchOptions struct {
 	LexicalWeight  float64 `json:"lexical_weight"`
 	SemanticWeight float64 `json:"semantic_weight"`
 	CandidateLimit int     `json:"candidate_limit"`
+	Parallelism    int     `json:"parallelism"` // questions searched at the same time
 }
 
 func hybridBenchDefaults(cfg registrySearchConfig, keywords bool) hybridBenchOptions {
-	return hybridBenchOptions{QueryKeywords: keywords, LexicalWeight: cfg.lexicalWeight, SemanticWeight: cfg.semanticWeight, CandidateLimit: cfg.candidates()}
+	return hybridBenchOptions{QueryKeywords: keywords, LexicalWeight: cfg.lexicalWeight, SemanticWeight: cfg.semanticWeight,
+		CandidateLimit: cfg.candidates(), Parallelism: hybridBenchDefaultParallelism}
 }
 
 // Omitted options take the defaults.
@@ -59,6 +64,7 @@ type hybridBenchRequest struct {
 	LexicalWeight  *float64 `json:"lexical_weight"`
 	SemanticWeight *float64 `json:"semantic_weight"`
 	CandidateLimit *int     `json:"candidate_limit"`
+	Parallelism    *int     `json:"parallelism"`
 }
 
 func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBenchOptions, error) {
@@ -77,6 +83,9 @@ func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBench
 	if r.CandidateLimit != nil {
 		opts.CandidateLimit = *r.CandidateLimit
 	}
+	if r.Parallelism != nil {
+		opts.Parallelism = *r.Parallelism
+	}
 	switch {
 	case !slices.Contains(hybridBenchPurposes, r.Purpose):
 		return opts, errors.New("unsupported purpose")
@@ -88,6 +97,8 @@ func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBench
 		return opts, errors.New("at least one RRF weight must be above 0")
 	case opts.CandidateLimit < 1 || opts.CandidateLimit > hybridBenchMaxCandidates:
 		return opts, errors.New("candidates per list must be between 1 and 1000")
+	case opts.Parallelism < 1 || opts.Parallelism > hybridBenchMaxParallelism:
+		return opts, errors.New("parallel queries must be between 1 and 32")
 	}
 	return opts, nil
 }
@@ -108,6 +119,7 @@ type hybridBenchRun struct {
 	LexicalWeight  float64    `json:"lexical_weight"`
 	SemanticWeight float64    `json:"semantic_weight"`
 	CandidateLimit int        `json:"candidate_limit"`
+	Parallelism    int        `json:"parallelism"`
 	CreatedBy      string     `json:"created_by"`
 	CreatedAt      time.Time  `json:"created_at"`
 	FinishedAt     *time.Time `json:"finished_at"`

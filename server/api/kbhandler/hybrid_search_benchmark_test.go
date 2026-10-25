@@ -21,7 +21,7 @@ func benchResults(pairs ...any) []artifactSearchResult {
 func intPtr(v int) *int { return &v }
 
 func TestHybridBenchRequestNormalize(t *testing.T) {
-	defaults := hybridBenchOptions{QueryKeywords: true, LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200}
+	defaults := hybridBenchOptions{QueryKeywords: true, LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200, Parallelism: 8}
 	ok := hybridBenchRequest{Purpose: " search_metrics ", Description: " baseline "}
 	opts, err := ok.normalize(defaults)
 	if err != nil || ok.Purpose != "search_metrics" || ok.Description != "baseline" || opts != defaults {
@@ -32,13 +32,15 @@ func TestHybridBenchRequestNormalize(t *testing.T) {
 	if opts, err := custom.normalize(defaults); err != nil || opts.QueryKeywords || opts.LexicalWeight != 0.5 || opts.SemanticWeight != 1 || opts.CandidateLimit != 50 {
 		t.Fatalf("custom options = %+v, %v", opts, err)
 	}
-	zero, negative, tooMany := 0.0, -1.0, 1001
+	zero, negative, tooMany, noWorkers, tooManyWorkers := 0.0, -1.0, 1001, 0, 33
 	for name, req := range map[string]hybridBenchRequest{
-		"purpose":     {Purpose: "search_provisions"},
-		"description": {Purpose: "search_metrics", Description: strings.Repeat("长", hybridBenchMaxDescription+1)},
-		"negative":    {Purpose: "search_metrics", SemanticWeight: &negative},
-		"both zero":   {Purpose: "search_metrics", LexicalWeight: &zero, SemanticWeight: &zero},
-		"candidates":  {Purpose: "search_metrics", CandidateLimit: &tooMany},
+		"purpose":      {Purpose: "search_provisions"},
+		"description":  {Purpose: "search_metrics", Description: strings.Repeat("长", hybridBenchMaxDescription+1)},
+		"negative":     {Purpose: "search_metrics", SemanticWeight: &negative},
+		"both zero":    {Purpose: "search_metrics", LexicalWeight: &zero, SemanticWeight: &zero},
+		"candidates":   {Purpose: "search_metrics", CandidateLimit: &tooMany},
+		"no workers":   {Purpose: "search_metrics", Parallelism: &noWorkers},
+		"many workers": {Purpose: "search_metrics", Parallelism: &tooManyWorkers},
 	} {
 		if _, err := req.normalize(defaults); err == nil {
 			t.Errorf("%s: invalid request accepted", name)
@@ -167,6 +169,27 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 	}
 	if r.EmbeddingMs == nil || r.KeywordsMs == nil || r.LexicalMs == nil || r.SemanticMs == nil || r.HybridMs == nil {
 		t.Fatalf("timings missing: %+v", r)
+	}
+
+	// Keyword extraction fails: the question records it and the searches skip keywords instead of
+	// calling the model again.
+	hybridBenchKeywords = func(context.Context, string) []string { keywordCalls++; return nil }
+	searchKeywordsSwitch := []bool{}
+	hybridBenchSearch = func(_ *sql.DB, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+		searchKeywordsSwitch = append(searchKeywordsSwitch, cfg.call.keywords != nil && *cfg.call.keywords)
+		return benchResults("416_mtc_2", 0.03), nil
+	}
+	on := true
+	cfg.call.keywords = &on
+	keywordCalls = 0
+	r = benchmarkHybridSearchQuestion(context.Background(), nil, q, cfg, logger)
+	if keywordCalls != 1 || r.ErrorMsg != hybridBenchErrKeywords || r.KeywordsMs == nil || r.HybridRank == nil {
+		t.Fatalf("keyword failure: calls=%d result=%+v", keywordCalls, r)
+	}
+	for i, used := range searchKeywordsSwitch {
+		if used {
+			t.Fatalf("search %d still asked for keywords after the failure", i)
+		}
 	}
 
 	// Keywords off for the run: no keyword call and no keyword time.

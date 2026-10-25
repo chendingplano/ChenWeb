@@ -18,6 +18,7 @@ export type HybridBenchmarkRun = {
 	lexical_weight: number;
 	semantic_weight: number;
 	candidate_limit: number;
+	parallelism: number;
 	created_by: string;
 	created_at: string;
 	finished_at?: string | null;
@@ -60,6 +61,7 @@ export type HybridBenchmarkOptions = {
 	lexical_weight: number;
 	semantic_weight: number;
 	candidate_limit: number;
+	parallelism: number;
 };
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {

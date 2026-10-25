@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -25,41 +27,66 @@ var (
 	}
 )
 
-// runHybridSearchBenchmark processes the questions one at a time (the shared embedding host times
-// out under concurrent load). Each question is one search with its own search run ID, which its
-// embedding and keyword calls carry in the LLM usage logs. The run's own settings (query keywords,
-// weights, candidates per list) replace the configured ones. Each stored result extends the run's
-// deadline; a run that stops heartbeating is marked failed by the next run listing.
+// runHybridSearchBenchmark searches run.Parallelism questions at a time. Each question is one search
+// with its own search run ID, which its embedding and keyword calls carry in the LLM usage logs. The
+// run's own settings (query keywords, weights, candidates per list) replace the configured ones.
+// Each stored result extends the run's deadline; a run that stops heartbeating is marked failed by
+// the next run listing.
 func runHybridSearchBenchmark(db *sql.DB, run hybridBenchRun, questions []hybridBenchQuestion) {
 	logger := loggerutil.CreateDefaultLogger("20261024-744")
 	cfg := loadRegistrySearchConfig()
 	cfg.lexicalWeight, cfg.semanticWeight = run.LexicalWeight, run.SemanticWeight
 	cfg.candidateLimit = run.CandidateLimit
 	keywords := run.QueryKeywords
+	workers := max(1, run.Parallelism)
+
+	jobs := make(chan hybridBenchQuestion)
+	var stopped atomic.Bool // set when a save fails or the run is no longer running
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for q := range jobs {
+				if stopped.Load() {
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), hybridBenchQuestionTimeout)
+				qcfg := cfg
+				qcfg.call = newSearchCall(ctx, db, run.CreatedBy)
+				qcfg.call.keywords = &keywords
+				result := benchmarkHybridSearchQuestion(ctx, db, q, qcfg, logger)
+				alive, err := saveHybridBenchResult(ctx, db, run.ID, result)
+				cancel()
+				if err != nil {
+					if !stopped.Swap(true) {
+						failHybridBenchRun(db, run.ID, "failed to save benchmark result", logger)
+					}
+					logger.Error("save benchmark result failed", "run_id", run.ID, "question_id", q.ID, "error", err)
+				} else if !alive {
+					stopped.Store(true)
+					logger.Warn("benchmark run no longer running; stopping", "run_id", run.ID, "question_id", q.ID)
+				}
+			}
+		}()
+	}
 	for _, q := range questions {
-		ctx, cancel := context.WithTimeout(context.Background(), hybridBenchQuestionTimeout)
-		qcfg := cfg
-		qcfg.call = newSearchCall(ctx, db, run.CreatedBy)
-		qcfg.call.keywords = &keywords
-		result := benchmarkHybridSearchQuestion(ctx, db, q, qcfg, logger)
-		alive, err := saveHybridBenchResult(ctx, db, run.ID, result)
-		cancel()
-		if err != nil {
-			failHybridBenchRun(db, run.ID, "failed to save benchmark result", logger)
-			logger.Error("save benchmark result failed", "run_id", run.ID, "question_id", q.ID, "error", err)
-			return
+		if stopped.Load() {
+			break
 		}
-		if !alive {
-			logger.Warn("benchmark run no longer running; stopping", "run_id", run.ID, "question_id", q.ID)
-			return
-		}
+		jobs <- q
+	}
+	close(jobs)
+	wg.Wait()
+	if stopped.Load() {
+		return
 	}
 	if _, err := db.Exec(`UPDATE testbed.hybrid_search_benchmark_runs
  SET status = 'done', finished_at = NOW() WHERE id = $1 AND status = 'running'`, run.ID); err != nil {
 		logger.Error("finish benchmark run failed", "run_id", run.ID, "error", err)
 		return
 	}
-	logger.Info("hybrid search benchmark completed", "run_id", run.ID, "questions", len(questions))
+	logger.Info("hybrid search benchmark completed", "run_id", run.ID, "questions", len(questions), "parallelism", workers)
 }
 
 func benchmarkHybridSearchQuestion(ctx context.Context, db *sql.DB, q hybridBenchQuestion, cfg registrySearchConfig, logger ApiTypes.JimoLogger) hybridBenchResult {
@@ -78,17 +105,24 @@ func benchmarkHybridSearchQuestion(ctx context.Context, db *sql.DB, q hybridBenc
 		return result
 	}
 	// Keywords are extracted fresh (not from the cache) so the call is timed and logged; the searches
-	// extract them again, and the cache this call fills makes that a lookup.
+	// extract them again, and the cache this call fills makes that a lookup. Failures are not cached,
+	// so after a failure the searches run without keywords (the raw query, as live search falls back
+	// to) instead of calling the model three more times.
+	errs := []string{}
 	if cfg.call.keywords == nil || *cfg.call.keywords {
 		fresh := cfg.call
 		fresh.freshKeywords = true
 		start = time.Now()
-		if kws := hybridBenchKeywords(withSearchCall(ctx, fresh), q.Question); kws != nil {
-			result.Keywords = kws
-		}
+		kws := hybridBenchKeywords(withSearchCall(ctx, fresh), q.Question)
 		result.KeywordsMs = msSince(start)
+		if kws != nil {
+			result.Keywords = kws
+		} else {
+			errs = append(errs, hybridBenchErrKeywords)
+			off := false
+			cfg.call.keywords = &off
+		}
 	}
-	errs := []string{}
 	for _, mode := range hybridBenchModes {
 		modeCfg := cfg
 		modeCfg.lexicalWeight, modeCfg.semanticWeight = hybridBenchModeWeights(mode, cfg)

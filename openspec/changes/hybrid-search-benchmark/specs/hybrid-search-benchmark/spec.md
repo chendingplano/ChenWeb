@@ -71,6 +71,22 @@ prompt used.
 - **WHEN** both weights are 0 or candidates per list is outside 1–1000
 - **THEN** the request is rejected with HTTP 400
 
+### Requirement: Parallel questions
+A run SHALL search up to its *parallel queries* option (1–32, default 8) questions at the same
+time. A failed save or an expired run SHALL stop all workers.
+
+#### Scenario: Parallel run
+- **WHEN** a run with parallel queries 8 is started
+- **THEN** up to 8 questions are searched at once and the run is marked done after all are stored
+
+### Requirement: Keyword failure
+When a question's keyword call fails or returns nothing, its searches SHALL run without keywords
+(no further keyword calls) and its result SHALL record the failure.
+
+#### Scenario: Keyword model unavailable
+- **WHEN** the keyword model returns an error
+- **THEN** the question makes one keyword call, its ranks use the raw query, and its error says so
+
 ### Requirement: Query timings
 Each result SHALL store the query embedding, keyword extraction (a fresh LLM call, not the cache)
 and each mode's search time in milliseconds. The page SHALL show a Query time column equal to

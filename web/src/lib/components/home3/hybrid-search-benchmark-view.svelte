@@ -23,7 +23,8 @@
 		query_keywords: true,
 		lexical_weight: 1,
 		semantic_weight: 1,
-		candidate_limit: 200
+		candidate_limit: 200,
+		parallelism: 8
 	});
 	let optionsLoaded = false;
 	let starting = $state(false);
@@ -52,7 +53,10 @@
 			options.lexical_weight + options.semantic_weight > 0 &&
 			Number.isInteger(options.candidate_limit) &&
 			options.candidate_limit >= 1 &&
-			options.candidate_limit <= 1000
+			options.candidate_limit <= 1000 &&
+			Number.isInteger(options.parallelism) &&
+			options.parallelism >= 1 &&
+			options.parallelism <= 32
 	);
 
 	const purposeLabel = (value: string) =>
@@ -253,6 +257,18 @@
 					disabled={starting}
 				/>
 			</div>
+			<div>
+				<label for="hsb-parallelism">{m.hsb_parallelism()}</label>
+				<input
+					id="hsb-parallelism"
+					type="number"
+					min="1"
+					max="32"
+					step="1"
+					bind:value={options.parallelism}
+					disabled={starting}
+				/>
+			</div>
 		</div>
 		<p class="hint">{m.hsb_options_hint()}</p>
 		{#if !validOptions}<p class="error" role="alert">{m.hsb_invalid_options()}</p>{/if}
@@ -361,6 +377,8 @@
 						</dd>
 						<dt>{m.hsb_candidate_limit()}</dt>
 						<dd>{selected.candidate_limit}</dd>
+						<dt>{m.hsb_parallelism()}</dt>
+						<dd>{selected.parallelism}</dd>
 					</dl>
 				</section>
 			</div>

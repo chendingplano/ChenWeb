@@ -34,3 +34,10 @@
 - [x] 6.2 Run options (keywords, RRF weights, candidates per list) with configured defaults; per-search keyword override and fresh keyword call
 - [x] 6.3 Page: options in the start form, View button, two-group run viewer with prompt and model name, Query time column
 - [x] 6.4 Tests and live check; spec 2026060201 §13.2
+
+## 7. Parallelism and keyword failures
+
+- [x] 7.1 Migration: `parallelism` on runs
+- [x] 7.2 Worker pool (option 1–32, default 8); results ordered by question
+- [x] 7.3 Keyword failure: no retries in the searches, recorded on the result
+- [x] 7.4 Tests, live check, spec 2026060201 §13.2
