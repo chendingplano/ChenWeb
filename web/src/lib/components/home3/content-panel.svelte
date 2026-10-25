@@ -59,6 +59,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import BenchmarkSetupView from '$lib/components/home3/benchmark-setup-view.svelte';
 	import QuestionGeneratorView from '$lib/components/home3/question-generator-view.svelte';
 	import HybridSearchBenchmarkView from '$lib/components/home3/hybrid-search-benchmark-view.svelte';
+	import HybridSearchBenchmarkAnalyzeView from '$lib/components/home3/hybrid-search-benchmark-analyze-view.svelte';
 	import PiHarnessAdminView from '$lib/components/home3/pi-harness-admin-view.svelte';
 	import PageConfigAdminView from '$lib/components/home3/page-config-admin-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
@@ -114,6 +115,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		docReviewKey = 0,
 		railOffset = 56,
 		siteConfig,
+		analyzeResultId = null,
 		onToggleShelf,
 		onMetricDetailsChange,
 		onSummaryDetailsChange,
@@ -130,6 +132,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		docReviewKey?: number;
 		railOffset?: number;
 		siteConfig: SiteConfig;
+		/** Hybrid Search Benchmark result shown by the run page's Analyze tab. */
+		analyzeResultId?: number | null;
 		onToggleShelf: () => void;
 		onMetricDetailsChange?: (details: Snippet | null) => void;
 		onSummaryDetailsChange?: (details: Snippet | null) => void;
@@ -236,7 +240,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			activeMenu?.childId !== 'sysadmin-alert-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-decision-candidates' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-assertions' &&
-			activeMenu?.childId !== 'cdm-editor'
+			activeMenu?.childId !== 'cdm-editor' &&
+			!(activeMenu?.childId === 'sysadmin-hybrid-search-benchmark-run' && analyzeResultId)
 	);
 </script>
 
@@ -420,7 +425,11 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'sysadmin-question-generator'}
 			<QuestionGeneratorView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-hybrid-search-benchmark-run'}
-			<HybridSearchBenchmarkView {darkMode} />
+			{#if analyzeResultId}
+				<HybridSearchBenchmarkAnalyzeView {darkMode} resultId={analyzeResultId} {onMetricDetailsChange} />
+			{:else}
+				<HybridSearchBenchmarkView {darkMode} />
+			{/if}
 		{:else if activeMenu?.childId === 'sysadmin-benchmark-setup'}
 			<BenchmarkSetupView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-page-config'}

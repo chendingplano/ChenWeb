@@ -85,8 +85,14 @@
 	let selectedReferences = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let selectedMetrics = $state<{ production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null>(null);
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: m.nav_dashboard() });
+	// Hybrid Search Benchmark → Analyze opens the run page in a new tab with ?analyze=<result id>.
+	// Read once from the loaded URL (replaceState does not update page.url); choosing another page
+	// leaves the analysis.
+	const HYBRID_BENCH_RUN_CHILD = 'sysadmin-hybrid-search-benchmark-run';
+	const analyzeParam = Number(page.url.searchParams.get('analyze'));
+	let analyzeResultId = $state<number | null>(Number.isInteger(analyzeParam) && analyzeParam > 0 ? analyzeParam : null);
 	$effect(() => {
-		if (activeMenu?.childId !== 'kb-metrics' && activeMenu?.childId !== 'sysadmin-llm-metrics-gold') metricDetails = null;
+		if (activeMenu?.childId !== 'kb-metrics' && activeMenu?.childId !== 'sysadmin-llm-metrics-gold' && activeMenu?.childId !== HYBRID_BENCH_RUN_CHILD) metricDetails = null;
 		if (activeMenu?.childId !== 'sysadmin-llm-summaries-gold' && activeMenu?.childId !== 'sysadmin-llm-summaries-benchmark') summaryDetails = null;
 		if (activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark') {
 			selectedMetrics = null;
@@ -188,8 +194,10 @@
 		if (selection.childId === 'apps-document-review') {
 			docReviewKey++;
 		}
+		if (selection.childId !== HYBRID_BENCH_RUN_CHILD) analyzeResultId = null;
 		activeMenu = selection;
 		const url = selectionUrl(page.url, selection);
+		if (analyzeResultId === null) url.searchParams.delete('analyze');
 		// Restoring the existing URL during mount runs before SvelteKit's router is ready.
 		if (url.href !== page.url.href) replaceState(url, page.state);
 	}
@@ -315,6 +323,7 @@
 			{autoShrinkExpand}
 			{docReviewKey}
 			{siteConfig}
+			{analyzeResultId}
 			onReferenceDetailsChange={(details) => {
 				referenceDetails = details;
 				if (details) shelfOpen = true;

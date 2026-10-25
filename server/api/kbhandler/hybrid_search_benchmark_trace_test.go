@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -23,10 +24,23 @@ func callHybridBenchTrace(t *testing.T, id, query string) *httptest.ResponseReco
 	return rec
 }
 
+var hybridBenchResultRowColumns = []string{"id", "search_run_id", "question_id", "input_record_id", "hop_type", "lang", "question",
+	"target_artifact_id", "keywords", "lexical_rank", "semantic_rank", "hybrid_rank", "hybrid_top", "error_msg",
+	"embedding_ms", "keywords_ms", "lexical_ms", "semantic_ms", "hybrid_ms",
+	"effort_rank", "effort_found", "effort_attempts", "effort_ms", "effort_trace", "lexical_backend"}
+
+// One stored result (low effort) plus its run's lexical backend.
+func hybridBenchResultRow(id int64, target string) *sqlmock.Rows {
+	return sqlmock.NewRows(hybridBenchResultRowColumns).AddRow(id, int64(612), int64(7), int64(416), "one_hop", "en", "q",
+		target, "{cadmium}", int64(2), int64(1), int64(2), `["416_mtc_1"]`, "",
+		int64(40), int64(900), int64(120), int64(110), int64(125),
+		nil, nil, nil, nil, nil, "paradedb")
+}
+
 func TestGetHybridSearchBenchmarkTrace(t *testing.T) {
 	_, mock := installPolicyDB(t)
-	mock.ExpectQuery("SELECT target_artifact_id FROM testbed\\.hybrid_search_benchmark_results").WithArgs(int64(5)).
-		WillReturnRows(sqlmock.NewRows([]string{"target_artifact_id"}).AddRow("416_mtc_9"))
+	mock.ExpectQuery("SELECT u\\.lexical_backend FROM testbed\\.hybrid_search_benchmark_runs u WHERE u\\.id = r\\.run_id\\)\\s+FROM testbed\\.hybrid_search_benchmark_results r WHERE r\\.id = \\$1").
+		WithArgs(int64(5)).WillReturnRows(hybridBenchResultRow(5, "416_mtc_9"))
 	mock.ExpectQuery("FROM testbed\\.hybrid_search_benchmark_queries WHERE result_id = \\$1 ORDER BY seq").WithArgs(int64(5)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "seq", "source", "attempt", "query_text", "keywords", "error_msg"}).
 			AddRow(int64(9), 1, "question", nil, "q", "{cadmium}", "").
@@ -44,13 +58,14 @@ func TestGetHybridSearchBenchmarkTrace(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 	}
 	var body struct {
-		Target  string                  `json:"target_artifact_id"`
+		Result  hybridBenchResult       `json:"result"`
+		Backend string                  `json:"lexical_backend"`
 		Queries []hybridBenchTraceQuery `json:"queries"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Target != "416_mtc_9" || len(body.Queries) != 2 {
+	if body.Result.TargetArtifactID != "416_mtc_9" || body.Result.ID != 5 || *body.Result.HybridRank != 2 || body.Backend != "paradedb" || len(body.Queries) != 2 {
 		t.Fatalf("body=%s", rec.Body)
 	}
 	q := body.Queries[0]
@@ -73,15 +88,15 @@ func TestGetHybridSearchBenchmarkTraceErrors(t *testing.T) {
 	if rec := callHybridBenchTrace(t, "x", ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad id: status=%d", rec.Code)
 	}
-	mock.ExpectQuery("SELECT target_artifact_id").WithArgs(int64(6)).WillReturnRows(sqlmock.NewRows([]string{"target_artifact_id"}))
+	mock.ExpectQuery("FROM testbed\\.hybrid_search_benchmark_results r WHERE r\\.id").WithArgs(int64(6)).WillReturnRows(sqlmock.NewRows(hybridBenchResultRowColumns))
 	if rec := callHybridBenchTrace(t, "6", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing result: status=%d", rec.Code)
 	}
 	// A result stored before tracing: no queries, no candidate lookups.
-	mock.ExpectQuery("SELECT target_artifact_id").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"target_artifact_id"}).AddRow("t"))
+	mock.ExpectQuery("FROM testbed\\.hybrid_search_benchmark_results r WHERE r\\.id").WithArgs(int64(7)).WillReturnRows(hybridBenchResultRow(7, "t"))
 	mock.ExpectQuery("FROM testbed\\.hybrid_search_benchmark_queries").WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "seq", "source", "attempt", "query_text", "keywords", "error_msg"}))
-	if rec := callHybridBenchTrace(t, "7", ""); rec.Code != http.StatusOK || rec.Body.String() != "{\"limit\":20,\"queries\":[],\"result_id\":7,\"target_artifact_id\":\"t\"}\n" {
+	if rec := callHybridBenchTrace(t, "7", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"queries":[]`) || !strings.Contains(rec.Body.String(), `"target_artifact_id":"t"`) {
 		t.Fatalf("old result: status=%d body=%s", rec.Code, rec.Body)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

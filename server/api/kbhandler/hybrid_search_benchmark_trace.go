@@ -43,9 +43,9 @@ type hybridBenchTraceQuery struct {
 	Counts   map[string]int                         `json:"counts"` // all rows stored per stage
 }
 
-// GetHybridSearchBenchmarkTrace returns one result's queries and candidate lists: per stage (per
-// partition for lexical_partition) the first limit rows plus the target's rows. Uses
-// QuestionGeneratorAdmin for access control.
+// GetHybridSearchBenchmarkTrace returns one result (as in its run's results), its run's lexical
+// backend, and its queries and candidate lists: per stage (per partition for lexical_partition) the
+// first limit rows plus the target's rows. Uses QuestionGeneratorAdmin for access control.
 func GetHybridSearchBenchmarkTrace(c echo.Context) error {
 	logger := loggerutil.CreateDefaultLogger("20261025-752")
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -59,8 +59,10 @@ func GetHybridSearchBenchmarkTrace(c echo.Context) error {
 		}
 	}
 	db, ctx := ApiTypes.ProjectDBHandle, c.Request().Context()
-	var target string
-	err = db.QueryRowContext(ctx, `SELECT target_artifact_id FROM testbed.hybrid_search_benchmark_results WHERE id = $1`, id).Scan(&target)
+	var lexicalBackend string
+	result, err := scanHybridBenchResult(db.QueryRowContext(ctx, `SELECT `+hybridBenchResultColumns+`,
+ (SELECT u.lexical_backend FROM testbed.hybrid_search_benchmark_runs u WHERE u.id = r.run_id)
+ FROM testbed.hybrid_search_benchmark_results r WHERE r.id = $1`, id), &lexicalBackend)
 	if errors.Is(err, sql.ErrNoRows) {
 		return questionGenerationError(c, http.StatusNotFound, "benchmark result not found")
 	}
@@ -68,12 +70,12 @@ func GetHybridSearchBenchmarkTrace(c echo.Context) error {
 		logger.Error("load benchmark result failed", "result_id", id, "error", err)
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load benchmark trace")
 	}
-	queries, err := loadHybridBenchTrace(ctx, db, id, target, limit)
+	queries, err := loadHybridBenchTrace(ctx, db, id, result.TargetArtifactID, limit)
 	if err != nil {
 		logger.Error("load benchmark trace failed", "result_id", id, "error", err)
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load benchmark trace")
 	}
-	return c.JSON(http.StatusOK, map[string]any{"result_id": id, "target_artifact_id": target, "limit": limit, "queries": queries})
+	return c.JSON(http.StatusOK, map[string]any{"result": result, "lexical_backend": lexicalBackend, "limit": limit, "queries": queries})
 }
 
 func loadHybridBenchTrace(ctx context.Context, db *sql.DB, resultID int64, target string, limit int) ([]hybridBenchTraceQuery, error) {

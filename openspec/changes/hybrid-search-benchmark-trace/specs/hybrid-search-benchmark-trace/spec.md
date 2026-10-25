@@ -97,19 +97,3 @@ ranks lower, with each candidate's label when the artifact still exists.
 #### Scenario: Unknown result or bad limit
 - **WHEN** the result does not exist, or `limit` is outside 1–1000
 - **THEN** the request is rejected with HTTP 404 or 400
-
-### Requirement: Analyze dialog
-Each row of the run page's Questions table SHALL have an **Analyze** button that opens a dialog
-for that question. The dialog SHALL show the question, its target and ranks, and each query (with
-source, attempt and keywords) with its four lists: ranks (merged and partition ranks for the
-merged BM25 list), partitions, scores and labels, highlighting the target's rows. When no trace
-is stored it SHALL say so. All text SHALL be available in English and Chinese, and SHALL be
-selectable.
-
-#### Scenario: Analyze a miss
-- **WHEN** an administrator presses Analyze on a question whose hybrid rank is a miss
-- **THEN** the dialog shows the question's lists and marks where, if anywhere, the target appears
-
-#### Scenario: Earlier run
-- **WHEN** an administrator presses Analyze on a question from a run stored before tracing
-- **THEN** the dialog says that no trace was stored for it

@@ -157,7 +157,7 @@ routes) returns the result's target and its queries in `seq` order, each with th
 first `limit` rows (default 20, 1–1000) plus the target's row when it ranks lower, and labels
 joined from `kb.search_artifacts` (LEFT JOIN: a re-indexed or deleted artifact shows its ID only).
 
-The Questions table gets an **Analyze** button per question (last column). It opens a dialog
+*Superseded by openspec `hybrid-search-benchmark-analyze-page`: Analyze now opens a new tab with the log, a PDF panel and metric details; the dialog below was removed.* The Questions table gets an **Analyze** button per question (last column). It opens a dialog
 headed by the question, its target and its four ranks, listing the queries (the question, then
 effort queries by attempt, with keywords) and for each query the four lists, target row
 highlighted. Results from earlier runs say that no trace was stored. Text is selectable; all text

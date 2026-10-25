@@ -2,7 +2,6 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import HybridSearchBenchmarkQuestions from './hybrid-search-benchmark-questions.svelte';
-	import HybridSearchBenchmarkAnalyze from './hybrid-search-benchmark-analyze.svelte';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
 		startBenchmarkRun,
@@ -49,7 +48,6 @@
 	let startController: AbortController | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let detailPanel = $state<HTMLElement | undefined>();
-	let analyzer = $state<ReturnType<typeof HybridSearchBenchmarkAnalyze>>();
 
 	let groupScores = $derived(scores.filter((s) => s.group === scoreGroup));
 	let running = $derived(runs.some((r) => r.status === 'running'));
@@ -109,6 +107,12 @@
 					).toLocaleString(getLocale(), { maximumFractionDigits: 1 })
 				})
 			: '—';
+	// Analyze opens this page in a new tab with the result's analysis (dashboard reads ?analyze=).
+	const analyzeHref = (resultId: number) => {
+		const url = new URL(window.location.href);
+		url.searchParams.set('analyze', String(resultId));
+		return url.pathname + url.search;
+	};
 	// Query time is what one live hybrid search costs: embedding + keywords + the hybrid query.
 	const queryTime = (r: HybridBenchmarkResult) =>
 		r.hybrid_ms === null ? null : (r.embedding_ms ?? 0) + (r.keywords_ms ?? 0) + r.hybrid_ms;
@@ -559,8 +563,8 @@
 									<td class="keywords">{result.keywords.join(', ')}</td>
 									<td class="num mono">{result.search_run_id || ''}</td>
 									<td class="actions"
-										><button type="button" onclick={() => analyzer?.open(result)}
-											>{m.hsba_button()}</button
+										><a class="analyze" href={analyzeHref(result.id)} target="_blank" rel="noopener"
+											>{m.hsba_button()}</a
 										></td
 									>
 								</tr>
@@ -569,7 +573,6 @@
 					</table>
 				</div>
 			{/if}
-			<HybridSearchBenchmarkAnalyze bind:this={analyzer} backend={selected.lexical_backend} />
 		</section>
 	{/if}
 </div>
@@ -737,6 +740,20 @@
 	}
 	.actions button {
 		padding: 4px 12px;
+	}
+	.actions a.analyze {
+		display: inline-block;
+		color: var(--text);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		padding: 4px 12px;
+		font-size: 13px;
+		background: var(--bg);
+		text-decoration: none;
+	}
+	.actions a.analyze:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.detail {
 		scroll-margin-top: 16px;

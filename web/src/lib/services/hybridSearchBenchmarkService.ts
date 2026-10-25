@@ -125,8 +125,9 @@ export function getBenchmarkRun(id: number, signal?: AbortSignal) {
 	}>(`${BASE}/${id}`, { signal });
 }
 
-// One result's trace (Analyze dialog): every query the question searched and the candidate lists
-// of its hybrid search — per stage the first `limit` rows plus the target's rows.
+// One result's trace (Analyze tab): the result itself, its run's lexical backend, and every query
+// the question searched with the candidate lists of its hybrid search — per stage the first
+// `limit` rows plus the target's rows.
 export type TraceStage = 'lexical_partition' | 'lexical' | 'semantic' | 'fused';
 export type TraceCandidate = {
 	rank: number;
@@ -152,8 +153,8 @@ export type TraceQuery = {
 };
 export function getBenchmarkTrace(resultId: number, signal?: AbortSignal) {
 	return request<{
-		result_id: number;
-		target_artifact_id: string;
+		result: HybridBenchmarkResult;
+		lexical_backend: string;
 		limit: number;
 		queries: TraceQuery[];
 	}>(`/api/v1/kb/hybrid-search-benchmark/results/${resultId}/trace`, { signal });
