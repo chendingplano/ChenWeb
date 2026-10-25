@@ -100,6 +100,15 @@
 	const ratio = (v: number | undefined) => (v === undefined ? '' : v.toFixed(2));
 	const when = (iso: string) => new Date(iso).toLocaleString(getLocale());
 	const ms = (v: number) => m.hsb_ms({ ms: v.toLocaleString(getLocale()) });
+	const runTime = (run: HybridBenchmarkRun) =>
+		run.finished_at
+			? m.hsb_run_seconds({
+					seconds: (
+						(Date.parse(run.finished_at) - Date.parse(run.created_at)) /
+						1000
+					).toLocaleString(getLocale(), { maximumFractionDigits: 1 })
+				})
+			: '—';
 	// Query time is what one live hybrid search costs: embedding + keywords + the hybrid query.
 	const queryTime = (r: HybridBenchmarkResult) =>
 		r.hybrid_ms === null ? null : (r.embedding_ms ?? 0) + (r.keywords_ms ?? 0) + r.hybrid_ms;
@@ -326,7 +335,8 @@
 							<th>{m.hsb_col_started()}</th>
 							<th>{m.hsb_col_status()}</th>
 							<th>{m.hsb_col_progress()}</th>
-							<th>{m.hsb_col_hybrid_r10()}</th>
+							<th class="num">{m.hsb_col_hybrid_r10()}</th>
+							<th class="num">{m.hsb_col_time()}</th>
 							<th>{m.qg_description()}</th>
 							<th><span class="sr-only">{m.hsb_col_actions()}</span></th>
 						</tr>
@@ -343,6 +353,7 @@
 								<td><span class="badge">{statusLabel(run.status)}</span></td>
 								<td>{m.qg_progress_count({ count: run.done_count, total: run.question_count })}</td>
 								<td class="num">{ratio(run.hybrid_r10)}</td>
+								<td class="num">{runTime(run)}</td>
 								<td>{run.description}</td>
 								<td class="actions"
 									><button

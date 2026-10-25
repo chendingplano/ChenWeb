@@ -140,6 +140,19 @@ run's attributes in two groups (run; search settings including the keyword promp
 scores and per-question ranks, refreshing while the run is in progress. All text SHALL be available in
 English and Chinese, and page text SHALL be selectable.
 
+The run list SHALL align the Hybrid R@10 heading with its numeric values and show a Time column
+with total wall-clock seconds (`finished_at - created_at`, up to one decimal place) for completed
+or failed runs. Runs without a finish timestamp SHALL show an em dash for Time. This duration
+includes all work performed during the run, including parallel searches and trace storage.
+
+#### Scenario: Finished run duration
+- **WHEN** a run started at 10:04:56 and finished at 10:05:03
+- **THEN** its Time is 7 seconds, with the unit localized to the interface language
+
+#### Scenario: Unfinished run duration
+- **WHEN** a run has no finish timestamp
+- **THEN** its Time is an em dash
+
 #### Scenario: Start and watch a run
 - **WHEN** an administrator starts a run on the page
 - **THEN** the run is selected and its progress and scores refresh until it is done or failed

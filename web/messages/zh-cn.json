@@ -7268,6 +7268,8 @@
 	"hsb_col_status": "状态",
 	"hsb_col_progress": "进度",
 	"hsb_col_hybrid_r10": "混合 R@10",
+	"hsb_col_time": "耗时",
+	"hsb_run_seconds": "{seconds} 秒",
 	"hsb_lexical_backend": "词法后端",
 	"hsb_query_keywords": "查询关键词",
 	"hsb_on": "开启",

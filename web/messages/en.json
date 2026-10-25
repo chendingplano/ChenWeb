@@ -7268,6 +7268,8 @@
 	"hsb_col_status": "Status",
 	"hsb_col_progress": "Progress",
 	"hsb_col_hybrid_r10": "Hybrid R@10",
+	"hsb_col_time": "Time",
+	"hsb_run_seconds": "{seconds} s",
 	"hsb_lexical_backend": "Lexical backend",
 	"hsb_query_keywords": "Query keywords",
 	"hsb_on": "On",
