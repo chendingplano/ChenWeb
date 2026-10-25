@@ -68,8 +68,8 @@
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
 			yAxis: [
 				{
-					type: 'value', position: 'left', min: 0, interval: 2000,
-					max: ({ max }) => Math.max(2000, Math.ceil(max / 2000) * 2000),
+					type: 'value', position: 'left', min: 0, interval: 5000,
+					max: ({ max }) => Math.max(5000, Math.ceil(max / 5000) * 5000),
 					name: m.code_monitor_total(), nameTextStyle: { color: colors.muted, align: 'left' },
 					axisLabel: { color: colors.muted, formatter: (value: number) => (value + baseline).toLocaleString() },
 					splitLine: { lineStyle: { color: colors.border } }

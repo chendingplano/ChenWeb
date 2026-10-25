@@ -61,7 +61,7 @@ Supported ranges are `today`, `yesterday`, `last_7_days` (today and six prior da
 #### Scenario: Total bars use an automatic baseline
 
 - **WHEN** the page displays a chart for a selected range
-- **THEN** Total bar heights SHALL equal `total − N`, and the Total axis SHALL display actual totals starting at N with increments of 2,000 lines
+- **THEN** Total bar heights SHALL equal `total − N`, and the Total axis SHALL display actual totals starting at N with increments of 5,000 lines
 - **AND** the maximum visible total SHALL determine a rounding step of `max(1, 10^(floor(log10(maximum)) − 1))`; N SHALL be the largest nonnegative multiple strictly below the minimum visible total
 - **AND** empty histories or ranges containing zero SHALL use N = 0
 - **AND** tooltips SHALL retain actual totals, while Delta values and their axis SHALL remain unchanged
