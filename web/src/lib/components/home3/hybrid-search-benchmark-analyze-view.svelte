@@ -64,10 +64,23 @@
 	let leftRatio = $state(0.5);
 	let resizing = $state(false);
 	let controller: AbortController | undefined;
+	// Each list's height: half of the content panel's visible height, so two rows of lists fill it.
+	const LIST_ROW_GAP = 14; // matches the log's .lists row gap
+	let contentEl = $state<HTMLElement | null>(null);
+	let listHeight = $state(340);
 
 	onMount(() => {
 		onMetricDetailsChange?.(metricDetails as unknown as Snippet);
 		void load();
+		const observer = new ResizeObserver(() => {
+			if (!contentEl) return;
+			const style = getComputedStyle(contentEl);
+			const inner =
+				contentEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+			listHeight = Math.max(160, Math.floor((inner - LIST_ROW_GAP) / 2));
+		});
+		if (contentEl) observer.observe(contentEl);
+		return () => observer.disconnect();
 	});
 	onDestroy(() => {
 		controller?.abort();
@@ -227,7 +240,12 @@
 		bind:this={splitEl}
 		style={`--left-fr: ${leftRatio}fr; --right-fr: ${1 - leftRatio}fr;`}
 	>
-		<section class="panel content" aria-label={m.hsba_content_panel()}>
+		<section
+			class="panel content"
+			bind:this={contentEl}
+			style={`--list-h: ${listHeight}px;`}
+			aria-label={m.hsba_content_panel()}
+		>
 			{#if loading}<p class="hint" role="status">{m.hsba_loading()}</p>
 			{:else if loadError}
 				<p class="error" role="alert">
@@ -345,6 +363,8 @@
 	}
 	.content {
 		overflow: auto;
+		/* Reserve the scroll bar's space so the lists' width does not change when it appears. */
+		scrollbar-gutter: stable;
 	}
 	.pdf {
 		display: flex;
@@ -438,8 +458,10 @@
 		.resizer {
 			display: none;
 		}
+		/* A definite height, so the list height (half of it) does not grow with the content. */
 		.content {
-			max-height: none;
+			height: 80vh;
+			min-height: 360px;
 		}
 		.pdf {
 			height: 70vh;

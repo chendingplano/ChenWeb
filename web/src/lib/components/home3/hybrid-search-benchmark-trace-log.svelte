@@ -63,6 +63,26 @@
 		}
 		return [...groups.entries()];
 	};
+
+	// The four lists start two per row, each half the width of their area, and keep that width when
+	// the panel is resized; once two no longer fit side by side they stack and fill the width.
+	// (A list the user drags keeps its own size: the resize grip sets inline width and height.)
+	const LIST_GAP = 18; // matches the .lists column gap
+	const LIST_MIN_WIDTH = 220;
+	function listsLayout(node: HTMLElement) {
+		let listWidth = 0;
+		const observer = new ResizeObserver(([entry]) => {
+			const width = entry.contentRect.width;
+			if (width <= 0) return; // a collapsed query: measure once it is opened
+			if (!listWidth) {
+				listWidth = Math.max(LIST_MIN_WIDTH, Math.floor((width - LIST_GAP) / 2));
+				node.style.setProperty('--list-w', `${listWidth}px`);
+			}
+			node.classList.toggle('stacked', width < 2 * listWidth + LIST_GAP);
+		});
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
+	}
 </script>
 
 {#snippet metricButton(id: string, label = '')}
@@ -100,7 +120,7 @@
 				: m.hsba_no_keywords()}
 		</p>
 		{#if q.error_msg}<p class="error">{q.error_msg}</p>{/if}
-		<div class="lists">
+		<div class="lists" use:listsLayout>
 			{#if partitionGroups(q).length > 0}
 				<section>
 					{@render listHeading(
@@ -377,10 +397,11 @@
 	section {
 		flex: 0 0 auto;
 		box-sizing: border-box;
-		width: max(260px, calc(50% - 9px));
+		width: var(--list-w, calc(50% - 9px));
 		max-width: 100%;
-		min-width: 220px;
-		height: 340px;
+		min-width: min(100%, 220px);
+		/* Two rows of lists fill one panel height (--list-h is set by the Analyze view). */
+		height: var(--list-h, 340px);
 		min-height: 120px;
 		display: flex;
 		flex-direction: column;
@@ -389,6 +410,9 @@
 		overflow: hidden;
 		resize: both;
 		background: var(--list-body);
+	}
+	.lists:global(.stacked) > section {
+		width: 100%;
 	}
 	.list-head {
 		flex: 0 0 auto;
