@@ -125,6 +125,7 @@
 	}
 	async function deleteSelected() {
 		if (deleting || loading || selected.length === 0) return;
+		if (!confirm(m.qg_delete_confirm({ count: selected.length }))) return;
 		archiveController = new AbortController();
 		deleting = true;
 		deleteError = false;

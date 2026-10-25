@@ -7471,6 +7471,7 @@
 	"qg_select_question": "Select question {number}",
 	"qg_selected_count": "{count} selected",
 	"qg_delete": "Delete",
+	"qg_delete_confirm": "Delete {count} selected questions? They will be moved to the archive and removed from active results.",
 	"qg_deleting": "Deleting…",
 	"qg_delete_hint": "Move selected questions to the archive",
 	"qg_delete_error": "Could not archive the selected questions. Please try again.",
