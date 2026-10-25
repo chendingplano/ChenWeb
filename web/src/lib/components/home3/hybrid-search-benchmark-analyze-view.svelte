@@ -305,6 +305,9 @@
 		--accent: #4f46e5;
 		--hit: #15803d;
 		--picked: #c7d2fe;
+		--list-head: #e9edf3;
+		--list-body: #ffffff;
+		--list-line: #dde2ea;
 		height: 100%;
 		box-sizing: border-box;
 		padding: 16px;
@@ -322,6 +325,9 @@
 		--accent: #a5b4fc;
 		--hit: #4ade80;
 		--picked: #3d4566;
+		--list-head: #2a3145;
+		--list-body: #191d2b;
+		--list-line: #343b55;
 	}
 	.split {
 		height: 100%;

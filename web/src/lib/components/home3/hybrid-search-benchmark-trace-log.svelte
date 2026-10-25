@@ -82,8 +82,10 @@
 {/snippet}
 
 {#snippet listHeading(title: string, rows: TraceCandidate[], count: number | undefined)}
-	<h4>{title} <span class="count">{m.hsba_count({ count: count ?? 0 })}</span></h4>
-	{#if rows.length > 0 && !rows.some(isTarget)}<p class="hint">{m.hsba_target_absent()}</p>{/if}
+	<div class="list-head">
+		<h4>{title} <span class="count">{m.hsba_count({ count: count ?? 0 })}</span></h4>
+		{#if rows.length > 0 && !rows.some(isTarget)}<p class="hint">{m.hsba_target_absent()}</p>{/if}
+	</div>
 {/snippet}
 
 {#snippet queryBlock(q: TraceQuery, open: boolean)}
@@ -106,14 +108,75 @@
 						stageRows(q, 'lexical_partition'),
 						q.counts.lexical_partition
 					)}
-					{#each partitionGroups(q) as [partition, rows]}
-						<p class="partition mono">{partition}</p>
+					<div class="list-body">
+						{#each partitionGroups(q) as [partition, rows]}
+							<p class="partition mono">{partition}</p>
+							<table>
+								<thead>
+									<tr>
+										<th class="num">{m.hsba_col_partition_rank()}</th>
+										<th>{m.hsba_col_metric()}</th>
+										<th class="num">{m.hsba_col_bm25()}</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each rows as c, i}
+										{#if gapBefore(rows, i)}{@render gap(3)}{/if}
+										<tr
+											class:target={isTarget(c)}
+											class:picked={c.artifact_id === selectedMetricId}
+										>
+											<td class="num">{c.rank}</td>
+											<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+											<td class="num">{fixed(c.score, 2)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/each}
+					</div>
+				</section>
+			{/if}
+			{#each [stageRows(q, 'lexical')] as rows}
+				<section>
+					{@render listHeading(m.hsba_stage_lexical(), rows, q.counts.lexical)}
+					<div class="list-body">
 						<table>
 							<thead>
 								<tr>
+									<th class="num">{m.hsba_col_merged_rank()}</th>
 									<th class="num">{m.hsba_col_partition_rank()}</th>
+									<th>{m.hsba_col_partition()}</th>
 									<th>{m.hsba_col_metric()}</th>
 									<th class="num">{m.hsba_col_bm25()}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each rows as c, i}
+									{#if gapBefore(rows, i)}{@render gap(5)}{/if}
+									<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
+										<td class="num">{c.rank}</td>
+										<td class="num">{c.partition_rank ?? ''}</td>
+										<td class="mono">{c.partition_name}</td>
+										<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+										<td class="num">{fixed(c.score, 2)}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</section>
+			{/each}
+			{#each [stageRows(q, 'semantic')] as rows}
+				<section>
+					{@render listHeading(m.hsba_stage_semantic(), rows, q.counts.semantic)}
+					<div class="list-body">
+						<table>
+							<thead>
+								<tr>
+									<th class="num">{m.hsba_col_rank()}</th>
+									<th>{m.hsba_col_metric()}</th>
+									<th class="num">{m.hsba_col_similarity()}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -122,92 +185,42 @@
 									<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
 										<td class="num">{c.rank}</td>
 										<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
-										<td class="num">{fixed(c.score, 2)}</td>
+										<td class="num">{fixed(c.score, 3)}</td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
-					{/each}
-				</section>
-			{/if}
-			{#each [stageRows(q, 'lexical')] as rows}
-				<section>
-					{@render listHeading(m.hsba_stage_lexical(), rows, q.counts.lexical)}
-					<table>
-						<thead>
-							<tr>
-								<th class="num">{m.hsba_col_merged_rank()}</th>
-								<th class="num">{m.hsba_col_partition_rank()}</th>
-								<th>{m.hsba_col_partition()}</th>
-								<th>{m.hsba_col_metric()}</th>
-								<th class="num">{m.hsba_col_bm25()}</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each rows as c, i}
-								{#if gapBefore(rows, i)}{@render gap(5)}{/if}
-								<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
-									<td class="num">{c.rank}</td>
-									<td class="num">{c.partition_rank ?? ''}</td>
-									<td class="mono">{c.partition_name}</td>
-									<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
-									<td class="num">{fixed(c.score, 2)}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</section>
-			{/each}
-			{#each [stageRows(q, 'semantic')] as rows}
-				<section>
-					{@render listHeading(m.hsba_stage_semantic(), rows, q.counts.semantic)}
-					<table>
-						<thead>
-							<tr>
-								<th class="num">{m.hsba_col_rank()}</th>
-								<th>{m.hsba_col_metric()}</th>
-								<th class="num">{m.hsba_col_similarity()}</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each rows as c, i}
-								{#if gapBefore(rows, i)}{@render gap(3)}{/if}
-								<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
-									<td class="num">{c.rank}</td>
-									<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
-									<td class="num">{fixed(c.score, 3)}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
+					</div>
 				</section>
 			{/each}
 			{#each [stageRows(q, 'fused')] as rows}
 				<section>
 					{@render listHeading(m.hsba_stage_fused(), rows, q.counts.fused)}
-					<table>
-						<thead>
-							<tr>
-								<th class="num">{m.hsba_col_rank()}</th>
-								<th>{m.hsba_col_metric()}</th>
-								<th class="num">{m.hsba_col_rrf()}</th>
-								<th class="num">{m.hsba_col_lexical_rank()}</th>
-								<th class="num">{m.hsba_col_semantic_rank()}</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each rows as c, i}
-								{#if gapBefore(rows, i)}{@render gap(5)}{/if}
-								<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
-									<td class="num">{c.rank}</td>
-									<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
-									<td class="num">{fixed(c.score, 4)}</td>
-									<td class="num">{c.lexical_rank ?? ''}</td>
-									<td class="num">{c.semantic_rank ?? ''}</td>
+					<div class="list-body">
+						<table>
+							<thead>
+								<tr>
+									<th class="num">{m.hsba_col_rank()}</th>
+									<th>{m.hsba_col_metric()}</th>
+									<th class="num">{m.hsba_col_rrf()}</th>
+									<th class="num">{m.hsba_col_lexical_rank()}</th>
+									<th class="num">{m.hsba_col_semantic_rank()}</th>
 								</tr>
-							{/each}
-						</tbody>
-					</table>
+							</thead>
+							<tbody>
+								{#each rows as c, i}
+									{#if gapBefore(rows, i)}{@render gap(5)}{/if}
+									<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
+										<td class="num">{c.rank}</td>
+										<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+										<td class="num">{fixed(c.score, 4)}</td>
+										<td class="num">{c.lexical_rank ?? ''}</td>
+										<td class="num">{c.semantic_rank ?? ''}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
 				</section>
 			{/each}
 		</div>
@@ -356,12 +369,29 @@
 		gap: 14px 18px;
 		margin-top: 8px;
 	}
+	/* Each list: a rounded frame with a header bar (title, count) over its entries. */
 	section {
 		min-width: 0;
+		align-self: start;
+		border: 1px solid var(--list-line);
+		border-radius: 10px;
+		overflow: hidden;
+		background: var(--list-body);
+	}
+	.list-head {
+		padding: 7px 10px;
+		background: var(--list-head);
+		border-bottom: 1px solid var(--list-line);
+	}
+	.list-head .hint {
+		margin: 2px 0 0;
+	}
+	.list-body {
 		overflow-x: auto;
+		padding: 2px 4px 6px;
 	}
 	h4 {
-		margin: 0 0 6px;
+		margin: 0;
 		font-size: 12px;
 	}
 	.count {
@@ -369,7 +399,7 @@
 		color: var(--muted);
 	}
 	.partition {
-		margin: 4px 0;
+		margin: 6px 6px 2px;
 		font-size: 11px;
 		color: var(--muted);
 	}
