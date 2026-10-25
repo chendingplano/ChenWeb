@@ -7,7 +7,7 @@
 	import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 	import { CanvasRenderer } from 'echarts/renderers';
 	import { m } from '$lib/paraglide/messages.js';
-	import { codeMonitorTotalBaseline } from './code-monitor-chart';
+	import { codeMonitorTotalScale } from './code-monitor-chart';
 	import { createLatestCodeMonitorLoader, type CodeMonitorProject, type CodeMonitorRange } from './code-monitor-client';
 
 	use([BarChart, AriaComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
@@ -55,7 +55,7 @@
 		const rows = [...project.rows].sort((a, b) => a.collection_date.localeCompare(b.collection_date));
 		const dates = rows.map((row) => row.collection_date);
 		const totals = rows.map((row) => row[metric]);
-		const baseline = codeMonitorTotalBaseline(totals);
+		const { baseline, interval, maximum } = codeMonitorTotalScale(totals);
 		const totalAxisName = m.code_monitor_total_baseline({ baseline: baseline.toLocaleString() });
 		const deltas = rows.map((row) => row[deltaMetric]);
 		return {
@@ -68,8 +68,8 @@
 			xAxis: { type: 'category', data: dates, axisLabel: { color: colors.muted } },
 			yAxis: [
 				{
-					type: 'value', position: 'left', min: 0, interval: 5000,
-					max: ({ max }) => Math.max(5000, Math.ceil(max / 5000) * 5000),
+					type: 'value', position: 'left', min: 0, interval,
+					max: maximum,
 					name: m.code_monitor_total(), nameTextStyle: { color: colors.muted, align: 'left' },
 					axisLabel: { color: colors.muted, formatter: (value: number) => (value + baseline).toLocaleString() },
 					splitLine: { lineStyle: { color: colors.border } }

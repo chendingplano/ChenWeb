@@ -1,29 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { codeMonitorTotalBaseline } from './code-monitor-chart';
+import { codeMonitorTotalScale } from './code-monitor-chart';
 
-describe('codeMonitorTotalBaseline', () => {
-	test('makes changes in large totals visible using a rounded baseline', () => {
-		const totals = [780_000, 790_000, 810_000];
-		const baseline = codeMonitorTotalBaseline(totals);
-		expect(baseline).toBe(770_000);
-		expect(totals.map((total) => total - baseline)).toEqual([10_000, 20_000, 40_000]);
+describe('codeMonitorTotalScale', () => {
+	test('chooses independent baselines and intervals for each metric', () => {
+		const scales = [[785_000, 821_000], [151_000, 161_000], [54_010, 54_210]].map(codeMonitorTotalScale);
+		expect(new Set(scales.map((scale) => scale.baseline)).size).toBe(3);
+		expect(new Set(scales.map((scale) => scale.interval)).size).toBe(3);
 	});
 
-	test('uses the maximum to set rounding precision without clipping smaller totals', () => {
-		expect(codeMonitorTotalBaseline([54_010, 54_200])).toBe(54_000);
-		expect(codeMonitorTotalBaseline([54_010, 810_000])).toBe(50_000);
-		expect(codeMonitorTotalBaseline([5, 810_000])).toBe(0);
-	});
-
-	test('keeps flat and single-snapshot totals visible', () => {
-		expect(codeMonitorTotalBaseline([180_000, 180_000])).toBe(170_000);
-		expect(codeMonitorTotalBaseline([5_000])).toBe(4_900);
-		expect(codeMonitorTotalBaseline([1])).toBe(0);
-	});
-
-	test('uses zero for empty history or a range containing zero', () => {
-		expect(codeMonitorTotalBaseline([])).toBe(0);
-		expect(codeMonitorTotalBaseline([0])).toBe(0);
-		expect(codeMonitorTotalBaseline([100, 0, 200])).toBe(0);
-	});
+	for (const totals of [[785_000, 821_000], [151_000, 161_000], [54_010, 54_210], [4_999, 4_999], [180_123], [0], [], [1], [0, 200], [5, 810_000]]) {
+		test(`encloses ${JSON.stringify(totals)} with about eight gridlines`, () => {
+			const { baseline, interval, maximum } = codeMonitorTotalScale(totals);
+			expect(baseline).toBeGreaterThanOrEqual(0);
+			expect(interval).toBeGreaterThanOrEqual(1);
+			expect(Number.isInteger(interval)).toBe(true);
+			expect(maximum / interval + 1).toBeGreaterThanOrEqual(6);
+			expect(maximum / interval + 1).toBeLessThanOrEqual(10);
+			for (const total of totals) {
+				if (total > 0) expect(total - baseline).toBeGreaterThan(0);
+				expect(total - baseline).toBeLessThan(maximum);
+			}
+		});
+	}
 });
