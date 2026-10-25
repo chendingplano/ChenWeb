@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { SearchIcon, BoxesIcon, ArrowUpRightIcon, XIcon } from '@lucide/svelte';
+	import { SearchIcon, BoxesIcon, ArrowUpRightIcon, GripHorizontalIcon, XIcon } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { filterModules, type ReusableModule } from './reusable-modules';
@@ -12,6 +12,50 @@
 	let failed = $state(false);
 	let selected = $state<ReusableModule | null>(null);
 	let dialog: HTMLDialogElement;
+	let drag: { pointerId: number; offsetX: number; offsetY: number } | null = null;
+
+	function positionDialog(left: number, top: number) {
+		const rect = dialog.getBoundingClientRect();
+		dialog.style.margin = '0';
+		dialog.style.inset = 'auto';
+		dialog.style.left = `${Math.max(8, Math.min(left, window.innerWidth - rect.width - 8))}px`;
+		dialog.style.top = `${Math.max(8, Math.min(top, window.innerHeight - rect.height - 8))}px`;
+	}
+
+	function startDrag(event: PointerEvent) {
+		if (event.button !== 0) return;
+		const rect = dialog.getBoundingClientRect();
+		drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+
+	function moveDrag(event: PointerEvent) {
+		if (drag?.pointerId !== event.pointerId) return;
+		positionDialog(event.clientX - drag.offsetX, event.clientY - drag.offsetY);
+	}
+
+	function endDrag(event: PointerEvent) {
+		if (drag?.pointerId !== event.pointerId) return;
+		drag = null;
+		const handle = event.currentTarget as HTMLElement;
+		if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+	}
+
+	function moveWithKeyboard(event: KeyboardEvent) {
+		const offsets: Record<string, [number, number]> = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] };
+		const delta = offsets[event.key];
+		if (!delta) return;
+		event.preventDefault();
+		const rect = dialog.getBoundingClientRect();
+		positionDialog(rect.left + delta[0], rect.top + delta[1]);
+	}
+
+	function keepDialogInView() {
+		if (!dialog?.open || !dialog.style.left) return;
+		const rect = dialog.getBoundingClientRect();
+		positionDialog(rect.left, rect.top);
+	}
 	const visible = $derived(filterModules(modules, query));
 	const statusLabel = (status: ReusableModule['status']) => ({ active: m.modules_active, 'under-dev': m.modules_under_dev, retired: m.modules_retired })[status]();
 	const typeLabel = (type: ReusableModule['module_type']) => ({ frontend: m.modules_frontend, backend: m.modules_backend, script: m.modules_script })[type]();
@@ -32,6 +76,8 @@
 	}
 	onMount(load);
 </script>
+
+<svelte:window onresize={keepDialogInView} />
 
 <div class="modules-page select-text" class:light={!darkMode}>
 	<header>
@@ -63,16 +109,19 @@
 						<h2 title={module.module_name}>{module.module_name}</h2>
 						<div class="tags"><span>{typeLabel(module.module_type)}</span><span>{module.prog_language}</span><span>{m.modules_version({ version: module.version })}</span></div>
 						<p class="description">{module.description || m.modules_no_description()}</p>
-						<footer><span>{m.modules_file_count({ count: module.files.length })}</span><button aria-label={m.modules_details_for({ name: module.module_name })} onclick={() => { selected = module; dialog.showModal(); }}>{m.modules_details()}<ArrowUpRightIcon size={15} /></button></footer>
+						<footer><span>{m.modules_file_count({ count: module.files.length })}</span><button aria-label={m.modules_details_for({ name: module.module_name })} onclick={() => { selected = module; dialog.removeAttribute('style'); dialog.showModal(); }}>{m.modules_details()}<ArrowUpRightIcon size={15} /></button></footer>
 					</article>
 				{/each}
 			</div>
 		{/if}
 	{/if}
 
-	<dialog bind:this={dialog} onclose={() => selected = null} aria-labelledby="module-detail-title">
+	<dialog bind:this={dialog} onclose={() => { selected = null; drag = null; }} aria-labelledby="module-detail-title">
 		{#if selected}
-			<div class="detail-header"><div><p class="module-id">{selected.module_id}</p><h2 id="module-detail-title">{selected.module_name}</h2></div><button aria-label={m.modules_close()} onclick={() => dialog.close()}><XIcon size={20} /></button></div>
+			<div class="detail-header">
+				<button class="dialog-drag-handle" aria-label={m.modules_move_dialog()} title={m.modules_move_dialog()} onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onlostpointercapture={() => drag = null} onkeydown={moveWithKeyboard}><GripHorizontalIcon size={20} /></button>
+				<div class="detail-title"><p class="module-id">{selected.module_id}</p><h2 id="module-detail-title">{selected.module_name}</h2></div><button aria-label={m.modules_close()} onclick={() => dialog.close()}><XIcon size={20} /></button>
+			</div>
 			<p class="detail-description">{selected.description || m.modules_no_description()}</p>
 			<dl>
 				<dt>{m.modules_type()}</dt><dd>{typeLabel(selected.module_type)}</dd>
@@ -105,7 +154,8 @@
 	input::placeholder { color: var(--muted); }
 	.result-count { margin: 20px 0 14px; font-variant-numeric: tabular-nums; }
 	.module-grid { display: grid; grid-template-columns: repeat(auto-fill, 340px); gap: 18px; }
-	.module-card { box-sizing: border-box; width: 340px; height: 280px; max-width: 100%; display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+	.module-card { box-sizing: border-box; width: 340px; height: 280px; max-width: 100%; display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--border); border-radius: 10px; background: #2d374b; }
+	.light .module-card { background: #fff; }
 	.card-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 	.module-id { font-family: monospace; font-size: 11px; color: var(--muted); }
 	.status { font-size: 11px; color: #fbbf24; }
@@ -125,6 +175,9 @@
 	dialog { width: min(680px, calc(100vw - 32px)); max-height: 85vh; box-sizing: border-box; padding: 28px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); user-select: text; }
 	dialog::backdrop { background: #080e1bb3; }
 	.detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+	.detail-title { flex: 1; min-width: 0; }
+	.dialog-drag-handle { cursor: grab; touch-action: none; padding: 6px; user-select: none; }
+	.dialog-drag-handle:active { cursor: grabbing; }
 	.detail-header h2 { font-size: 23px; font-weight: 600; margin-top: 6px; overflow-wrap: anywhere; }
 	.detail-description { margin: 18px 0; color: var(--muted); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 	dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; font-size: 13px; }

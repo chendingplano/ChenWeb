@@ -7077,6 +7077,7 @@
 	"modules_details": "Details",
 	"modules_details_for": "View details for {name}",
 	"modules_close": "Close details",
+	"modules_move_dialog": "Move dialog",
 	"modules_type": "Type",
 	"modules_status": "Status",
 	"modules_language": "Language",

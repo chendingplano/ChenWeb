@@ -7077,6 +7077,7 @@
 	"modules_details": "详情",
 	"modules_details_for": "查看 {name} 的详情",
 	"modules_close": "关闭详情",
+	"modules_move_dialog": "移动对话框",
 	"modules_type": "类型",
 	"modules_status": "状态",
 	"modules_language": "编程语言",
