@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -188,6 +189,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 	previousQuestions := []string{}
 	seenQuestions := map[string]bool{}
 	duplicatePasses := 0
+	var documentErrors []error
 	for questionDocumentCounts(req, generated).total() > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -209,48 +211,90 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 			}
 			counts := questionDocumentCounts(req, generated)
 			if counts.total() == 0 {
-				return nil
+				return errors.Join(documentErrors...)
 			}
 			docReq := req
 			docReq.InputRecordID = recordID
 			docReq.OneHopCount, docReq.TwoHopCount, docReq.MultiHopCount = &counts.OneHop, &counts.TwoHop, &counts.MultiHop
-			questions, err := generateMetricQuestionDocument(ctx, db, runID, docReq, cfg, client, promptName, prompt, userID, previousQuestions, logger)
-			if err != nil {
-				logger.Warn("question generation document skipped", "run_id", runID, "record_id", recordID, "error", err)
-				if req.InputRecordID > 0 {
-					return err
+			persisted := map[string]bool{}
+			persistedQuestions := []generatedQuestion{}
+			documentSaved := false
+			var partialSaveErr error
+			savePartial := func(accepted []generatedQuestion) error {
+				pending := []generatedQuestion{}
+				for _, q := range accepted {
+					if !seenQuestions[strings.ToLower(strings.Join(strings.Fields(q.Question), " "))] {
+						pending = append(pending, q)
+					}
 				}
-				lastFailure = err.Error()
+				if len(pending) == 0 {
+					return nil
+				}
+				partialSaveErr = saveGeneratedQuestionBatch(ctx, db, runID, recordID, pending, false, true)
+				if partialSaveErr != nil {
+					return partialSaveErr
+				}
+				documentSaved = true
+				persistedQuestions = pending
+				for _, q := range pending {
+					persisted[fmt.Sprintf("%d/%s", q.SetNo, q.HopType)] = true
+				}
+				logger.Info("valid questions saved before correction", "run_id", runID, "record_id", recordID, "saved_questions", len(pending))
+				return nil
+			}
+			questions, documentErr := generateMetricQuestionDocument(ctx, db, runID, docReq, cfg, client, promptName, prompt, userID, previousQuestions, logger, savePartial)
+			if partialSaveErr != nil {
+				logger.Error("save valid questions before correction failed", "run_id", runID, "record_id", recordID, "error", partialSaveErr)
+				return fmt.Errorf("cannot save questions: run expired or database write failed")
+			}
+			if documentErr != nil && len(questions) == 0 {
+				logger.Warn("question generation document skipped", "run_id", runID, "record_id", recordID, "error", documentErr)
+				if req.InputRecordID > 0 {
+					return documentErr
+				}
+				lastFailure = documentErr.Error()
 				continue
 			}
-			duplicate := false
+			unique := make([]generatedQuestion, 0, len(questions))
 			for _, q := range questions {
-				if seenQuestions[strings.ToLower(strings.Join(strings.Fields(q.Question), " "))] {
-					duplicate = true
-					break
+				if persisted[fmt.Sprintf("%d/%s", q.SetNo, q.HopType)] {
+					continue
 				}
+				if seenQuestions[strings.ToLower(strings.Join(strings.Fields(q.Question), " "))] {
+					documentErr = errors.Join(documentErr, fmt.Errorf("model repeated a previously generated question"))
+					continue
+				}
+				unique = append(unique, q)
 			}
-			if duplicate {
+			questions = unique
+			if len(questions) == 0 && !documentSaved {
 				sawDuplicate = true
 				lastFailure = "model repeated a previously generated question"
 				logger.Warn("duplicate metric question document retried", "run_id", runID, "record_id", recordID)
 				continue
 			}
+			if documentErr != nil {
+				documentErrors = append(documentErrors, fmt.Errorf("record %d: %w", recordID, documentErr))
+				logger.Warn("saving valid questions from incomplete document", "run_id", runID, "record_id", recordID, "saved_questions", len(persistedQuestions)+len(questions), "error", documentErr)
+			}
 			next := generated.add(counts)
-			done := questionDocumentCounts(req, next).total() == 0
-			if err := saveGeneratedQuestions(ctx, db, runID, recordID, questions, done); err != nil {
-				logger.Error("save generated document questions failed", "run_id", runID, "record_id", recordID, "error", err)
-				return fmt.Errorf("cannot save questions: run expired or database write failed")
+			finished := questionDocumentCounts(req, next).total() == 0
+			done := finished && len(documentErrors) == 0
+			if len(questions) > 0 || done {
+				if err := saveGeneratedQuestionBatch(ctx, db, runID, recordID, questions, done, !documentSaved); err != nil {
+					logger.Error("save generated document questions failed", "run_id", runID, "record_id", recordID, "error", err)
+					return fmt.Errorf("cannot save questions: run expired or database write failed")
+				}
 			}
 			generated = next
-			for _, q := range questions {
+			for _, q := range append(persistedQuestions, questions...) {
 				previousQuestions = append(previousQuestions, q.Question)
 				seenQuestions[strings.ToLower(strings.Join(strings.Fields(q.Question), " "))] = true
 			}
 			documentsDone++
-			logger.Info("metric question document saved", "run_id", runID, "record_id", recordID, "one_hop", counts.OneHop, "two_hop", counts.TwoHop, "multi_hop", counts.MultiHop)
-			if done {
-				return nil
+			logger.Info("metric question document saved", "run_id", runID, "record_id", recordID, "saved_questions", len(persistedQuestions)+len(questions), "requested_questions", counts.total())
+			if finished {
+				return errors.Join(documentErrors...)
 			}
 		}
 		if documentsDone == 0 {
@@ -262,7 +306,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 		}
 		duplicatePasses = 0
 	}
-	return nil
+	return errors.Join(documentErrors...)
 }
 
 func loadGroundedQuestionMetrics(ctx context.Context, db *sql.DB, recordID int64, logger ApiTypes.JimoLogger) ([]metricReviewInputMetric, []docprocessing.Line, error) {
@@ -298,7 +342,7 @@ func loadGroundedQuestionMetrics(ctx context.Context, db *sql.DB, recordID int64
 	return grounded, lines, nil
 }
 
-func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64, req questionGenerationRequest, cfg ApiTypes.LLMModelDef, client metricJSONExtractor, promptName, prompt, userID string, previousQuestions []string, logger ApiTypes.JimoLogger) ([]generatedQuestion, error) {
+func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64, req questionGenerationRequest, cfg ApiTypes.LLMModelDef, client metricJSONExtractor, promptName, prompt, userID string, previousQuestions []string, logger ApiTypes.JimoLogger, persistPartial ...func([]generatedQuestion) error) ([]generatedQuestion, error) {
 	grounded, lines := req.preparedMetrics, req.preparedLines
 	if grounded == nil {
 		var err error
@@ -351,32 +395,60 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 		PreviousResponse  map[string]any           `json:"previous_response,omitempty"`
 	}{DocumentMetadata: metadata, RunID: runID, InputRecordID: req.InputRecordID,
 		Purpose: req.Purpose, Description: req.Description, Sets: sets, PreviousQuestions: previousQuestions}
+	accepted := []generatedQuestion{}
+	acceptedSlots := map[string]bool{}
+	acceptedText := map[string]bool{}
+	wanted := 0
+	for _, set := range sets {
+		wanted += len(set.Questions)
+	}
+	var lastValidationErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return accepted, errors.Join(lastValidationErr, err)
 		}
 		input, err := json.Marshal(request)
 		if err != nil {
-			return nil, fmt.Errorf("cannot format metric question input")
+			return accepted, fmt.Errorf("cannot format metric question input")
 		}
 		if utf8.RuneCount(input) > questionGenerationMaxInputChars {
-			return nil, fmt.Errorf("document and metric context too large after formatting")
+			return accepted, fmt.Errorf("document and metric context too large after formatting")
 		}
 		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: runID, RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
 		if err != nil {
 			logger.Error("metric question model call failed", "run_id", runID, "record_id", req.InputRecordID, "error", err)
-			return nil, fmt.Errorf("question generation model request failed or timed out")
+			return accepted, errors.Join(lastValidationErr, fmt.Errorf("question generation model request failed or timed out"))
 		}
-		questions, err := validateMetricQuestions(payload, req, source, sets, hash)
-		if err == nil {
-			return questions, nil
+		questions, validationErr := collectMetricQuestions(payload, req, source, sets, hash, acceptedSlots)
+		for _, q := range questions {
+			key := fmt.Sprintf("%d/%s", q.SetNo, q.HopType)
+			if acceptedSlots[key] {
+				continue
+			}
+			text := strings.ToLower(strings.Join(strings.Fields(q.Question), " "))
+			if acceptedText[text] {
+				validationErr = errors.Join(validationErr, fmt.Errorf("question for set %d (%s) duplicates an accepted question", q.SetNo, q.HopType))
+				continue
+			}
+			accepted = append(accepted, q)
+			acceptedSlots[key], acceptedText[text] = true, true
+		}
+		if len(accepted) == wanted {
+			return accepted, nil
+		}
+		lastValidationErr = validationErr
+		// Commit successful rows before a correction call can fail, time out, or be interrupted.
+		if attempt == 0 && len(accepted) > 0 && len(persistPartial) > 0 {
+			if err := persistPartial[0](accepted); err != nil {
+				return accepted, err
+			}
 		}
 		// Give malformed model output one correction attempt without changing its
 		// sampled metrics, language targets, or source evidence. Never relax validation.
 		if attempt == 1 {
-			return nil, err
+			return accepted, validationErr
 		}
-		logger.Warn("metric question output invalid; requesting correction", "run_id", runID, "record_id", req.InputRecordID, "error", err)
-		request.ValidationError, request.PreviousResponse = err.Error(), payload
+		logger.Warn("metric question output invalid; requesting correction", "run_id", runID, "record_id", req.InputRecordID, "accepted_questions", len(accepted), "error", validationErr)
+		request.ValidationError, request.PreviousResponse = validationErr.Error(), payload
 	}
 }

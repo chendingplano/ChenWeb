@@ -7424,6 +7424,7 @@
 	"qg_create_error": "无法启动生成。请检查生成设置和网络连接后重试。",
 	"qg_running_hint": "正在生成。此任务会自动刷新，也可稍后返回查看。",
 	"qg_generation_failed": "生成失败。请查看诊断详情，必要时创建新任务。",
+	"qg_generation_partial": "生成未全部完成。已保存 {count} 个有效问题，可在“生成的问题”中查看。请查看诊断详情了解其余失败原因。",
 	"qg_error_detail": "诊断详情（服务器原始消息）",
 	"qg_answer": "参考答案",
 	"qg_reasoning_evidence": "推理与原文证据",

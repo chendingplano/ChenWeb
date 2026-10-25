@@ -109,6 +109,11 @@ func loadQuestionRun(ctx context.Context, db *sql.DB, id int64) (questionGenerat
 // Each document and its progress commit together. A late worker cannot change a
 // terminal run; documents committed before a later failure remain available.
 func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int64, questions []generatedQuestion, done bool) error {
+	return saveGeneratedQuestionBatch(ctx, db, runID, recordID, questions, done, true)
+}
+
+// Correction attempts may add questions to a document that was already counted.
+func saveGeneratedQuestionBatch(ctx context.Context, db *sql.DB, runID, recordID int64, questions []generatedQuestion, done, countDocument bool) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -150,13 +155,17 @@ func saveGeneratedQuestions(ctx context.Context, db *sql.DB, runID, recordID int
 			return err
 		}
 	}
+	documentIncrement := "0"
+	if countDocument {
+		documentIncrement = "1"
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE testbed.generated_question_runs SET
  status = CASE WHEN $2 THEN 'done' ELSE 'running' END,
  finished_at = CASE WHEN $2 THEN NOW() ELSE finished_at END,
  generated_one_hop_count = generated_one_hop_count + $3,
  generated_two_hop_count = generated_two_hop_count + $4,
  generated_multi_hop_count = generated_multi_hop_count + $5,
- documents_processed = documents_processed + 1
+ documents_processed = documents_processed + `+documentIncrement+`
  WHERE id = $1 AND status = 'running' AND expires_at > NOW()`, runID, done, oneHop, twoHop, multiHop)
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package kbhandler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sort"
@@ -212,58 +213,87 @@ func metricEvidenceLineIDs(metric metricReviewInputMetric, source map[int]string
 }
 
 func validateMetricQuestions(payload map[string]any, req questionGenerationRequest, source map[int]string, sets []metricQuestionSet, hash string) ([]generatedQuestion, error) {
-	questions, err := validateGeneratedQuestions(payload, req, source)
+	questions, err := collectMetricQuestions(payload, req, source, sets, hash, nil)
 	if err != nil {
 		return nil, err
 	}
+	return questions, nil
+}
+
+func collectMetricQuestions(payload map[string]any, req questionGenerationRequest, source map[int]string, sets []metricQuestionSet, hash string, retainedSlots map[string]bool) ([]generatedQuestion, error) {
+	questions, positions, structuralErr := collectGeneratedQuestions(payload, req, source, false)
+	validationErrors := []error{structuralErr}
+	accepted := make([]generatedQuestion, 0, len(questions))
+	seenText := map[string]int{}
 	expected := map[string]metricQuestionTarget{}
 	anchors := map[int]questionGenerationMetric{}
 	for _, set := range sets {
 		anchors[set.SetNo] = set.Metric
 		for _, target := range set.Questions {
-			expected[fmt.Sprintf("%d/%s", set.SetNo, target.HopType)] = target
+			key := fmt.Sprintf("%d/%s", set.SetNo, target.HopType)
+			if !retainedSlots[key] {
+				expected[key] = target
+			}
 		}
 	}
 	for i := range questions {
 		q := &questions[i]
-		key := fmt.Sprintf("%d/%s", q.SetNo, q.HopType)
-		target, ok := expected[key]
-		if !ok || q.Lang != target.Lang {
-			return nil, fmt.Errorf("question %d has an unexpected set, hop type, or language", i+1)
+		// A correction cannot replace an earlier accepted slot. Ignore its replacement
+		// before checking duplicate text, so it cannot disqualify an unresolved slot.
+		if retainedSlots[fmt.Sprintf("%d/%s", q.SetNo, q.HopType)] {
+			continue
 		}
-		delete(expected, key)
-		metric := anchors[q.SetNo]
-		anchorLines := metricEvidenceLineIDs(metric.metricReviewInputMetric, source)
-		allowed := make(map[int]bool, len(metric.ContextLineIDs))
-		for _, id := range metric.ContextLineIDs {
-			allowed[id] = true
-		}
-		anchored := false
-		for _, e := range q.Evidence {
-			if !allowed[e.LineID] {
-				return nil, fmt.Errorf("question %d cites line %d outside its selected metric context", i+1, e.LineID)
+		err := func() error {
+			key := fmt.Sprintf("%d/%s", q.SetNo, q.HopType)
+			target, ok := expected[key]
+			if !ok || q.Lang != target.Lang {
+				return fmt.Errorf("question %d has an unexpected set, hop type, or language", positions[i])
 			}
-			if anchorLines[e.LineID] {
-				anchored = true
+			metric := anchors[q.SetNo]
+			anchorLines := metricEvidenceLineIDs(metric.metricReviewInputMetric, source)
+			allowed := make(map[int]bool, len(metric.ContextLineIDs))
+			for _, id := range metric.ContextLineIDs {
+				allowed[id] = true
 			}
-		}
-		if !anchored {
-			return nil, fmt.Errorf("question %d does not cite its selected metric's source lines", i+1)
-		}
-		if err := checkMetricNameLeak(*q, metric); err != nil {
-			return nil, fmt.Errorf("question %d %w", i+1, err)
-		}
-		q.MetricID = metric.MetricID
-		q.MetricSnapshot, err = json.Marshal(metric)
+			anchored := false
+			for _, e := range q.Evidence {
+				if !allowed[e.LineID] {
+					return fmt.Errorf("question %d cites line %d outside its selected metric context", positions[i], e.LineID)
+				}
+				if anchorLines[e.LineID] {
+					anchored = true
+				}
+			}
+			if !anchored {
+				return fmt.Errorf("question %d does not cite its selected metric's source lines", positions[i])
+			}
+			if err := checkMetricNameLeak(*q, metric); err != nil {
+				return fmt.Errorf("question %d %w", positions[i], err)
+			}
+			text := strings.ToLower(strings.Join(strings.Fields(q.Question), " "))
+			if previous := seenText[text]; previous != 0 {
+				return fmt.Errorf("question %d duplicates question %d (ignoring case and whitespace); provide a distinct question", positions[i], previous)
+			}
+			q.MetricID = metric.MetricID
+			snapshot, err := json.Marshal(metric)
+			if err != nil {
+				return err
+			}
+			q.MetricSnapshot = snapshot
+			q.SourceSHA256 = hash
+			delete(expected, key)
+			accepted = append(accepted, *q)
+			seenText[text] = positions[i]
+			return nil
+		}()
 		if err != nil {
-			return nil, err
+			validationErrors = append(validationErrors, err)
 		}
-		q.SourceSHA256 = hash
 	}
 	if len(expected) != 0 {
-		return nil, fmt.Errorf("model omitted requested metric question sets")
+		validationErrors = append(validationErrors, fmt.Errorf("%d requested metric questions are missing or rejected", len(expected)))
 	}
-	return questions, nil
+	return accepted, errors.Join(validationErrors...)
 }
 
 // checkMetricNameLeak rejects a two- or multi-hop question that contains its target metric's name

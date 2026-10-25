@@ -208,42 +208,58 @@ func buildQuestionGenerationSource(lines []docprocessing.Line) (string, map[int]
 }
 
 func validateGeneratedQuestions(payload map[string]any, req questionGenerationRequest, source map[int]string) ([]generatedQuestion, error) {
-	raw, err := json.Marshal(payload)
+	questions, _, err := collectGeneratedQuestions(payload, req, source, true)
 	if err != nil {
 		return nil, err
 	}
+	return questions, nil
+}
+
+// Keep independently valid rows and their original response positions for diagnostics.
+func collectGeneratedQuestions(payload map[string]any, req questionGenerationRequest, source map[int]string, checkDuplicates bool) ([]generatedQuestion, []int, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	type outputQuestion struct {
+		HopType        string   `json:"hop_type"`
+		Question       string   `json:"question"`
+		Answer         string   `json:"answer"`
+		ReasoningSteps []string `json:"reasoning_steps"`
+		LineIDs        []int    `json:"line_ids"`
+		StepLineIDs    [][]int  `json:"step_line_ids"`
+		SetNo          int      `json:"set_no"`
+		Lang           string   `json:"lang"`
+		Reasoning      []struct {
+			Text    string `json:"text"`
+			LineIDs []int  `json:"line_ids"`
+		} `json:"reasoning"`
+	}
 	var output struct {
-		Questions []struct {
-			HopType        string   `json:"hop_type"`
-			Question       string   `json:"question"`
-			Answer         string   `json:"answer"`
-			ReasoningSteps []string `json:"reasoning_steps"`
-			LineIDs        []int    `json:"line_ids"`
-			StepLineIDs    [][]int  `json:"step_line_ids"`
-			SetNo          int      `json:"set_no"`
-			Lang           string   `json:"lang"`
-			Reasoning      []struct {
-				Text    string `json:"text"`
-				LineIDs []int  `json:"line_ids"`
-			} `json:"reasoning"`
-		} `json:"questions"`
+		Questions []json.RawMessage `json:"questions"`
 	}
 	if err := json.Unmarshal(raw, &output); err != nil {
-		return nil, fmt.Errorf("invalid question output: %w", err)
+		return nil, nil, fmt.Errorf("invalid question output: %w", err)
 	}
 	expected := map[string]int{"one_hop": *req.OneHopCount, "two_hop": *req.TwoHopCount, "multi_hop": *req.MultiHopCount}
 	minima := map[string]int{"one_hop": 1, "two_hop": 2, "multi_hop": 3}
-	if len(output.Questions) != *req.OneHopCount+*req.TwoHopCount+*req.MultiHopCount {
-		return nil, fmt.Errorf("model returned the wrong total question count")
-	}
 	counts := map[string]int{}
 	seen := map[string]int{}
 	var validationErrors []error
+	if len(output.Questions) != *req.OneHopCount+*req.TwoHopCount+*req.MultiHopCount {
+		validationErrors = append(validationErrors, fmt.Errorf("model returned the wrong total question count"))
+	}
 	questions := make([]generatedQuestion, 0, len(output.Questions))
-	for i, q := range output.Questions {
+	positions := make([]int, 0, len(output.Questions))
+	for i, rawQuestion := range output.Questions {
+		var q outputQuestion
+		if err := json.Unmarshal(rawQuestion, &q); err != nil {
+			validationErrors = append(validationErrors, fmt.Errorf("question %d has invalid output: %w", i+1, err))
+			continue
+		}
 		counts[q.HopType]++
 		// Check every question so a correction request also exposes errors later
-		// in the response. A malformed question never yields saved partial output.
+		// in the response; malformed rows never enter the accepted output.
 		err := func() error {
 			minimum, ok := minima[q.HopType]
 			if !ok {
@@ -255,13 +271,10 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 				return fmt.Errorf("question %d has empty question text", i+1)
 			}
 			previous := seen[key]
-			if previous == 0 {
-				seen[key] = i + 1
-			}
 			if q.Answer == "" {
 				return fmt.Errorf("question %d has no answer", i+1)
 			}
-			if previous != 0 {
+			if checkDuplicates && previous != 0 {
 				return fmt.Errorf("question %d duplicates question %d (ignoring case and whitespace); provide a distinct question", i+1, previous)
 			}
 			if q.Reasoning != nil {
@@ -319,6 +332,8 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 				return fmt.Errorf("question %d has evidence unused by its reasoning", i+1)
 			}
 			questions = append(questions, generatedQuestion{InputRecordID: req.InputRecordID, HopType: q.HopType, Question: q.Question, Answer: q.Answer, ReasoningSteps: q.ReasoningSteps, StepLineIDs: q.StepLineIDs, Evidence: evidence, SetNo: q.SetNo, Lang: q.Lang})
+			seen[key] = i + 1
+			positions = append(positions, i+1)
 			return nil
 		}()
 		if err != nil {
@@ -330,8 +345,5 @@ func validateGeneratedQuestions(payload map[string]any, req questionGenerationRe
 			validationErrors = append(validationErrors, fmt.Errorf("model returned %d %s questions; expected %d", counts[hop], hop, n))
 		}
 	}
-	if err := errors.Join(validationErrors...); err != nil {
-		return nil, err
-	}
-	return questions, nil
+	return questions, positions, errors.Join(validationErrors...)
 }

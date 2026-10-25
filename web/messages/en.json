@@ -7424,6 +7424,7 @@
 	"qg_create_error": "Could not start generation. Check the generation settings and your connection, then try again.",
 	"qg_running_hint": "Generation is in progress. This run refreshes automatically; you can return to it later.",
 	"qg_generation_failed": "Generation failed. Review the diagnostic details, then start a new run if needed.",
+	"qg_generation_partial": "Generation incomplete. Saved {count} successful questions; they remain available in Generated questions. Review the diagnostic details for the remaining failures.",
 	"qg_error_detail": "Diagnostic details (original server message)",
 	"qg_answer": "Reference answer",
 	"qg_reasoning_evidence": "Reasoning and source evidence",

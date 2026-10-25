@@ -465,4 +465,63 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 			t.Fatalf("count re-up: %v", err)
 		}
 	})
+	t.Run("preserve partial questions and count a document once", func(t *testing.T) {
+		var id int64
+		if err := db.QueryRowContext(ctx, `INSERT INTO testbed.generated_question_runs
+ (input_record_id,purpose,lang,model_ref,prompt_name,one_hop_count,two_hop_count,multi_hop_count,
+ total_one_hop_count,total_two_hop_count,total_multi_hop_count)
+ VALUES (416,'search_metrics','mixed','fixture','fixture',1,1,1,1,1,1) RETURNING id`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","metrics_per_document":1}`)
+		if err := req.normalize(); err != nil {
+			t.Fatal(err)
+		}
+		sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", MetricName: "保温层长度", SourceLineSpans: json.RawMessage(`["101"]`)}, ContextLineIDs: []int{101}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "en"}, {HopType: "two_hop", Lang: "en"}, {HopType: "multi_hop", Lang: "en"}}}}
+		questions, rejection := collectMetricQuestions(partialQuestionPayload(), req, map[int]string{101: "Protective material extends 1 m."}, sets, "fixture-hash", nil)
+		if rejection == nil || len(questions) != 2 {
+			t.Fatalf("questions=%d rejection=%v", len(questions), rejection)
+		}
+		if err := saveGeneratedQuestionBatch(ctx, db, id, 416, questions, false, true); err != nil {
+			t.Fatal(err)
+		}
+		run, saved, err := loadQuestionRun(ctx, db, id)
+		if err != nil || len(saved) != 2 || run.GeneratedOneHopCount != 1 || run.GeneratedTwoHopCount != 1 || run.GeneratedMultiHopCount != 0 || run.DocumentsProcessed != 1 {
+			t.Fatalf("partial run=%+v saved=%d error=%v", run, len(saved), err)
+		}
+		// The worker's terminal failure update must preserve both questions and progress.
+		if _, err := db.ExecContext(ctx, `UPDATE testbed.generated_question_runs SET status='failed',error_msg=$2,finished_at=NOW() WHERE id=$1`, id, rejection.Error()); err != nil {
+			t.Fatal(err)
+		}
+		run, saved, err = loadQuestionRun(ctx, db, id)
+		if err != nil || run.Status != "failed" || len(saved) != 2 {
+			t.Fatalf("failed run=%+v saved=%d error=%v", run, len(saved), err)
+		}
+		// Use a second run to verify that a corrected question is appended without recounting the document.
+		var correctedRunID int64
+		if err := db.QueryRowContext(ctx, `INSERT INTO testbed.generated_question_runs
+ (input_record_id,purpose,lang,model_ref,prompt_name,one_hop_count,two_hop_count,multi_hop_count,
+ total_one_hop_count,total_two_hop_count,total_multi_hop_count)
+ SELECT input_record_id,purpose,lang,model_ref,prompt_name,one_hop_count,two_hop_count,multi_hop_count,
+ total_one_hop_count,total_two_hop_count,total_multi_hop_count FROM testbed.generated_question_runs WHERE id=$1 RETURNING id`, id).Scan(&correctedRunID); err != nil {
+			t.Fatal(err)
+		}
+		id = correctedRunID
+		if err := saveGeneratedQuestionBatch(ctx, db, id, 416, questions, false, true); err != nil {
+			t.Fatal(err)
+		}
+		payload := partialQuestionPayload()
+		payload["questions"].([]any)[2].(map[string]any)["question"] = "How far must protection extend after considering the setup?"
+		repaired, err := collectMetricQuestions(payload, req, map[int]string{101: "Protective material extends 1 m."}, sets, "fixture-hash", map[string]bool{"1/one_hop": true, "1/two_hop": true})
+		if err != nil || len(repaired) != 1 {
+			t.Fatalf("repaired=%d error=%v", len(repaired), err)
+		}
+		if err := saveGeneratedQuestionBatch(ctx, db, id, 416, repaired, true, false); err != nil {
+			t.Fatal(err)
+		}
+		run, saved, err = loadQuestionRun(ctx, db, id)
+		if err != nil || run.Status != "done" || len(saved) != 3 || run.DocumentsProcessed != 1 || run.GeneratedMultiHopCount != 1 {
+			t.Fatalf("corrected run=%+v saved=%d error=%v", run, len(saved), err)
+		}
+	})
 }

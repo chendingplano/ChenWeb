@@ -101,6 +101,38 @@ error that the correction round passes back to the model.
 - **WHEN** a one-hop question contains its metric's name
 - **THEN** validation accepts it
 
+### Requirement: Preserve independently valid questions
+Generation SHALL validate questions independently and preserve all accepted questions even when
+other rows are malformed, omitted, duplicated, ungrounded, or fail the name-leak rule. An initial
+response's accepted rows SHALL be committed before requesting its one correction attempt. The
+correction SHALL use the same sampled metrics, language targets and source snapshot, and SHALL
+only fill unresolved `(set_no, hop_type)` slots. Earlier accepted rows SHALL NOT be overwritten
+or discarded if a correction regresses, fails, times out, or is interrupted. Duplicate checks
+SHALL consider retained questions, ignoring replacements for already-accepted slots.
+
+Each write SHALL atomically insert accepted rows and update actual saved per-hop counts. A
+document visit SHALL increment documents_processed once, even when a correction appends rows.
+Unresolved questions SHALL leave the job Failed, with its saved questions and rejection
+diagnostics accessible. The status panel SHALL report the saved count in English and Chinese.
+Batch generation SHALL continue its planned metric-set budget across other documents and retain
+all successful rows, without silently resampling metrics to replace rejected slots.
+
+#### Scenario: One question still fails
+- **WHEN** two questions pass and a third still leaks its target metric name after correction
+- **THEN** the two successful questions remain saved, counters are 1/1/0 by hop, and the job is Failed
+
+#### Scenario: Correction regresses a successful question
+- **WHEN** an initial valid question becomes invalid in the correction while the missing question is repaired
+- **THEN** the initial valid version and the newly repaired question are retained and the job completes
+
+#### Scenario: Correction fails after partial commit
+- **WHEN** valid questions have been saved and the correction model fails or the worker is cancelled
+- **THEN** the saved questions and counters remain intact
+
+#### Scenario: Original response position
+- **WHEN** question 57 fails after earlier invalid rows have been removed from accepted output
+- **THEN** the diagnostic still identifies its original response position as question 57
+
 ### Requirement: English name in the model input
 The model input for each sampled metric SHALL include `metric_name_en` when `kb.metrics` has one.
 If the English names cannot be loaded, generation SHALL continue and the check SHALL use the

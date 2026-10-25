@@ -99,6 +99,10 @@
 		lang === 'en' ? m.qg_english() : lang === 'zh-cn' ? m.qg_chinese() : lang || m.qg_mixed();
 	const statusLabel = (status: QuestionRun['status']) =>
 		status === 'running' ? m.qg_running() : status === 'done' ? m.qg_done() : m.qg_failed();
+	const savedCount = (run: QuestionRun) =>
+		(run.generated_one_hop_count ?? 0) +
+		(run.generated_two_hop_count ?? 0) +
+		(run.generated_multi_hop_count ?? 0);
 	const progress = (run: QuestionRun, hop: GeneratedQuestion['hop_type']) =>
 		m.qg_progress_count({
 			count: run[`generated_${hop}_count`] ?? runQuestions.filter((q) => q.hop_type === hop).length,
@@ -411,7 +415,9 @@
 			{#if pollError}<p class="error" role="alert">{m.qg_load_error()}</p>
 				<button onclick={() => void poll(activeRun!.id)}>{m.qg_retry()}</button>{/if}
 			{#if activeRun.status === 'failed'}<p role="alert" class="error">
-					{m.qg_generation_failed()}
+					{savedCount(activeRun) > 0
+						? m.qg_generation_partial({ count: savedCount(activeRun) })
+						: m.qg_generation_failed()}
 				</p>
 				{#if activeRun.error_msg}<details>
 						<summary>{m.qg_error_detail()}</summary>

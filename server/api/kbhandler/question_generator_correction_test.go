@@ -137,10 +137,12 @@ func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 				}
 			} else {
 				expectedCalls := 2
+				expectedQuestions := 1
 				if mode == "provider-error" {
 					expectedCalls = 1
+					expectedQuestions = 0
 				}
-				if err == nil || len(qs) != 0 || calls != expectedCalls {
+				if err == nil || len(qs) != expectedQuestions || calls != expectedCalls {
 					t.Fatalf("questions=%d calls=%d error=%v", len(qs), calls, err)
 				}
 			}
