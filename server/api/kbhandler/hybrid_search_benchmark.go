@@ -65,7 +65,10 @@ type hybridBenchRequest struct {
 	SemanticWeight *float64 `json:"semantic_weight"`
 	CandidateLimit *int     `json:"candidate_limit"`
 	Parallelism    *int     `json:"parallelism"`
+	QuestionIDs    []int64  `json:"question_ids"` // empty: every question of the purpose
 }
+
+var errHybridBenchSelection = errors.New("some selected questions do not exist or have another purpose")
 
 func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBenchOptions, error) {
 	r.Purpose = strings.TrimSpace(r.Purpose)
@@ -99,7 +102,11 @@ func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBench
 		return opts, errors.New("candidates per list must be between 1 and 1000")
 	case opts.Parallelism < 1 || opts.Parallelism > hybridBenchMaxParallelism:
 		return opts, errors.New("parallel queries must be between 1 and 32")
+	case len(r.QuestionIDs) > hybridBenchMaxSelected:
+		return opts, errors.New("too many selected questions")
 	}
+	slices.Sort(r.QuestionIDs)
+	r.QuestionIDs = slices.Compact(r.QuestionIDs)
 	return opts, nil
 }
 

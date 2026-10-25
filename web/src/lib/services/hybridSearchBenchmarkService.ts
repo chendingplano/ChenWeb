@@ -70,7 +70,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 	return response.json();
 }
 export function startBenchmarkRun(
-	payload: { purpose: string; description: string } & HybridBenchmarkOptions,
+	payload: {
+		purpose: string;
+		description: string;
+		question_ids: number[];
+	} & HybridBenchmarkOptions,
 	signal?: AbortSignal
 ) {
 	return request<{ run: HybridBenchmarkRun }>(BASE, {
@@ -93,4 +97,40 @@ export function getBenchmarkRun(id: number, signal?: AbortSignal) {
 		scores: HybridBenchmarkScore[];
 		results: HybridBenchmarkResult[];
 	}>(`${BASE}/${id}`, { signal });
+}
+
+// Questions of one purpose matching the "Tests to run" filters (all matches up to `limit`).
+export type BenchmarkQuestionFilters = {
+	purpose: string;
+	created_from: string;
+	created_to: string;
+	run_id: string;
+	hop_type: string;
+	lang: string;
+	input_record_id: string;
+	question: string;
+	answer: string;
+	metric_id: string;
+};
+export type BenchmarkQuestion = {
+	id: number;
+	run_id: number;
+	input_record_id: number;
+	hop_type: 'one_hop' | 'two_hop' | 'multi_hop';
+	lang: 'en' | 'zh-cn';
+	metric_id: string;
+	question: string;
+	answer: string;
+	created_at: string;
+};
+export function listBenchmarkQuestions(filters: BenchmarkQuestionFilters, signal?: AbortSignal) {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(filters)) {
+		const v = value.trim();
+		if (v) params.set(key, key.startsWith('created_') ? new Date(v).toISOString() : v);
+	}
+	return request<{ questions: BenchmarkQuestion[]; total: number; limit: number }>(
+		`/api/v1/kb/hybrid-search-benchmark/questions?${params}`,
+		{ signal }
+	);
 }

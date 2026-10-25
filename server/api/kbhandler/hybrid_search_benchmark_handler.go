@@ -40,7 +40,7 @@ func scanHybridBenchRun(row interface{ Scan(...any) error }, extra ...any) (hybr
 func StartHybridSearchBenchmark(c echo.Context) error {
 	logger := loggerutil.CreateDefaultLogger("20261024-741")
 	var req hybridBenchRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 16*1024))
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 128*1024))
 	if err := decoder.Decode(&req); err != nil {
 		return questionGenerationError(c, http.StatusBadRequest, "invalid request body")
 	}
@@ -49,7 +49,10 @@ func StartHybridSearchBenchmark(c echo.Context) error {
 		return questionGenerationError(c, http.StatusBadRequest, err.Error())
 	}
 	db, ctx := ApiTypes.ProjectDBHandle, c.Request().Context()
-	questions, err := loadHybridBenchQuestions(ctx, db, req.Purpose)
+	questions, err := loadHybridBenchQuestions(ctx, db, req.Purpose, req.QuestionIDs)
+	if errors.Is(err, errHybridBenchSelection) {
+		return questionGenerationError(c, http.StatusBadRequest, err.Error())
+	}
 	if err != nil {
 		logger.Error("load benchmark questions failed", "purpose", req.Purpose, "error", err)
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load questions")
@@ -76,7 +79,7 @@ func StartHybridSearchBenchmark(c echo.Context) error {
 	}
 	logger.Info("hybrid search benchmark started", "run_id", run.ID, "purpose", run.Purpose,
 		"questions", run.QuestionCount, "lexical_backend", run.LexicalBackend, "query_keywords", run.QueryKeywords,
-		"lexical_weight", run.LexicalWeight, "semantic_weight", run.SemanticWeight, "candidate_limit", run.CandidateLimit, "parallelism", run.Parallelism, "user_id", userID)
+		"lexical_weight", run.LexicalWeight, "semantic_weight", run.SemanticWeight, "candidate_limit", run.CandidateLimit, "parallelism", run.Parallelism, "selected_questions", len(req.QuestionIDs), "user_id", userID)
 	launchHybridSearchBenchmark(db, run, questions)
 	return c.JSON(http.StatusAccepted, map[string]any{"run": run})
 }
@@ -142,24 +145,6 @@ func GetHybridSearchBenchmarkRun(c echo.Context) error {
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load benchmark run")
 	}
 	return c.JSON(http.StatusOK, map[string]any{"run": run, "scores": scoreHybridBench(results), "results": results})
-}
-
-func loadHybridBenchQuestions(ctx context.Context, db *sql.DB, purpose string) ([]hybridBenchQuestion, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, input_record_id, hop_type, lang, question, metric_id
- FROM testbed.generated_questions WHERE purpose = $1 AND metric_id <> '' ORDER BY id`, purpose)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var questions []hybridBenchQuestion
-	for rows.Next() {
-		var q hybridBenchQuestion
-		if err := rows.Scan(&q.ID, &q.InputRecordID, &q.HopType, &q.Lang, &q.Question, &q.TargetArtifactID); err != nil {
-			return nil, err
-		}
-		questions = append(questions, q)
-	}
-	return questions, rows.Err()
 }
 
 func loadHybridBenchResults(ctx context.Context, db *sql.DB, runID int64) ([]hybridBenchResult, error) {

@@ -818,6 +818,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	hybridSearchBenchmark.POST("/runs", kbhandler.StartHybridSearchBenchmark)
 	hybridSearchBenchmark.GET("/runs", kbhandler.ListHybridSearchBenchmarkRuns)
 	hybridSearchBenchmark.GET("/runs/:id", kbhandler.GetHybridSearchBenchmarkRun)
+	hybridSearchBenchmark.GET("/questions", kbhandler.ListHybridSearchBenchmarkQuestions)
 	apiGroup.GET("/kb/metric-reviews/:record_id", kbhandler.GetMetricReview)
 	apiGroup.POST("/kb/metric-reviews/:record_id", kbhandler.StartMetricReview)
 	apiGroup.POST("/kb/metric-reviews/:record_id/translate", kbhandler.TranslateMetricReview)

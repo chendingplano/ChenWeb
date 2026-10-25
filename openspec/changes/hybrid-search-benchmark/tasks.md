@@ -41,3 +41,9 @@
 - [x] 7.2 Worker pool (option 1–32, default 8); results ordered by question
 - [x] 7.3 Keyword failure: no retries in the searches, recorded on the result
 - [x] 7.4 Tests, live check, spec 2026060201 §13.2
+
+## 8. Tests to run
+
+- [x] 8.1 `GET /kb/hybrid-search-benchmark/questions` with the dialog's filters; `question_ids` on run start
+- [x] 8.2 Dialog component with filters, per-question checkboxes, select all matching, clear
+- [x] 8.3 Tests, live check, spec 2026060201 §13.2

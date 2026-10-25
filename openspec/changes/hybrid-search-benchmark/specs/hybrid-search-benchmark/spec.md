@@ -71,6 +71,21 @@ prompt used.
 - **WHEN** both weights are 0 or candidates per list is outside 1–1000
 - **THEN** the request is rejected with HTTP 400
 
+### Requirement: Choose the questions to run
+The page SHALL offer a *Tests to run* dialog listing the questions of the selected purpose,
+searchable by creation time, question-generation run, hop type, language, input record, words in
+the question, words in the answer and metric ID, with a checkbox per question, select-all for the
+search result and clear. A run SHALL use the ticked questions, or every question of the purpose
+when none is ticked.
+
+#### Scenario: Cherry-picked questions
+- **WHEN** three questions are ticked and a run is started
+- **THEN** the run's question count is 3 and its results are exactly those questions
+
+#### Scenario: Foreign question
+- **WHEN** a run is requested with a question ID that does not exist or has another purpose
+- **THEN** the request is rejected with HTTP 400
+
 ### Requirement: Parallel questions
 A run SHALL search up to its *parallel queries* option (1–32, default 8) questions at the same
 time. A failed save or an expired run SHALL stop all workers.

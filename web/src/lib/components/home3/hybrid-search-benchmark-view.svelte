@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
+	import HybridSearchBenchmarkQuestions from './hybrid-search-benchmark-questions.svelte';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import {
 		startBenchmarkRun,
@@ -27,6 +28,8 @@
 		parallelism: 8
 	});
 	let optionsLoaded = false;
+	// Questions picked in "Tests to run"; empty = every question of the purpose.
+	let questionIds = $state<number[]>([]);
 	let starting = $state(false);
 	let startError = $state(false);
 	let runs = $state<HybridBenchmarkRun[]>([]);
@@ -165,7 +168,7 @@
 		startError = false;
 		try {
 			const { run } = await startBenchmarkRun(
-				{ purpose, description: description.trim(), ...options },
+				{ purpose, description: description.trim(), question_ids: questionIds, ...options },
 				startController.signal
 			);
 			if (!alive) return;
@@ -195,7 +198,11 @@
 		<div class="start-fields">
 			<div>
 				<label for="hsb-purpose">{m.qg_purpose()}</label>
-				<select id="hsb-purpose" bind:value={purpose} disabled={starting}
+				<select
+					id="hsb-purpose"
+					bind:value={purpose}
+					disabled={starting}
+					onchange={() => (questionIds = [])}
 					>{#each purposes as value}<option {value}>{purposeLabel(value)}</option>{/each}</select
 				>
 			</div>
@@ -212,6 +219,9 @@
 			<button class="primary" type="submit" disabled={starting || running || !validOptions}
 				>{starting ? m.qg_starting() : m.hsb_run()}</button
 			>
+		</div>
+		<div class="tests">
+			<HybridSearchBenchmarkQuestions {purpose} bind:selected={questionIds} disabled={starting} />
 		</div>
 		<div class="options">
 			<label class="check"
@@ -724,6 +734,13 @@
 		color: var(--muted);
 		font-size: 12px;
 		min-width: 160px;
+	}
+	.tests {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12px;
+		align-items: center;
+		margin-top: 16px;
 	}
 	.options {
 		display: flex;
