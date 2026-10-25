@@ -17,7 +17,7 @@ const (
 	questionGenerationMaxInputChars = 600000
 	questionGenerationTimeout       = 10 * time.Minute
 	questionGenerationBatchTimeout  = time.Hour
-	questionGenerationPrompt        = "prompt-question-generator-search-metrics-v2.md"
+	questionGenerationPrompt        = "prompt-question-generator-search-metrics-v3.md"
 )
 
 type questionGenerationRequest struct {

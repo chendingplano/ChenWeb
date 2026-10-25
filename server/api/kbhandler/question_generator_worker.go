@@ -19,6 +19,7 @@ var (
 	loadQuestionGenerationLines    = docprocessing.LoadRecordLinesByID
 	loadQuestionGenerationMetrics  = loadMetricReviewInputMetrics
 	loadQuestionGenerationMetadata = readQuestionDocumentMetadata
+	loadQuestionMetricEnglishNames = readQuestionMetricEnglishNames
 	questionGenerationCandidates   = randomQuestionDocumentIDs
 )
 
@@ -125,6 +126,24 @@ func metricSourceAvailable(metric metricReviewInputMetric, index map[int]string)
 		}
 	}
 	return true
+}
+
+func readQuestionMetricEnglishNames(ctx context.Context, db *sql.DB, recordID int64) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT metric_id, COALESCE(metric_name_en, '') FROM kb.metrics
+ WHERE input_record_id = $1 AND metric_id IS NOT NULL AND COALESCE(metric_name_en, '') <> ''`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		names[id] = name
+	}
+	return names, rows.Err()
 }
 
 // Sampling eligible inputs directly is equivalent to repeatedly drawing kb.inputs
@@ -284,6 +303,14 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 	sets, source, hash, err := buildMetricQuestionContexts(lines, sets)
 	if err != nil {
 		return nil, err
+	}
+	// English names only strengthen the name-leak check; without them the Chinese name is checked.
+	if names, err := loadQuestionMetricEnglishNames(ctx, db, req.InputRecordID); err != nil {
+		logger.Warn("load metric English names failed; name check uses the stored name only", "record_id", req.InputRecordID, "error", err)
+	} else {
+		for i := range sets {
+			sets[i].Metric.MetricNameEN = names[sets[i].Metric.MetricID]
+		}
 	}
 	metadata, err := loadQuestionGenerationMetadata(ctx, db, req.InputRecordID)
 	if err != nil {

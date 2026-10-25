@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
@@ -33,6 +34,9 @@ type metricQuestionTarget struct {
 }
 type questionGenerationMetric struct {
 	metricReviewInputMetric
+	// MetricNameEN lets the model avoid the English name too; two- and multi-hop questions may not
+	// contain either name (validateMetricQuestions).
+	MetricNameEN      string   `json:"metric_name_en,omitempty"`
 	Context           string   `json:"context"`
 	ContextLineIDs    []int    `json:"-"`
 	ContextLineRanges []string `json:"context_line_ranges"`
@@ -246,6 +250,9 @@ func validateMetricQuestions(payload map[string]any, req questionGenerationReque
 		if !anchored {
 			return nil, fmt.Errorf("question %d does not cite its selected metric's source lines", i+1)
 		}
+		if err := checkMetricNameLeak(*q, metric); err != nil {
+			return nil, fmt.Errorf("question %d %w", i+1, err)
+		}
 		q.MetricID = metric.MetricID
 		q.MetricSnapshot, err = json.Marshal(metric)
 		if err != nil {
@@ -257,4 +264,21 @@ func validateMetricQuestions(payload map[string]any, req questionGenerationReque
 		return nil, fmt.Errorf("model omitted requested metric question sets")
 	}
 	return questions, nil
+}
+
+// checkMetricNameLeak rejects a two- or multi-hop question that contains its target metric's name
+// (Chinese or English, case-insensitive). Those questions must describe the need, so a searcher has
+// to work out which metric to look up. Names under two characters are too generic to check.
+func checkMetricNameLeak(q generatedQuestion, metric questionGenerationMetric) error {
+	if q.HopType == "one_hop" {
+		return nil
+	}
+	question := strings.ToLower(q.Question)
+	for _, name := range []string{metric.MetricName, metric.MetricNameEN} {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if utf8.RuneCountInString(name) >= 2 && strings.Contains(question, name) {
+			return fmt.Errorf("(%s) contains its target metric name %q; describe the need or situation instead of naming the metric", q.HopType, name)
+		}
+	}
+	return nil
 }
