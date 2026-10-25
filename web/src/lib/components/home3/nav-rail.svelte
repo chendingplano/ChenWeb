@@ -464,6 +464,7 @@
 			icon: FlaskConicalIcon,
 			group: 'Development',
 			children: [
+				{ id: 'dev-modules', label: m.nav_dev_modules() },
 				{ id: 'sysadmin-system-code-monitor', label: m.nav_sysadmin_system_code_monitor() },
 				{
 					id: 'dev-demos',

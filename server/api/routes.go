@@ -61,6 +61,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
+	"github.com/chendingplano/deepdoc/server/api/reusablemodules"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
 	"github.com/chendingplano/deepdoc/server/api/terminologyresourcehandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
@@ -320,6 +321,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
+	apiGroup.GET("/reusable-modules", reusablemodules.Handler(ApiTypes.ProjectDBHandle))
 	monitorLoc, err := time.LoadLocation(appconfig.GetLLMConfig().WorkspaceTimezone)
 	if err != nil {
 		return fmt.Errorf("load code monitor timezone: %w", err)
