@@ -7442,5 +7442,7 @@
 	"qg_delete_hint": "将所选问题移至归档表",
 	"qg_delete_error": "无法归档所选问题，请重试。",
 	"qg_archived_count": "已将 {count} 个问题移至归档表。",
-	"qg_details": "详情"
+	"qg_details": "详情",
+	"qg_select_all": "全选",
+	"qg_select_all_hint": "选择本页的所有问题"
 }

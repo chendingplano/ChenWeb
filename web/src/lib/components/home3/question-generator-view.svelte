@@ -34,6 +34,10 @@
 	let questions = $state<GeneratedQuestion[]>([]);
 	let view = $state<'list' | 'cards'>('cards');
 	let selected = $state<number[]>([]);
+	let allSelected = $derived(
+		questions.length > 0 && questions.every((q) => selected.includes(q.id))
+	);
+	let partiallySelected = $derived(selected.length > 0 && !allSelected);
 	let deleting = $state(false);
 	let deleteError = $state(false);
 	let archivedCount = $state<number | null>(null);
@@ -100,6 +104,9 @@
 		pollController?.abort();
 		clearTimeout(timer);
 	});
+	function selectAll(checked: boolean) {
+		selected = checked ? questions.map((q) => q.id) : [];
+	}
 	function selectQuestion(id: number, checked: boolean) {
 		selected = checked ? [...new Set([...selected, id])] : selected.filter((value) => value !== id);
 	}
@@ -371,6 +378,7 @@
 				>
 			</div>
 			<div class="selection-actions">
+				{#if view === 'cards'}{@render selectAllControl()}{/if}
 				<span>{m.qg_selected_count({ count: selected.length })}</span>
 				<button
 					class="delete"
@@ -402,6 +410,18 @@
 		>
 			{#if view === 'cards'}{@render results()}{/if}
 		</div>
+		{#snippet selectAllControl()}
+			<label class="select-all" title={m.qg_select_all_hint()}>
+				<input
+					type="checkbox"
+					checked={allSelected}
+					indeterminate={partiallySelected}
+					disabled={loading || deleting || loadError || questions.length === 0}
+					onchange={(event) => selectAll(event.currentTarget.checked)}
+				/>
+				{m.qg_select_all()}
+			</label>
+		{/snippet}
 		{#snippet results()}
 			{#if loading}<p role="status">{m.qg_loading()}</p>
 			{:else if loadError}<p class="error" role="alert">{m.qg_load_error()}</p>
@@ -424,7 +444,9 @@
 					<table>
 						<thead
 							><tr>
-								<th>{m.qg_select()}</th><th>{m.qg_field_question()}</th><th>{m.qg_answer()}</th>
+								<th>{@render selectAllControl()}</th><th>{m.qg_field_question()}</th><th
+									>{m.qg_answer()}</th
+								>
 								<th>{m.qg_filter_run()}</th><th>{m.qg_filter_record()}</th><th
 									>{m.qg_filter_language()}</th
 								><th>{m.qg_reasoning_evidence()}</th>
@@ -740,6 +762,13 @@
 		justify-content: space-between;
 		flex-wrap: wrap;
 		margin-top: 20px;
+	}
+	.select-all {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		white-space: nowrap;
+		cursor: pointer;
 	}
 	.selection-actions {
 		font-size: 13px;

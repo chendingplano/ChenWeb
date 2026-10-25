@@ -7442,5 +7442,7 @@
 	"qg_delete_hint": "Move selected questions to the archive",
 	"qg_delete_error": "Could not archive the selected questions. Please try again.",
 	"qg_archived_count": "{count} questions moved to the archive.",
-	"qg_details": "Details"
+	"qg_details": "Details",
+	"qg_select_all": "Select All",
+	"qg_select_all_hint": "Select all questions on this page"
 }
