@@ -48,12 +48,32 @@ export type QuestionRequest = {
 	input_record_id: number;
 	purpose: 'search_metrics';
 	description: string;
-	metrics_per_document: number;
-	total_metrics: number;
+	metrics_per_document?: number;
+	total_metrics?: number;
+	num_questions_to_generate?: number;
+	confirmed_available_questions?: number;
 };
+
+export class QuestionCapacityError extends Error {
+	constructor(
+		public availableMetrics: number,
+		public availableQuestions: number,
+		public confirmationRequired: boolean
+	) {
+		super('question generation capacity');
+	}
+}
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 	const response = await fetch(url, { credentials: 'same-origin', ...options });
+	if (response.status === 409) {
+		const capacity = await response.json();
+		throw new QuestionCapacityError(
+			capacity.available_metrics,
+			capacity.available_questions,
+			capacity.confirmation_required
+		);
+	}
 	if (!response.ok) throw new Error(String(response.status));
 	return response.json();
 }

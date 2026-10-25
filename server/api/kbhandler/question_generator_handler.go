@@ -78,6 +78,30 @@ func StartQuestionGeneration(c echo.Context) error {
 		if !exists {
 			return questionGenerationError(c, http.StatusNotFound, "input record not found")
 		}
+		if req.NumQuestionsToGenerate != nil {
+			metrics, lines, err := loadGroundedQuestionMetrics(ctx, db, req.InputRecordID, logger)
+			if err != nil {
+				logger.Error("question generation capacity check failed", "record_id", req.InputRecordID, "error", err)
+				return questionGenerationError(c, http.StatusInternalServerError, err.Error())
+			}
+			available := len(metrics)
+			plannedQuestions := min(available, *req.OneHopCount) * 3
+			staleConfirmation := req.ConfirmedAvailableQuestions != nil && *req.ConfirmedAvailableQuestions != plannedQuestions
+			if available < *req.OneHopCount || staleConfirmation {
+				if available == 0 || req.ConfirmedAvailableQuestions == nil || staleConfirmation {
+					logger.Info("question generation needs capacity confirmation", "record_id", req.InputRecordID, "requested_questions", *req.NumQuestionsToGenerate, "available_questions", plannedQuestions)
+					return c.JSON(http.StatusConflict, map[string]any{
+						"confirmation_required": available > 0, "available_metrics": available,
+						"available_questions": plannedQuestions, "requested_questions": *req.NumQuestionsToGenerate,
+					})
+				}
+				for _, field := range []**int{&req.MetricsPerDocument, &req.TotalMetrics, &req.OneHopCount, &req.TwoHopCount, &req.MultiHopCount, &req.TotalOneHopCount, &req.TotalTwoHopCount, &req.TotalMultiHopCount} {
+					n := available
+					*field = &n
+				}
+			}
+			req.preparedMetrics, req.preparedLines = metrics, lines
+		}
 	}
 	modelRef := envOrDefault("QUESTION_GEN_MODEL_NAME", "deepseek-flash-processor")
 	userID, _ := c.Get("question-generator-user-id").(string)

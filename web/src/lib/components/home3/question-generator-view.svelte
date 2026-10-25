@@ -6,10 +6,12 @@
 	import {
 		archiveQuestions,
 		createQuestionRun,
+		QuestionCapacityError,
 		getQuestionRun,
 		listQuestions,
 		getQuestionFilters,
 		type QuestionRun,
+		type QuestionRequest,
 		type GeneratedQuestion,
 		type QuestionFilters,
 		type QuestionFilterOptions
@@ -52,9 +54,11 @@
 	let purpose = $state<'search_metrics'>('search_metrics');
 	let description = $state('');
 	let metricsPerDocument = $state(10);
+	let numQuestionsToGenerate = $state(30);
 	let totalMetrics = $state(10);
 	let saving = $state(false);
 	let createError = $state(false);
+	let capacityError = $state(false);
 	let activeRun = $state<QuestionRun | null>(null);
 	let runQuestions = $state<GeneratedQuestion[]>([]);
 	let pollError = $state(false);
@@ -71,11 +75,16 @@
 	let validRecord = $derived(Number.isSafeInteger(normalizedRecordID) && normalizedRecordID >= 0);
 	let valid = $derived(
 		validRecord &&
-			Number.isInteger(metricsPerDocument) &&
-			metricsPerDocument >= 1 &&
-			metricsPerDocument <= 50 &&
-			(singleDocument ||
-				(Number.isInteger(totalMetrics) && totalMetrics >= 1 && totalMetrics <= 1000))
+			(singleDocument
+				? Number.isInteger(numQuestionsToGenerate) &&
+					numQuestionsToGenerate >= 1 &&
+					numQuestionsToGenerate <= 3000
+				: Number.isInteger(metricsPerDocument) &&
+					metricsPerDocument >= 1 &&
+					metricsPerDocument <= 50 &&
+					Number.isInteger(totalMetrics) &&
+					totalMetrics >= 1 &&
+					totalMetrics <= 1000)
 	);
 	let validDates = $derived(
 		!draft.created_from || !draft.created_to || draft.created_from <= draft.created_to
@@ -217,17 +226,41 @@
 		createController = new AbortController();
 		saving = true;
 		createError = false;
+		capacityError = false;
 		try {
-			const { run } = await createQuestionRun(
-				{
-					input_record_id: normalizedRecordID,
-					purpose,
-					description: description.trim(),
-					metrics_per_document: metricsPerDocument,
-					total_metrics: singleDocument ? 0 : totalMetrics
-				},
-				createController.signal
-			);
+			let payload: QuestionRequest = {
+				input_record_id: normalizedRecordID,
+				purpose,
+				description: description.trim(),
+				...(singleDocument
+					? { num_questions_to_generate: numQuestionsToGenerate }
+					: { metrics_per_document: metricsPerDocument, total_metrics: totalMetrics })
+			};
+			let run: QuestionRun;
+			while (true) {
+				try {
+					({ run } = await createQuestionRun(payload, createController.signal));
+					break;
+				} catch (error) {
+					if (!alive || createController.signal.aborted) return;
+					if (!(error instanceof QuestionCapacityError)) throw error;
+					if (!error.confirmationRequired) {
+						capacityError = true;
+						return;
+					}
+					if (
+						!confirm(
+							m.qg_capacity_confirm({
+								requested: payload.num_questions_to_generate ?? 0,
+								metrics: error.availableMetrics,
+								questions: error.availableQuestions
+							})
+						)
+					)
+						return;
+					payload = { ...payload, confirmed_available_questions: error.availableQuestions };
+				}
+			}
 			if (!alive) return;
 			activeRun = run;
 			runQuestions = [];
@@ -543,33 +576,56 @@
 				bind:value={description}
 				placeholder={m.qg_description_placeholder()}
 			></textarea>
-			<div class="counts">
-				<div class="metric-count">
-					<label for="qg-metrics-per-document">{m.qg_metrics_per_document()}</label><input
-						id="qg-metrics-per-document"
-						type="number"
-						min="1"
-						max="50"
-						step="1"
-						required
-						bind:value={metricsPerDocument}
-					/>
-					<p class="hint">{m.qg_metrics_per_document_hint()}</p>
+			{#if singleDocument}
+				<label for="qg-num-questions">{m.qg_num_questions()}</label>
+				<input
+					id="qg-num-questions"
+					type="number"
+					min="1"
+					max="3000"
+					step="1"
+					required
+					bind:value={numQuestionsToGenerate}
+					disabled={saving}
+				/>
+				<p class="hint">{m.qg_num_questions_hint()}</p>
+				{#if valid}
+					<p class="hint">
+						{m.qg_question_plan({
+							metrics: Math.ceil(numQuestionsToGenerate / 3),
+							questions: Math.ceil(numQuestionsToGenerate / 3) * 3
+						})}
+					</p>
+				{/if}
+			{:else}
+				<div class="counts">
+					<div class="metric-count">
+						<label for="qg-metrics-per-document">{m.qg_metrics_per_document()}</label><input
+							id="qg-metrics-per-document"
+							type="number"
+							min="1"
+							max="50"
+							step="1"
+							required
+							bind:value={metricsPerDocument}
+						/>
+						<p class="hint">{m.qg_metrics_per_document_hint()}</p>
+					</div>
+					<div class="metric-count">
+						<label for="qg-total-metrics">{m.qg_total_metrics()}</label><input
+							id="qg-total-metrics"
+							type="number"
+							min="1"
+							max="1000"
+							step="1"
+							required
+							disabled={singleDocument}
+							bind:value={totalMetrics}
+						/>
+						<p class="hint">{singleDocument ? m.qg_totals_ignored() : m.qg_total_metrics_hint()}</p>
+					</div>
 				</div>
-				<div class="metric-count">
-					<label for="qg-total-metrics">{m.qg_total_metrics()}</label><input
-						id="qg-total-metrics"
-						type="number"
-						min="1"
-						max="1000"
-						step="1"
-						required
-						disabled={singleDocument}
-						bind:value={totalMetrics}
-					/>
-					<p class="hint">{singleDocument ? m.qg_totals_ignored() : m.qg_total_metrics_hint()}</p>
-				</div>
-			</div>
+			{/if}
 			<p class="hint">{m.qg_metric_triplet_hint()}</p>
 			<p class="hint">{m.qg_language_hint()}</p>
 			<button class="primary" type="submit" disabled={!valid || saving}
@@ -577,6 +633,7 @@
 			>
 		</form>
 		{#if createError}<p role="alert" class="error">{m.qg_create_error()}</p>{/if}
+		{#if capacityError}<p role="alert" class="error">{m.qg_no_usable_metrics()}</p>{/if}
 	</dialog>
 </div>
 

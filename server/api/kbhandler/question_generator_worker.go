@@ -265,19 +265,19 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 	return nil
 }
 
-func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64, req questionGenerationRequest, cfg ApiTypes.LLMModelDef, client metricJSONExtractor, promptName, prompt, userID string, previousQuestions []string, logger ApiTypes.JimoLogger) ([]generatedQuestion, error) {
-	metrics, err := loadQuestionGenerationMetrics(ctx, db, req.InputRecordID)
+func loadGroundedQuestionMetrics(ctx context.Context, db *sql.DB, recordID int64, logger ApiTypes.JimoLogger) ([]metricReviewInputMetric, []docprocessing.Line, error) {
+	metrics, err := loadQuestionGenerationMetrics(ctx, db, recordID)
 	if err != nil {
-		logger.Error("load question metrics failed", "record_id", req.InputRecordID, "error", err)
-		return nil, fmt.Errorf("cannot load document metrics")
+		logger.Error("load question metrics failed", "record_id", recordID, "error", err)
+		return nil, nil, fmt.Errorf("cannot load document metrics")
 	}
 	if len(metrics) == 0 {
-		return nil, fmt.Errorf("document has no metrics")
+		return []metricReviewInputMetric{}, nil, nil
 	}
-	lines, err := loadQuestionGenerationLines(ctx, db, req.InputRecordID)
+	lines, err := loadQuestionGenerationLines(ctx, db, recordID)
 	if err != nil {
-		logger.Error("load metric question source failed", "record_id", req.InputRecordID, "error", err)
-		return nil, fmt.Errorf("cannot read this record's canonical line file")
+		logger.Error("load metric question source failed", "record_id", recordID, "error", err)
+		return nil, nil, fmt.Errorf("cannot read this record's canonical line file")
 	}
 	// Use the full line index only to find grounded metrics. Only sampled metrics'
 	// context windows are formatted, size-checked, and sent to the model.
@@ -288,13 +288,33 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 		}
 	}
 	grounded := make([]metricReviewInputMetric, 0, len(metrics))
+	seen := map[string]bool{}
 	for _, metric := range metrics {
-		if metric.MetricID != "" && metricSourceAvailable(metric, lineIndex) {
+		if metric.MetricID != "" && !seen[metric.MetricID] && metricSourceAvailable(metric, lineIndex) {
 			grounded = append(grounded, metric)
+			seen[metric.MetricID] = true
+		}
+	}
+	return grounded, lines, nil
+}
+
+func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64, req questionGenerationRequest, cfg ApiTypes.LLMModelDef, client metricJSONExtractor, promptName, prompt, userID string, previousQuestions []string, logger ApiTypes.JimoLogger) ([]generatedQuestion, error) {
+	grounded, lines := req.preparedMetrics, req.preparedLines
+	if grounded == nil {
+		var err error
+		grounded, lines, err = loadGroundedQuestionMetrics(ctx, db, req.InputRecordID, logger)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if len(grounded) == 0 {
+		if lines == nil {
+			return nil, fmt.Errorf("document has no metrics")
+		}
 		return nil, fmt.Errorf("document has no metrics linked to usable source lines")
+	}
+	if req.NumQuestionsToGenerate != nil && *req.OneHopCount > len(grounded) {
+		return nil, fmt.Errorf("not enough distinct metrics for the confirmed question count")
 	}
 	sets, err := makeMetricQuestionSets(grounded, questionCounts{*req.OneHopCount, *req.TwoHopCount, *req.MultiHopCount})
 	if err != nil {

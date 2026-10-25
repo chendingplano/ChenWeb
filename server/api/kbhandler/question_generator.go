@@ -21,6 +21,11 @@ const (
 )
 
 type questionGenerationRequest struct {
+	NumQuestionsToGenerate      *int `json:"num_questions_to_generate"`
+	ConfirmedAvailableQuestions *int `json:"confirmed_available_questions"`
+	// A single-document preflight keeps the exact eligible pool and source for the worker.
+	preparedMetrics    []metricReviewInputMetric
+	preparedLines      []docprocessing.Line
 	MetricsPerDocument *int   `json:"metrics_per_document"`
 	TotalMetrics       *int   `json:"total_metrics"`
 	InputRecordID      int64  `json:"input_record_id"`
@@ -72,7 +77,18 @@ func (r *questionGenerationRequest) normalize() error {
 		}
 		return n, nil
 	}
-	perDocument, err := resolve(r.MetricsPerDocument, []*int{r.OneHopCount, r.TwoHopCount, r.MultiHopCount}, 50, "metrics_per_document")
+	maximum := 50
+	if r.NumQuestionsToGenerate != nil {
+		if r.InputRecordID == 0 {
+			return fmt.Errorf("num_questions_to_generate requires a specific input_record_id")
+		}
+		if *r.NumQuestionsToGenerate < 1 || *r.NumQuestionsToGenerate > 3000 {
+			return fmt.Errorf("num_questions_to_generate must be between 1 and 3000")
+		}
+		n := (*r.NumQuestionsToGenerate + 2) / 3
+		r.MetricsPerDocument, maximum = &n, 1000
+	}
+	perDocument, err := resolve(r.MetricsPerDocument, []*int{r.OneHopCount, r.TwoHopCount, r.MultiHopCount}, maximum, "metrics_per_document")
 	if err != nil {
 		return err
 	}

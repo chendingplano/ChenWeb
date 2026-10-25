@@ -414,5 +414,55 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 			t.Fatalf("archive re-up: %v", err)
 		}
 	})
-
+	// Exercise the count migration independently of the archive lifecycle above.
+	t.Run("requested question count constraints", func(t *testing.T) {
+		migrationDir := t.TempDir()
+		name := "20261025000005_question_generation_requested_count.sql"
+		raw, err := os.ReadFile(filepath.Join("../../../project_migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(migrationDir, name), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		counts, err := goose.NewProvider(goose.DialectPostgres, db, os.DirFS(migrationDir), goose.WithTableName("question_count_migrations"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		insert := func(n int) (int64, error) {
+			var id int64
+			err := db.QueryRowContext(ctx, `INSERT INTO testbed.generated_question_runs
+ (input_record_id,purpose,lang,model_ref,prompt_name,one_hop_count,two_hop_count,multi_hop_count)
+ VALUES (416,'search_metrics','mixed','fixture','fixture',$1,$1,$1) RETURNING id`, n).Scan(&id)
+			return id, err
+		}
+		if _, err := insert(51); err == nil {
+			t.Fatal("old constraint accepted 51 metrics")
+		}
+		if _, err := counts.Up(ctx); err != nil {
+			t.Fatal(err)
+		}
+		id, err := insert(1000)
+		if err != nil {
+			t.Fatalf("new constraint rejected 1000 metrics: %v", err)
+		}
+		if _, err := insert(1001); err == nil {
+			t.Fatal("new constraint accepted 1001 metrics")
+		}
+		if _, err := counts.Down(ctx); err == nil {
+			t.Fatal("downgrade accepted a run exceeding the old limit")
+		}
+		if _, err := db.ExecContext(ctx, "DELETE FROM testbed.generated_question_runs WHERE id=$1", id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := counts.Down(ctx); err != nil {
+			t.Fatalf("count rollback: %v", err)
+		}
+		if _, err := insert(51); err == nil {
+			t.Fatal("rollback did not restore the old limit")
+		}
+		if _, err := counts.Up(ctx); err != nil {
+			t.Fatalf("count re-up: %v", err)
+		}
+	})
 }
