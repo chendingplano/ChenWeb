@@ -429,13 +429,12 @@
 		background: color-mix(in srgb, var(--accent) 12%, transparent);
 		font-weight: 600;
 	}
+	/* The clicked metric: a solid, lighter background (after tr.target, so it wins on the target). */
 	tr.picked td {
-		box-shadow: inset 0 -2px 0 var(--accent);
+		background: var(--picked);
 	}
-	tr.picked td:first-child {
-		box-shadow:
-			inset 3px 0 0 var(--accent),
-			inset 0 -2px 0 var(--accent);
+	tr.picked .label {
+		color: inherit;
 	}
 	tr.gap td {
 		color: var(--muted);

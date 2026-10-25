@@ -304,6 +304,7 @@
 		--muted: #6b7280;
 		--accent: #4f46e5;
 		--hit: #15803d;
+		--picked: #c7d2fe;
 		height: 100%;
 		box-sizing: border-box;
 		padding: 16px;
@@ -320,6 +321,7 @@
 		--muted: #94a3b8;
 		--accent: #a5b4fc;
 		--hit: #4ade80;
+		--picked: #3d4566;
 	}
 	.split {
 		height: 100%;
