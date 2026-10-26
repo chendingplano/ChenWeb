@@ -2,17 +2,18 @@
 
 ### Requirement: Only stored actions run
 `POST /api/v1/wpi/actions/run` SHALL run only `load` and `save` actions taken from
-descriptors stored in `kb.wpi_descriptors`: either a stored action (`{"action": id}`) or an
-inline action inside a stored page (`{"page": id, "pointer": JSON Pointer}`). The request
+descriptors stored in `kb.wpi_descriptors`, named by `ref`: either a stored action
+(`{"kind": "action", "id": id}`) or an inline action inside a stored page or element
+(`{"kind": "page" | "element", "id": id, "pointer": JSON Pointer}`). The request
 SHALL NOT be able to supply a table name, column name or action body. A logged-in user
 SHALL be required.
 
 #### Scenario: Stored action by ID
-- **WHEN** a logged-in user runs `{"action": "load-customer", "args": {"id": 7}}`
+- **WHEN** a logged-in user runs `{"ref": {"kind": "action", "id": "load-customer"}, "args": {"id": 7}}`
 - **THEN** the system runs the stored `load-customer` action with `id` 7
 
 #### Scenario: Inline action by pointer
-- **WHEN** a logged-in user runs `{"page": "customer-form", "pointer": "/elements/3/on_click"}` and that place holds an inline `save` action
+- **WHEN** a logged-in user runs `{"ref": {"kind": "page", "id": "customer-form", "pointer": "/elements/3/on_click"}}` and that place holds an inline `save` action
 - **THEN** the system runs that inline action
 
 #### Scenario: Extra fields are ignored for targeting

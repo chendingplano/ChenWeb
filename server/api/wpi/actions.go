@@ -1,0 +1,294 @@
+package wpi
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/lib/pq"
+	"github.com/labstack/echo/v4"
+)
+
+// ActionRef names a stored action ({kind: "action", id}) or an inline action
+// at a JSON Pointer inside a stored page or element.
+type ActionRef struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Pointer string `json:"pointer"`
+}
+
+func (r ActionRef) String() string {
+	if r.Pointer == "" {
+		return r.Kind + ":" + r.ID
+	}
+	return r.Kind + ":" + r.ID + "#" + r.Pointer
+}
+
+type runRequest struct {
+	Ref      ActionRef      `json:"ref"`
+	Args     map[string]any `json:"args"`
+	InputDoc map[string]any `json:"input_doc"`
+}
+
+// requestError is a problem with the request or the descriptor it names; its
+// message is safe to show.
+type requestError struct {
+	status int
+	msg    string
+}
+
+func (e *requestError) Error() string { return e.msg }
+
+func badRequest(format string, a ...any) error {
+	return &requestError{http.StatusBadRequest, fmt.Sprintf(format, a...)}
+}
+
+// RunAction runs a stored load or save action.
+// Endpoint: POST /api/v1/wpi/actions/run
+func (h *Handler) RunAction(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	start := time.Now()
+	var req runRequest
+	raw, err := io.ReadAll(io.LimitReader(c.Request().Body, maxBodyBytes))
+	if err == nil {
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.UseNumber()
+		err = d.Decode(&req)
+	}
+	if err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
+	}
+	ctx := c.Request().Context()
+	act, node, err := h.resolveAction(ctx, req.Ref)
+	var rows int
+	var result any
+	if err == nil {
+		result, rows, err = h.run(ctx, act, node, req)
+	}
+	logArgs := []any{"ref", req.Ref.String(), "user", actorName(user), "table", act.Table, "action_type", act.ActionType,
+		"mode", act.Mode + act.Result, "rows", rows, "duration_ms", time.Since(start).Milliseconds()}
+	var reqErr *requestError
+	var fieldErrs fieldErrors
+	switch {
+	case errors.As(err, &fieldErrs):
+		handlerLog.Info("WPI save rejected by field rules", append(logArgs, "field_errors", len(fieldErrs))...)
+		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"field_errors": fieldErrs})
+	case errors.As(err, &reqErr):
+		handlerLog.Warn("WPI action refused", append(logArgs, "error", err)...)
+		return errorJSON(c, reqErr.status, reqErr.msg)
+	case err != nil:
+		handlerLog.Error("WPI action failed", append(logArgs, "error", err)...)
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && (pqErr.Code.Class() == "22" || pqErr.Code.Class() == "23") {
+			return errorJSON(c, http.StatusBadRequest, "The database rejected the values")
+		}
+		return errorJSON(c, http.StatusInternalServerError, "Unable to run action")
+	}
+	handlerLog.Info("WPI action run", logArgs...)
+	return c.JSON(http.StatusOK, result)
+}
+
+type fieldErrors map[string][]string
+
+func (f fieldErrors) Error() string { return "field rules failed" }
+
+// resolveAction loads the referenced action from stored descriptors only and
+// checks that it is a valid load or save action.
+func (h *Handler) resolveAction(ctx context.Context, ref ActionRef) (Action, map[string]any, error) {
+	var act Action
+	kind := Kind(ref.Kind)
+	if kind != KindAction && kind != KindPage && kind != KindElement {
+		return act, nil, badRequest("ref.kind must be action, page or element")
+	}
+	if !idPattern.MatchString(ref.ID) {
+		return act, nil, badRequest("ref.id is not a valid descriptor ID")
+	}
+	if (kind == KindAction) != (ref.Pointer == "") {
+		return act, nil, badRequest("a pointer is required for inline actions and not allowed for stored actions")
+	}
+	found, err := store{h.DB}.latest(ctx, kind, []string{ref.ID})
+	if err != nil {
+		return act, nil, err
+	}
+	d, ok := found[ref.ID]
+	if !ok {
+		return act, nil, &requestError{http.StatusNotFound, fmt.Sprintf("%s %q does not exist", kind, ref.ID)}
+	}
+	node := d.Body
+	if kind != KindAction {
+		target, err := jsonPointer(d.Body, ref.Pointer)
+		if err != nil {
+			return act, nil, badRequest("%v", err)
+		}
+		if node, ok = target.(map[string]any); !ok || node["action_type"] == nil {
+			return act, nil, badRequest("pointer %q does not point at an inline action", ref.Pointer)
+		}
+	}
+	if typ := str(node["action_type"]); typ != "load" && typ != "save" {
+		return act, nil, badRequest("only load and save actions run on the server, not %q", typ)
+	}
+	v := &validator{kind: kind, id: ref.ID}
+	if kind == KindAction {
+		v.action(node, "", true)
+	} else {
+		v.action(node, ref.Pointer, false, "args")
+	}
+	if len(v.issues) > 0 {
+		return act, nil, badRequest("the action descriptor is invalid: %s", v.issues[0].Message)
+	}
+	b, _ := json.Marshal(node)
+	if err := json.Unmarshal(b, &act); err != nil {
+		return act, nil, err
+	}
+	return act, node, nil
+}
+
+func (h *Handler) run(ctx context.Context, act Action, node map[string]any, req runRequest) (any, int, error) {
+	cols, err := catalogColumns(h.DB)(ctx, act.Table)
+	if err != nil {
+		return nil, 0, err
+	}
+	if cols == nil {
+		return nil, 0, badRequest("table %q does not exist", act.Table)
+	}
+	for _, col := range actionColumns(node) {
+		if col.name != "" && !cols[col.name] {
+			return nil, 0, badRequest("column %q does not exist in table %q", col.name, act.Table)
+		}
+	}
+	if act.ActionType == "load" {
+		return h.load(ctx, act, req.Args)
+	}
+	return h.save(ctx, act, req.InputDoc)
+}
+
+func (h *Handler) load(ctx context.Context, act Action, args map[string]any) (any, int, error) {
+	where := map[string]any{}
+	for col, v := range act.Where {
+		val, err := substituteArgs(v, args)
+		if err != nil {
+			return nil, 0, badRequest("%v", err)
+		}
+		if _, isObj := val.(map[string]any); isObj {
+			return nil, 0, badRequest("argument for %q must be a string, number, boolean or null", col)
+		}
+		if _, isArr := val.([]any); isArr {
+			return nil, 0, badRequest("argument for %q must be a string, number, boolean or null", col)
+		}
+		where[col] = val
+	}
+	q := buildLoad(act, where)
+	rows, err := h.DB.QueryContext(ctx, q.sql, q.args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	records := []map[string]any{}
+	for rows.Next() {
+		vals := make([]any, len(act.Fields))
+		ptrs := make([]any, len(vals))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, 0, err
+		}
+		rec := make(map[string]any, len(vals))
+		for i, f := range act.Fields {
+			rec[f.Attribute] = jsonValue(vals[i])
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if act.Result == "record" {
+		if len(records) == 0 {
+			return nil, 0, &requestError{http.StatusNotFound, "Record not found"}
+		}
+		return map[string]any{"result": records[0]}, 1, nil
+	}
+	return map[string]any{"result": records}, len(records), nil
+}
+
+func (h *Handler) save(ctx context.Context, act Action, doc map[string]any) (any, int, error) {
+	if doc == nil {
+		return nil, 0, badRequest("input_doc is required for a save action")
+	}
+	if errs := checkFields(act.Fields, doc); len(errs) > 0 {
+		return nil, 0, fieldErrors(errs)
+	}
+	keyValue := doc[act.Key]
+	insert := act.Mode == "insert" || (act.Mode == "upsert" && isEmpty(keyValue))
+	var q query
+	if insert {
+		q = buildInsert(act, doc)
+	} else {
+		if isEmpty(keyValue) {
+			return nil, 0, badRequest("input_doc has no value for key %q", act.Key)
+		}
+		var ok bool
+		if q, ok = buildUpdate(act, doc, keyValue); !ok {
+			return nil, 0, badRequest("input_doc has none of the attributes this action saves")
+		}
+	}
+	var key any
+	err := h.DB.QueryRowContext(ctx, q.sql, q.args...).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, 0, &requestError{http.StatusNotFound, "Record not found"}
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	return map[string]any{"key_attribute": act.Key, "key_value": jsonValue(key)}, 1, nil
+}
+
+// jsonValue converts a scanned database value into something JSON shows well.
+func jsonValue(v any) any {
+	switch x := v.(type) {
+	case []byte:
+		return string(x)
+	case time.Time:
+		return x.Format(time.RFC3339)
+	}
+	return v
+}
+
+// jsonPointer resolves an RFC 6901 pointer inside a decoded JSON value.
+func jsonPointer(doc any, pointer string) (any, error) {
+	if !strings.HasPrefix(pointer, "/") {
+		return nil, fmt.Errorf("pointer %q must start with /", pointer)
+	}
+	cur := doc
+	for _, tok := range strings.Split(pointer[1:], "/") {
+		tok = strings.ReplaceAll(strings.ReplaceAll(tok, "~1", "/"), "~0", "~")
+		switch node := cur.(type) {
+		case map[string]any:
+			next, ok := node[tok]
+			if !ok {
+				return nil, fmt.Errorf("pointer %q does not exist", pointer)
+			}
+			cur = next
+		case []any:
+			i, err := strconv.Atoi(tok)
+			if err != nil || i < 0 || i >= len(node) {
+				return nil, fmt.Errorf("pointer %q does not exist", pointer)
+			}
+			cur = node[i]
+		default:
+			return nil, fmt.Errorf("pointer %q does not exist", pointer)
+		}
+	}
+	return cur, nil
+}

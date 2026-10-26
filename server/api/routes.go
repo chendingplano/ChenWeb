@@ -67,6 +67,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/videohandler"
 	"github.com/chendingplano/deepdoc/server/api/workspacelists"
+	"github.com/chendingplano/deepdoc/server/api/wpi"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -411,6 +412,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/page-config/admin/pages/:pageKey/entries", pageconfighandler.UpsertEntry)
 	apiGroup.PUT("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.UpsertEntry)
 	apiGroup.DELETE("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.DeleteEntry)
+
+	// Web Page Interpreter pilot (openspec/changes/wpi-pilot): app bundles,
+	// admin descriptor writes, and stored load/save actions.
+	wpiHandler := wpi.New(ApiTypes.ProjectDBHandle)
+	apiGroup.GET("/wpi/apps/:appId", wpiHandler.GetApp)
+	apiGroup.PUT("/wpi/descriptors/:kind/:descriptorId", wpiHandler.PutDescriptor)
+	apiGroup.POST("/wpi/actions/run", wpiHandler.RunAction)
 
 	// Holiday calendar admin (System Admin > System > Calendar). Admin-only:
 	// year-independent holiday definitions plus year-specific date bindings

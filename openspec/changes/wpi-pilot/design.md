@@ -83,10 +83,11 @@ still renders an `ErrorBox` for anything it cannot draw.
 
 ### D4. Actions are invoked by reference; `$args` is resolved on the server
 
-`POST /api/v1/wpi/actions/run` takes either `{"action": "<id>"}` (a stored action
-descriptor) or `{"page": "<id>", "pointer": "<JSON Pointer>"}` (an inline action inside a
-stored page, RFC 6901 pointer to the trigger object), plus `args` (values only) and, for
-`save`, `input_doc`.
+`POST /api/v1/wpi/actions/run` takes `ref`: either `{"kind": "action", "id": "<id>"}` (a
+stored action descriptor) or `{"kind": "page" | "element", "id": "<id>", "pointer": "<JSON
+Pointer>"}` (an inline action inside a stored page or element, RFC 6901 pointer to the
+trigger object), plus `args` (values only) and, for `save`, `input_doc`. Inline actions can
+live in elements as well as pages, so the reference names the containing descriptor's kind.
 
 - The browser resolves `$record.*` and `$input_doc.*` inside a trigger's `args` before
   calling; action descriptors may only reference `$args.*`, which the server substitutes.
@@ -236,7 +237,7 @@ Every descriptor has `descriptor_id` (`^[a-z0-9][a-z0-9-]{0,127}$`) and `schema_
 | --- | --- | --- | --- |
 | `GET /api/v1/wpi/apps/:appId` | logged-in | — | 200 `{app, pages, elements, actions, warnings}` (maps by ID); 404 unknown app; 422 `{errors: [{kind, descriptor_id, path, message}], warnings}` |
 | `PUT /api/v1/wpi/descriptors/:kind/:descriptorId` | admin | descriptor body | 200 `{kind, descriptor_id, version}`; 400 validation errors; 403 non-admin |
-| `POST /api/v1/wpi/actions/run` | logged-in | `{action}` or `{page, pointer}`, `args`, `input_doc` | `load`: 200 `{result}`; `save`: 200 `{key_attribute, key_value}` or 422 `{field_errors}`; 400 bad reference or arguments; 404 record not found |
+| `POST /api/v1/wpi/actions/run` | logged-in | `ref` (`{kind, id}` or `{kind, id, pointer}`), `args`, `input_doc` | `load`: 200 `{result}`; `save`: 200 `{key_attribute, key_value}` or 422 `{field_errors}`; 400 bad reference or arguments; 404 record not found |
 
 ## Risks / Trade-offs
 
