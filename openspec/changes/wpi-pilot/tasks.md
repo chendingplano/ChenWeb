@@ -67,6 +67,6 @@
 
 ## 10. Documentation and wrap-up
 
-- [ ] 10.1 Update devdoc 2026102601 header status to "pilot built" and note any decisions changed during implementation.
-- [ ] 10.2 Write the post-build devdoc (create-devdoc skill, OpenSpec template) and catalogue the interpreter as a reusable module (create-reusable-module skill).
-- [ ] 10.3 Commit with `jj` using explicit paths: migrations + backend, frontend, and docs as separate commits; confirm a linear `jj log`.
+- [x] 10.1 Update devdoc 2026102601 header status to "pilot built" and note any decisions changed during implementation.
+- [x] 10.2 Write the post-build devdoc (create-devdoc skill, OpenSpec template) and catalogue the interpreter as a reusable module (create-reusable-module skill).
+- [x] 10.3 Commit with `jj` using explicit paths: migrations + backend, frontend, and docs as separate commits; confirm a linear `jj log`.
