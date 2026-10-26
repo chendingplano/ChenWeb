@@ -153,9 +153,12 @@ schema_version, body JSONB, status, created_by, updated_by, created_at, updated_
 ### D9. Layout templates and the flow layouter
 
 - Templates are Svelte components in a registry (`single-pane`, `top-left-middle-right-
-  bottom`). The five-region template uses CSS grid rows (top / middle / bottom) and, in the
-  middle row, the existing `resizable` pane group; regions the app does not mention are not
-  rendered. Pane geometry attributes map to CSS sizes and the pane group's min/max.
+  bottom`). The five-region template is a flex column (top / middle / bottom) whose middle
+  row is a flex row (left / middle / right); regions the app does not mention are not
+  rendered. Pane geometry attributes map to CSS flex sizes and min/max.
+- `resizable` applies to panes with a fixed pixel width: they get a drag handle on their
+  inner edge, clamped to min/max. The existing `resizable` (paneforge) component was not
+  used because it sizes panes in percentages, which does not fit pixel and elastic panes.
 - `flow-layouter` is a wrapping flex container. Width mapping: fixed → `flex: 0 0 <w>`;
   `elastic` → `flex: 1 1 <min_width or 0>` with `min-width`/`max-width`; `auto` →
   `flex: 0 0 auto`. The browser recomputes widths on pane resize.
@@ -163,9 +166,11 @@ schema_version, body JSONB, status, created_by, updated_by, created_at, updated_
 ### D10. Elements
 
 A registry maps `element_type` to a Svelte component receiving the resolved descriptor and
-its panel. Components wrap `components/ui` parts (`input`, `select`, `button`, the list as a
-simple table, the menu as a nested list with folder toggles). An element whose type is not
-in the registry renders an `ErrorBox`.
+its panel. `input` and `button` wrap the `components/ui` parts; `select` is a native
+`<select>` styled like `ui/input` (simpler and accessible); the list is a grid of rows (one
+button per row when rows are clickable); the menu is a nested list with folder toggles. The
+unsaved-changes prompt is a native `<dialog>`, as other ChenWeb dialogs are. An element
+whose type is not in the registry renders an `ErrorBox`.
 
 ### D11. Unsaved changes and leaving
 

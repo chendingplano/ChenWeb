@@ -34,36 +34,36 @@
 
 ## 6. Frontend: pure logic (bun test)
 
-- [ ] 6.1 `web/src/lib/wpi/types.ts` mirroring the Go descriptor shapes and the bundle/API responses; `api.ts` for the three endpoints.
-- [ ] 6.2 `refs.ts`: get/set by `$input_doc` path (creating missing objects, rejecting forbidden segments), resolve trigger `args` with `$record` / `$input_doc`, resolve `$args` in `open_page` inputs. Tests.
-- [ ] 6.3 `dirty.ts`: canonical JSON snapshot and compare (key order independent). Tests incl. edit-then-undo.
-- [ ] 6.4 `panels.ts`: per-pane panel lists, visible panel, sharing key (page + canonical resolved input), menu bindings, replace decision (hide if bound, close otherwise). Tests for every scenario in `specs/wpi-app-shell/spec.md` that does not need a browser.
-- [ ] 6.5 `layout.ts`: width/size → CSS mapping for fixed / elastic / auto (design D9). Tests.
+- [x] 6.1 `web/src/lib/wpi/types.ts` mirroring the Go descriptor shapes and the bundle/API responses; `api.ts` for the three endpoints.
+- [x] 6.2 `refs.ts`: get/set by `$input_doc` path (creating missing objects, rejecting forbidden segments), resolve trigger `args` with `$record` / `$input_doc`, resolve `$args` in `open_page` inputs. Tests.
+- [x] 6.3 `dirty.ts`: canonical JSON snapshot and compare (key order independent). Tests incl. edit-then-undo.
+- [x] 6.4 `panels.ts`: per-pane panel lists, visible panel, sharing key (page + canonical resolved input), menu bindings, replace decision (hide if bound, close otherwise). Tests for every scenario in `specs/wpi-app-shell/spec.md` that does not need a browser.
+- [x] 6.5 `layout.ts`: width/size → CSS mapping for fixed / elastic / auto (design D9). Tests.
 
 ## 7. Frontend: components
 
-- [ ] 7.1 `runtime.svelte.ts`: app runtime with `$state` panes/panels/input docs, `openPage`, `closePanel` (returns whether closed), show counter for refresh, dirty tracking, save with key write-back and field errors.
-- [ ] 7.2 Route `web/src/routes/wpi/[appId]/+page.svelte` (+ `+page.ts` with `ssr = false`): load bundle, show validation errors or `WpiApp`; root `select-text`; `beforeunload` while any panel is dirty.
-- [ ] 7.3 Layout templates `single-pane` and `top-left-middle-right-bottom` (CSS grid rows; `resizable` pane group for the middle row; omitted regions not rendered); `Pane.svelte` keeping hidden panels mounted.
-- [ ] 7.4 `Panel.svelte` + `layouters/FlowLayouter.svelte`; element registry with `ErrorBox` fallback.
-- [ ] 7.5 Elements `text`, `input`, `select`, `button` with binding modes and field-error display (cleared on edit).
-- [ ] 7.6 `list` element: query via `source`, loading / empty / error states, rows, `on_row_click` with `$record`, re-query on show counter change.
-- [ ] 7.7 `menu` element: tree with folders, item click → `open_page` with binding, `initial_item` on start.
-- [ ] 7.8 `UnsavedDialog.svelte` (save / discard / keep editing) wired to `closePanel`; `close_page` action.
-- [ ] 7.9 Refresh on show for pages with `refresh.on_show` (lists re-query; load-backed input doc reloads unless dirty).
+- [x] 7.1 `runtime.svelte.ts`: app runtime with `$state` panes/panels/input docs, `openPage`, `closePanel` (returns whether closed), show counter for refresh, dirty tracking, save with key write-back and field errors.
+- [x] 7.2 Route `web/src/routes/wpi/[appId]/+page.svelte` (+ `+page.ts` with `ssr = false`): load bundle, show validation errors or `WpiApp`; root `select-text`; `beforeunload` while any panel is dirty.
+- [x] 7.3 Layout templates `single-pane` and `top-left-middle-right-bottom` (flex rows and columns; drag handle for fixed-width resizable panes; omitted regions not rendered); `Pane.svelte` keeping hidden panels mounted.
+- [x] 7.4 `Panel.svelte` + `layouters/FlowLayouter.svelte`; element registry with `ErrorBox` fallback.
+- [x] 7.5 Elements `text`, `input`, `select`, `button` with binding modes and field-error display (cleared on edit).
+- [x] 7.6 `list` element: query via `source`, loading / empty / error states, rows, `on_row_click` with `$record`, re-query on show counter change.
+- [x] 7.7 `menu` element: tree with folders, item click → `open_page` with binding, `initial_item` on start.
+- [x] 7.8 `UnsavedDialog.svelte` (save / discard / keep editing) wired to `closePanel`; `close_page` action.
+- [x] 7.9 Refresh on show for pages with `refresh.on_show` (lists re-query; load-backed input doc reloads unless dirty).
 
 ## 8. Frontend: text and checks
 
-- [ ] 8.1 Add `wpi_*` keys to `web/messages/en.json` and `zh-cn.json` (real Chinese) for dialog, error boxes, field error codes, loading and empty states.
-- [ ] 8.2 `bun test src/lib/wpi` and `bun run check` (from `web/`) pass with no new hard-coded text.
+- [x] 8.1 Add `wpi_*` keys to `web/messages/en.json` and `zh-cn.json` (real Chinese) for dialog, error boxes, field error codes, loading and empty states.
+- [x] 8.2 `bun test src/lib/wpi` and `bun run check` (from `web/`) pass with no new hard-coded text.
 
 ## 9. Verification against devdoc §8
 
-- [ ] 9.1 In a browser on the dev server, `/wpi/customer-admin` opens with header, left menu and customer list in the middle.
-- [ ] 9.2 Switching *Customers* ↔ *New customer* keeps a half-filled form and re-queries the list each time it is shown.
-- [ ] 9.3 Inserting a customer works; a missing/invalid field shows a translated error next to the right input.
-- [ ] 9.4 Clicking a customer opens it in the right pane; saving updates the row; clicking another customer with unsaved edits prompts first; "keep editing" cancels.
-- [ ] 9.5 Switch the locale to Chinese and confirm the interpreter's own text changes while descriptor labels stay as written.
+- [x] 9.1 In a browser on the dev server, `/wpi/customer-admin` opens with header, left menu and customer list in the middle.
+- [x] 9.2 Switching *Customers* ↔ *New customer* keeps a half-filled form and re-queries the list each time it is shown.
+- [x] 9.3 Inserting a customer works; a missing/invalid field shows a translated error next to the right input.
+- [x] 9.4 Clicking a customer opens it in the right pane; saving updates the row; clicking another customer with unsaved edits prompts first; "keep editing" cancels.
+- [x] 9.5 Switch the locale to Chinese and confirm the interpreter's own text changes while descriptor labels stay as written.
 
 ## 10. Documentation and wrap-up
 
