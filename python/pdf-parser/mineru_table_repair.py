@@ -18,6 +18,19 @@ Run with MinerU's Python, like mineru_v4_adapter.py:
 It rewrites the content list in place and prints a JSON report to stdout.
 """
 
+"""
+IMPORTANT!!!
+Commented out by Chen Ding on 2026/10/27
+It should no longer be used. 
+Note that this script will make LLM calls. This is the reason
+I commented out. All LLM calls should be routed through 'shared/go/api/llm'
+so that we can capture all LLM calls.
+
+If this script is needed again, inform users the reasons why it is
+commented.
+"""
+
+"""
 import io
 import json
 import logging
@@ -50,7 +63,7 @@ class TableSplitError(RuntimeError):
 
 
 def _line_spans(gray: np.ndarray) -> list[tuple[int, int]]:
-    """(first, last) pixel row of each horizontal ruling line."""
+    # first, last) pixel row of each horizontal ruling line.
     dark = np.flatnonzero((gray < 128).mean(axis=1) > 0.5)
     spans: list[tuple[int, int]] = []
     for y in dark.tolist():
@@ -62,12 +75,12 @@ def _line_spans(gray: np.ndarray) -> list[tuple[int, int]]:
 
 
 def row_separators(gray: np.ndarray) -> list[int]:
-    """Centre y of each horizontal ruling line, top to bottom."""
+    # Centre y of each horizontal ruling line, top to bottom.
     return [(first + last) // 2 for first, last in _line_spans(gray)]
 
 
 def header_row_count(html: str) -> int:
-    """Header depth, taken from the tallest rowspan in the first row."""
+    # Header depth, taken from the tallest rowspan in the first row.
     rows = _ROW_RE.findall(html)
     if not rows:
         return 1
@@ -75,7 +88,7 @@ def header_row_count(html: str) -> int:
 
 
 def _split_bands(image: Image.Image, header_rows: int) -> tuple[Image.Image, Image.Image]:
-    """Cut the body at the ruling line nearest its middle; both bands get the header."""
+    # Cut the body at the ruling line nearest its middle; both bands get the header.
     spans = _line_spans(np.asarray(image.convert("L")))
     if len(spans) < header_rows + 3:
         raise TableSplitError(f"only {len(spans)} ruling lines; cannot split below a {header_rows}-row header")
@@ -100,7 +113,7 @@ def _merge(first: str, second: str, header_rows: int) -> str:
 
 
 def _recognize_split(image: Image.Image, recognize: Recognizer, header_rows: int) -> str:
-    """Recognise each band, splitting again any band that is still truncated."""
+    # Recognise each band, splitting again any band that is still truncated.
     merged = ""
     for band in _split_bands(image, header_rows):
         html, finished = recognize(band)
@@ -111,7 +124,7 @@ def _recognize_split(image: Image.Image, recognize: Recognizer, header_rows: int
 
 
 def repair_table(image: Image.Image, recognize: Recognizer, header_rows: int) -> str | None:
-    """Full table HTML rebuilt from bands, or None when the whole crop fits."""
+    # Full table HTML rebuilt from bands, or None when the whole crop fits.
     _, finished = recognize(image)
     if finished:
         return None
@@ -119,7 +132,7 @@ def repair_table(image: Image.Image, recognize: Recognizer, header_rows: int) ->
 
 
 def repair_content_list(doc: dict, images_root: str, recognize: Recognizer) -> list[dict]:
-    """Repair truncated tables in a page-wrapped content list, in place."""
+    # Repair truncated tables in a page-wrapped content list, in place.
     report = []
     for page in doc.get("pages", []):
         for item in page.get("items", []):
@@ -147,7 +160,7 @@ def repair_content_list(doc: dict, images_root: str, recognize: Recognizer) -> l
 
 
 def _llama_cpp_recognizer() -> Recognizer | None:
-    """MinerU's table request on its own llama.cpp model; None for other engines."""
+    # MinerU's table request on its own llama.cpp model; None for other engines.
     from mineru.config import config
     from mineru.model.registry import vlm_model_repo
     from mineru.model.vlm.selector import resolve_vlm_engine
@@ -193,3 +206,5 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
+
+"""
