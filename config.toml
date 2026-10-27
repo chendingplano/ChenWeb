@@ -60,7 +60,7 @@ phrase_friendly = true
 min_rank = 0.0
 # Hybrid search fuses a lexical (BM25) and a semantic (vector) list with Reciprocal Rank Fusion:
 # score = hybrid_lexical_weight/(60+rank) + hybrid_semantic_weight/(60+rank). 0 drops a list.
-# Benchmark (benchmark/category-index, 2026-10-24): lexical 0.5 or 0.25 ranked better than 1.0.
+# Offline benchmark (2026-10-24): lexical 0.5 or 0.25 ranked better than 1.0.
 hybrid_lexical_weight = 1.0
 hybrid_semantic_weight = 1.0
 

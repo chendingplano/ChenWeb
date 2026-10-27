@@ -1,11 +1,14 @@
 ## Why
 
-The Question Generator now fills `testbed.generated_questions` with known-item questions, each
-written to find one metric (`purpose = 'search_metrics'`). Nothing uses them yet: the only search
-measurements are the offline Python scripts in `benchmark/category-index/`, which query testbed
-copies of the search rows rather than the live search code. A page that runs the stored questions
+When this change was proposed, the Question Generator filled `testbed.generated_questions` with
+known-item questions, each written to find one metric (`purpose = 'search_metrics'`). The only
+search measurements were offline category-index Python scripts, which queried testbed copies
+of the search rows rather than the live search code. A page that runs the stored questions
 through the real metric search lets us measure every search change (keywords, weights, embedding
 model, index rebuilds) the same way and keep the results.
+
+The offline scripts were removed on 2026-10-27. The live benchmark described below is the
+supported evaluation path.
 
 ## What Changes
 
