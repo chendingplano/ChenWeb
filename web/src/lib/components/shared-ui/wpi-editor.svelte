@@ -23,6 +23,14 @@
 	import FlowPicker from './canvas/FlowPicker.svelte';
 	import NodePalette from './canvas/NodePalette.svelte';
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
+	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
+	import {
+		alignNodes,
+		distributeNodes,
+		selectedCount,
+		type AlignMode,
+		type DistributeAxis
+	} from './canvas/align-nodes';
 
 	// Node type components
 	import AiAssistantNode from './canvas/nodes/AiAssistantNode.svelte';
@@ -36,8 +44,12 @@
 	import RuleNode from './canvas/nodes/RuleNode.svelte';
 	import CodingAssistantNode from './canvas/nodes/CodingAssistantNode.svelte';
 	import GitNode from './canvas/nodes/GitNode.svelte';
+	import WpiNode from './canvas/nodes/WpiNode.svelte';
 
 	const NODE_TYPES = {
+		'wpi-page': WpiNode,
+		'wpi-element': WpiNode,
+		'wpi-action': WpiNode,
 		'ai-assistant': AiAssistantNode,
 		text: TextNode,
 		file: FileNode,
@@ -90,6 +102,15 @@
 	let nodeTypes = $state<NodeType[]>([]);
 	// Palette folders for WPI building blocks; no node types belong to them yet.
 	const WPI_PALETTE_CATEGORIES = ['Pages', 'Elements'];
+	// Node types the tool bar creates. They are not in the server's palette list.
+	const WPI_NODE_TYPES = $derived<Record<WpiNodeKind, NodeType>>({
+		page: { id: 'wpi-page', label: m.wpi_editor_page(), category: 'Pages', icon: 'file', inputs: ['in'], outputs: ['out'], defaultData: {} },
+		element: { id: 'wpi-element', label: m.wpi_editor_element(), category: 'Elements', icon: 'square-mouse-pointer', inputs: ['in'], outputs: ['out'], defaultData: {} },
+		action: { id: 'wpi-action', label: m.wpi_editor_action(), category: 'Actions', icon: 'zap', inputs: ['in'], outputs: ['out'], defaultData: {} }
+	});
+	// Size of the canvas area, for placing created nodes in the middle of the view.
+	let canvasWidth = $state(0);
+	let canvasHeight = $state(0);
 	let toastMsg = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -112,8 +133,12 @@
 
 	const selectedNode = $derived(nodes.find((n) => n.id === selectedNodeId) ?? null);
 	const selectedNodeType = $derived(
-		selectedNode ? (nodeTypes.find((t) => t.id === selectedNode.type) ?? null) : null
+		selectedNode
+			? ([...nodeTypes, ...Object.values(WPI_NODE_TYPES)].find((t) => t.id === selectedNode.type) ??
+					null)
+			: null
 	);
+	const selectedTotal = $derived(selectedCount(nodes));
 
 	// ── Toast ──────────────────────────────────────────────────────────────
 	function toast(msg: string) {
@@ -283,6 +308,43 @@
 		}
 	}
 
+	// ── Tool bar ────────────────────────────────────────────────────────────
+	// Create a node in the middle of the visible canvas (BaseNode is 160×60 at minimum),
+	// stepping one grid cell down-right while another node already sits there.
+	function createWpiNode(kind: WpiNodeKind) {
+		const nodeType = WPI_NODE_TYPES[kind];
+		const zoom = viewport.zoom || 1;
+		const position = {
+			x: snapToGridValue((canvasWidth / 2 - viewport.x) / zoom - 80),
+			y: snapToGridValue((canvasHeight / 2 - viewport.y) / zoom - 30)
+		};
+		while (nodes.some((n) => n.position.x === position.x && n.position.y === position.y)) {
+			position.x += gridResolution;
+			position.y += gridResolution;
+		}
+		const id = `${nodeType.id}-${Date.now()}`;
+		takeSnapshot();
+		nodes = [
+			...nodes,
+			{ id, type: nodeType.id, position, data: { ...nodeType.defaultData, label: nodeType.label } }
+		];
+		hasContent = true;
+		selectedNodeId = id;
+		checkLimits();
+	}
+
+	function alignSelected(mode: AlignMode) {
+		if (selectedTotal < 2) return;
+		takeSnapshot();
+		nodes = alignNodes(nodes, mode);
+	}
+
+	function distributeSelected(axis: DistributeAxis) {
+		if (selectedTotal < 3) return;
+		takeSnapshot();
+		nodes = distributeNodes(nodes, axis);
+	}
+
 	// ── Close with guard ────────────────────────────────────────────────────
 	function requestClose() {
 		if (isDirty) {
@@ -387,7 +449,8 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="fixed inset-y-0 right-0 flex flex-col" style="background:#0d1117; z-index:40; left:{railOffset}px;">
+<!-- Starts below the sticky site header (routes/semos/components/SiteHeader.svelte: h-[4.25rem] + 1px border, z-50), which would otherwise cover the top of the editor. -->
+<div class="fixed bottom-0 right-0 flex flex-col" style="background:#0d1117; z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
 	<!-- Toolbar -->
 	<FlowToolbar
 		{activeFlow}
@@ -424,9 +487,19 @@
 			onDragStart={onPaletteDragStart}
 		/>
 
-		<!-- Canvas -->
+		<!-- Canvas column: tool bar + canvas -->
+		<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+		<WpiCanvasToolbar
+			selectedCount={selectedTotal}
+			onCreate={createWpiNode}
+			onLoadPage={() => toast(m.wpi_toolbar_load_page_not_yet_implemented())}
+			onAlign={alignSelected}
+			onDistribute={distributeSelected}
+		/>
 		<div
-			class="flex-1 overflow-hidden"
+			class="min-h-0 flex-1 overflow-hidden"
+			bind:clientWidth={canvasWidth}
+			bind:clientHeight={canvasHeight}
 			ondragover={(e) => e.preventDefault()}
 			ondrop={onCanvasDrop}
 			role="application"
@@ -438,6 +511,7 @@
 				bind:viewport
 				nodeTypes={NODE_TYPES}
 				fitView
+				fitViewOptions={{ maxZoom: 1 }}
 				snapGrid={snapToGrid ? [gridResolution, gridResolution] : undefined}
 				onselectionchange={(params: { nodes: Node[] }) => {
 					selectedNodeId = params.nodes.length === 1 ? params.nodes[0].id : null;
@@ -574,6 +648,7 @@
 					{/if}
 				</Panel>
 			</SvelteFlow>
+		</div>
 		</div>
 
 		<!-- Properties Panel -->
