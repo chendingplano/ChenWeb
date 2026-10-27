@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
+	import { Eye, EyeOff } from '@lucide/svelte';
 	import {
 		createManagedUser,
 		deleteManagedUser,
@@ -57,6 +58,7 @@
 	let editDialogOpen = $state(false);
 	let creating = $state(false);
 	let initialPassword = $state('');
+	let passwordVisible = $state(false);
 	let canManageAll = $state(false);
 	let userScope = $state<'all' | 'self'>('all');
 	let editDraft = $state<EditDraft>({
@@ -158,6 +160,7 @@
 	function startCreate() {
   creating = true;
   initialPassword = '';
+		passwordVisible = false;
   error = null;
   success = null;
   editDraft = { id: '', email: '', phone: '', firstName: '', lastName: '', status: 'active', admin: false, roles: '' };
@@ -168,6 +171,7 @@
 	function startEdit(user: UserRow) {
 		creating = false;
 		initialPassword = '';
+		passwordVisible = false;
 		success = null;
 		error = null;
 		editDraft = {
@@ -192,6 +196,7 @@
 		if (saving) return;
 		editDialogOpen = false;
 		initialPassword = '';
+		passwordVisible = false;
 		roleMenuOpen = false;
 	}
 
@@ -241,6 +246,7 @@
 			syncUsers();
 			editDialogOpen = false;
 			initialPassword = '';
+		passwordVisible = false;
 			success = creating ? m.user_management_created_account({ email: updated.email }) : m.user_management_updated_account({ email: updated.email });
 		} catch (err) {
 			error = err instanceof Error ? err.message : m.user_management_failed_to_update_user();
@@ -431,7 +437,20 @@
 				<label>
 					<span>{creating ? m.user_management_initial_password() : m.user_management_phone()}</span>
 					{#if creating}
-						<input type="password" bind:value={initialPassword} required autocomplete="new-password" aria-label={m.user_management_initial_password()} />
+						<div class="password-field">
+							<input id="managed-user-password" type={passwordVisible ? 'text' : 'password'} bind:value={initialPassword} required autocomplete="new-password" aria-label={m.user_management_initial_password()} />
+							<button
+								type="button"
+								class="password-toggle"
+								aria-label={passwordVisible ? m.user_management_hide_password() : m.user_management_show_password()}
+								title={passwordVisible ? m.user_management_hide_password() : m.user_management_show_password()}
+								aria-controls="managed-user-password"
+								aria-pressed={passwordVisible}
+								onclick={() => (passwordVisible = !passwordVisible)}
+							>
+								{#if passwordVisible}<EyeOff size={18} aria-hidden="true" />{:else}<Eye size={18} aria-hidden="true" />{/if}
+							</button>
+						</div>
 					{:else}
 						<input value={editDraft.phone || m.user_management_no_phone_on_file()} readonly />
 					{/if}
@@ -720,6 +739,31 @@
 		font-size: 13px;
 		padding: 10px 12px;
 	}
+	.password-field {
+		position: relative;
+	}
+	.password-field input {
+		width: 100%;
+		box-sizing: border-box;
+		padding-right: 44px;
+	}
+	.password-toggle {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: 40px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--sub);
+		cursor: pointer;
+	}
+	.password-toggle:hover { color: var(--heading); }
+	.password-toggle:focus-visible { outline: 2px solid var(--btn); outline-offset: -3px; }
 	.dialog-body .toggle {
 		justify-content: flex-end;
 	}

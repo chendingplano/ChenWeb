@@ -7640,5 +7640,7 @@
 	"wpi_err_unknown": "此值被拒绝（{code}）。",
 	"user_management_initial_password": "初始密码",
 	"user_management_create_help": "使用初始密码创建账户。邮箱将标记为已验证，不会发送邮件。",
-	"user_management_created_account": "已为 {email} 创建账户。"
+	"user_management_created_account": "已为 {email} 创建账户。",
+	"user_management_show_password": "显示密码",
+	"user_management_hide_password": "隐藏密码"
 }
