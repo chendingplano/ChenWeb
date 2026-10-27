@@ -262,6 +262,33 @@ func TestValidateClassRows(t *testing.T) {
 	}
 }
 
+func TestValidateDraftClass(t *testing.T) {
+	valid := `{"descriptor_id": "slider", "schema_version": "0.2", "description": {"en": "A slider", "zh-cn": "滑块"}, "label": null, "min": 0, "step": 5, "on_change": null, "width": "240px", "binding_mode": "read-write"}`
+	expectIssue(t, ValidateDraftClass(decode(t, valid)), "")
+	// A class that has code may be drafted too; its code is checked when it is made active.
+	expectIssue(t, ValidateDraftClass(decode(t, `{"descriptor_id": "input", "schema_version": "0.2", "description": "x"}`)), "")
+	cases := []struct{ body, want string }{
+		{`{"descriptor_id": "Slider", "description": "x"}`, `/descriptor_id descriptor ID "Slider"`},
+		{`{"descriptor_id": "slider", "schema_version": "0.1", "description": "x"}`, `schema_version "0.1" is not supported`},
+		{`{"descriptor_id": "slider"}`, `/description a draft class needs a description`},
+		{`{"descriptor_id": "slider", "description": {"zh-cn": "滑块"}}`, `need an "en" entry`},
+		{`{"descriptor_id": "slider", "description": "x", "element": null}`, `"element" cannot be an attribute name`},
+		{`{"descriptor_id": "slider", "description": "x", "max-value": 1}`, `"max-value" cannot be an attribute name`},
+		{`{"descriptor_id": "slider", "description": "x", "on_click": {"action": "close-page"}}`, `/on_click attribute "on_click" holds actions`},
+		{`{"descriptor_id": "slider", "description": "x", "width": "wide"}`, `/width "wide" must match`},
+		{`{"descriptor_id": "slider", "description": "x", "label": ""}`, `/label must be a non-empty string`},
+		{`{"descriptor_id": "slider", "description": "x", "data_binding": "$record.x"}`, `must be a $input_doc path`},
+		{`{"descriptor_id": "slider", "description": "x", "binding_mode": "write"}`, `"write" is not supported`},
+	}
+	for _, c := range cases {
+		body := decode(t, c.body)
+		if _, ok := body["schema_version"]; !ok {
+			body["schema_version"] = SchemaVersion
+		}
+		expectIssue(t, ValidateDraftClass(body), c.want)
+	}
+}
+
 // TestPageInstances covers the checks made against class rows when a bundle
 // is built.
 func TestPageInstances(t *testing.T) {

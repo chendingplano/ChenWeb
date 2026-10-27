@@ -3,6 +3,7 @@ package wpi
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -120,6 +121,61 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 	}
 	handlerLog.Info("WPI descriptor stored", "kind", kind, "id", id, "version", version, "user", actorName(user))
 	return c.JSON(http.StatusOK, map[string]any{"kind": kind, "descriptor_id": id, "version": version})
+}
+
+// CreateElementClass stores a new element class as a draft: version 1, before
+// its code exists. A class ID that already has a row is a conflict (OpenSpec
+// wpi-create-element-class). The class becomes active through PutDescriptor
+// once its code is registered.
+// Endpoint: POST /api/v1/wpi/classes/element (admins only)
+func (h *Handler) CreateElementClass(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	if !isAdmin(user) {
+		return errorJSON(c, http.StatusForbidden, "Admin access required")
+	}
+	raw, err := io.ReadAll(io.LimitReader(c.Request().Body, maxBodyBytes))
+	if err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Unable to read request body")
+	}
+	body, err := decodeBody(raw)
+	if err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
+	}
+	if issues := ValidateDraftClass(body); len(issues) > 0 {
+		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+	}
+	id := body["descriptor_id"].(string)
+	err = store{h.DB}.insertDraftClass(c.Request().Context(), id, raw, actorName(user))
+	if errors.Is(err, errClassExists) {
+		handlerLog.Info("WPI element class already exists", "id", id, "user", actorName(user))
+		return errorJSON(c, http.StatusConflict, fmt.Sprintf("element class %q already exists", id))
+	}
+	if err != nil {
+		handlerLog.Error("WPI element class insert failed", "id", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to store element class")
+	}
+	handlerLog.Info("WPI element class drafted", "id", id, "user", actorName(user))
+	return c.JSON(http.StatusCreated, map[string]any{"descriptor_id": id, "version": 1, "status": "draft"})
+}
+
+// ListElementClasses returns the latest draft or active version of every
+// element class, for the editor's palette.
+// Endpoint: GET /api/v1/wpi/classes/element
+func (h *Handler) ListElementClasses(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	classes, err := store{h.DB}.elementClasses(c.Request().Context())
+	if err != nil {
+		handlerLog.Error("WPI element class list failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to list element classes")
+	}
+	handlerLog.Info("WPI element classes listed", "user", actorName(user), "found", len(classes))
+	return c.JSON(http.StatusOK, map[string]any{"classes": classes})
 }
 
 // Limits of a page search (design D10).

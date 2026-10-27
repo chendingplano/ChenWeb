@@ -23,8 +23,9 @@
 
   const searching = $derived(search !== '');
 
+  // Extra folders keep their given order after the others, even once node types belong to them.
   const categories = $derived(
-    [...new Set([...nodeTypes.map(n => n.category), ...extraCategories])]
+    [...new Set([...nodeTypes.map(n => n.category).filter(c => !extraCategories.includes(c)), ...extraCategories])]
   );
 
   function filteredByCategory(cat: string) {

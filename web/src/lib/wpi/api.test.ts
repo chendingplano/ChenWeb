@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchApp, runAction, WpiError } from './api';
+import { createElementClass, fetchApp, listElementClasses, runAction, WpiError } from './api';
 
 function fakeFetch(status: number, body: unknown, seen: { url?: string; init?: RequestInit } = {}): typeof fetch {
 	return (async (url: string, init?: RequestInit) => {
@@ -38,6 +38,36 @@ test('runAction carries field errors', async () => {
 	await assert.rejects(runAction({ kind: 'page', id: 'p', pointer: '/save_action' }, {}, {}, fakeFetch(422, { field_errors: { email: ['required'] } })), (err: unknown) => {
 		assert.ok(err instanceof WpiError);
 		assert.deepEqual(err.fieldErrors, { email: ['required'] });
+		return true;
+	});
+});
+
+test('listElementClasses returns the classes', async () => {
+	const seen: { url?: string } = {};
+	const classes = await listElementClasses(fakeFetch(200, { classes: [{ descriptor_id: 'slider', version: 1, status: 'draft', description: 'A slider' }] }, seen));
+	assert.equal(seen.url, '/api/v1/wpi/classes/element');
+	assert.equal(classes[0].status, 'draft');
+});
+
+test('createElementClass posts the class row', async () => {
+	const seen: { url?: string; init?: RequestInit } = {};
+	await createElementClass({ descriptor_id: 'slider', schema_version: '0.2' }, fakeFetch(201, { status: 'draft' }, seen));
+	assert.equal(seen.url, '/api/v1/wpi/classes/element');
+	assert.equal(seen.init?.method, 'POST');
+	assert.deepEqual(JSON.parse(String(seen.init?.body)), { descriptor_id: 'slider', schema_version: '0.2' });
+});
+
+test('createElementClass carries the status and issues', async () => {
+	await assert.rejects(createElementClass({}, fakeFetch(409, { error: 'element class "input" already exists' })), (err: unknown) => {
+		assert.ok(err instanceof WpiError);
+		assert.equal(err.status, 409);
+		assert.equal(err.message, 'element class "input" already exists');
+		return true;
+	});
+	const issues = [{ kind: 'element', descriptor_id: 'slider', path: '/description', message: 'a draft class needs a description' }];
+	await assert.rejects(createElementClass({}, fakeFetch(400, { errors: issues })), (err: unknown) => {
+		assert.ok(err instanceof WpiError);
+		assert.deepEqual(err.issues, issues);
 		return true;
 	});
 });

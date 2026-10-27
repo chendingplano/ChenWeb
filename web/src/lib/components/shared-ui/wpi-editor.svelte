@@ -16,6 +16,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
+	import { listElementClasses, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 
@@ -23,6 +24,7 @@
 	import NodePalette from './canvas/NodePalette.svelte';
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
+	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import {
 		alignNodes,
 		distributeNodes,
@@ -107,6 +109,22 @@
 		element: { id: 'wpi-element', label: m.wpi_editor_element(), category: 'Elements', icon: 'square-mouse-pointer', inputs: ['in'], outputs: ['out'], defaultData: {} },
 		action: { id: 'wpi-action', label: m.wpi_editor_action(), category: 'Actions', icon: 'zap', inputs: ['in'], outputs: ['out'], defaultData: {} }
 	});
+	// Element classes, listed in the palette's ELEMENTS folder. Their palette IDs carry a
+	// prefix, so they are unique; dropping one adds a wpi-element node of that class.
+	const ELEMENT_CLASS_PREFIX = 'wpi-element:';
+	let elementClasses = $state<ElementClassSummary[]>([]);
+	const elementClassTypes = $derived<NodeType[]>(
+		elementClasses.map((c) => ({
+			id: ELEMENT_CLASS_PREFIX + c.descriptor_id,
+			label: c.status === 'draft' ? m.wpi_editor_draft_class({ id: c.descriptor_id }) : c.descriptor_id,
+			category: 'Elements',
+			icon: 'square-mouse-pointer',
+			inputs: ['in'],
+			outputs: ['out'],
+			defaultData: {}
+		}))
+	);
+	let showCreateElement = $state(false);
 	// Size of the canvas area, for placing created nodes in the middle of the view.
 	let canvasWidth = $state(0);
 	let canvasHeight = $state(0);
@@ -280,15 +298,17 @@
 			y: snapToGridValue(rawY)
 		};
 
-		const id = `${nodeType.id}-${Date.now()}`;
+		const cls = nodeType.id.startsWith(ELEMENT_CLASS_PREFIX) ? nodeType.id.slice(ELEMENT_CLASS_PREFIX.length) : null;
+		const type = cls ? 'wpi-element' : nodeType.id;
+		const id = `${type}-${Date.now()}`;
 		takeSnapshot();
 		nodes = [
 			...nodes,
 			{
 				id,
-				type: nodeType.id,
+				type,
 				position,
-				data: { ...nodeType.defaultData, label: nodeType.label }
+				data: cls ? { label: cls, element: cls } : { ...nodeType.defaultData, label: nodeType.label }
 			}
 		];
 		hasContent = true;
@@ -330,6 +350,14 @@
 		hasContent = true;
 		selectedNodeId = id;
 		checkLimits();
+	}
+
+	async function loadElementClasses() {
+		try {
+			elementClasses = await listElementClasses();
+		} catch {
+			toast(m.wpi_editor_element_classes_failed());
+		}
 	}
 
 	function alignSelected(mode: AlignMode) {
@@ -419,6 +447,8 @@
 
 	// ── Keyboard shortcuts ───────────────────────────────────────────────────
 	function onKeydown(e: KeyboardEvent) {
+		// The Create Element form has its own fields; undo and save belong to the canvas.
+		if (showCreateElement) return;
 		const mod = e.ctrlKey || e.metaKey;
 		if (mod && e.key === 'z' && !e.shiftKey) {
 			e.preventDefault();
@@ -436,6 +466,7 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(async () => {
+		loadElementClasses();
 		const res = await flowService.getNodeTypes();
 		nodeTypes = res.nodeTypes ?? [];
 		await loadDefaultOrPicker();
@@ -454,7 +485,7 @@
 	<div class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
 		<NodePalette
-			{nodeTypes}
+			nodeTypes={[...nodeTypes, ...elementClassTypes]}
 			extraCategories={WPI_PALETTE_CATEGORIES}
 			{darkMode}
 			onDragStart={onPaletteDragStart}
@@ -479,7 +510,7 @@
 					activeFlow = { ...activeFlow, flow_name: name };
 				}
 			}}
-			onCreate={createWpiNode}
+			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
 			onLoadPage={() => toast(m.wpi_toolbar_load_page_not_yet_implemented())}
 			onUndo={undo}
 			onRedo={redo}
@@ -662,6 +693,17 @@
 		</div>
 	{/if}
 </div>
+
+{#if showCreateElement}
+	<CreateElementDialog
+		onCreated={(id) => {
+			showCreateElement = false;
+			toast(m.wpi_editor_element_class_created({ id }));
+			loadElementClasses();
+		}}
+		onClose={() => (showCreateElement = false)}
+	/>
+{/if}
 
 <!-- Flow Picker Modal -->
 {#if showPicker}

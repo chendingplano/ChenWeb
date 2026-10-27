@@ -340,6 +340,47 @@ func (v *validator) classRow(b map[string]any) {
 	}
 }
 
+// ValidateDraftClass checks an element class row created as a draft, before its
+// code exists (OpenSpec wpi-create-element-class, design D4). Without code it
+// cannot know which attributes the class has, so it checks their names, that
+// attributes holding actions have no default, and the defaults of attributes
+// every class shares.
+func ValidateDraftClass(body map[string]any) []Issue {
+	id, _ := body["descriptor_id"].(string)
+	v := &validator{kind: KindElement, id: id}
+	if !idPattern.MatchString(id) {
+		v.errf("/descriptor_id", "descriptor ID %q must match %s", id, idPattern)
+	}
+	if sv, _ := body["schema_version"].(string); sv != SchemaVersion {
+		v.errf("/schema_version", "schema_version %q is not supported by this interpreter (supports %q)", sv, SchemaVersion)
+	}
+	// A draft has no code, so its description is all that says what to build.
+	if _, ok := body["description"]; !ok {
+		v.errf("/description", "a draft class needs a description")
+	}
+	v.text(body, "description", "")
+	defaults := map[string]any{}
+	for _, k := range slices.Sorted(maps.Keys(body)) {
+		switch {
+		case slices.Contains(classAttrs, k):
+		case k == "element" || !segmentPattern.MatchString(k):
+			v.errf("/"+k, "%q cannot be an attribute name", k)
+		case body[k] == nil:
+		case slices.Contains(actionHolding, k):
+			v.errf("/"+k, "attribute %q holds actions, so it cannot have a default; use null", k)
+		default:
+			defaults[k] = body[k]
+		}
+	}
+	for _, k := range elementSizeAttrs {
+		v.size(defaults, k, "")
+	}
+	v.text(defaults, "label", "")
+	v.binding(defaults, "")
+	v.oneOf(defaults, "binding_mode", "", bindingModes)
+	return v.issues
+}
+
 // elementInstance checks a page entry {"element": class, ...} as far as it can
 // without the class row; pageInstances checks it against the row.
 func (v *validator) elementInstance(m map[string]any, path string) {

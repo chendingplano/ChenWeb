@@ -146,6 +146,67 @@ func (s store) pageSummaries(ctx context.Context) ([]PageSummary, error) {
 	return out, rows.Err()
 }
 
+// errClassExists reports a create for a class ID that already has a row.
+var errClassExists = errors.New("class already exists")
+
+// insertDraftClass stores body as version 1 of a new element class, as a draft
+// (OpenSpec wpi-create-element-class, design D3). Any row of the ID, whatever
+// its version or status, makes it a conflict; so does a concurrent create.
+func (s store) insertDraftClass(ctx context.Context, id string, raw []byte, actor string) error {
+	res, err := s.db.ExecContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
+		SELECT 'element', $1::text, 1, $2::text, $3::jsonb, 'draft', $4::text, $4::text
+		WHERE NOT EXISTS (SELECT 1 FROM kb.wpi_descriptors WHERE kind = 'element' AND descriptor_id = $1::text)`,
+		id, SchemaVersion, string(raw), actor)
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		return errClassExists
+	}
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errClassExists
+	}
+	return nil
+}
+
+// ClassSummary describes the latest draft or active version of a class to the
+// editor's palette.
+type ClassSummary struct {
+	DescriptorID string `json:"descriptor_id"`
+	Version      int    `json:"version"`
+	Status       string `json:"status"`
+	Description  any    `json:"description"`
+}
+
+// elementClasses returns the latest draft or active version of every element
+// class, ordered by ID; classes with only retired rows are left out.
+func (s store) elementClasses(ctx context.Context) ([]ClassSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, status, body->'description'
+		FROM kb.wpi_descriptors WHERE kind = 'element' AND status IN ('draft', 'active') ORDER BY descriptor_id, version DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ClassSummary{}
+	for rows.Next() {
+		var c ClassSummary
+		var desc []byte
+		if err := rows.Scan(&c.DescriptorID, &c.Version, &c.Status, &desc); err != nil {
+			return nil, err
+		}
+		if desc != nil {
+			_ = json.Unmarshal(desc, &c.Description)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // Kinds of stored rows that query and load-file name (design D8).
 const (
 	storedStatement = "statement"

@@ -1,0 +1,24 @@
+## 1. Backend
+
+- [x] 1.1 Validator: `ValidateDraftClass(body)` — ID, schema version, required description, attribute names (pattern, not `element`), action-holding attributes `null`, shared-attribute value checks; tests
+- [x] 1.2 Store: `insertDraftClass` (version 1, `draft`, only when no row of the ID exists; unique violation → conflict) and `elementClasses` (latest draft-or-active version per class); sqlmock tests
+- [x] 1.3 Handlers `CreateElementClass` (admin, 201/400/403/409) and `ListElementClasses` (logged in), routes in `server/api/routes.go`; handler tests
+- [x] 1.4 `go test ./api/wpi/...` and `go vet` pass
+
+## 2. Frontend
+
+- [x] 2.1 `web/src/lib/wpi/api.ts`: `listElementClasses`, `createElementClass` (WpiError carrying status and issues)
+- [x] 2.2 `element-class-form.ts`: parse a default (JSON or string), check an attribute name, build the class body; unit tests
+- [x] 2.3 `CreateElementDialog.svelte`: class ID, description en/zh-cn, attribute row with Add Attribute, attribute list with remove, Create Element / Cancel, errors shown
+- [x] 2.4 `wpi-editor.svelte`: Create Element opens the form; load the class list on open and after a create; ELEMENTS folder entries (drafts marked); dropping a class adds a `wpi-element` node labelled with the class
+- [x] 2.5 Message keys in `web/messages/en.json` and `zh-cn.json`; `bun run check` and the unit tests pass
+
+## 3. Verification
+
+- [x] 3.1 Against the dev server: create a draft through the form, see it in ELEMENTS, get the "already exists" error on a second create, drag a class onto the canvas
+- [x] 3.2 Remove the verification draft row afterwards
+
+## 4. Docs
+
+- [x] 4.1 Devdoc 2026102601: §3.5.1 (a class may be drafted before its code; the create workflow), §6 (draft rows, the create and list endpoints), §9 (authoring)
+- [x] 4.2 Devdoc 2026102603 and the WPI reusable-module entries: the new endpoints and the form

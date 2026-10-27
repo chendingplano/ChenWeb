@@ -151,3 +151,70 @@ func TestPutDescriptor(t *testing.T) {
 		})
 	}
 }
+
+const sliderDraft = `{"descriptor_id": "slider", "schema_version": "0.2", "description": {"en": "A slider"}, "label": null, "min": 0}`
+
+func TestCreateElementClass(t *testing.T) {
+	t.Run("stored as a draft", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		mock.ExpectExec(insertDraftQuery).WithArgs("slider", SchemaVersion, sliderDraft, "admin@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
+		rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", sliderDraft)
+		if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"status":"draft"`) || !strings.Contains(rec.Body.String(), `"version":1`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("already exists", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		mock.ExpectExec(insertDraftQuery).WillReturnResult(sqlmock.NewResult(0, 0))
+		rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", strings.Replace(sliderDraft, "slider", "input", 1))
+		if rec.Code != 409 || !strings.Contains(rec.Body.String(), `element class \"input\" already exists`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	})
+	rejected := []struct {
+		name, body string
+		user       *ApiTypes.UserInfo
+		status     int
+		want       string
+	}{
+		{"no description", `{"descriptor_id": "slider", "schema_version": "0.2"}`, adminUser, 400, `a draft class needs a description`},
+		{"action default", `{"descriptor_id": "slider", "schema_version": "0.2", "description": "x", "on_click": {"action": "close-page"}}`, adminUser, 400, `holds actions`},
+		{"not JSON", `[1]`, adminUser, 400, "JSON object"},
+		{"not an admin", sliderDraft, plainUser, 403, "Admin access required"},
+		{"not logged in", sliderDraft, nil, 401, "Authentication required"},
+	}
+	for _, c := range rejected {
+		t.Run(c.name, func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			rec := call(t, testHandler(db, c.user).CreateElementClass, "POST", c.body)
+			if rec.Code != c.status || !strings.Contains(rec.Body.String(), c.want) {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal("nothing may be stored: ", err)
+			}
+		})
+	}
+}
+
+func TestListElementClasses(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(elementClassesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "status", "description"}).
+		AddRow("input", 1, "active", []byte(`"A field"`)).
+		AddRow("slider", 1, "draft", []byte(`{"en": "A slider"}`)))
+	rec := call(t, testHandler(db, plainUser).ListElementClasses, "GET", "")
+	want := `{"classes":[{"descriptor_id":"input","version":1,"status":"active","description":"A field"},{"descriptor_id":"slider","version":1,"status":"draft","description":{"en":"A slider"}}]}`
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, testHandler(db, nil).ListElementClasses, "GET", ""); rec.Code != 401 {
+		t.Fatalf("not logged in: status %d", rec.Code)
+	}
+}

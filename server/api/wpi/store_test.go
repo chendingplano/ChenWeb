@@ -2,9 +2,11 @@ package wpi
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 )
 
 const latestAllQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_descriptors WHERE kind = \$1 AND status = 'active' ORDER BY descriptor_id, version DESC`
@@ -60,6 +62,48 @@ func TestStoreLatestRejectsNonObjectBody(t *testing.T) {
 	mock.ExpectQuery(latestPagesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).AddRow("x", 1, []byte(`null`)))
 	if _, err := (store{db}).latest(context.Background(), KindPage, []string{"x"}); err == nil {
 		t.Fatal("a null body must be an error")
+	}
+}
+
+const insertDraftQuery = `INSERT INTO kb\.wpi_descriptors .+ SELECT 'element', \$1::text, 1, .+ 'draft', .+ WHERE NOT EXISTS \(SELECT 1 FROM kb\.wpi_descriptors WHERE kind = 'element' AND descriptor_id = \$1::text\)`
+
+const elementClassesQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, status, body->'description'\s+FROM kb\.wpi_descriptors WHERE kind = 'element' AND status IN \('draft', 'active'\) ORDER BY descriptor_id, version DESC`
+
+func TestStoreInsertDraftClass(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	ctx := context.Background()
+	mock.ExpectExec(insertDraftQuery).WithArgs("slider", SchemaVersion, `{"a":1}`, "cding@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
+	if err := (store{db}).insertDraftClass(ctx, "slider", []byte(`{"a":1}`), "cding@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// A row of the ID exists: nothing inserted.
+	mock.ExpectExec(insertDraftQuery).WillReturnResult(sqlmock.NewResult(0, 0))
+	if err := (store{db}).insertDraftClass(ctx, "input", []byte(`{}`), "x"); !errors.Is(err, errClassExists) {
+		t.Fatalf("existing ID: got %v", err)
+	}
+	// A concurrent create won the race.
+	mock.ExpectExec(insertDraftQuery).WillReturnError(&pq.Error{Code: "23505"})
+	if err := (store{db}).insertDraftClass(ctx, "slider", []byte(`{}`), "x"); !errors.Is(err, errClassExists) {
+		t.Fatalf("unique violation: got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreElementClasses(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(elementClassesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "status", "description"}).
+		AddRow("input", 2, "active", []byte(`{"en": "A field"}`)).
+		AddRow("slider", 1, "draft", nil))
+	got, err := store{db}.elementClasses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Status != "active" || got[0].Description.(map[string]any)["en"] != "A field" || got[1].Status != "draft" || got[1].Description != nil {
+		t.Fatalf("got %+v", got)
 	}
 }
 

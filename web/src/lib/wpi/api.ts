@@ -1,5 +1,5 @@
 // Client for the WPI endpoints (server/api/wpi).
-import type { ActionRef, Bundle, Issue, Json, JsonObject } from './types';
+import type { ActionRef, Bundle, Issue, Json, JsonObject, Text } from './types';
 
 export class WpiError extends Error {
 	constructor(
@@ -51,4 +51,37 @@ export async function runAction(
 		throw new WpiError(String(body.error ?? res.statusText), res.status, [], fieldErrors);
 	}
 	return body as Record<string, Json>;
+}
+
+// The latest draft or active version of an element class, for the editor's
+// palette. A draft is defined but has no code yet.
+export type ElementClassSummary = {
+	descriptor_id: string;
+	version: number;
+	status: 'draft' | 'active';
+	description: Text | null;
+};
+
+export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise<ElementClassSummary[]> {
+	const res = await fetchFn('/api/v1/wpi/classes/element', { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) {
+		throw new WpiError(String(body.error ?? res.statusText), res.status);
+	}
+	return (body.classes as ElementClassSummary[]) ?? [];
+}
+
+// Stores a new element class as a draft. Throws WpiError: 409 when the class
+// ID already exists, 400 with issues when the draft breaks a rule.
+export async function createElementClass(classRow: JsonObject, fetchFn: typeof fetch = fetch): Promise<void> {
+	const res = await fetchFn('/api/v1/wpi/classes/element', {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(classRow)
+	});
+	if (!res.ok) {
+		const body = await parse(res);
+		throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+	}
 }
