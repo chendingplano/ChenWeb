@@ -22,3 +22,9 @@
 
 - [x] 4.1 Devdoc 2026102601: §3.5.1 (a class may be drafted before its code; the create workflow), §6 (draft rows, the create and list endpoints), §9 (authoring)
 - [x] 4.2 Devdoc 2026102603 and the WPI reusable-module entries: the new endpoints and the form
+
+## 5. Form revision (class attributes in the list)
+
+- [x] 5.1 `element-class-form.ts`: initial class attributes, value parsing per attribute, edit text, edit and row checks; unit tests
+- [x] 5.2 `CreateElementDialog.svelte`: drop the class ID and description inputs; list starts with the class attributes (not removable); double-click (or Enter/F2) edits a value in place; stale create errors cleared on change
+- [x] 5.3 Messages updated in both languages; `bun run check`, unit tests and the browser run pass; spec, design and devdocs updated

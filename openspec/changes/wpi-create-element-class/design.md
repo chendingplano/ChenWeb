@@ -92,21 +92,32 @@ latest version whose status is `draft` or `active` of each element class, as
 out. Any logged-in user may read it, as with page search.
 
 **D7. The form.** `CreateElementDialog.svelte` is a modal over the editor, styled like the
-editor's other dark panels. Its fields are the class ID, the description in English
-(required) and in Chinese (optional), and an attribute row: name, default value, and
-"Every instance must set it". **Add Attribute** appends the row to a list, which shows each
-attribute's stored value and has a remove button. **Create Element** sends the descriptor.
+editor's other dark panels. The descriptor is one list of attributes, in row order. It
+starts with the class attributes (`descriptor_id` empty, `schema_version` `"0.2"`,
+`description` `{"en": "", "zh-cn": ""}`), which are tagged "class" and cannot be removed.
+Above the list, an attribute row (name, default value, "Every instance must set it") and
+**Add Attribute** append instance attributes, which have a remove button. Double-clicking a
+row edits its value in place (Enter or blur keeps it, Escape drops it without closing the
+form; Enter or F2 on the focused value does the same from the keyboard). **Create Element**
+sends the descriptor. The user decided (2026-10-27) that the class attributes are created
+automatically and that the list is their only editor, replacing separate class ID and
+description inputs.
 
-- A default value is parsed as JSON when it is valid JSON (`200`, `true`,
-  `{"en": "Name"}`), otherwise it is taken as a string (`200px`, `read-write`). The list
-  shows the stored JSON, so `"123"` versus `123` is visible.
-- The description is `{"en": …, "zh-cn": …}`, leaving out an empty Chinese text.
-- Client-side checks give quick feedback on the ID pattern, the attribute name pattern,
-  duplicate names, reserved names (`descriptor_id`, `schema_version`, `description`,
-  `element`) and a missing default. The server's rules are the ones that count, and its
-  issues are shown in the form. A 409 is shown as "already exists".
-- The pure parts (parsing a default, checking a name, building the body) are in
-  `element-class-form.ts`, with unit tests.
+- A typed value is parsed as JSON when it is valid JSON (`200`, `true`,
+  `{"en": "Name"}`), otherwise it is taken as a string (`200px`, `read-write`).
+  `descriptor_id` and `schema_version` are always strings. The list shows the stored JSON,
+  so `"123"` versus `123` is visible, and an edit starts from text that reads back as the
+  same value.
+- Empty texts in the description object are left out, so an unfilled Chinese text is not
+  sent.
+- Client-side checks give quick feedback on the class ID, an English description, the
+  attribute name pattern, duplicate names, reserved names (`descriptor_id`,
+  `schema_version`, `description`, `element`), a missing default and an instance attribute
+  edited to empty. The server's rules are the ones that count, and its issues are shown in
+  the form. A 409 is shown as "already exists". A change to the list clears the last
+  create's error.
+- The pure parts (the initial list, parsing a value, checking a name, building and checking
+  the body) are in `element-class-form.ts`, with unit tests.
 
 **D8. The ELEMENTS folder shows the class list.** The editor loads the list when it opens,
 and again after a create. Each class becomes a palette entry in the `Elements` category

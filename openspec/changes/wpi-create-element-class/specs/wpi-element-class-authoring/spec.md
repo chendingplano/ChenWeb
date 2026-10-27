@@ -94,15 +94,32 @@ left out. It SHALL require a logged-in user.
 
 ### Requirement: Create Element form
 In the WPI editor, **Create Nodes → Create Element** SHALL open a form that defines an
-element class: its ID, a description in English (required) and Chinese (optional), and its
-attributes. An attribute SHALL be entered as a name and either a default value or "Every
-instance must set it" (stored as `null`), and added with **Add Attribute** to a list that
-shows every attribute added so far with its stored value and a way to remove it. A default
-value SHALL be stored as JSON when it parses as JSON, otherwise as a string. **Create
-Element** SHALL post the class. On success the form SHALL close and the class SHALL appear
+element class as a list of its attributes. The list SHALL start with the class attributes
+`descriptor_id` (empty), `schema_version` (`"0.2"`) and `description`
+(`{"en": "", "zh-cn": ""}`), which cannot be removed. An instance attribute SHALL be entered
+as a name and either a default value or "Every instance must set it" (stored as `null`), and
+added with **Add Attribute** to the list, which shows every attribute with its stored value;
+instance attributes can be removed. Double-clicking an attribute SHALL edit its value in
+place: Enter or leaving the field keeps the edit, Escape drops it. A typed value SHALL be
+stored as JSON when it parses as JSON, otherwise as a string, except `descriptor_id` and
+`schema_version`, which are always strings; an instance attribute cannot be edited to empty.
+**Create Element** SHALL post the class, leaving out empty description texts, after
+checking that `descriptor_id` is a valid class ID and `description` has an English text. On success the form SHALL close and the class SHALL appear
 in the ELEMENTS folder. On failure the form SHALL stay open and show the error, including
 "already exists" for a 409. All of the form's text SHALL be available in English and
 Chinese.
+
+#### Scenario: Class attributes listed from the start
+- **WHEN** the form opens
+- **THEN** the list shows `descriptor_id`, `schema_version` `0.2` and `description`, with no way to remove them
+
+#### Scenario: Value edited by double-click
+- **WHEN** the author double-clicks `descriptor_id`, types `slider` and presses Enter
+- **THEN** the list shows `slider`, and the created row has `"descriptor_id": "slider"`
+
+#### Scenario: Class ID missing
+- **WHEN** the author presses Create Element without setting `descriptor_id`
+- **THEN** nothing is sent and the form says `descriptor_id` must be the class ID
 
 #### Scenario: Attributes listed as they are added
 - **WHEN** the author adds `label` with "Every instance must set it" and then `max` with default `100`

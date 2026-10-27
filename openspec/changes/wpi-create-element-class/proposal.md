@@ -9,11 +9,12 @@ implement.
 
 ## What Changes
 
-- **Create Element opens a form** that defines a new element class descriptor: the class
-  ID, a description in English and optionally Chinese, and its instance attributes. Each
-  attribute is entered with a name and either a default value or "every instance must set
-  it" (`null`), then added with **Add Attribute**. A list shows the attributes added so
-  far, each of which can be removed. **Create Element** stores the descriptor.
+- **Create Element opens a form** that defines a new element class descriptor as a list of
+  attributes. The list starts with the class attributes (`descriptor_id`, `schema_version`,
+  `description`). Instance attributes are entered with a name and either a default value or
+  "every instance must set it" (`null`), then added with **Add Attribute**, and can be
+  removed. Double-clicking an attribute edits its value. **Create Element** stores the
+  descriptor.
 - **The new class is stored as a draft**: version 1 of `kind = 'element'` in
   `kb.wpi_descriptors`, with `status = 'draft'`. If any row of that class ID already
   exists, whatever its version or status, nothing is stored and the error is reported:

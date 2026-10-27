@@ -1,7 +1,7 @@
 <!-- web/src/lib/components/shared-ui/canvas/CreateElementDialog.svelte -->
-<!-- The WPI editor's Create Element form: defines a new element class (its ID, description and
-     instance attributes) and stores it as a draft, to be implemented in code afterwards
-     (OpenSpec wpi-create-element-class). -->
+<!-- The WPI editor's Create Element form: defines a new element class as a list of attributes,
+     starting with its class attributes, and stores it as a draft, to be implemented in code
+     afterwards (OpenSpec wpi-create-element-class). Double-clicking an attribute edits its value. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import { createElementClass, WpiError } from '$lib/wpi/api';
@@ -9,8 +9,13 @@
   import {
     attributeProblem,
     buildClassRow,
-    CLASS_ID_PATTERN,
     draftAttribute,
+    editProblem,
+    editText,
+    initialAttributes,
+    isClassAttribute,
+    parseValue,
+    rowProblem,
     type AttributeProblem,
     type DraftAttribute,
   } from './element-class-form';
@@ -23,10 +28,7 @@
     onClose:   () => void;
   } = $props();
 
-  let classId       = $state('');
-  let descriptionEn = $state('');
-  let descriptionZh = $state('');
-  let attributes    = $state<DraftAttribute[]>([]);
+  let attributes = $state<DraftAttribute[]>(initialAttributes());
 
   // The attribute being entered.
   let attrName     = $state('');
@@ -34,16 +36,28 @@
   let attrRequired = $state(false);
   let attrError    = $state('');
 
+  // The attribute whose value is being edited in the list.
+  let editing   = $state<string | null>(null);
+  let editValue = $state('');
+  let editError = $state('');
+
   let formError = $state('');
   let issues    = $state<Issue[]>([]);
   let saving    = $state(false);
 
+  // A changed attribute may have fixed what the last create reported.
+  function clearFormError() {
+    formError = '';
+    issues = [];
+  }
+
   function problemText(p: AttributeProblem, name: string): string {
     switch (p) {
-      case 'name':       return m.wpi_create_element_err_attribute_name();
-      case 'reserved':   return m.wpi_create_element_err_reserved({ name });
-      case 'duplicate':  return m.wpi_create_element_err_duplicate({ name });
-      case 'no_default': return m.wpi_create_element_err_no_default();
+      case 'name':        return m.wpi_create_element_err_attribute_name();
+      case 'reserved':    return m.wpi_create_element_err_reserved({ name });
+      case 'duplicate':   return m.wpi_create_element_err_duplicate({ name });
+      case 'no_default':  return m.wpi_create_element_err_no_default();
+      case 'empty_value': return m.wpi_create_element_err_empty_value();
     }
   }
 
@@ -55,6 +69,7 @@
       return;
     }
     attributes = [...attributes, draftAttribute(name, attrRequired, attrDefault)];
+    clearFormError();
     attrName = '';
     attrDefault = '';
     attrRequired = false;
@@ -63,23 +78,68 @@
 
   function removeAttribute(name: string) {
     attributes = attributes.filter((a) => a.name !== name);
+    clearFormError();
+  }
+
+  function startEdit(attr: DraftAttribute) {
+    // A double-click inside the open editor selects a word; it must not restart the edit.
+    if (editing === attr.name) return;
+    editing = attr.name;
+    editValue = editText(attr);
+    editError = '';
+  }
+
+  function commitEdit() {
+    const name = editing;
+    if (name === null) return;
+    const p = editProblem(name, editValue);
+    if (p) {
+      editError = problemText(p, name);
+      return;
+    }
+    attributes = attributes.map((a) => (a.name === name ? { name, value: parseValue(name, editValue) } : a));
+    editing = null;
+    editError = '';
+    clearFormError();
+  }
+
+  function cancelEdit() {
+    editing = null;
+    editError = '';
+  }
+
+  function onEditKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitEdit();
+    } else if (e.key === 'Escape') {
+      // Escape leaves the edit, not the form.
+      e.stopPropagation();
+      cancelEdit();
+    }
+  }
+
+  function focusSelect(node: HTMLInputElement) {
+    node.focus();
+    node.select();
   }
 
   async function create() {
-    formError = '';
-    issues = [];
-    const id = classId.trim();
-    if (!CLASS_ID_PATTERN.test(id)) {
+    clearFormError();
+    const row = buildClassRow(attributes);
+    const p = rowProblem(row);
+    if (p === 'class_id') {
       formError = m.wpi_create_element_err_class_id();
       return;
     }
-    if (descriptionEn.trim() === '') {
+    if (p === 'description') {
       formError = m.wpi_create_element_err_description();
       return;
     }
+    const id = row.descriptor_id as string;
     saving = true;
     try {
-      await createElementClass(buildClassRow(id, descriptionEn, descriptionZh, attributes));
+      await createElementClass(row);
       onCreated(id);
     } catch (e) {
       if (e instanceof WpiError && e.status === 409) formError = m.wpi_create_element_err_exists({ id });
@@ -122,23 +182,8 @@
     </div>
 
     <div style="flex:1; overflow-y:auto; padding:16px 20px;">
-      <!-- Class -->
-      <label class="field">
-        <span>{m.wpi_create_element_class_id()}</span>
-        <input bind:value={classId} maxlength="128" autocomplete="off" />
-        <small>{m.wpi_create_element_class_id_hint()}</small>
-      </label>
-      <label class="field">
-        <span>{m.wpi_create_element_description_en()}</span>
-        <input bind:value={descriptionEn} />
-      </label>
-      <label class="field">
-        <span>{m.wpi_create_element_description_zh()}</span>
-        <input bind:value={descriptionZh} />
-      </label>
-
-      <!-- Attributes -->
-      <div class="section">{m.wpi_create_element_attributes()}</div>
+      <!-- New attribute -->
+      <div class="section" style="margin-top:0;">{m.wpi_create_element_attributes()}</div>
       <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
         <label class="field" style="flex:1 1 140px; margin:0;">
           <span>{m.wpi_create_element_attribute_name()}</span>
@@ -159,38 +204,59 @@
         <div class="error" style="margin-top:6px;">{attrError}</div>
       {/if}
 
-      <div style="margin-top:10px; border:1px solid #1e2a3a; border-radius:6px; overflow:hidden;">
-        {#if attributes.length === 0}
-          <div style="padding:10px 12px; font-size:11px; color:#4b5563; font-style:italic;">{m.wpi_create_element_no_attributes()}</div>
-        {:else}
-          <table style="width:100%; border-collapse:collapse; font-size:11px;">
-            <thead>
-              <tr style="background:#161b27; color:#6b7280; text-align:left;">
-                <th style="padding:6px 12px; font-weight:500;">{m.wpi_create_element_attribute_name()}</th>
-                <th style="padding:6px 12px; font-weight:500;">{m.wpi_create_element_default_value()}</th>
-                <th style="width:32px;"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each attributes as attr (attr.name)}
-                <tr style="border-top:1px solid #1e2a3a; color:#e2e8f0;">
-                  <td style="padding:6px 12px; font-family:monospace;">{attr.name}</td>
-                  <td style="padding:6px 12px; font-family:monospace; word-break:break-all;">
-                    {JSON.stringify(attr.value)}
-                    {#if attr.value === null}<span style="color:#6b7280; font-family:inherit;"> · {m.wpi_create_element_must_set()}</span>{/if}
-                  </td>
-                  <td style="padding:0 6px; text-align:center;">
+      <!-- The class's attributes -->
+      <div style="margin-top:12px; border:1px solid #1e2a3a; border-radius:6px; overflow:hidden;">
+        <table style="width:100%; border-collapse:collapse; font-size:11px;">
+          <thead>
+            <tr style="background:#161b27; color:#6b7280; text-align:left;">
+              <th style="padding:6px 12px; font-weight:500; width:34%;">{m.wpi_create_element_attribute_name()}</th>
+              <th style="padding:6px 12px; font-weight:500;">{m.wpi_create_element_value()}</th>
+              <th style="width:32px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each attributes as attr (attr.name)}
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <tr class="attr-row" style="border-top:1px solid #1e2a3a; color:#e2e8f0;" ondblclick={() => startEdit(attr)}>
+                <td style="padding:6px 12px; font-family:monospace;">
+                  {attr.name}
+                  {#if isClassAttribute(attr.name)}<span class="tag">{m.wpi_create_element_class_attribute()}</span>{/if}
+                </td>
+                <td style="padding:3px 6px; font-family:monospace; word-break:break-all;">
+                  {#if editing === attr.name}
+                    <input class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit}
+                      aria-label={m.wpi_create_element_edit_value({ name: attr.name })} autocomplete="off" use:focusSelect />
+                  {:else}
+                    <button type="button" class="value" title={m.wpi_create_element_edit_hint()}
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(attr); } }}>
+                      {#if attr.name === 'descriptor_id' && attr.value === ''}
+                        <span class="muted">{m.wpi_create_element_double_click_to_set()}</span>
+                      {:else if attr.name === 'descriptor_id' || attr.name === 'schema_version'}
+                        {attr.value}
+                      {:else}
+                        {JSON.stringify(attr.value)}
+                        {#if attr.value === null}<span class="muted"> · {m.wpi_create_element_must_set()}</span>{/if}
+                      {/if}
+                    </button>
+                  {/if}
+                </td>
+                <td style="padding:0 6px; text-align:center;">
+                  {#if !isClassAttribute(attr.name)}
                     <button type="button" onclick={() => removeAttribute(attr.name)}
                       aria-label={m.wpi_create_element_remove_attribute({ name: attr.name })}
                       title={m.wpi_create_element_remove_attribute({ name: attr.name })}
                       style="color:#6b7280; background:none; border:none; cursor:pointer;">✕</button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
+      <small class="hint">{m.wpi_create_element_edit_hint()}</small>
+      {#if editError}
+        <div class="error" style="margin-top:6px;">{editError}</div>
+      {/if}
 
       {#if formError}
         <div class="error" style="margin-top:12px;">
@@ -225,10 +291,27 @@
     padding: 5px 8px; font-size: 12px; color: #e2e8f0;
   }
   .field input:disabled { opacity: 0.4; }
-  .field small, .hint { display: block; font-size: 10px; color: #4b5563; margin-top: 3px; }
+  .hint { display: block; font-size: 10px; color: #4b5563; margin-top: 3px; }
   .section {
     font-size: 9px; color: #6366f1; letter-spacing: 1px; text-transform: uppercase;
     margin: 16px 0 8px;
+  }
+  .attr-row:hover { background: rgba(255, 255, 255, 0.03); }
+  .value {
+    display: block; width: 100%; text-align: left; padding: 3px 6px;
+    background: none; border: 1px solid transparent; border-radius: 4px;
+    color: inherit; font: inherit; cursor: text; user-select: text;
+  }
+  .value:focus-visible { border-color: #6366f1; outline: none; }
+  .edit {
+    width: 100%; box-sizing: border-box;
+    background: #0d1117; border: 1px solid #6366f1; border-radius: 4px;
+    padding: 3px 6px; font: inherit; color: #e2e8f0;
+  }
+  .muted { color: #6b7280; font-family: system-ui, sans-serif; }
+  .tag {
+    margin-left: 6px; padding: 0 5px; border-radius: 3px;
+    background: #1e2535; color: #818cf8; font-size: 9px; font-family: system-ui, sans-serif;
   }
   .btn {
     background: #1e2535; border: 1px solid #374151; border-radius: 6px;
