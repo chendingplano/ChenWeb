@@ -19,7 +19,6 @@
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 
-	import FlowToolbar from './canvas/FlowToolbar.svelte';
 	import FlowPicker from './canvas/FlowPicker.svelte';
 	import NodePalette from './canvas/NodePalette.svelte';
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
@@ -451,32 +450,6 @@
 
 <!-- Starts below the sticky site header (routes/semos/components/SiteHeader.svelte: h-[4.25rem] + 1px border, z-50), which would otherwise cover the top of the editor. -->
 <div class="fixed bottom-0 right-0 flex flex-col" style="background:#0d1117; z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
-	<!-- Toolbar -->
-	<FlowToolbar
-		{activeFlow}
-		{isDirty}
-		{canUndo}
-		{canRedo}
-		{darkMode}
-		onPickerOpen={() => {
-			if (isDirty) {
-				if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
-			}
-			showPicker = true;
-		}}
-		onRename={(name) => {
-			if (activeFlow) {
-				activeFlow = { ...activeFlow, flow_name: name };
-			}
-		}}
-		onUndo={undo}
-		onRedo={redo}
-		onFitView={() => {}}
-		onSave={save}
-		onSaveAsTemplate={saveCurrentAsTemplate}
-		onClose={requestClose}
-	/>
-
 	<!-- 3-panel body -->
 	<div class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
@@ -490,11 +463,30 @@
 		<!-- Canvas column: tool bar + canvas -->
 		<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
 		<WpiCanvasToolbar
+			{activeFlow}
+			{isDirty}
+			{canUndo}
+			{canRedo}
 			selectedCount={selectedTotal}
+			onPickerOpen={() => {
+				if (isDirty) {
+					if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
+				}
+				showPicker = true;
+			}}
+			onRename={(name) => {
+				if (activeFlow) {
+					activeFlow = { ...activeFlow, flow_name: name };
+				}
+			}}
 			onCreate={createWpiNode}
 			onLoadPage={() => toast(m.wpi_toolbar_load_page_not_yet_implemented())}
+			onUndo={undo}
+			onRedo={redo}
 			onAlign={alignSelected}
 			onDistribute={distributeSelected}
+			onSave={save}
+			onSaveAsTemplate={saveCurrentAsTemplate}
 		/>
 		<div
 			class="min-h-0 flex-1 overflow-hidden"
