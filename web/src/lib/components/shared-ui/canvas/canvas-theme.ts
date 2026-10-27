@@ -12,10 +12,11 @@ const DARK = {
 	field: '#0d1117', // inline edit fields
 	divider: '#1e2a3a', // lines between areas
 	border: '#374151', // borders of inputs and nodes
-	text: '#e2e8f0',
-	'text-2': '#94a3b8',
-	'text-muted': '#6b7280',
-	'text-faint': '#4b5563',
+	// All text is white in dark mode; size and weight, not grey, set the levels apart.
+	text: '#ffffff',
+	'text-2': '#ffffff',
+	'text-muted': '#ffffff',
+	'text-faint': '#ffffff',
 	accent: '#6366f1',
 	'accent-2': '#818cf8',
 	warn: '#fbbf24',
