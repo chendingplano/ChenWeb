@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Node } from '@xyflow/svelte';
-import { nodeJson, pageJson } from './wpi-json';
+import { nodeData, nodeJson, pageJson } from './wpi-json';
 
 function element(id: string, cls: string, x: number, y: number, attrs?: Record<string, unknown>): Node {
 	return { id, type: 'wpi-element', position: { x, y }, data: { label: `name of ${id}`, element: cls, ...(attrs ? { attrs } : {}) } };
@@ -17,6 +17,18 @@ test('an element node is its class and the attributes set, not the node name', (
 test('other nodes show their data', () => {
 	const page: Node = { id: 'p', type: 'wpi-page', position: { x: 0, y: 0 }, data: { label: 'Page' } };
 	assert.deepEqual(nodeJson(page), { label: 'Page' });
+});
+
+test('an edited element instance goes back into the node, which keeps its name', () => {
+	const node = element('b', 'button', 0, 0, { label: 'Save' });
+	const data = nodeData(node, { element: 'link', label: 'Send', width: 200 });
+	assert.deepEqual(data, { label: 'name of b', element: 'link', attrs: { label: 'Send', width: 200 } });
+	assert.deepEqual(nodeJson({ ...node, data }), { element: 'link', label: 'Send', width: 200 });
+});
+
+test('other nodes take the edited JSON as their data', () => {
+	const page: Node = { id: 'p', type: 'wpi-page', position: { x: 0, y: 0 }, data: { label: 'Page' } };
+	assert.deepEqual(nodeData(page, { label: 'Start', note: 'x' }), { label: 'Start', note: 'x' });
 });
 
 test('the page lists element nodes in reading order and skips other nodes', () => {

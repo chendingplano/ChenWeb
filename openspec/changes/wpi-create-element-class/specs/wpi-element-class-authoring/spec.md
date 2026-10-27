@@ -221,3 +221,29 @@ the element nodes' instances in reading order (top to bottom, then left to right
 #### Scenario: Nothing selected
 - **WHEN** a `button` node sits below an `input` node, nothing is selected, and the author clicks View JSON
 - **THEN** the view shows a page whose `elements` are the `input` instance, then the `button` instance
+
+### Requirement: Node tab
+In the WPI editor the properties panel SHALL have two tabs, **Properties** (the panel
+described above) and **Node**, and SHALL start 390 px wide. With one node selected, the Node
+tab SHALL list the node's descriptor, the JSON View JSON shows for it, one attribute per row
+with an editable name and value, and SHALL let the author add, rename, change and remove
+attributes. A value SHALL be read as JSON when it parses, otherwise as a string, and the
+field SHALL keep the text as typed until the author leaves it. A name SHALL start with a
+letter or `_` and contain only letters, digits and `_`, and SHALL NOT be one the descriptor
+already has; a refused rename SHALL put the old name back and show the problem. For an
+element node the edits SHALL go to `data.element` and `data.attrs`, leaving the node's name
+unchanged, and `element` SHALL be neither renamed nor removed, its value always text. Any
+other node's data SHALL be edited as it is, saying it has no WPI descriptor yet. The Flow
+page's properties panel SHALL have no tabs.
+
+#### Scenario: Attribute added
+- **WHEN** a `button` node is selected and the author adds `on_click` with the value `{"action": "save-page"}` on the Node tab
+- **THEN** the node's `data.attrs.on_click` is the object `{"action": "save-page"}`, listed last, and the Properties tab shows it
+
+#### Scenario: Rename refused
+- **WHEN** the author renames `label` to `on_click` on a node that has both
+- **THEN** `label` keeps its name and the panel says the node already has an attribute `on_click`
+
+#### Scenario: Class key fixed
+- **WHEN** an element node is selected on the Node tab
+- **THEN** its `element` row has a read-only name and no remove button

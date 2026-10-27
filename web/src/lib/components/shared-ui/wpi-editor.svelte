@@ -137,7 +137,7 @@
 	// ── Properties panel width (dragged by the separator on its left) ────
 	const PROPS_MIN_WIDTH = 200;
 	const PROPS_MAX_WIDTH = 640;
-	let propsWidth = $state(240);
+	let propsWidth = $state(390);
 	let body: HTMLElement;
 	let resizing: number | null = null;
 
@@ -720,6 +720,7 @@
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
 			elementClass={selectedElementClass}
+			nodeTab
 			width={propsWidth}
 			{darkMode}
 			onUpdate={updateNodeData}

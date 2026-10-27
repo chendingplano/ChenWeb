@@ -5,7 +5,7 @@
 import type { Json, JsonObject } from '$lib/wpi/types';
 
 export const CLASS_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
-const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // Every class row may have these (devdoc 2026102601 §3.5.1); the form lists them from the start.
 const CLASS_ATTRIBUTES = ['descriptor_id', 'schema_version', 'description', 'implement_notes'];
 // Values that are always text, never read as JSON.

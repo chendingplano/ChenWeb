@@ -6,11 +6,13 @@
   import type { JsonObject } from '$lib/wpi/types';
   import { localized } from '$lib/wpi/text';
   import { valueText, withAttribute } from './element-attributes';
+  import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
 
   let {
     node,
     nodeType,
     elementClass,
+    nodeTab  = false,
     width    = 240,
     darkMode = true,
     onUpdate,
@@ -21,6 +23,8 @@
     // instead of nodeType's: null when the class is not in the class list,
     // left out for other nodes.
     elementClass?: ElementClassSummary | null;
+    // Tabs Properties and Node, where Node edits the node's descriptor (the WPI editor).
+    nodeTab?:  boolean;
     width?:    number;
     darkMode?: boolean;
     onUpdate:  (nodeId: string, data: Record<string, unknown>) => void;
@@ -37,6 +41,13 @@
   };
   const MASKED_ATTRS  = new Set(['auth_token']);
   const TEXTAREA_ATTRS = new Set(['system_prompt', 'content', 'tool_config', 'headers', 'rule_expression']);
+
+  type Tab = 'properties' | 'node';
+  let tab = $state<Tab>('properties');
+  const TABS = $derived<{ id: Tab; label: string }[]>([
+    { id: 'properties', label: m.propertiespanel_tab_properties() },
+    { id: 'node',       label: m.propertiespanel_tab_node() },
+  ]);
 
   function update(key: string, value: unknown) {
     if (!node) return;
@@ -75,13 +86,28 @@
   class="flex flex-col h-full overflow-hidden flex-shrink-0"
   style="width:{width}px; background:var(--cv-panel); border-left:1px solid var(--cv-divider);"
 >
+  {#if nodeTab}
+    <div role="tablist" style="display:flex; gap:16px; padding:0 12px; border-bottom:1px solid var(--cv-divider); flex-shrink:0;">
+      {#each TABS as t (t.id)}
+        <button type="button" role="tab" aria-selected={tab === t.id} onclick={() => (tab = t.id)}
+          style="background:none; border:none; border-bottom:2px solid {tab === t.id ? 'var(--cv-accent)' : 'transparent'}; margin-bottom:-1px; padding:9px 0 7px; font-size:11px; font-weight:500; color:{tab === t.id ? 'var(--cv-accent)' : 'var(--cv-text-muted)'}; cursor:pointer;"
+        >{t.label}</button>
+      {/each}
+    </div>
+  {/if}
   {#if !node || !nodeType}
     <div class="flex-1 flex items-center justify-center" style="color:var(--cv-text-faint); font-size:12px;">
       {m.propertiespanel_select_a_node_to_edit()}
     </div>
+  {:else if nodeTab && tab === 'node'}
+    {#key node.id}
+      <NodeDescriptorEditor {node} {onUpdate} />
+    {/key}
   {:else}
     <div style="padding:12px 12px 0; border-bottom:1px solid var(--cv-divider);">
-      <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
+      {#if !nodeTab}
+        <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
+      {/if}
       <!-- Node name -->
       <div style="margin-bottom:10px;">
         <label for="prop-node-label" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.propertiespanel_name()}</label>

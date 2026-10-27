@@ -59,3 +59,9 @@
 
 - [x] 10.1 Tool bar **View JSON**; `WpiJsonDialog.svelte` (read-only, Escape or outside click closes); `wpi-json.ts` (`nodeJson`, `pageJson`: element instances in reading order, schema 0.2, flow-layouter, no descriptor_id) + tests; messages in both languages
 - [x] 10.2 `bun run check`, unit tests and the editor's browser run (node JSON, page JSON order, closing) pass; spec and devdoc 2603 updated
+
+## 11. Properties panel: Node tab
+
+- [x] 11.1 `PropertiesPanel.svelte`: tabs Properties and Node (`nodeTab`, set by the WPI editor only; the Flow page keeps one panel); the editor's panel starts at 390 px
+- [x] 11.2 `NodeDescriptorEditor.svelte`: the node's descriptor as name/value rows — add (Enter in the name), rename (on leaving the field; a refused name is put back), change, remove; `element` fixed; `node-descriptor.ts` + tests, `wpi-json.ts` `nodeData` (inverse of `nodeJson`) + tests; messages in both languages
+- [x] 11.3 `bun run check`, unit tests and the editor's browser run (English and Chinese, light and dark: add, rename, refused names, remove, Properties tab and View JSON agree, page node data) pass; spec and devdocs 2603/2701 updated

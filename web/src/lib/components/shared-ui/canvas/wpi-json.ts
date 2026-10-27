@@ -1,6 +1,7 @@
-// The WPI descriptors the editor's canvas stands for, shown by View JSON: an
-// element node as the element instance a page holds, and the canvas as a page
-// descriptor (devdoc 2026102601 §3.2.1, §3.5).
+// The WPI descriptors the editor's canvas stands for, shown by View JSON and
+// edited in the properties panel's Node tab: an element node as the element
+// instance a page holds, and the canvas as a page descriptor (devdoc 2026102601
+// §3.2.1, §3.5).
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
 
@@ -17,6 +18,14 @@ export function isElementNode(node: Node): boolean {
 export function nodeJson(node: Node): JsonObject {
 	if (!isElementNode(node)) return node.data as JsonObject;
 	return { element: String(node.data.element ?? ''), ...((node.data.attrs as JsonObject | undefined) ?? {}) };
+}
+
+// The node's data after its JSON was edited, the inverse of nodeJson. An element
+// node keeps the rest of its data, such as its name in data.label.
+export function nodeData(node: Node, json: JsonObject): Record<string, unknown> {
+	if (!isElementNode(node)) return json;
+	const { element, ...attrs } = json;
+	return { ...node.data, element, attrs };
 }
 
 // The canvas as a page: its element nodes in reading order (top to bottom, then
