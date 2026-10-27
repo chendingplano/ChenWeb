@@ -83,6 +83,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import PricesView from '$lib/components/home3/prices-view.svelte';
 	import MechanicalProductNamesImportView from '$lib/components/home3/mechanical-product-names-import-view.svelte';
 	import Canvas01 from '$lib/components/shared-ui/canvas-01.svelte';
+	import WpiEditor from '$lib/components/shared-ui/wpi-editor.svelte';
 	import Chatter01 from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
@@ -311,6 +312,14 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<PiHarnessAdminView {darkMode} />
 		{:else if activeMenu?.childId === 'flow'}
 			<Canvas01
+				{darkMode}
+				{railOffset}
+				onClose={() => {
+					/* no-op — handled by parent navigation */
+				}}
+			/>
+		{:else if activeMenu?.childId === 'wpi-editor'}
+			<WpiEditor
 				{darkMode}
 				{railOffset}
 				onClose={() => {
