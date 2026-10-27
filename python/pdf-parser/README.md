@@ -179,6 +179,11 @@ Page numbers are one-based, and image references point to files under the
 adjacent `images/` directory. The Go converter and stored-result contract stay
 unchanged.
 
+The service also writes the canonical `<pdf-stem>_mineru.json` used by the Go
+converter. Parser-file discovery excludes the intermediate
+`<pdf-stem>_content_list.json` so it cannot be mistaken for a parser named
+`content_list` or mark an otherwise successful conversion as failed.
+
 #### Font-encoding garble OCR fallback
 
 Some PDFs — notably Chinese GB/T standards — embed Latin text in fonts that lack

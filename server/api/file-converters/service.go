@@ -310,6 +310,11 @@ func findParserJSONs(dir, stem string) []parserJSONFile {
 		if parserName == "" {
 			continue
 		}
+		// MinerU keeps this intermediate beside the canonical <stem>_mineru.json.
+		// It is not a separate parser output.
+		if parserName == "content_list" {
+			continue
+		}
 		out = append(out, parserJSONFile{
 			path:   filepath.Join(dir, name),
 			parser: parserName,

@@ -815,6 +815,40 @@ func TestHandleRequestDiscoversParserFilesByNamingConvention(t *testing.T) {
 	}
 }
 
+func TestHandleMessageIgnoresMineruContentListIntermediate(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"doc_content_list.json": `{"pages":[]}`,
+		"doc_mineru.json":       `{"pages":[{"page_number":1,"items":[{"type":"text","text":"hello"}]}]}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := &fakeStore{rec: InputRecord{
+		ID: 20, Type: "pdf", ParserName: "mineru",
+		StatusRaw: `[{"operation":"parsed","proc_status":"success"}]`,
+		FileName:  filepath.Join(dir, "doc.pdf"), UserID: "test-tenant",
+	}}
+	pub := &fakePublisher{}
+	svc := NewService(st, slog.Default())
+	svc.Publisher = pub
+	t.Setenv("DOC_PROCESSOR_MODE", "auto")
+	if err := svc.HandleMessage(context.Background(), []byte(`{"record_id":20,"type":"pdf","status":"success"}`)); err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	if st.updateCalls != 1 || st.updatedError != nil || !HasOperationSuccess(st.updatedStatus, "converted") {
+		t.Fatalf("expected converted success, got status=%s error=%v", st.updatedStatus, st.updatedError)
+	}
+	if pub.calls != 1 {
+		t.Fatalf("expected one canonical line-file event, got %d", pub.calls)
+	}
+	out, err := os.ReadFile(filepath.Join(dir, "doc_mineru.txt"))
+	if err != nil || !strings.Contains(string(out), "hello") {
+		t.Fatalf("canonical line file=%q, err=%v", out, err)
+	}
+}
+
 func TestHandleRequestFailureAppendsFailedStatus(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{
 		ID:         12,
@@ -1782,9 +1816,9 @@ func TestHandleRequestMineruOperations(t *testing.T) {
 	})
 }
 
-func TestParserDiscoveryIgnoresTableGeometryCompanions(t *testing.T) {
+func TestParserDiscoveryIgnoresIntermediateAndCompanionFiles(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"doc_mineru.json", "doc_mineru.table-geometry.json", "doc.pdf-table-geometry.json"} {
+	for _, name := range []string{"doc_mineru.json", "doc_content_list.json", "doc_CONTENT_LIST.JSON", "doc_mineru.table-geometry.json", "doc.pdf-table-geometry.json"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{}`), 0600); err != nil {
 			t.Fatal(err)
 		}
