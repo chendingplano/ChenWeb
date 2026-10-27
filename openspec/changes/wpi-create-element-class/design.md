@@ -96,8 +96,10 @@ editor's other dark panels. The descriptor is one list of attributes, in row ord
 starts with the class attributes (`descriptor_id` empty, `schema_version` `"0.2"`,
 `description` `{"en": "", "zh-cn": ""}`), which are tagged "class" in a column of their
 own and cannot be removed or renamed.
-Above the list, an attribute row (name, default value, "Every instance must set it") and
-**Add Attribute** append instance attributes, which have a remove button. Double-clicking a
+Above the list, the attribute entry appends instance attributes, which have a remove
+button. Its first line holds the name and a multi-line default value that takes the
+remaining width (Enter starts a new line, so Ctrl/Cmd+Enter adds the attribute, as Enter
+does in the name). The next line holds "Every instance must set it" and **Add Attribute**. Double-clicking a
 value edits it in place, and double-clicking an instance attribute's name renames it in
 place, keeping its position and value (Enter or blur keeps the edit, Escape drops it
 without closing the form; Enter or F2 on the focused value or name does the same from the

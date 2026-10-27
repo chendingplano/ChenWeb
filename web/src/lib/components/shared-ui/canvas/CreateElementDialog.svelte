@@ -209,8 +209,17 @@
     }
   }
 
-  function onAttrKeydown(e: KeyboardEvent) {
+  // Enter adds the attribute from the name field; in the default, Enter starts a new line, so
+  // Ctrl/Cmd+Enter adds it.
+  function onNameKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
+      e.preventDefault();
+      addAttribute();
+    }
+  }
+
+  function onDefaultKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       addAttribute();
     }
@@ -242,22 +251,24 @@
     <div style="flex:1; overflow-y:auto; padding:16px 20px;">
       <!-- New attribute -->
       <div class="section" style="margin-top:0;">{m.wpi_create_element_attributes()}</div>
-      <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
-        <label class="field" style="flex:1 1 140px; margin:0;">
+      <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+        <label class="field" style="flex:0 1 180px; min-width:120px; margin:0;">
           <span>{m.wpi_create_element_attribute_name()}</span>
-          <input bind:value={attrName} onkeydown={onAttrKeydown} autocomplete="off" />
+          <input bind:value={attrName} onkeydown={onNameKeydown} autocomplete="off" />
         </label>
-        <label class="field" style="flex:1 1 160px; margin:0;">
+        <label class="field" style="flex:1 1 240px; margin:0;">
           <span>{m.wpi_create_element_default_value()}</span>
-          <input bind:value={attrDefault} onkeydown={onAttrKeydown} disabled={attrRequired} autocomplete="off" />
+          <textarea bind:value={attrDefault} onkeydown={onDefaultKeydown} disabled={attrRequired} rows="3" spellcheck="false"></textarea>
         </label>
-        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#94a3b8; padding-bottom:6px;">
+      </div>
+      <small class="hint">{m.wpi_create_element_default_hint()}</small>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#94a3b8;">
           <input type="checkbox" bind:checked={attrRequired} style="accent-color:#6366f1;" />
           {m.wpi_create_element_required()}
         </label>
-        <button type="button" class="btn" onclick={addAttribute}>{m.wpi_create_element_add_attribute()}</button>
+        <button type="button" class="btn" onclick={addAttribute} title={m.wpi_create_element_add_attribute_shortcut()}>{m.wpi_create_element_add_attribute()}</button>
       </div>
-      <small class="hint">{m.wpi_create_element_default_hint()}</small>
       {#if attrError}
         <div class="error" style="margin-top:6px;">{attrError}</div>
       {/if}
@@ -358,12 +369,13 @@
 <style>
   .field { display: block; margin-bottom: 12px; }
   .field span { display: block; font-size: 10px; color: #6b7280; margin-bottom: 3px; }
-  .field input {
+  .field input, .field textarea {
     width: 100%; box-sizing: border-box;
     background: #1e2535; border: 1px solid #374151; border-radius: 4px;
     padding: 5px 8px; font-size: 12px; color: #e2e8f0;
   }
-  .field input:disabled { opacity: 0.4; }
+  .field textarea { display: block; min-height: 60px; resize: vertical; font-family: monospace; line-height: 1.4; }
+  .field input:disabled, .field textarea:disabled { opacity: 0.4; }
   .hint { display: block; font-size: 10px; color: #4b5563; margin-top: 3px; }
   .section {
     font-size: 9px; color: #6366f1; letter-spacing: 1px; text-transform: uppercase;

@@ -34,3 +34,8 @@
 - [x] 6.1 Class tags in a column of their own; resize grip (bottom-right, centred dialog grows by twice the drag, 480×320 minimum)
 - [x] 6.2 Double-click an instance attribute's name to rename it (`renameProblem`); class attribute names read-only; unit tests
 - [x] 6.3 Messages in both languages; `bun run check`, unit tests and the browser run (alignment, rename, resize) pass; spec, design and devdocs updated
+
+## 7. Form revision (entry layout)
+
+- [x] 7.1 Default value is a multi-line editor using the rest of the name's line (Enter adds a line, Ctrl/Cmd+Enter adds the attribute); checkbox and Add Attribute on the next line
+- [x] 7.2 `bun run check` and the browser run (layout, multi-line JSON default) pass

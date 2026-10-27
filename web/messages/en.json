@@ -1418,6 +1418,7 @@
 	"wpi_create_element_default_value": "Default value",
 	"wpi_create_element_required": "Every instance must set it",
 	"wpi_create_element_add_attribute": "Add Attribute",
+	"wpi_create_element_add_attribute_shortcut": "Add Attribute (Ctrl/⌘+Enter in the default value)",
 	"wpi_create_element_default_hint": "A default that is valid JSON, such as 100 or true, is stored as JSON; anything else is stored as text.",
 	"wpi_create_element_value": "Value",
 	"wpi_create_element_class_attribute": "class",
