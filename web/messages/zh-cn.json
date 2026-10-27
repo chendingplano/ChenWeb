@@ -1410,6 +1410,7 @@
 	"wpi_editor_draft_class": "{id}（草稿）",
 	"wpi_editor_element_class_created": "已创建元素类 {id}（草稿）。实现其代码后，页面即可使用它。",
 	"wpi_editor_element_classes_failed": "无法加载元素类",
+	"wpi_editor_resize_properties": "调整属性面板宽度",
 	"wpi_create_element_title": "创建元素",
 	"wpi_create_element_subtitle": "定义一个新的元素类。在实现其代码之前，它以草稿形式保存。",
 	"wpi_create_element_close": "关闭",

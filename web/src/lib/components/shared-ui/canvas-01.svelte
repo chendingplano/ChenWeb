@@ -23,6 +23,7 @@
 	import FlowPicker from './canvas/FlowPicker.svelte';
 	import NodePalette from './canvas/NodePalette.svelte';
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
+	import { canvasThemeVars } from './canvas/canvas-theme';
 
 	// Node type components
 	import AiAssistantNode from './canvas/nodes/AiAssistantNode.svelte';
@@ -385,7 +386,8 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="fixed inset-y-0 right-0 flex flex-col" style="background:#0d1117; z-index:40; left:{railOffset}px;">
+<!-- Flow has no light theme yet: its palette, properties panel and nodes read the dark --cv-* colors. -->
+<div class="fixed inset-y-0 right-0 flex flex-col" style="{canvasThemeVars(true)} background:#0d1117; z-index:40; left:{railOffset}px;">
 	<!-- Toolbar -->
 	<FlowToolbar
 		{activeFlow}
@@ -592,7 +594,7 @@
 <!-- Flow Picker Modal -->
 {#if showPicker}
 	<FlowPicker
-		{darkMode}
+		darkMode={true}
 		currentUserId={activeFlow?.user_id ?? 0}
 		onOpen={loadFlow}
 		onNewEmpty={createNewEmpty}

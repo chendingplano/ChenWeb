@@ -49,18 +49,18 @@
 
 <aside
   class="flex flex-col h-full overflow-hidden flex-shrink-0"
-  style="width:200px; background:#111827; border-right:1px solid #1e2a3a;"
+  style="width:200px; background:var(--cv-panel); border-right:1px solid var(--cv-divider);"
 >
-  <div style="padding:8px; border-bottom:1px solid #1e2a3a;">
-    <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:6px;">{m.nodepalette_node_palette()}</div>
+  <div style="padding:8px; border-bottom:1px solid var(--cv-divider);">
+    <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:6px;">{m.nodepalette_node_palette()}</div>
     <input
       bind:value={search}
       placeholder={m.nodepalette_search_nodes()}
-      style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#94a3b8; box-sizing:border-box;"
+      style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); box-sizing:border-box;"
     />
   </div>
 
-  <div class="flex-1 overflow-y-auto" style="padding:8px; scrollbar-width:thin; scrollbar-color:#374151 transparent;">
+  <div class="flex-1 overflow-y-auto" style="padding:8px; scrollbar-width:thin; scrollbar-color:var(--cv-border) transparent;">
     {#each categories as cat}
       {@const items = filteredByCategory(cat)}
       {#if items.length > 0 || !searching}
@@ -69,7 +69,7 @@
           type="button"
           onclick={() => (expanded[cat] = !expanded[cat])}
           aria-expanded={open}
-          class="flex items-center gap-1 w-full text-left text-[#4b5563] hover:text-[#94a3b8] transition-colors"
+          class="flex items-center gap-1 w-full text-left text-(--cv-text-faint) hover:text-(--cv-text-2) transition-colors"
           style="font-size:8px; letter-spacing:1px; margin:8px 0 4px 0; padding:0 4px 0 0; background:none; border:none; cursor:pointer;"
         >
           <ChevronRightIcon size={10} class="flex-shrink-0 transition-transform {open ? 'rotate-90' : ''}" />
@@ -78,15 +78,15 @@
         </button>
         {#if open}
           {#if items.length === 0}
-            <div style="font-size:9px; color:#4b5563; font-style:italic; padding:2px 8px 4px 14px;">{m.nodepalette_no_nodes_yet()}</div>
+            <div style="font-size:9px; color:var(--cv-text-faint); font-style:italic; padding:2px 8px 4px 14px;">{m.nodepalette_no_nodes_yet()}</div>
           {/if}
           {#each items as nodeType (nodeType.id)}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               draggable="true"
               ondragstart={(e) => onDragStart(e, nodeType)}
-              class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-white/5 transition-colors select-none"
-              style="background:#1e2535; border:1px solid transparent; font-size:10px; color:#e2e8f0;"
+              class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-(--cv-hover) transition-colors select-none"
+              style="background:var(--cv-surface); border:1px solid transparent; font-size:10px; color:var(--cv-text);"
               title={m.nodepalette_drag_onto_canvas()}
             >
               <span style="font-size:14px; flex-shrink:0;">{getIcon(nodeType.icon)}</span>

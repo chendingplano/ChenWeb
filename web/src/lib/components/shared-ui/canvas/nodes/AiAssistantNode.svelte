@@ -8,8 +8,8 @@
   inputHandles={['text','context']} outputHandles={['response']}
   onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
-  <div style="padding:6px 10px; font-size:9px; color:#6b7280;">
+  <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.model ?? 'gpt-4o'}
-    {#if data.system_prompt}<span style="margin-left:4px;color:#4b5563;">{m.aiassistantnode_prompt_set()}</span>{/if}
+    {#if data.system_prompt}<span style="margin-left:4px;color:var(--cv-text-faint);">{m.aiassistantnode_prompt_set()}</span>{/if}
   </div>
 </BaseNode>

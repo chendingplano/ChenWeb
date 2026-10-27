@@ -91,70 +91,70 @@
     { axis: 'vertical'   as DistributeAxis, label: m.wpi_toolbar_distribute_vertical(),   Icon: DistributeVerticalIcon },
   ]);
 
-  // The editor is always dark, so the menu does not follow the site theme.
-  const itemClass = 'text-[12px] text-[#e2e8f0] data-highlighted:bg-white/5 data-highlighted:text-[#e2e8f0]';
+  // The menu opens outside the editor, beyond its --cv-* colors, so it keeps the site theme's colors.
+  const itemClass = 'text-[12px]';
 </script>
 
 <div class="flex items-center gap-1 px-2 flex-shrink-0 overflow-x-auto"
-  style="height:40px; background:#161b27; border-bottom:1px solid #1e2a3a;"
+  style="height:40px; background:var(--cv-raised); border-bottom:1px solid var(--cv-divider);"
   role="toolbar" aria-label={m.wpi_toolbar_label()}>
 
   <!-- Flow name + picker toggle -->
   <div class="flex items-center gap-1 flex-shrink-0">
-    <div class="w-5 h-5 rounded flex-shrink-0" style="background:#6366f1;"></div>
+    <div class="w-5 h-5 rounded flex-shrink-0" style="background:var(--cv-accent);"></div>
     {#if editingName}
       <input
         bind:value={nameInput}
         onblur={commitRename}
         onkeydown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') editingName=false; }}
         class="rounded px-2 py-1"
-        style="background:#0d1117; border:1px solid #6366f1; color:#e2e8f0; font-size:12px; max-width:200px;"
+        style="background:var(--cv-field); border:1px solid var(--cv-accent); color:var(--cv-text); font-size:12px; max-width:200px;"
         use:focus
         maxlength="255"
       />
     {:else}
       <button
         onclick={startRename}
-        class="rounded px-2 py-1 flex items-center gap-1 hover:bg-white/5 transition-colors"
-        style="background:#1e2535; color:#e2e8f0; font-size:12px; border:none; cursor:pointer; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+        class="rounded px-2 py-1 flex items-center gap-1 hover:bg-(--cv-hover) transition-colors"
+        style="background:var(--cv-surface); color:var(--cv-text); font-size:12px; border:none; cursor:pointer; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
         title={m.flowtoolbar_click_to_rename()}
       >
         {activeFlow?.flow_name ?? m.flowtoolbar_untitled_flow()}
-        {#if isDirty}<span style="color:#f59e0b; font-size:10px;">•</span>{/if}
+        {#if isDirty}<span style="color:var(--cv-warn); font-size:10px;">•</span>{/if}
       </button>
     {/if}
     <button
       onclick={onPickerOpen}
       title={m.flowtoolbar_open_flow_picker()}
       aria-label={m.flowtoolbar_open_flow_picker()}
-      style="background:#1e2535; border:none; border-radius:4px; padding:3px 5px; cursor:pointer; color:#6b7280; display:flex; align-items:center;"
+      style="background:var(--cv-surface); border:none; border-radius:4px; padding:3px 5px; cursor:pointer; color:var(--cv-text-muted); display:flex; align-items:center;"
     >
       <ChevronDownIcon class="w-3 h-3" />
     </button>
   </div>
 
-  <div style="width:1px; height:20px; background:#374151; margin:0 4px;"></div>
+  <div style="width:1px; height:20px; background:var(--cv-border); margin:0 4px;"></div>
 
   <!-- Create nodes -->
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
-        <button {...props} class="toolbar-btn" style="color:#e2e8f0; gap:4px;">
+        <button {...props} class="toolbar-btn" style="color:var(--cv-text); gap:4px;">
           <PlusIcon class="w-4 h-4" />
           <span style="font-size:11px;">{m.wpi_toolbar_create_nodes()}</span>
           <ChevronDownIcon class="w-3 h-3" />
         </button>
       {/snippet}
     </DropdownMenu.Trigger>
-    <DropdownMenu.Content align="start" class="min-w-40 bg-[#1e2535] border-[#374151]">
+    <DropdownMenu.Content align="start" class="min-w-40">
       <DropdownMenu.Item class={itemClass} onclick={() => onCreate('page')}>
-        <FileIcon class="w-4 h-4 text-[#94a3b8]" />{m.wpi_toolbar_create_page()}
+        <FileIcon class="w-4 h-4 text-muted-foreground" />{m.wpi_toolbar_create_page()}
       </DropdownMenu.Item>
       <DropdownMenu.Item class={itemClass} onclick={() => onCreate('element')}>
-        <SquareMousePointerIcon class="w-4 h-4 text-[#94a3b8]" />{m.wpi_toolbar_create_element()}
+        <SquareMousePointerIcon class="w-4 h-4 text-muted-foreground" />{m.wpi_toolbar_create_element()}
       </DropdownMenu.Item>
       <DropdownMenu.Item class={itemClass} onclick={() => onCreate('action')}>
-        <ZapIcon class="w-4 h-4 text-[#94a3b8]" />{m.wpi_toolbar_create_action()}
+        <ZapIcon class="w-4 h-4 text-muted-foreground" />{m.wpi_toolbar_create_action()}
       </DropdownMenu.Item>
     </DropdownMenu.Content>
   </DropdownMenu.Root>
@@ -165,7 +165,7 @@
     <span style="font-size:11px;">{m.wpi_toolbar_load_page()}</span>
   </button>
 
-  <div style="width:1px; height:20px; background:#374151; margin:0 4px;"></div>
+  <div style="width:1px; height:20px; background:var(--cv-border); margin:0 4px;"></div>
 
   <!-- Undo / Redo -->
   <button onclick={onUndo} disabled={!canUndo} title={m.flowtoolbar_undo()} aria-label={m.flowtoolbar_undo()} class="toolbar-btn">
@@ -175,7 +175,7 @@
     <Redo2Icon class="w-4 h-4" />
   </button>
 
-  <div style="width:1px; height:20px; background:#374151; margin:0 4px;"></div>
+  <div style="width:1px; height:20px; background:var(--cv-border); margin:0 4px;"></div>
 
   <!-- Align (two or more selected) -->
   {#each alignTools as tool (tool.mode)}
@@ -185,7 +185,7 @@
     </button>
   {/each}
 
-  <div style="width:1px; height:20px; background:#374151; margin:0 4px;"></div>
+  <div style="width:1px; height:20px; background:var(--cv-border); margin:0 4px;"></div>
 
   <!-- Distribute (three or more selected) -->
   {#each distributeTools as tool (tool.axis)}
@@ -198,7 +198,7 @@
   <div class="flex-1"></div>
 
   <!-- Save / Template -->
-  <button onclick={onSave} title={m.flowtoolbar_save()} aria-label={m.flowtoolbar_save()} class="toolbar-btn" style="color:{isDirty ? '#fbbf24' : ''}">
+  <button onclick={onSave} title={m.flowtoolbar_save()} aria-label={m.flowtoolbar_save()} class="toolbar-btn" style="color:{isDirty ? 'var(--cv-warn)' : ''}">
     <SaveIcon class="w-4 h-4" />
     <span style="font-size:10px; margin-left:3px;">{m.flowtoolbar_save()}</span>
   </button>
@@ -211,9 +211,9 @@
   .toolbar-btn {
     display: flex; align-items: center; flex-shrink: 0;
     background: none; border: none; cursor: pointer;
-    color: #94a3b8; border-radius: 4px; padding: 4px 6px;
+    color: var(--cv-text-2); border-radius: 4px; padding: 4px 6px;
     transition: background 0.1s;
   }
-  .toolbar-btn:hover:not(:disabled) { background: rgba(255,255,255,0.05); }
+  .toolbar-btn:hover:not(:disabled) { background: var(--cv-hover); }
   .toolbar-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 </style>

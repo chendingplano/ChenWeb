@@ -8,7 +8,7 @@
   inputHandles={[]} outputHandles={['document']}
   onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
-  <div style="padding:6px 10px; font-size:9px; color:#6b7280;">
+  <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.doc_source ?? m.documentnode_no_source()}
   </div>
 </BaseNode>

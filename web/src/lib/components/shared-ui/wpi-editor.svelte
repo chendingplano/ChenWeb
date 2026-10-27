@@ -25,6 +25,7 @@
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
+	import { canvasThemeVars } from './canvas/canvas-theme';
 	import {
 		alignNodes,
 		distributeNodes,
@@ -130,6 +131,13 @@
 	let canvasHeight = $state(0);
 	let toastMsg = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	// ── Properties panel width (dragged by the separator on its left) ────
+	const PROPS_MIN_WIDTH = 200;
+	const PROPS_MAX_WIDTH = 640;
+	let propsWidth = $state(240);
+	let body: HTMLElement;
+	let resizing: number | null = null;
 
 	// Undo / redo
 	let undoStack = $state<Snapshot[]>([]);
@@ -372,6 +380,24 @@
 		nodes = distributeNodes(nodes, axis);
 	}
 
+	// ── Properties panel resize ─────────────────────────────────────────────
+	function startResize(event: PointerEvent) {
+		if (event.button !== 0) return;
+		resizing = event.pointerId;
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+
+	function resize(event: PointerEvent) {
+		if (resizing !== event.pointerId) return;
+		const next = body.getBoundingClientRect().right - event.clientX;
+		propsWidth = Math.round(Math.min(PROPS_MAX_WIDTH, Math.max(PROPS_MIN_WIDTH, next)));
+	}
+
+	function endResize(event: PointerEvent) {
+		if (resizing === event.pointerId) resizing = null;
+	}
+
 	// ── Close with guard ────────────────────────────────────────────────────
 	function requestClose() {
 		if (isDirty) {
@@ -480,9 +506,9 @@
 <svelte:window onkeydown={onKeydown} />
 
 <!-- Starts below the sticky site header (routes/semos/components/SiteHeader.svelte: h-[4.25rem] + 1px border, z-50), which would otherwise cover the top of the editor. -->
-<div class="fixed bottom-0 right-0 flex flex-col" style="background:#0d1117; z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
+<div class="fixed bottom-0 right-0 flex flex-col" style="{canvasThemeVars(darkMode)} background:var(--cv-canvas); z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
 	<!-- 3-panel body -->
-	<div class="flex flex-1 overflow-hidden">
+	<div bind:this={body} class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
 		<NodePalette
 			nodeTypes={[...nodeTypes, ...elementClassTypes]}
@@ -533,6 +559,7 @@
 				bind:edges
 				bind:viewport
 				nodeTypes={NODE_TYPES}
+				colorMode={darkMode ? 'dark' : 'light'}
 				fitView
 				fitViewOptions={{ maxZoom: 1 }}
 				snapGrid={snapToGrid ? [gridResolution, gridResolution] : undefined}
@@ -583,16 +610,17 @@
 					checkLimits();
 				}}
 				ondelete={() => takeSnapshot()}
-				style="background:#0d1117;"
+				style="background:var(--cv-canvas);"
 			>
 				<Background
 					variant={BackgroundVariant.Dots}
 					gap={gridResolution}
 					size={1}
-					patternColor="#374151"
+					bgColor="var(--cv-canvas)"
+					patternColor="var(--cv-grid)"
 				/>
 				<Controls />
-				<MiniMap style="background:#161b27;" />
+				<MiniMap style="background:var(--cv-raised);" />
 
 				<!-- Canvas config panel -->
 				<Panel
@@ -605,19 +633,19 @@
 						}}
 						title={m.canvas_01_canvas_settings()}
 						style="background:{showConfig
-							? '#6366f1'
-							: '#1e2535'}; border:1px solid #374151; border-radius:6px; width:28px; height:28px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:{showConfig
+							? 'var(--cv-accent)'
+							: 'var(--cv-surface)'}; border:1px solid var(--cv-border); border-radius:6px; width:28px; height:28px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:{showConfig
 							? '#fff'
-							: '#94a3b8'};"
+							: 'var(--cv-text-2)'};"
 					>
 						<SettingsIcon size={14} />
 					</button>
 					{#if showConfig}
 						<div
-							style="background:#1e2535; border:1px solid #374151; border-radius:8px; padding:10px 12px; min-width:170px; box-shadow:0 4px 16px rgba(0,0,0,0.4);"
+							style="background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:8px; padding:10px 12px; min-width:170px; box-shadow:0 4px 16px var(--cv-shadow);"
 						>
 							<p
-								style="font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin:0 0 8px;"
+								style="font-size:10px; font-weight:600; color:var(--cv-text-muted); text-transform:uppercase; letter-spacing:.05em; margin:0 0 8px;"
 							>
 								{m.canvas_01_edge_style()}
 							</p>
@@ -625,24 +653,24 @@
 								<button
 									onclick={() => applyEdgeStyle(k as EdgeStyle)}
 									style="display:block; width:100%; text-align:left; padding:5px 8px; border-radius:5px; border:none; cursor:pointer; font-size:12px; margin-bottom:3px;
-                    background:{edgeStyle === k ? '#6366f1' : 'transparent'};
-                    color:{edgeStyle === k ? '#fff' : '#94a3b8'};"
+                    background:{edgeStyle === k ? 'var(--cv-accent)' : 'transparent'};
+                    color:{edgeStyle === k ? '#fff' : 'var(--cv-text-2)'};"
 								>
 									{label}
 								</button>
 							{/each}
 
-							<hr style="border:none; border-top:1px solid #374151; margin:10px 0;" />
+							<hr style="border:none; border-top:1px solid var(--cv-border); margin:10px 0;" />
 
 							<p
-								style="font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin:0 0 8px;"
+								style="font-size:10px; font-weight:600; color:var(--cv-text-muted); text-transform:uppercase; letter-spacing:.05em; margin:0 0 8px;"
 							>
 								{m.canvas_01_grid_settings()}
 							</p>
 
 							<div style="margin-bottom:8px;">
 								<label
-									style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#94a3b8; margin-bottom:4px;"
+									style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--cv-text-2); margin-bottom:4px;"
 								>
 									<span>{m.canvas_01_resolution()}</span>
 									<input
@@ -650,14 +678,14 @@
 										min="1"
 										max="50"
 										bind:value={gridResolution}
-										style="width:50px; background:#0d1117; border:1px solid #374151; border-radius:4px; padding:2px 6px; color:#e2e8f0; font-size:11px; text-align:right;"
+										style="width:50px; background:var(--cv-field); border:1px solid var(--cv-border); border-radius:4px; padding:2px 6px; color:var(--cv-text); font-size:11px; text-align:right;"
 									/>
 								</label>
 							</div>
 
 							<div>
 								<label
-									style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#94a3b8;"
+									style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--cv-text-2);"
 								>
 									<span>{m.canvas_01_snap_to_grid()}</span>
 									<input
@@ -674,10 +702,23 @@
 		</div>
 		</div>
 
+		<!-- Drag to resize the properties panel; it straddles the panel's left border. -->
+		<div
+			role="separator"
+			aria-orientation="vertical"
+			aria-label={m.wpi_editor_resize_properties()}
+			class="relative z-10 -mx-[3px] w-1.5 flex-shrink-0 cursor-col-resize select-none hover:bg-(--cv-accent)/40"
+			onpointerdown={startResize}
+			onpointermove={resize}
+			onpointerup={endResize}
+			onpointercancel={endResize}
+		></div>
+
 		<!-- Properties Panel -->
 		<PropertiesPanel
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
+			width={propsWidth}
 			{darkMode}
 			onUpdate={updateNodeData}
 		/>
@@ -687,7 +728,7 @@
 	{#if toastMsg}
 		<div
 			class="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-lg px-4 py-2 text-sm shadow-xl"
-			style="background:#1e2535; border:1px solid #374151; color:#e2e8f0; z-index:60; pointer-events:none;"
+			style="background:var(--cv-surface); border:1px solid var(--cv-border); color:var(--cv-text); z-index:60; pointer-events:none;"
 		>
 			{toastMsg}
 		</div>
@@ -696,6 +737,7 @@
 
 {#if showCreateElement}
 	<CreateElementDialog
+		{darkMode}
 		onCreated={(id) => {
 			showCreateElement = false;
 			toast(m.wpi_editor_element_class_created({ id }));

@@ -7,7 +7,7 @@
   inputHandles={['files']} outputHandles={['result']}
   onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
-  <div style="padding:6px 10px; font-size:9px; color:#6b7280;">
+  <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.operation ?? 'status'} · {data.branch ?? 'main'}
   </div>
 </BaseNode>

@@ -6,11 +6,13 @@
   let {
     node,
     nodeType,
+    width    = 240,
     darkMode = true,
     onUpdate,
   }: {
     node:      FlowNode | null;
     nodeType:  NodeType | null;
+    width?:    number;
     darkMode?: boolean;
     onUpdate:  (nodeId: string, data: Record<string, unknown>) => void;
   } = $props();
@@ -35,34 +37,34 @@
 
 <aside
   class="flex flex-col h-full overflow-hidden flex-shrink-0"
-  style="width:240px; background:#111827; border-left:1px solid #1e2a3a;"
+  style="width:{width}px; background:var(--cv-panel); border-left:1px solid var(--cv-divider);"
 >
   {#if !node || !nodeType}
-    <div class="flex-1 flex items-center justify-center" style="color:#4b5563; font-size:12px;">
+    <div class="flex-1 flex items-center justify-center" style="color:var(--cv-text-faint); font-size:12px;">
       {m.propertiespanel_select_a_node_to_edit()}
     </div>
   {:else}
-    <div style="padding:12px 12px 0; border-bottom:1px solid #1e2a3a;">
-      <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
+    <div style="padding:12px 12px 0; border-bottom:1px solid var(--cv-divider);">
+      <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
       <!-- Node name -->
       <div style="margin-bottom:10px;">
-        <label for="prop-node-label" style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px;">{m.propertiespanel_name()}</label>
+        <label for="prop-node-label" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.propertiespanel_name()}</label>
         <input
           id="prop-node-label"
           type="text"
           maxlength="100"
           value={String(node.data.label ?? nodeType.label)}
           oninput={(e) => update('label', (e.target as HTMLInputElement).value)}
-          style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; box-sizing:border-box;"
+          style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;"
         />
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto" style="padding:10px 12px; scrollbar-width:thin; scrollbar-color:#374151 transparent;">
+    <div class="flex-1 overflow-y-auto" style="padding:10px 12px; scrollbar-width:thin; scrollbar-color:var(--cv-border) transparent;">
       <!-- Attributes -->
       {#each Object.entries(nodeType.defaultData) as [key]}
         <div style="margin-bottom:10px;">
-          <label for={`prop-attr-${key}`} style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px; text-transform:capitalize;">
+          <label for={`prop-attr-${key}`} style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px; text-transform:capitalize;">
             {key.replace(/_/g, ' ')}
           </label>
           {#if SELECT_ATTRS[key]}
@@ -70,7 +72,7 @@
               id={`prop-attr-${key}`}
               value={String(node.data[key] ?? nodeType.defaultData[key])}
               onchange={(e) => update(key, (e.target as HTMLSelectElement).value)}
-              style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0;"
+              style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text);"
             >
               {#each SELECT_ATTRS[key] as opt}
                 <option value={opt}>{opt}</option>
@@ -83,7 +85,7 @@
                 oninput={(e) => update(key, parseFloat((e.target as HTMLInputElement).value))}
                 style="flex:1;"
               />
-              <span style="font-size:10px; color:#94a3b8; min-width:24px;">{node.data[key] ?? nodeType.defaultData[key]}</span>
+              <span style="font-size:10px; color:var(--cv-text-2); min-width:24px;">{node.data[key] ?? nodeType.defaultData[key]}</span>
             </div>
           {:else if TEXTAREA_ATTRS.has(key)}
             <textarea
@@ -91,19 +93,19 @@
               rows="4"
               value={String(node.data[key] ?? nodeType.defaultData[key] ?? '')}
               oninput={(e) => update(key, (e.target as HTMLTextAreaElement).value)}
-              style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; resize:vertical; box-sizing:border-box;"
+              style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); resize:vertical; box-sizing:border-box;"
             ></textarea>
           {:else if MASKED_ATTRS.has(key)}
             <input id={`prop-attr-${key}`} type="password"
               value={String(node.data[key] ?? '')}
               oninput={(e) => update(key, (e.target as HTMLInputElement).value)}
-              style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; box-sizing:border-box;"
+              style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;"
             />
           {:else}
             <input id={`prop-attr-${key}`} type="text"
               value={String(node.data[key] ?? '')}
               oninput={(e) => update(key, (e.target as HTMLInputElement).value)}
-              style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; box-sizing:border-box;"
+              style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;"
             />
           {/if}
         </div>
@@ -111,12 +113,12 @@
 
       <!-- Connectors (read-only) -->
       <div style="margin-top:8px;">
-        <div style="font-size:9px; color:#6b7280; margin-bottom:6px;">{m.propertiespanel_connectors()}</div>
+        <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:6px;">{m.propertiespanel_connectors()}</div>
         {#each nodeType.inputs as inp}
-          <div style="background:#1e2535; border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:#818cf8;">{m.propertiespanel_in({ inp })}</div>
+          <div style="background:var(--cv-surface); border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:var(--cv-accent-2);">{m.propertiespanel_in({ inp })}</div>
         {/each}
         {#each nodeType.outputs as out}
-          <div style="background:#1e2535; border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:#6366f1;">{m.propertiespanel_out({ out })}</div>
+          <div style="background:var(--cv-surface); border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:var(--cv-accent);">{m.propertiespanel_out({ out })}</div>
         {/each}
       </div>
     </div>

@@ -8,7 +8,7 @@
   inputHandles={[]} outputHandles={['text']}
   onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
-  <div style="padding:6px 10px; font-size:9px; color:#6b7280; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+  <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
     {data.content ? String(data.content).slice(0,40) : m.textnode_no_content_yet()}
   </div>
 </BaseNode>

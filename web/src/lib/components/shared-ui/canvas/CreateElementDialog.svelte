@@ -25,11 +25,14 @@
     type DraftAttribute,
     type EditField,
   } from './element-class-form';
+  import { canvasThemeVars } from './canvas-theme';
 
   let {
+    darkMode = true,
     onCreated,
     onClose,
   }: {
+    darkMode?: boolean;
     onCreated: (classId: string) => void;
     onClose:   () => void;
   } = $props();
@@ -231,26 +234,26 @@
   }
 </script>
 
-<!-- Backdrop -->
+<!-- Backdrop. It renders outside the editor's root, so it sets the --cv-* colors itself. -->
 <div class="fixed inset-0 z-50 flex items-center justify-center select-text"
-  style="background: rgba(0,0,0,0.7);"
+  style="{canvasThemeVars(darkMode)} background: var(--cv-backdrop);"
   onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
   onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
   role="dialog" aria-modal="true" aria-labelledby="create-element-title"
   tabindex="-1"
 >
   <div bind:this={panel} class="rounded-xl overflow-hidden shadow-2xl"
-    style="position:relative; background:#111827; border:1px solid #1e2a3a; display:flex; flex-direction:column;
+    style="position:relative; background:var(--cv-panel); border:1px solid var(--cv-divider); display:flex; flex-direction:column;
       width:{size ? `${size.width}px` : '760px'}; height:{size ? `${size.height}px` : 'auto'};
       max-width:calc(100vw - 16px); max-height:{size ? 'calc(100vh - 16px)' : '85vh'};">
 
     <!-- Header -->
-    <div style="padding:16px 20px; border-bottom:1px solid #1e2a3a; display:flex; justify-content:space-between; align-items:flex-start;">
+    <div style="padding:16px 20px; border-bottom:1px solid var(--cv-divider); display:flex; justify-content:space-between; align-items:flex-start;">
       <div>
-        <div id="create-element-title" style="font-size:15px; font-weight:600; color:#e2e8f0;">{m.wpi_create_element_title()}</div>
-        <div style="font-size:11px; color:#6b7280; margin-top:2px;">{m.wpi_create_element_subtitle()}</div>
+        <div id="create-element-title" style="font-size:15px; font-weight:600; color:var(--cv-text);">{m.wpi_create_element_title()}</div>
+        <div style="font-size:11px; color:var(--cv-text-muted); margin-top:2px;">{m.wpi_create_element_subtitle()}</div>
       </div>
-      <button onclick={onClose} style="color:#6b7280; font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_create_element_close()}>✕</button>
+      <button onclick={onClose} style="color:var(--cv-text-muted); font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_create_element_close()}>✕</button>
     </div>
 
     <div style="flex:1; overflow-y:auto; padding:16px 20px;">
@@ -279,8 +282,8 @@
         </label>
       </div>
       <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px;">
-        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#94a3b8;">
-          <input type="checkbox" bind:checked={attrRequired} style="accent-color:#6366f1;" />
+        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--cv-text-2);">
+          <input type="checkbox" bind:checked={attrRequired} style="accent-color:var(--cv-accent);" />
           {m.wpi_create_element_required()}
         </label>
         <button type="button" class="btn" onclick={addAttribute} title={m.wpi_create_element_add_attribute_shortcut()}>{m.wpi_create_element_add_attribute()}</button>
@@ -291,10 +294,10 @@
       {/if}
 
       <!-- The class's attributes -->
-      <div style="margin-top:12px; border:1px solid #1e2a3a; border-radius:6px; overflow:hidden;">
+      <div style="margin-top:12px; border:1px solid var(--cv-divider); border-radius:6px; overflow:hidden;">
         <table style="width:100%; border-collapse:collapse; font-size:11px;">
           <thead>
-            <tr style="background:#161b27; color:#6b7280; text-align:left;">
+            <tr style="background:var(--cv-raised); color:var(--cv-text-muted); text-align:left;">
               <th style="padding:6px 12px; font-weight:500; width:22%;">{m.wpi_create_element_attribute_name()}</th>
               <th style="width:56px;"></th>
               <th style="padding:6px 12px; font-weight:500; width:38%;">{m.wpi_create_element_value()}</th>
@@ -304,7 +307,7 @@
           </thead>
           <tbody>
             {#each attributes as attr (attr.name)}
-              <tr class="attr-row" style="border-top:1px solid #1e2a3a; color:#e2e8f0;">
+              <tr class="attr-row" style="border-top:1px solid var(--cv-divider); color:var(--cv-text);">
                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <td style="padding:3px 6px; font-family:monospace; word-break:break-all;" ondblclick={() => startEdit(attr, 'name')}>
                   {#if isEditing(attr, 'name')}
@@ -372,7 +375,7 @@
                     <button type="button" onclick={() => removeAttribute(attr.name)}
                       aria-label={m.wpi_create_element_remove_attribute({ name: attr.name })}
                       title={m.wpi_create_element_remove_attribute({ name: attr.name })}
-                      style="color:#6b7280; background:none; border:none; cursor:pointer;">✕</button>
+                      style="color:var(--cv-text-muted); background:none; border:none; cursor:pointer;">✕</button>
                   {/if}
                 </td>
               </tr>
@@ -400,7 +403,7 @@
     </div>
 
     <!-- Footer -->
-    <div style="padding:12px 20px; border-top:1px solid #1e2a3a; display:flex; justify-content:flex-end; gap:8px;">
+    <div style="padding:12px 20px; border-top:1px solid var(--cv-divider); display:flex; justify-content:flex-end; gap:8px;">
       <button type="button" class="btn" onclick={onClose}>{m.wpi_create_element_cancel()}</button>
       <button type="button" class="btn primary" onclick={create} disabled={saving}>
         {saving ? m.wpi_create_element_creating() : m.wpi_create_element_create()}
@@ -414,53 +417,53 @@
 
 <style>
   .field { display: block; margin-bottom: 12px; }
-  .field span { display: block; font-size: 10px; color: #6b7280; margin-bottom: 3px; }
+  .field span { display: block; font-size: 10px; color: var(--cv-text-muted); margin-bottom: 3px; }
   .field input, .field textarea {
     width: 100%; box-sizing: border-box;
-    background: #1e2535; border: 1px solid #374151; border-radius: 4px;
-    padding: 5px 8px; font-size: 12px; color: #e2e8f0;
+    background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px;
+    padding: 5px 8px; font-size: 12px; color: var(--cv-text);
   }
   .field textarea { display: block; min-height: 60px; resize: vertical; font-family: monospace; line-height: 1.4; }
   .field input:disabled, .field textarea:disabled { opacity: 0.4; }
-  .hint { display: block; font-size: 10px; color: #4b5563; margin-top: 3px; }
+  .hint { display: block; font-size: 10px; color: var(--cv-text-faint); margin-top: 3px; }
   .section {
-    font-size: 9px; color: #6366f1; letter-spacing: 1px; text-transform: uppercase;
+    font-size: 9px; color: var(--cv-accent); letter-spacing: 1px; text-transform: uppercase;
     margin: 16px 0 8px;
   }
-  .attr-row:hover { background: rgba(255, 255, 255, 0.03); }
+  .attr-row:hover { background: var(--cv-hover); }
   .value {
     display: block; width: 100%; text-align: left; padding: 3px 6px;
     background: none; border: 1px solid transparent; border-radius: 4px;
     color: inherit; font: inherit; cursor: text; user-select: text;
   }
-  .value:focus-visible { border-color: #6366f1; outline: none; }
+  .value:focus-visible { border-color: var(--cv-accent); outline: none; }
   .edit {
     width: 100%; box-sizing: border-box;
-    background: #0d1117; border: 1px solid #6366f1; border-radius: 4px;
-    padding: 3px 6px; font: inherit; color: #e2e8f0;
+    background: var(--cv-field); border: 1px solid var(--cv-accent); border-radius: 4px;
+    padding: 3px 6px; font: inherit; color: var(--cv-text);
   }
   .name { display: block; padding: 3px 6px; border: 1px solid transparent; }
-  .muted { color: #6b7280; font-family: system-ui, sans-serif; }
+  .muted { color: var(--cv-text-muted); font-family: system-ui, sans-serif; }
   .notes { white-space: pre-wrap; font-family: system-ui, sans-serif; }
   textarea.edit { display: block; resize: vertical; line-height: 1.4; font-family: system-ui, sans-serif; }
   .grip {
     position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; cursor: nwse-resize;
-    background: linear-gradient(135deg, transparent 0 50%, #4b5563 50% 58%, transparent 58% 70%, #4b5563 70% 78%, transparent 78%);
+    background: linear-gradient(135deg, transparent 0 50%, var(--cv-text-faint) 50% 58%, transparent 58% 70%, var(--cv-text-faint) 70% 78%, transparent 78%);
   }
   .tag {
     padding: 0 5px; border-radius: 3px;
-    background: #1e2535; color: #818cf8; font-size: 9px; font-family: system-ui, sans-serif;
+    background: var(--cv-surface); color: var(--cv-accent-2); font-size: 9px; font-family: system-ui, sans-serif;
   }
   .btn {
-    background: #1e2535; border: 1px solid #374151; border-radius: 6px;
-    padding: 5px 12px; font-size: 11px; color: #e2e8f0; cursor: pointer; white-space: nowrap;
+    background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 6px;
+    padding: 5px 12px; font-size: 11px; color: var(--cv-text); cursor: pointer; white-space: nowrap;
   }
-  .btn:hover:not(:disabled) { background: #273046; }
-  .btn.primary { background: #6366f1; border-color: #6366f1; color: #fff; }
+  .btn:hover:not(:disabled) { background: var(--cv-surface-hover); }
+  .btn.primary { background: var(--cv-accent); border-color: var(--cv-accent); color: #fff; }
   .btn.primary:hover:not(:disabled) { background: #4f46e5; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .error {
-    padding: 8px 12px; background: #1f1313; border: 1px solid #ef4444; border-radius: 6px;
+    padding: 8px 12px; background: var(--cv-error-bg); border: 1px solid #ef4444; border-radius: 6px;
     font-size: 11px; color: #ef4444;
   }
 </style>
