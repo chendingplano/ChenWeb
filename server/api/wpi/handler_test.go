@@ -206,11 +206,11 @@ func TestCreateElementClass(t *testing.T) {
 func TestListElementClasses(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	mock.ExpectQuery(elementClassesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "status", "description"}).
-		AddRow("input", 1, "active", []byte(`"A field"`)).
-		AddRow("slider", 1, "draft", []byte(`{"en": "A slider"}`)))
+	mock.ExpectQuery(elementClassesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "status", "body"}).
+		AddRow("input", 1, "active", []byte(`{"descriptor_id": "input", "description": "A field", "input_type": {"help_tip": "Kind", "default_value": "text"}}`)).
+		AddRow("slider", 1, "draft", []byte(`{"descriptor_id": "slider", "description": {"en": "A slider"}}`)))
 	rec := call(t, testHandler(db, plainUser).ListElementClasses, "GET", "")
-	want := `{"classes":[{"descriptor_id":"input","version":1,"status":"active","description":"A field"},{"descriptor_id":"slider","version":1,"status":"draft","description":{"en":"A slider"}}]}`
+	want := `{"classes":[{"descriptor_id":"input","version":1,"status":"active","description":"A field","attributes":{"input_type":{"default_value":"text","help_tip":"Kind"}}},{"descriptor_id":"slider","version":1,"status":"draft","description":{"en":"A slider"},"attributes":{}}]}`
 	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}

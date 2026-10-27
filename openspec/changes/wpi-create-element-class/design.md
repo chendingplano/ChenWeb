@@ -90,7 +90,9 @@ class without code.
 
 **D6. `GET /api/v1/wpi/classes/element` lists classes for the palette.** It returns the
 latest version whose status is `draft` or `active` of each element class, as
-`{descriptor_id, version, status, description}`, ordered by ID. Retired classes are left
+`{descriptor_id, version, status, description, attributes}`, ordered by ID; `attributes`
+holds the row's instance attributes (everything but the class attributes), each
+`{help_tip, default_value}`, for the editor's Properties panel. Retired classes are left
 out. Any logged-in user may read it, as with page search.
 
 **D7. The form.** `CreateElementDialog.svelte` is a modal over the editor, styled like the

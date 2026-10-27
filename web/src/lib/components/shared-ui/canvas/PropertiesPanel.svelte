@@ -2,16 +2,25 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
   import type { FlowNode, NodeType } from '$lib/types/flow';
+  import type { ElementAttribute, ElementClassSummary } from '$lib/wpi/api';
+  import type { JsonObject } from '$lib/wpi/types';
+  import { localized } from '$lib/wpi/text';
+  import { valueText, withAttribute } from './element-attributes';
 
   let {
     node,
     nodeType,
+    elementClass,
     width    = 240,
     darkMode = true,
     onUpdate,
   }: {
     node:      FlowNode | null;
     nodeType:  NodeType | null;
+    // The class of a WPI element node, whose instance attributes are edited
+    // instead of nodeType's: null when the class is not in the class list,
+    // left out for other nodes.
+    elementClass?: ElementClassSummary | null;
     width?:    number;
     darkMode?: boolean;
     onUpdate:  (nodeId: string, data: Record<string, unknown>) => void;
@@ -32,6 +41,33 @@
   function update(key: string, value: unknown) {
     if (!node) return;
     onUpdate(node.id, { ...node.data, [key]: value });
+  }
+
+  // An element node keeps its instance attributes in data.attrs; data.label is
+  // the node's name, which may differ from an instance attribute called label.
+  function attrsOf(n: FlowNode): JsonObject {
+    return (n.data.attrs as JsonObject | undefined) ?? {};
+  }
+
+  // The attribute field being typed in. Its text stays as typed until the field
+  // is left, so reading it as JSON does not rewrite it under the cursor.
+  let typing = $state<{ nodeId: string; name: string; text: string } | null>(null);
+
+  function attrText(n: FlowNode, name: string): string {
+    if (typing && typing.nodeId === n.id && typing.name === name) return typing.text;
+    return valueText(attrsOf(n)[name]);
+  }
+
+  function typeAttr(name: string, text: string) {
+    if (!node) return;
+    typing = { nodeId: node.id, name, text };
+    update('attrs', withAttribute(attrsOf(node), name, text));
+  }
+
+  function attrPlaceholder(attr: ElementAttribute): string {
+    if (attr.default_value === null) return m.propertiespanel_required();
+    if (attr.default_value === undefined) return m.propertiespanel_no_default();
+    return m.propertiespanel_default({ value: valueText(attr.default_value) });
   }
 </script>
 
@@ -61,6 +97,39 @@
     </div>
 
     <div class="flex-1 overflow-y-auto" style="padding:10px 12px; scrollbar-width:thin; scrollbar-color:var(--cv-border) transparent;">
+      {#if elementClass !== undefined}
+        <!-- Element class and its instance attributes -->
+        <div style="margin-bottom:10px;">
+          <label for="prop-element-class" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.propertiespanel_element_class()}</label>
+          <input id="prop-element-class" type="text" readonly value={String(node.data.element ?? '')}
+            style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); box-sizing:border-box;"
+          />
+        </div>
+        {#if elementClass === null}
+          <div style="font-size:10px; color:var(--cv-text-faint);">{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</div>
+        {:else}
+          {#each Object.entries(elementClass.attributes) as [name, attr] (name)}
+            <div style="margin-bottom:10px;">
+              <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">
+                {name}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
+              </label>
+              <textarea
+                id={`prop-attr-${name}`}
+                rows="1"
+                value={attrText(node, name)}
+                placeholder={attrPlaceholder(attr)}
+                oninput={(e) => typeAttr(name, (e.target as HTMLTextAreaElement).value)}
+                onblur={() => (typing = null)}
+                style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); resize:vertical; field-sizing:content; box-sizing:border-box;"
+              ></textarea>
+              {#if attr.help_tip}
+                <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      {/if}
+
       <!-- Attributes -->
       {#each Object.entries(nodeType.defaultData) as [key]}
         <div style="margin-bottom:10px;">
@@ -112,6 +181,7 @@
       {/each}
 
       <!-- Connectors (read-only) -->
+      {#if nodeType.inputs.length > 0 || nodeType.outputs.length > 0}
       <div style="margin-top:8px;">
         <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:6px;">{m.propertiespanel_connectors()}</div>
         {#each nodeType.inputs as inp}
@@ -121,6 +191,7 @@
           <div style="background:var(--cv-surface); border-radius:4px; padding:4px 8px; margin-bottom:3px; font-size:9px; color:var(--cv-accent);">{m.propertiespanel_out({ out })}</div>
         {/each}
       </div>
+      {/if}
     </div>
   {/if}
 </aside>

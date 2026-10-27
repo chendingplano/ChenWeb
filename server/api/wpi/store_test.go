@@ -67,7 +67,7 @@ func TestStoreLatestRejectsNonObjectBody(t *testing.T) {
 
 const insertDraftQuery = `INSERT INTO kb\.wpi_descriptors .+ SELECT 'element', \$1::text, 1, .+ 'draft', .+ WHERE NOT EXISTS \(SELECT 1 FROM kb\.wpi_descriptors WHERE kind = 'element' AND descriptor_id = \$1::text\)`
 
-const elementClassesQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, status, body->'description'\s+FROM kb\.wpi_descriptors WHERE kind = 'element' AND status IN \('draft', 'active'\) ORDER BY descriptor_id, version DESC`
+const elementClassesQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, status, body\s+FROM kb\.wpi_descriptors WHERE kind = 'element' AND status IN \('draft', 'active'\) ORDER BY descriptor_id, version DESC`
 
 func TestStoreInsertDraftClass(t *testing.T) {
 	db, mock, _ := sqlmock.New()
@@ -95,15 +95,19 @@ func TestStoreInsertDraftClass(t *testing.T) {
 func TestStoreElementClasses(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	mock.ExpectQuery(elementClassesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "status", "description"}).
-		AddRow("input", 2, "active", []byte(`{"en": "A field"}`)).
-		AddRow("slider", 1, "draft", nil))
+	mock.ExpectQuery(elementClassesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "status", "body"}).
+		AddRow("input", 2, "active", []byte(`{"descriptor_id": "input", "schema_version": "0.3", "description": {"en": "A field"}, "label": {"default_value": null}}`)).
+		AddRow("slider", 1, "draft", []byte(`{"descriptor_id": "slider", "schema_version": "0.3", "implement_notes": "x"}`)))
 	got, err := store{db}.elementClasses(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].Status != "active" || got[0].Description.(map[string]any)["en"] != "A field" || got[1].Status != "draft" || got[1].Description != nil {
 		t.Fatalf("got %+v", got)
+	}
+	// Only instance attributes: the class attributes stay out.
+	if len(got[0].Attributes) != 1 || got[0].Attributes["label"].(map[string]any)["default_value"] != nil || len(got[1].Attributes) != 0 {
+		t.Fatalf("attributes %+v, %+v", got[0].Attributes, got[1].Attributes)
 	}
 }
 

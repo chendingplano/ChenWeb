@@ -86,13 +86,18 @@ still refuse a class with no code.
 
 ### Requirement: Element class list
 `GET /api/v1/wpi/classes/element` SHALL return, for each element class, its latest version
-whose status is `draft` or `active`, as `descriptor_id`, `version`, `status` and
-`description`, ordered by `descriptor_id`. Classes whose rows are all `retired` SHALL be
+whose status is `draft` or `active`, as `descriptor_id`, `version`, `status`,
+`description` and `attributes` (the row's instance attributes, each with its `help_tip` and
+`default_value`; class attributes left out), ordered by `descriptor_id`. Classes whose rows are all `retired` SHALL be
 left out. It SHALL require a logged-in user.
 
 #### Scenario: Drafts and active classes
 - **WHEN** `input` is active and `slider` is a draft
 - **THEN** the list holds `input` with status `active` and `slider` with status `draft`
+
+#### Scenario: Instance attributes listed
+- **WHEN** the latest row of `button` has `label` and `on_click`, each `{"help_tip": …, "default_value": null}`
+- **THEN** the list's `button` entry has `attributes` with exactly `label` and `on_click`, as stored
 
 #### Scenario: Not logged in
 - **WHEN** a request without a session asks for the list
@@ -166,7 +171,8 @@ Chinese.
 ### Requirement: ELEMENTS folder lists element classes
 The editor's palette SHALL list the element classes from the class list in its ELEMENTS
 folder, marking drafts as not yet implemented. Dragging a class onto the canvas SHALL add
-an element node labelled with the class ID.
+an element node labelled with the class ID. The new node SHALL be the canvas selection, SHALL
+have no connection points, and SHALL be resizable by its corners and edges.
 
 #### Scenario: New draft appears
 - **WHEN** the author creates class `slider`
@@ -175,3 +181,26 @@ an element node labelled with the class ID.
 #### Scenario: Drag a class onto the canvas
 - **WHEN** the author drags `input` from the ELEMENTS folder onto the canvas
 - **THEN** an element node labelled `input` is added where it was dropped
+
+#### Scenario: Dropped node is selected and resizable
+- **WHEN** the author drops `button` on the canvas
+- **THEN** the node shows its resize grips without a click, has no connection points, and
+  dragging a corner or an edge resizes it
+
+### Requirement: Element node properties
+When an element node is selected, the Properties panel SHALL show its class and list the
+class's instance attributes from the class list, each with its help tip and an editable
+value. A value SHALL be read as JSON when it parses, otherwise as a string, and SHALL be
+kept in the node's `data.attrs`; empty text SHALL unset it. An unset attribute SHALL show
+its default ("Default: …"), "No default", or, for `default_value` `null`, that every
+instance must set it. A field SHALL keep the text as typed until the author leaves it. When
+the node's class is not in the class list, the panel SHALL say so instead of listing
+attributes.
+
+#### Scenario: Edit an attribute
+- **WHEN** the author selects a `button` node and types `{"action": "save-page"}` into `on_click`
+- **THEN** the node's `data.attrs.on_click` is the object `{"action": "save-page"}` and its name is unchanged
+
+#### Scenario: Defaults shown
+- **WHEN** the author selects an `input` node whose `input_type` is unset
+- **THEN** the `input_type` field is empty and shows "Default: text"

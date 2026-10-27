@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -175,18 +176,20 @@ func (s store) insertDraftClass(ctx context.Context, id string, raw []byte, acto
 }
 
 // ClassSummary describes the latest draft or active version of a class to the
-// editor's palette.
+// editor's palette and properties panel. Attributes are the row's instance
+// attributes, each {help_tip, default_value} (format 0.3).
 type ClassSummary struct {
-	DescriptorID string `json:"descriptor_id"`
-	Version      int    `json:"version"`
-	Status       string `json:"status"`
-	Description  any    `json:"description"`
+	DescriptorID string         `json:"descriptor_id"`
+	Version      int            `json:"version"`
+	Status       string         `json:"status"`
+	Description  any            `json:"description"`
+	Attributes   map[string]any `json:"attributes"`
 }
 
 // elementClasses returns the latest draft or active version of every element
 // class, ordered by ID; classes with only retired rows are left out.
 func (s store) elementClasses(ctx context.Context) ([]ClassSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, status, body->'description'
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, status, body
 		FROM kb.wpi_descriptors WHERE kind = 'element' AND status IN ('draft', 'active') ORDER BY descriptor_id, version DESC`)
 	if err != nil {
 		return nil, err
@@ -195,12 +198,20 @@ func (s store) elementClasses(ctx context.Context) ([]ClassSummary, error) {
 	out := []ClassSummary{}
 	for rows.Next() {
 		var c ClassSummary
-		var desc []byte
-		if err := rows.Scan(&c.DescriptorID, &c.Version, &c.Status, &desc); err != nil {
+		var raw []byte
+		if err := rows.Scan(&c.DescriptorID, &c.Version, &c.Status, &raw); err != nil {
 			return nil, err
 		}
-		if desc != nil {
-			_ = json.Unmarshal(desc, &c.Description)
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return nil, fmt.Errorf("element class %s version %d: %w", c.DescriptorID, c.Version, err)
+		}
+		c.Description = body["description"]
+		c.Attributes = map[string]any{}
+		for k, v := range body {
+			if !slices.Contains(classAttrs, k) {
+				c.Attributes[k] = v
+			}
 		}
 		out = append(out, c)
 	}

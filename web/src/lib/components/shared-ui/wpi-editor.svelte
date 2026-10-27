@@ -105,7 +105,7 @@
 	// Node types the tool bar creates. They are not in the server's palette list.
 	const WPI_NODE_TYPES = $derived<Record<WpiNodeKind, NodeType>>({
 		page: { id: 'wpi-page', label: m.wpi_editor_page(), category: 'Pages', icon: 'file', inputs: ['in'], outputs: ['out'], defaultData: {} },
-		element: { id: 'wpi-element', label: m.wpi_editor_element(), category: 'Elements', icon: 'square-mouse-pointer', inputs: ['in'], outputs: ['out'], defaultData: {} },
+		element: { id: 'wpi-element', label: m.wpi_editor_element(), category: 'Elements', icon: 'square-mouse-pointer', inputs: [], outputs: [], defaultData: {} },
 		action: { id: 'wpi-action', label: m.wpi_editor_action(), category: 'Actions', icon: 'zap', inputs: ['in'], outputs: ['out'], defaultData: {} }
 	});
 	// Element classes, listed in the palette's ELEMENTS folder. Their palette IDs carry a
@@ -118,8 +118,8 @@
 			label: c.status === 'draft' ? m.wpi_editor_draft_class({ id: c.descriptor_id }) : c.descriptor_id,
 			category: 'Elements',
 			icon: 'square-mouse-pointer',
-			inputs: ['in'],
-			outputs: ['out'],
+			inputs: [],
+			outputs: [],
 			defaultData: {}
 		}))
 	);
@@ -162,6 +162,13 @@
 			: null
 	);
 	const selectedTotal = $derived(selectedCount(nodes));
+	// The class of the selected element node, whose instance attributes the properties
+	// panel edits: null when it is not in the class list, undefined for other nodes.
+	const selectedElementClass = $derived(
+		selectedNode?.type === 'wpi-element'
+			? (elementClasses.find((c) => c.descriptor_id === selectedNode.data.element) ?? null)
+			: undefined
+	);
 
 	// ── Toast ──────────────────────────────────────────────────────────────
 	function toast(msg: string) {
@@ -294,12 +301,14 @@
 		const type = cls ? 'wpi-element' : nodeType.id;
 		const id = `${type}-${Date.now()}`;
 		takeSnapshot();
+		// The new node becomes the selection, so its resize grips show without a click.
 		nodes = [
-			...nodes,
+			...nodes.map((n) => ({ ...n, selected: false })),
 			{
 				id,
 				type,
 				position,
+				selected: true,
 				data: cls ? { label: cls, element: cls } : { ...nodeType.defaultData, label: nodeType.label }
 			}
 		];
@@ -335,8 +344,8 @@
 		const id = `${nodeType.id}-${Date.now()}`;
 		takeSnapshot();
 		nodes = [
-			...nodes,
-			{ id, type: nodeType.id, position, data: { ...nodeType.defaultData, label: nodeType.label } }
+			...nodes.map((n) => ({ ...n, selected: false })),
+			{ id, type: nodeType.id, position, selected: true, data: { ...nodeType.defaultData, label: nodeType.label } }
 		];
 		selectedNodeId = id;
 		checkLimits();
@@ -704,6 +713,7 @@
 		<PropertiesPanel
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
+			elementClass={selectedElementClass}
 			width={propsWidth}
 			{darkMode}
 			onUpdate={updateNodeData}

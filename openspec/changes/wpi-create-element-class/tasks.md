@@ -47,3 +47,10 @@
 - [x] 8.3 Frontend interpreter: `mergeElement` reads `default_value`; tests
 - [x] 8.4 Form: `implement_notes` in the list (multi-line editor), help tips entered and edited, empty default = no default; helpers and tests; messages in both languages
 - [x] 8.5 `go test`, `bun run check`, unit tests, the pilot app's browser run and the editor's browser run pass
+
+## 9. Element nodes: properties, no connection points, resizing
+
+- [x] 9.1 `GET /api/v1/wpi/classes/element` returns each class's instance attributes (`ClassSummary.Attributes`); store and handler tests
+- [x] 9.2 `WpiNode.svelte`: element nodes have no connection points; `wpi-editor.svelte`: a dropped or created node becomes the canvas selection (resize grips show at once)
+- [x] 9.3 `PropertiesPanel.svelte`: element class and instance attributes (help tip, default or required as placeholder) edited into `data.attrs`; `element-attributes.ts` + tests; messages in both languages
+- [x] 9.4 `go test`, `bun run check`, unit tests and the editor's browser run (no handles, grips, corner and edge resize, attribute edits) pass; spec, design, devdocs 2601/2603 and module docs (2.4.0) updated

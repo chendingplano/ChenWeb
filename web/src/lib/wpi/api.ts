@@ -53,13 +53,18 @@ export async function runAction(
 	return body as Record<string, Json>;
 }
 
+// An instance attribute of an element class row (format 0.3). default_value
+// null: every instance must set it; left out: optional, no default.
+export type ElementAttribute = { help_tip?: Text; default_value?: Json };
+
 // The latest draft or active version of an element class, for the editor's
-// palette. A draft is defined but has no code yet.
+// palette and properties panel. A draft is defined but has no code yet.
 export type ElementClassSummary = {
 	descriptor_id: string;
 	version: number;
 	status: 'draft' | 'active';
 	description: Text | null;
+	attributes: Record<string, ElementAttribute>;
 };
 
 export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise<ElementClassSummary[]> {
