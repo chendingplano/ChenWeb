@@ -9,16 +9,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
+	"slices"
 	"time"
 
-	"github.com/lib/pq"
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 )
 
-// ActionRef names a stored action ({kind: "action", id}) or an inline action
-// at a JSON Pointer inside a stored page or element.
+// ActionRef names an action instance by its place in a stored page:
+// {kind: "page", id, pointer} (design D5).
 type ActionRef struct {
 	Kind    string `json:"kind"`
 	ID      string `json:"id"`
@@ -51,7 +50,7 @@ func badRequest(format string, a ...any) error {
 	return &requestError{http.StatusBadRequest, fmt.Sprintf(format, a...)}
 }
 
-// RunAction runs a stored load or save action.
+// RunAction runs a load or save instance written in a stored page.
 // Endpoint: POST /api/v1/wpi/actions/run
 func (h *Handler) RunAction(c echo.Context) error {
 	user := h.User(c)
@@ -76,7 +75,7 @@ func (h *Handler) RunAction(c echo.Context) error {
 	if err == nil {
 		result, rows, err = h.run(ctx, act, node, req)
 	}
-	logArgs := []any{"ref", req.Ref.String(), "user", actorName(user), "table", act.Table, "action_type", act.ActionType,
+	logArgs := []any{"ref", req.Ref.String(), "user", actorName(user), "table", act.Table, "action", act.Class,
 		"mode", act.Mode + act.Result, "rows", rows, "duration_ms", time.Since(start).Milliseconds()}
 	var reqErr *requestError
 	var fieldErrs fieldErrors
@@ -103,55 +102,58 @@ type fieldErrors map[string][]string
 
 func (f fieldErrors) Error() string { return "field rules failed" }
 
-// resolveAction loads the referenced action from stored descriptors only and
-// checks that it is a valid load or save action.
+// resolveAction finds the referenced action instance in its stored page,
+// checks it against its class row and returns it merged with the class.
 func (h *Handler) resolveAction(ctx context.Context, ref ActionRef) (Action, map[string]any, error) {
 	var act Action
-	kind := Kind(ref.Kind)
-	if kind != KindAction && kind != KindPage && kind != KindElement {
-		return act, nil, badRequest("ref.kind must be action, page or element")
+	if ref.Kind != string(KindPage) {
+		return act, nil, badRequest("ref.kind must be page")
 	}
 	if !idPattern.MatchString(ref.ID) {
 		return act, nil, badRequest("ref.id is not a valid descriptor ID")
 	}
-	if (kind == KindAction) != (ref.Pointer == "") {
-		return act, nil, badRequest("a pointer is required for inline actions and not allowed for stored actions")
+	if ref.Pointer == "" {
+		return act, nil, badRequest("ref.pointer is required")
 	}
-	found, err := store{h.DB}.latest(ctx, kind, []string{ref.ID})
+	st := store{h.DB}
+	found, err := st.latest(ctx, KindPage, []string{ref.ID})
 	if err != nil {
 		return act, nil, err
 	}
 	d, ok := found[ref.ID]
 	if !ok {
-		return act, nil, &requestError{http.StatusNotFound, fmt.Sprintf("%s %q does not exist", kind, ref.ID)}
+		return act, nil, &requestError{http.StatusNotFound, fmt.Sprintf("page %q does not exist", ref.ID)}
 	}
-	node := d.Body
-	if kind != KindAction {
-		target, err := jsonPointer(d.Body, ref.Pointer)
-		if err != nil {
-			return act, nil, badRequest("%v", err)
-		}
-		if node, ok = target.(map[string]any); !ok || node["action_type"] == nil {
-			return act, nil, badRequest("pointer %q does not point at an inline action", ref.Pointer)
-		}
+	positions := actionPositions(d.Body)
+	i := slices.IndexFunc(positions, func(p actionPos) bool { return p.path == ref.Pointer })
+	if i < 0 {
+		return act, nil, badRequest("pointer %q does not point at an action instance", ref.Pointer)
 	}
-	if typ := str(node["action_type"]); typ != "load" && typ != "save" {
-		return act, nil, badRequest("only load and save actions run on the server, not %q", typ)
+	pos := positions[i]
+	m, _ := pos.val.(map[string]any)
+	cls := str(m["action"])
+	if cls != "load" && cls != "save" {
+		return act, nil, badRequest("only load and save actions run on the server, not %q", cls)
 	}
-	v := &validator{kind: kind, id: ref.ID}
-	if kind == KindAction {
-		v.action(node, "", true)
-	} else {
-		v.action(node, ref.Pointer, false, "args")
+	rows, err := st.latest(ctx, KindAction, []string{cls})
+	if err != nil {
+		return act, nil, err
+	}
+	v := &validator{kind: KindPage, id: ref.ID, classes: map[Kind]map[string]Descriptor{KindAction: rows}}
+	v.actionInstance(pos)
+	var merged map[string]any
+	if len(v.issues) == 0 {
+		merged = v.actionComplete(pos)
 	}
 	if len(v.issues) > 0 {
-		return act, nil, badRequest("the action descriptor is invalid: %s", v.issues[0].Message)
+		return act, nil, badRequest("the action instance is invalid: %s", v.issues[0].Message)
 	}
-	b, _ := json.Marshal(node)
+	b, _ := json.Marshal(merged)
 	if err := json.Unmarshal(b, &act); err != nil {
 		return act, nil, err
 	}
-	return act, node, nil
+	act.Class = cls
+	return act, merged, nil
 }
 
 func (h *Handler) run(ctx context.Context, act Action, node map[string]any, req runRequest) (any, int, error) {
@@ -167,7 +169,7 @@ func (h *Handler) run(ctx context.Context, act Action, node map[string]any, req 
 			return nil, 0, badRequest("column %q does not exist in table %q", col.name, act.Table)
 		}
 	}
-	if act.ActionType == "load" {
+	if act.Class == "load" {
 		return h.load(ctx, act, req.Args)
 	}
 	return h.save(ctx, act, req.InputDoc)
@@ -263,32 +265,4 @@ func jsonValue(v any) any {
 		return x.Format(time.RFC3339)
 	}
 	return v
-}
-
-// jsonPointer resolves an RFC 6901 pointer inside a decoded JSON value.
-func jsonPointer(doc any, pointer string) (any, error) {
-	if !strings.HasPrefix(pointer, "/") {
-		return nil, fmt.Errorf("pointer %q must start with /", pointer)
-	}
-	cur := doc
-	for _, tok := range strings.Split(pointer[1:], "/") {
-		tok = strings.ReplaceAll(strings.ReplaceAll(tok, "~1", "/"), "~0", "~")
-		switch node := cur.(type) {
-		case map[string]any:
-			next, ok := node[tok]
-			if !ok {
-				return nil, fmt.Errorf("pointer %q does not exist", pointer)
-			}
-			cur = next
-		case []any:
-			i, err := strconv.Atoi(tok)
-			if err != nil || i < 0 || i >= len(node) {
-				return nil, fmt.Errorf("pointer %q does not exist", pointer)
-			}
-			cur = node[i]
-		default:
-			return nil, fmt.Errorf("pointer %q does not exist", pointer)
-		}
-	}
-	return cur, nil
 }

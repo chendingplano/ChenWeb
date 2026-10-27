@@ -27,9 +27,16 @@ func decodeBody(raw []byte) (map[string]any, error) {
 
 type store struct{ db *sql.DB }
 
-// latest returns the latest active version of each requested descriptor.
+// latest returns the latest active version of each requested descriptor, or
+// of every descriptor of the kind when ids is nil.
 func (s store) latest(ctx context.Context, kind Kind, ids []string) (map[string]Descriptor, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body FROM kb.wpi_descriptors WHERE kind = $1 AND status = 'active' AND descriptor_id = ANY($2) ORDER BY descriptor_id, version DESC`, string(kind), pq.Array(ids))
+	var rows *sql.Rows
+	var err error
+	if ids == nil {
+		rows, err = s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body FROM kb.wpi_descriptors WHERE kind = $1 AND status = 'active' ORDER BY descriptor_id, version DESC`, string(kind))
+	} else {
+		rows, err = s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body FROM kb.wpi_descriptors WHERE kind = $1 AND status = 'active' AND descriptor_id = ANY($2) ORDER BY descriptor_id, version DESC`, string(kind), pq.Array(ids))
+	}
 	if err != nil {
 		return nil, err
 	}

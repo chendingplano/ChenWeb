@@ -15,8 +15,9 @@ function setup() {
 }
 
 test('sharing key depends on page and input, not key order', () => {
-	assert.equal(sharingKey('form', { action: 'load', args: { a: 1, b: 2 } }), sharingKey('form', { args: { b: 2, a: 1 }, action: 'load' }));
-	assert.notEqual(sharingKey('form', {}), sharingKey('form', { action: 'load' }));
+	const ref = { kind: 'page', id: 'form', pointer: '/input' } as const;
+	assert.equal(sharingKey('form', { ref, args: { a: 1, b: 2 } }), sharingKey('form', { args: { b: 2, a: 1 }, ref }));
+	assert.notEqual(sharingKey('form', {}), sharingKey('form', { ref }));
 	assert.equal(sharingKey('form', undefined), sharingKey('form', {}));
 });
 
@@ -44,7 +45,7 @@ test('two menu items for the same page and input share one panel', () => {
 test('an unbound panel is closed when replaced', () => {
 	const { pane, panels, bindings, add } = setup();
 	add('form#7', 'customer-form');
-	const plan = planOpen(pane, panels, bindings, { key: sharingKey('customer-form', { action: 'load-customer', args: { id: 9 } }) });
+	const plan = planOpen(pane, panels, bindings, { key: sharingKey('customer-form', { ref: { kind: 'page', id: 'customers', pointer: '/elements/1/on_row_click/input' }, args: { id: 9 } }) });
 	assert.deepEqual(plan, { reuse: null, current: { id: 'form#7', fate: 'close' } });
 });
 

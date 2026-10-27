@@ -15,7 +15,7 @@ var customerFields = []FieldMap{
 }
 
 func TestBuildLoadRecord(t *testing.T) {
-	a := Action{ActionType: "load", Table: "kb.wpi_demo_customers", Result: "record", Fields: customerFields}
+	a := Action{Class: "load", Table: "kb.wpi_demo_customers", Result: "record", Fields: customerFields}
 	q := buildLoad(a, map[string]any{"id": json.Number("7")})
 	want := `SELECT "id", "user_name", "email" FROM "kb"."wpi_demo_customers" WHERE "id" = $1 LIMIT 1`
 	if q.sql != want || !reflect.DeepEqual(q.args, []any{"7"}) {
@@ -24,7 +24,7 @@ func TestBuildLoadRecord(t *testing.T) {
 }
 
 func TestBuildLoadList(t *testing.T) {
-	a := Action{ActionType: "load", Table: "people", Result: "list", Fields: customerFields[:2],
+	a := Action{Class: "load", Table: "people", Result: "list", Fields: customerFields[:2],
 		OrderBy: []OrderBy{{Column: "user_name"}, {Column: "id", Direction: "desc"}}}
 	q := buildLoad(a, map[string]any{"city": "Paris", "deleted_at": nil})
 	want := `SELECT "id", "user_name" FROM "public"."people" WHERE "city" = $1 AND "deleted_at" IS NULL ORDER BY "user_name" ASC, "id" DESC LIMIT $2`
@@ -45,7 +45,7 @@ func TestListLimit(t *testing.T) {
 }
 
 func TestBuildLoadKeepsSQLInParameters(t *testing.T) {
-	a := Action{ActionType: "load", Table: "people", Result: "record", Fields: customerFields[:1]}
+	a := Action{Class: "load", Table: "people", Result: "record", Fields: customerFields[:1]}
 	q := buildLoad(a, map[string]any{"id": "1; DROP TABLE x"})
 	if q.sql != `SELECT "id" FROM "public"."people" WHERE "id" = $1 LIMIT 1` || q.args[0] != "1; DROP TABLE x" {
 		t.Fatalf("got %q %v", q.sql, q.args)
@@ -53,7 +53,7 @@ func TestBuildLoadKeepsSQLInParameters(t *testing.T) {
 }
 
 func TestBuildInsert(t *testing.T) {
-	a := Action{ActionType: "save", Table: "kb.wpi_demo_customers", Mode: "upsert", Key: "id", Fields: customerFields[1:]}
+	a := Action{Class: "save", Table: "kb.wpi_demo_customers", Mode: "upsert", Key: "id", Fields: customerFields[1:]}
 	q := buildInsert(a, map[string]any{"user_name": "dana", "email": "d@example.com", "ignored": "x"})
 	want := `INSERT INTO "kb"."wpi_demo_customers" ("user_name", "email") VALUES ($1, $2) RETURNING "id"`
 	if q.sql != want || !reflect.DeepEqual(q.args, []any{"dana", "d@example.com"}) {
@@ -66,7 +66,7 @@ func TestBuildInsert(t *testing.T) {
 
 func TestBuildUpdate(t *testing.T) {
 	// The key column is never SET, even when mapped.
-	a := Action{ActionType: "save", Table: "people", Mode: "update", Key: "id", Fields: customerFields}
+	a := Action{Class: "save", Table: "people", Mode: "update", Key: "id", Fields: customerFields}
 	q, ok := buildUpdate(a, map[string]any{"id": json.Number("7"), "email": "e@example.com", "tags": []any{"a"}}, json.Number("7"))
 	want := `UPDATE "public"."people" SET "email" = $1 WHERE "id" = $2 RETURNING "id"`
 	if !ok || q.sql != want || !reflect.DeepEqual(q.args, []any{"e@example.com", "7"}) {

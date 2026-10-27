@@ -7602,7 +7602,7 @@
 	"wpi_error_title": "无法显示 {descriptor}",
 	"wpi_unknown_template": "不支持布局模板 {name}。",
 	"wpi_unknown_layouter": "不支持布局器 {name}。",
-	"wpi_unknown_element": "不支持元素类型 {type}。",
+	"wpi_unknown_element": "元素类 {name} 在此解释器中没有对应的代码。",
 	"wpi_panel_loading": "正在加载…",
 	"wpi_action_failed": "操作失败：{message}",
 	"wpi_list_empty": "没有记录。",

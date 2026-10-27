@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
+	import { actionRef } from '../entries';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { getRuntime } from '../runtime.svelte';
 	import type { Json, JsonObject } from '../types';
-	import { triggerOrigin, type ElementProps } from './index';
+	import type { ElementProps } from './index';
 
 	let { panelId, element }: ElementProps = $props();
 
@@ -23,7 +24,7 @@
 		if (!d.source) return;
 		status = 'loading';
 		try {
-			records = await rt.queryList(panelId, d.source);
+			records = await rt.queryList(panelId, actionRef(element, 'source'), d.source.args);
 			status = 'ready';
 		} catch (err) {
 			failure = err instanceof Error ? err.message : String(err);
@@ -49,7 +50,7 @@
 	}
 
 	function open(record: JsonObject) {
-		if (d.on_row_click) void rt.runTrigger(d.on_row_click, triggerOrigin(element, 'on_row_click'), { panelId, record });
+		if (d.on_row_click) void rt.runTrigger(d.on_row_click, actionRef(element, 'on_row_click'), { panelId, record });
 	}
 </script>
 

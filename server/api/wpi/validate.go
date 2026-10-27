@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -14,13 +15,23 @@ var (
 	columnPattern = segmentPattern
 	tablePattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 	sizePattern   = regexp.MustCompile(`^(auto|elastic|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
+	localePattern = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
 )
 
 var elementSizeAttrs = []string{"width", "height", "min_width", "max_width"}
 
-// elementAttrs lists the attributes each element type accepts besides
-// descriptor_id, schema_version, element_type and the size attributes.
-var elementAttrs = map[string]struct{ required, optional []string }{
+// codeAttrs lists the instance attributes a class's code defines: required
+// ones the code cannot work without, and optional ones.
+type codeAttrs struct{ required, optional []string }
+
+func (a codeAttrs) defines(attr string) bool {
+	return slices.Contains(a.required, attr) || slices.Contains(a.optional, attr)
+}
+
+// elementAttrs is keyed by element class ID, which is also the name of the
+// frontend code that draws the class (devdoc 2026102601 §3.5.1). Every element
+// class also defines the size attributes.
+var elementAttrs = map[string]codeAttrs{
 	"text":   {nil, []string{"text", "data_binding"}},
 	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type"}},
 	"select": {[]string{"label", "data_binding", "binding_mode", "options"}, nil},
@@ -29,10 +40,46 @@ var elementAttrs = map[string]struct{ required, optional []string }{
 	"menu":   {[]string{"items"}, []string{"initial_item"}},
 }
 
+// actionAttrs is keyed by action class ID, which is also the name of the code
+// that performs the action (devdoc §5). Every action instance may also set args.
+var actionAttrs = map[string]codeAttrs{
+	"load":       {[]string{"table", "result", "fields"}, []string{"where", "order_by", "limit"}},
+	"save":       {[]string{"table", "mode", "key", "fields"}, nil},
+	"open-page":  {[]string{"page", "pane"}, []string{"input"}},
+	"close-page": {},
+	"save-page":  {},
+}
+
+// classAttrs are shared by every instance of a class and set only in its row.
+var classAttrs = []string{"descriptor_id", "schema_version", "description"}
+
+// actionHolding attributes hold action instances. A class row cannot give them
+// defaults, so every action instance is written in a page (design D5).
+var actionHolding = []string{"on_click", "on_row_click", "source", "items", "input"}
+
+var (
+	triggerClasses = []string{"save", "open-page", "close-page", "save-page"}
+	loadClass      = []string{"load"}
+	saveClass      = []string{"save"}
+)
+
+// classCode returns the instance attributes the code of a class defines.
+func classCode(kind Kind, cls string) (codeAttrs, bool) {
+	if kind == KindAction {
+		a, ok := actionAttrs[cls]
+		return a, ok
+	}
+	a, ok := elementAttrs[cls]
+	a.optional = append(slices.Clone(a.optional), elementSizeAttrs...)
+	return a, ok
+}
+
 type validator struct {
 	kind   Kind
 	id     string
 	issues []Issue
+	// classes, when set, are the class rows instances are checked against.
+	classes map[Kind]map[string]Descriptor
 }
 
 func (v *validator) errf(path, format string, a ...any) {
@@ -40,8 +87,9 @@ func (v *validator) errf(path, format string, a ...any) {
 }
 
 // ValidateDescriptor checks one stored descriptor's structure and that every
-// type it names is supported. It does not follow references to other
-// descriptors; BuildBundle does that.
+// class it names has code. It checks a page's instances only as far as that is
+// possible without class rows; BuildBundle checks them against the rows and
+// follows references to other descriptors.
 func ValidateDescriptor(kind Kind, id string, body map[string]any) []Issue {
 	v := &validator{kind: kind, id: id}
 	if !idPattern.MatchString(id) {
@@ -58,10 +106,8 @@ func ValidateDescriptor(kind Kind, id string, body map[string]any) []Issue {
 		v.app(body)
 	case KindPage:
 		v.page(body)
-	case KindElement:
-		v.element(body, "", true)
-	case KindAction:
-		v.action(body, "", true)
+	case KindElement, KindAction:
+		v.classRow(body)
 	default:
 		v.errf("", "unknown descriptor kind %q", kind)
 	}
@@ -222,117 +268,194 @@ func (v *validator) app(b map[string]any) {
 func (v *validator) page(b map[string]any) {
 	v.keys(b, "", []string{"descriptor_id", "schema_version", "layouter", "elements"}, "input", "save_action", "refresh")
 	v.oneOf(b, "layouter", "", layouters)
-	if in, ok := b["input"]; ok {
-		v.input(in, "/input")
-	}
-	v.matching(b, "save_action", "", idPattern)
 	if r, ok := b["refresh"]; ok {
 		if m, ok := v.object(r, "/refresh"); ok {
 			v.keys(m, "/refresh", nil, "on_show")
 			v.boolean(m, "on_show", "/refresh")
 		}
 	}
-	els, ok := b["elements"]
-	if !ok {
-		return
-	}
-	list, ok := v.array(els, "/elements", false)
-	if !ok {
-		return
-	}
-	inlineIDs := map[string]bool{}
-	for i, e := range list {
-		path := "/elements/" + strconv.Itoa(i)
-		m, ok := v.object(e, path)
-		if !ok {
-			continue
-		}
-		if _, isRef := m["element"]; isRef {
-			v.elementRef(m, path)
-			continue
-		}
-		v.element(m, path, false)
-		if id, _ := m["descriptor_id"].(string); id != "" {
-			if inlineIDs[id] {
-				v.errf(path+"/descriptor_id", "inline element ID %q is used twice in this page", id)
+	if els, ok := b["elements"]; ok {
+		if list, ok := v.array(els, "/elements", false); ok {
+			for i, e := range list {
+				path := "/elements/" + strconv.Itoa(i)
+				if m, ok := v.object(e, path); ok {
+					v.elementInstance(m, path)
+				}
 			}
-			inlineIDs[id] = true
 		}
+	}
+	for _, pos := range actionPositions(b) {
+		v.actionInstance(pos)
 	}
 }
 
-// elementRef checks a page entry that places a stored element. Override
-// values are checked against the element's type when the bundle is built.
-func (v *validator) elementRef(m map[string]any, path string) {
-	v.matching(m, "element", path, idPattern)
-	allowed := map[string]bool{}
-	for _, a := range elementAttrs {
-		for _, k := range append(slices.Clone(a.required), a.optional...) {
-			allowed[k] = true
-		}
-	}
-	for _, k := range elementSizeAttrs {
-		allowed[k] = true
-	}
-	for _, k := range slices.Sorted(maps.Keys(m)) {
-		if k != "element" && !allowed[k] {
-			v.errf(path+"/"+k, "attribute %q cannot be overridden", k)
-		}
-	}
-}
-
-func (v *validator) element(e map[string]any, path string, stored bool) {
-	typ, _ := e["element_type"].(string)
-	attrs, known := elementAttrs[typ]
+// classRow checks an element or action class row (design D2): besides the
+// class attributes, it holds instance attributes its code defines, each with a
+// default or null. Every attribute the code requires must be there, and
+// attributes that hold actions cannot have defaults.
+func (v *validator) classRow(b map[string]any) {
+	code, known := classCode(v.kind, v.id)
 	if !known {
-		if typ == "" {
-			v.errf(path, "missing attribute %q", "element_type")
-		} else {
-			v.errf(path+"/element_type", "element type %q is not supported", typ)
+		v.errf("", "%s class %q has no code in this interpreter", v.kind, v.id)
+		return
+	}
+	v.text(b, "description", "")
+	defaults := map[string]any{}
+	for _, k := range slices.Sorted(maps.Keys(b)) {
+		switch {
+		case slices.Contains(classAttrs, k):
+		case !code.defines(k):
+			v.errf("/"+k, "unknown attribute %q", k)
+		case b[k] == nil:
+		case slices.Contains(actionHolding, k):
+			v.errf("/"+k, "attribute %q holds actions, so it cannot have a default; use null or leave it out", k)
+		default:
+			defaults[k] = b[k]
+		}
+	}
+	for _, k := range code.required {
+		if _, ok := b[k]; !ok {
+			v.errf("", "the class must give %q a default or null, because its code requires it", k)
+		}
+	}
+	if v.kind == KindElement {
+		v.element(v.id, defaults, "")
+	} else {
+		v.action(v.id, defaults, "")
+	}
+}
+
+// elementInstance checks a page entry {"element": class, ...} as far as it can
+// without the class row; pageInstances checks it against the row.
+func (v *validator) elementInstance(m map[string]any, path string) {
+	cls, ok := v.str(m, "element", path)
+	if !ok {
+		if _, present := m["element"]; !present {
+			v.errf(path, "missing attribute %q", "element")
 		}
 		return
 	}
-	required := append([]string{"descriptor_id", "element_type"}, attrs.required...)
-	optional := append(slices.Clone(elementSizeAttrs), attrs.optional...)
-	if stored {
-		required = append(required, "schema_version")
-	} else {
-		v.matching(e, "descriptor_id", path, idPattern)
+	if _, known := elementAttrs[cls]; !known {
+		v.errf(path+"/element", "element class %q has no code in this interpreter", cls)
+		return
 	}
-	v.keys(e, path, required, optional...)
+	v.noClassAttrs(m, path)
+	v.element(cls, instanceAttrs(m, "element"), path)
+}
+
+func (v *validator) noClassAttrs(m map[string]any, path string) {
+	for _, k := range classAttrs {
+		if _, ok := m[k]; ok {
+			v.errf(path+"/"+k, "%q is a class attribute; an instance cannot set it", k)
+		}
+	}
+}
+
+// instanceAttrs returns an instance's own attributes: everything but its class
+// name (classKey) and class attributes.
+func instanceAttrs(m map[string]any, classKey string) map[string]any {
+	out := map[string]any{}
+	for k, val := range m {
+		if k != classKey && !slices.Contains(classAttrs, k) {
+			out[k] = val
+		}
+	}
+	return out
+}
+
+// element checks the attributes an element instance or class row sets: each is
+// defined by the class's code and has a valid value. Whether required ones are
+// there is checked on the merged instance (elementComplete). Action instances
+// inside are checked through actionPositions.
+func (v *validator) element(cls string, e map[string]any, path string) {
+	code, _ := classCode(KindElement, cls)
+	v.keys(e, path, nil, append(slices.Clone(code.required), code.optional...)...)
 	for _, k := range elementSizeAttrs {
 		v.size(e, k, path)
 	}
-	switch typ {
+	switch cls {
 	case "text":
-		_, hasText := e["text"]
-		_, hasBinding := e["data_binding"]
-		if hasText == hasBinding {
-			v.errf(path, "a text element needs exactly one of %q or %q", "text", "data_binding")
-		}
-		if hasText {
-			if _, ok := e["text"].(string); !ok {
+		if t, ok := e["text"]; ok {
+			if _, ok := t.(string); !ok {
 				v.errf(path+"/text", "must be a string")
 			}
 		}
 		v.binding(e, path)
 	case "input", "select":
-		v.str(e, "label", path)
+		v.text(e, "label", path)
 		v.binding(e, path)
 		v.oneOf(e, "binding_mode", path, []string{"read-only", "read-write"})
 		v.oneOf(e, "input_type", path, []string{"text", "number", "email"})
-		if typ == "select" {
+		if _, ok := e["options"]; ok {
 			v.options(e, path)
 		}
 	case "button":
-		v.str(e, "label", path)
-		if t, ok := e["on_click"]; ok {
-			v.trigger(t, path+"/on_click", false)
-		}
+		v.text(e, "label", path)
 	case "list":
-		v.listElement(e, path)
+		v.listColumns(e, path)
+		v.oneOf(e, "presentation", path, []string{"rows"})
 	case "menu":
-		v.menu(e, path)
+		if items, ok := e["items"]; ok {
+			v.menuItems(items, path+"/items", map[string]bool{})
+		}
+		v.str(e, "initial_item", path)
+	}
+}
+
+// elementComplete checks a merged element instance: every attribute its code
+// requires is there, and the rules that span attributes hold.
+func (v *validator) elementComplete(cls string, merged map[string]any, path string) {
+	code, _ := classCode(KindElement, cls)
+	v.required(merged, path, code.required)
+	switch cls {
+	case "text":
+		_, hasText := merged["text"]
+		_, hasBinding := merged["data_binding"]
+		if hasText == hasBinding {
+			v.errf(path, "a text element needs exactly one of %q or %q", "text", "data_binding")
+		}
+	case "menu":
+		if initial, ok := merged["initial_item"].(string); ok && !menuLeaves(merged["items"])[initial] {
+			v.errf(path+"/initial_item", "initial_item %q is not a menu item that opens a page", initial)
+		}
+	}
+}
+
+func (v *validator) required(obj map[string]any, path string, keys []string) {
+	for _, k := range keys {
+		if _, ok := obj[k]; !ok {
+			v.errf(path, "missing attribute %q", k)
+		}
+	}
+}
+
+// text checks a text attribute: a non-empty string, or non-empty strings keyed
+// by language code that include "en" (design D9).
+func (v *validator) text(obj map[string]any, key, path string) {
+	val, present := obj[key]
+	if !present {
+		return
+	}
+	p := path + "/" + key
+	switch t := val.(type) {
+	case string:
+		if t == "" {
+			v.errf(p, "must be a non-empty string or an object of texts by language")
+		}
+	case map[string]any:
+		for _, lang := range slices.Sorted(maps.Keys(t)) {
+			if !localePattern.MatchString(lang) {
+				v.errf(p+"/"+lang, "%q is not a language code", lang)
+			}
+			if s, ok := t[lang].(string); !ok || s == "" {
+				v.errf(p+"/"+lang, "must be a non-empty string")
+			}
+		}
+		if _, ok := t["en"]; !ok {
+			v.errf(p, "texts by language need an %q entry", "en")
+		}
+	default:
+		v.errf(p, "must be a non-empty string or an object of texts by language")
 	}
 }
 
@@ -371,49 +494,29 @@ func (v *validator) options(e map[string]any, path string) {
 	}
 }
 
-func (v *validator) listElement(e map[string]any, path string) {
-	if src, ok := e["source"]; ok {
-		if m, ok := v.object(src, path+"/source"); ok {
-			v.keys(m, path+"/source", []string{"action"}, "args")
-			v.matching(m, "action", path+"/source", idPattern)
-			v.values(m, "args", path+"/source", RootInputDoc)
-		}
-	}
-	v.oneOf(e, "presentation", path, []string{"rows"})
-	if cols, ok := e["columns"]; ok {
-		if list, ok := v.array(cols, path+"/columns", true); ok {
-			for i, c := range list {
-				p := path + "/columns/" + strconv.Itoa(i)
-				m, ok := v.object(c, p)
-				if !ok {
-					continue
-				}
-				v.keys(m, p, []string{"field", "label"}, "width")
-				v.matching(m, "field", p, segmentPattern)
-				v.str(m, "label", p)
-				v.size(m, "width", p)
-			}
-		}
-	}
-	if t, ok := e["on_row_click"]; ok {
-		v.trigger(t, path+"/on_row_click", true)
-	}
-}
-
-func (v *validator) menu(e map[string]any, path string) {
-	items, ok := e["items"]
+func (v *validator) listColumns(e map[string]any, path string) {
+	cols, ok := e["columns"]
 	if !ok {
 		return
 	}
-	leaves := map[string]bool{}
-	seen := map[string]bool{}
-	v.menuItems(items, path+"/items", seen, leaves)
-	if initial, ok := v.str(e, "initial_item", path); ok && !leaves[initial] {
-		v.errf(path+"/initial_item", "initial_item %q is not a menu item that opens a page", initial)
+	list, ok := v.array(cols, path+"/columns", true)
+	if !ok {
+		return
+	}
+	for i, c := range list {
+		p := path + "/columns/" + strconv.Itoa(i)
+		m, ok := v.object(c, p)
+		if !ok {
+			continue
+		}
+		v.keys(m, p, []string{"field", "label"}, "width")
+		v.matching(m, "field", p, segmentPattern)
+		v.str(m, "label", p)
+		v.size(m, "width", p)
 	}
 }
 
-func (v *validator) menuItems(val any, path string, seen, leaves map[string]bool) {
+func (v *validator) menuItems(val any, path string, seen map[string]bool) {
 	list, ok := v.array(val, path, true)
 	if !ok {
 		return
@@ -425,79 +528,133 @@ func (v *validator) menuItems(val any, path string, seen, leaves map[string]bool
 			continue
 		}
 		v.keys(m, p, []string{"item_id", "label"}, "on_click", "children")
-		id, _ := v.matching(m, "item_id", p, idPattern)
-		if id != "" {
+		if id, ok := v.matching(m, "item_id", p, idPattern); ok {
 			if seen[id] {
 				v.errf(p+"/item_id", "menu item ID %q is used twice", id)
 			}
 			seen[id] = true
 		}
 		v.str(m, "label", p)
-		click, hasClick := m["on_click"]
+		_, hasClick := m["on_click"]
 		children, hasChildren := m["children"]
 		switch {
 		case hasClick == hasChildren:
 			v.errf(p, "a menu item needs exactly one of %q or %q", "on_click", "children")
-		case hasClick:
-			v.trigger(click, p+"/on_click", false)
-			if id != "" {
-				leaves[id] = true
+		case hasChildren:
+			v.menuItems(children, p+"/children", seen)
+		}
+	}
+}
+
+// menuLeaves returns the IDs of menu items that open a page.
+func menuLeaves(items any) map[string]bool {
+	out := map[string]bool{}
+	list, _ := items.([]any)
+	for _, it := range list {
+		m, _ := it.(map[string]any)
+		if _, ok := m["on_click"]; ok {
+			out[str(m["item_id"])] = true
+		}
+		maps.Copy(out, menuLeaves(m["children"]))
+	}
+	return out
+}
+
+// actionPos is a place in a page that holds an action instance.
+type actionPos struct {
+	val     any
+	path    string
+	allowed []string // action classes allowed here
+	roots   []string // reference roots its args may use
+	emptyOK bool     // {} is allowed and means an empty input doc
+}
+
+// actionPositions lists every place in a page that holds an action instance
+// (design D5), including open-page inputs nested in them. It accepts pages
+// that fail validation, so callers can use it on any stored page.
+func actionPositions(page map[string]any) []actionPos {
+	var out []actionPos
+	if in, ok := page["input"]; ok {
+		out = append(out, actionPos{in, "/input", loadClass, nil, true})
+	}
+	if s, ok := page["save_action"]; ok {
+		out = append(out, actionPos{s, "/save_action", saveClass, nil, false})
+	}
+	els, _ := page["elements"].([]any)
+	for i, e := range els {
+		m, _ := e.(map[string]any)
+		code := elementAttrs[str(m["element"])]
+		path := "/elements/" + strconv.Itoa(i)
+		add := func(attr string, allowed, roots []string) {
+			if val, ok := m[attr]; ok && code.defines(attr) {
+				out = append(out, actionPos{val, path + "/" + attr, allowed, roots, false})
 			}
-		default:
-			v.menuItems(children, p+"/children", seen, leaves)
+		}
+		add("on_click", triggerClasses, []string{RootInputDoc})
+		add("source", loadClass, []string{RootInputDoc})
+		add("on_row_click", triggerClasses, []string{RootInputDoc, RootRecord})
+		if code.defines("items") {
+			out = append(out, itemPositions(m["items"], path+"/items")...)
 		}
 	}
+	for i := 0; i < len(out); i++ {
+		m, _ := out[i].val.(map[string]any)
+		if in, ok := m["input"]; ok && str(m["action"]) == "open-page" {
+			out = append(out, actionPos{in, out[i].path + "/input", loadClass, []string{RootArgs}, true})
+		}
+	}
+	return out
 }
 
-// trigger checks an event's action: a stored action by ID or an inline action.
-// Its args may use $input_doc, and $record when allowRecord is set.
-func (v *validator) trigger(val any, path string, allowRecord bool) {
-	t, ok := v.object(val, path)
+func itemPositions(items any, path string) []actionPos {
+	var out []actionPos
+	list, _ := items.([]any)
+	for i, it := range list {
+		m, _ := it.(map[string]any)
+		p := path + "/" + strconv.Itoa(i)
+		if t, ok := m["on_click"]; ok {
+			out = append(out, actionPos{t, p + "/on_click", triggerClasses, []string{RootInputDoc}, false})
+		}
+		out = append(out, itemPositions(m["children"], p+"/children")...)
+	}
+	return out
+}
+
+// actionInstance checks an action instance as far as it can without the class
+// row: its class has code and is allowed here, and the attributes it sets are
+// defined by that code and valid.
+func (v *validator) actionInstance(pos actionPos) {
+	m, ok := v.object(pos.val, pos.path)
+	if !ok || (pos.emptyOK && len(m) == 0) {
+		return
+	}
+	cls, ok := v.str(m, "action", pos.path)
 	if !ok {
-		return
-	}
-	roots := []string{RootInputDoc}
-	if allowRecord {
-		roots = append(roots, RootRecord)
-	}
-	if _, byID := t["action"]; byID {
-		v.keys(t, path, []string{"action"}, "args")
-		v.matching(t, "action", path, idPattern)
-	} else {
-		v.action(t, path, false, "args")
-	}
-	v.values(t, "args", path, roots...)
-}
-
-func (v *validator) input(val any, path string, roots ...string) {
-	m, ok := v.object(val, path)
-	if !ok || len(m) == 0 {
-		return
-	}
-	v.keys(m, path, []string{"action"}, "args")
-	v.matching(m, "action", path, idPattern)
-	v.values(m, "args", path, roots...)
-}
-
-// action checks a stored action (stored=true) or an inline one inside a
-// trigger; extra lists attributes the surrounding trigger adds.
-func (v *validator) action(a map[string]any, path string, stored bool, extra ...string) {
-	typ, _ := a["action_type"].(string)
-	if !slices.Contains(actionTypes, typ) {
-		if typ == "" {
-			v.errf(path, "missing attribute %q", "action_type")
-		} else {
-			v.errf(path+"/action_type", "action type %q is not supported", typ)
+		if _, present := m["action"]; !present {
+			v.errf(pos.path, "missing attribute %q", "action")
 		}
 		return
 	}
-	required := []string{"action_type"}
-	if stored {
-		required = append(required, "descriptor_id", "schema_version")
+	if _, known := actionAttrs[cls]; !known {
+		v.errf(pos.path+"/action", "action class %q has no code in this interpreter", cls)
+		return
 	}
-	switch typ {
+	if !slices.Contains(pos.allowed, cls) {
+		v.errf(pos.path+"/action", "a %s action is not allowed here (allowed: %s)", cls, strings.Join(pos.allowed, ", "))
+		return
+	}
+	v.noClassAttrs(m, pos.path)
+	v.action(cls, instanceAttrs(m, "action"), pos.path, "args")
+	v.values(m, "args", pos.path, pos.roots...)
+}
+
+// action checks the attributes an action instance or class row sets; extra
+// lists attributes allowed besides those its code defines.
+func (v *validator) action(cls string, a map[string]any, path string, extra ...string) {
+	code := actionAttrs[cls]
+	v.keys(a, path, nil, append(append(slices.Clone(code.required), code.optional...), extra...)...)
+	switch cls {
 	case "load":
-		v.keys(a, path, append(required, "table", "result", "fields"), append(extra, "where", "order_by", "limit")...)
 		v.matching(a, "table", path, tablePattern)
 		v.oneOf(a, "result", path, []string{"record", "list"})
 		v.fieldMaps(a, path, false)
@@ -514,21 +671,100 @@ func (v *validator) action(a map[string]any, path string, stored bool, extra ...
 		v.orderBy(a, path)
 		v.positiveInt(a, "limit", path)
 	case "save":
-		v.keys(a, path, append(required, "table", "mode", "key", "fields"), extra...)
 		v.matching(a, "table", path, tablePattern)
 		v.oneOf(a, "mode", path, []string{"insert", "update", "upsert"})
 		v.matching(a, "key", path, columnPattern)
 		v.fieldMaps(a, path, true)
-	case "open_page":
-		v.keys(a, path, append(required, "page", "pane"), append(extra, "input")...)
+	case "open-page":
 		v.matching(a, "page", path, idPattern)
 		v.str(a, "pane", path)
-		if in, ok := a["input"]; ok {
-			v.input(in, path+"/input", RootArgs)
-		}
-	case "close_page":
-		v.keys(a, path, required, extra...)
 	}
+}
+
+// mergeInstance overlays an instance's own attributes on its class row's
+// non-null defaults (devdoc 2026102601 §3.5.1).
+func mergeInstance(row, own map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, val := range row {
+		if val != nil && !slices.Contains(classAttrs, k) {
+			out[k] = val
+		}
+	}
+	maps.Copy(out, own)
+	return out
+}
+
+// againstClass checks an instance's own attributes against its class row and
+// returns the merged instance. Every attribute the row sets to null must be
+// set by the instance.
+func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path string) (map[string]any, bool) {
+	row, ok := v.classes[kind][cls]
+	if !ok {
+		key := "element"
+		if kind == KindAction {
+			key = "action"
+		}
+		v.errf(path+"/"+key, "%s class %q does not exist", kind, cls)
+		return nil, false
+	}
+	for _, k := range slices.Sorted(maps.Keys(row.Body)) {
+		if _, set := own[k]; !set && row.Body[k] == nil {
+			v.errf(path, "attribute %q has no default in %s class %q, so this instance must set it", k, kind, cls)
+		}
+	}
+	return mergeInstance(row.Body, own), true
+}
+
+// actionComplete checks an action instance against its class row and returns
+// the merged instance, or nil for an empty input doc or an instance whose
+// class problems actionInstance reports.
+func (v *validator) actionComplete(pos actionPos) map[string]any {
+	m, _ := pos.val.(map[string]any)
+	cls := str(m["action"])
+	if _, known := actionAttrs[cls]; !known || !slices.Contains(pos.allowed, cls) {
+		return nil
+	}
+	merged, ok := v.againstClass(KindAction, cls, instanceAttrs(m, "action"), pos.path)
+	if !ok {
+		return nil
+	}
+	v.required(merged, pos.path, actionAttrs[cls].required)
+	return merged
+}
+
+// mergedElement is an element instance merged with its class.
+type mergedElement struct {
+	cls, path string
+	body      map[string]any
+}
+
+// mergedAction is an action instance merged with its class.
+type mergedAction struct {
+	page, path, cls string
+	body            map[string]any
+}
+
+// pageInstances checks a page's instances against their class rows (design
+// D3, second stage) and returns them merged with their classes.
+func (v *validator) pageInstances(page map[string]any) ([]mergedElement, []mergedAction) {
+	var els []mergedElement
+	list, _ := page["elements"].([]any)
+	for i, e := range list {
+		m, _ := e.(map[string]any)
+		cls, path := str(m["element"]), "/elements/"+strconv.Itoa(i)
+		if merged, ok := v.againstClass(KindElement, cls, instanceAttrs(m, "element"), path); ok {
+			v.elementComplete(cls, merged, path)
+			els = append(els, mergedElement{cls, path, merged})
+		}
+	}
+	var acts []mergedAction
+	for _, pos := range actionPositions(page) {
+		if merged := v.actionComplete(pos); merged != nil {
+			m, _ := pos.val.(map[string]any)
+			acts = append(acts, mergedAction{v.id, pos.path, str(m["action"]), merged})
+		}
+	}
+	return els, acts
 }
 
 func (v *validator) fieldMaps(a map[string]any, path string, save bool) {

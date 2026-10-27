@@ -31,8 +31,8 @@ export async function fetchApp(appId: string, fetchFn: typeof fetch = fetch): Pr
 
 export type SaveResult = { key_attribute: string; key_value: Json };
 
-// Runs a stored load or save action. Throws WpiError; a save rejected by its
-// field rules carries fieldErrors.
+// Runs a load or save instance named by its place in a stored page. Throws
+// WpiError; a save rejected by its field rules carries fieldErrors.
 export async function runAction(
 	ref: ActionRef,
 	args: JsonObject = {},

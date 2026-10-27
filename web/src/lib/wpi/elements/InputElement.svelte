@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Input } from '$lib/components/ui/input';
 	import { getRuntime } from '../runtime.svelte';
-	import { fieldErrorText } from '../text';
+	import { fieldErrorText, localized } from '../text';
 	import type { Json } from '../types';
 	import type { ElementProps } from './index';
 
@@ -22,7 +22,7 @@
 </script>
 
 <div class="flex flex-col gap-1 text-sm">
-	<label for={id} class="text-muted-foreground">{d.label}</label>
+	<label for={id} class="text-muted-foreground">{localized(d.label)}</label>
 	<Input
 		{id}
 		type={d.input_type ?? 'text'}

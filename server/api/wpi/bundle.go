@@ -14,8 +14,9 @@ import (
 // ErrNotFound means the requested app (or record) does not exist.
 var ErrNotFound = errors.New("not found")
 
-// Loader returns the latest active descriptors of one kind among ids; IDs
-// with no active version are absent from the map.
+// Loader returns the latest active descriptors of one kind among ids, or every
+// active descriptor of that kind when ids is nil; IDs with no active version
+// are absent from the map.
 type Loader func(ctx context.Context, kind Kind, ids []string) (map[string]Descriptor, error)
 
 // Columns returns a table's column names, or nil when the table does not exist.
@@ -28,29 +29,10 @@ type BundleResult struct {
 	Warnings []Issue
 }
 
-// site is a place inside a descriptor that refers to another descriptor.
-// expect lists the action types allowed there (nil: any).
-type site struct {
-	kind   Kind
-	id     string
-	path   string
-	expect []string
-}
-
-// actionSite is an action body reachable from the app, stored or inline.
-type actionSite struct {
-	kind Kind
-	id   string
-	path string
-	body map[string]any
-}
-
-type walker struct {
-	got     map[Kind]map[string]Descriptor
-	tried   map[Kind]map[string]bool
-	sites   map[Kind]map[string][]site
-	actions []actionSite
-	issues  []Issue
+// pageRef is a place inside a descriptor that names a page.
+type pageRef struct {
+	kind         Kind
+	id, path, to string
 }
 
 func str(v any) string {
@@ -58,8 +40,9 @@ func str(v any) string {
 	return s
 }
 
-// BuildBundle loads appID and everything reachable from it, then validates the
-// whole set: structure, references, panes, tables and columns, bindings.
+// BuildBundle loads appID, every page reachable from it and all classes, then
+// validates the whole set: structure, instances against their classes,
+// references, panes, tables and columns, bindings.
 func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns) (*BundleResult, error) {
 	apps, err := load(ctx, KindApp, []string{appID})
 	if err != nil {
@@ -69,55 +52,55 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 	if !ok {
 		return nil, ErrNotFound
 	}
-	w := &walker{got: map[Kind]map[string]Descriptor{}, tried: map[Kind]map[string]bool{}, sites: map[Kind]map[string][]site{}}
-	for _, k := range []Kind{KindApp, KindPage, KindElement, KindAction} {
-		w.got[k], w.tried[k], w.sites[k] = map[string]Descriptor{}, map[string]bool{}, map[string][]site{}
+	// Classes are few by design, so all of them are loaded, one query per
+	// kind, and every instance can be merged as soon as its page arrives.
+	classes := map[Kind]map[string]Descriptor{}
+	for _, kind := range []Kind{KindElement, KindAction} {
+		if classes[kind], err = load(ctx, kind, nil); err != nil {
+			return nil, err
+		}
 	}
-	w.add(app)
-	// Fetch referenced descriptors round by round; cycles end because each
-	// ID is tried once.
-	for {
-		fetched := false
-		for _, kind := range []Kind{KindPage, KindElement, KindAction} {
-			var ids []string
-			for _, id := range slices.Sorted(maps.Keys(w.sites[kind])) {
-				if !w.tried[kind][id] {
-					ids = append(ids, id)
-				}
-			}
-			if len(ids) == 0 {
-				continue
-			}
-			fetched = true
-			found, err := load(ctx, kind, ids)
-			if err != nil {
-				return nil, err
-			}
-			for _, id := range ids {
-				w.tried[kind][id] = true
-				if d, ok := found[id]; ok {
-					w.add(d)
-				}
-			}
-		}
-		if !fetched {
-			break
-		}
+	pages, refs, err := loadPages(ctx, app, classes[KindAction], load)
+	if err != nil {
+		return nil, err
 	}
 
 	res := &BundleResult{}
-	for _, kind := range []Kind{KindApp, KindPage, KindElement, KindAction} {
-		for _, id := range slices.Sorted(maps.Keys(w.got[kind])) {
-			res.Errors = append(res.Errors, ValidateDescriptor(kind, id, w.got[kind][id].Body)...)
+	res.Errors = append(res.Errors, ValidateDescriptor(KindApp, appID, app.Body)...)
+	for _, r := range refs {
+		if _, ok := pages[r.to]; !ok {
+			res.Errors = append(res.Errors, Issue{r.kind, r.id, r.path, fmt.Sprintf("page %q does not exist", r.to)})
 		}
 	}
-	res.Errors = append(res.Errors, w.issues...)
-	res.Errors = append(res.Errors, w.referenceErrors()...)
-	pageErrs, warnings := w.pageChecks()
-	res.Errors = append(res.Errors, pageErrs...)
-	res.Warnings = warnings
-	res.Errors = append(res.Errors, w.paneErrors(appID, str(app.Body["layout_template"]))...)
-	tableErrs, err := w.tableErrors(ctx, columns)
+	used := map[Kind]map[string]bool{KindElement: {}, KindAction: {}}
+	var actions []mergedAction
+	for _, id := range slices.Sorted(maps.Keys(pages)) {
+		body := pages[id].Body
+		if issues := ValidateDescriptor(KindPage, id, body); len(issues) > 0 {
+			res.Errors = append(res.Errors, issues...)
+			continue
+		}
+		v := &validator{kind: KindPage, id: id, classes: classes}
+		els, acts := v.pageInstances(body)
+		res.Errors = append(res.Errors, v.issues...)
+		for _, e := range els {
+			used[KindElement][e.cls] = true
+		}
+		for _, a := range acts {
+			used[KindAction][a.cls] = true
+		}
+		actions = append(actions, acts...)
+		res.Warnings = append(res.Warnings, unboundSaveWarnings(id, els, acts)...)
+	}
+	// Only the classes the app uses are checked, so a broken class row that no
+	// page uses does not break every app.
+	for _, kind := range []Kind{KindElement, KindAction} {
+		for _, cls := range slices.Sorted(maps.Keys(used[kind])) {
+			res.Errors = append(res.Errors, ValidateDescriptor(kind, cls, classes[kind][cls].Body)...)
+		}
+	}
+	res.Errors = append(res.Errors, paneErrors(appID, str(app.Body["layout_template"]), actions)...)
+	tableErrs, err := tableErrors(ctx, columns, actions)
 	if err != nil {
 		return nil, err
 	}
@@ -126,200 +109,123 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 		return res, nil
 	}
 
-	b := &Bundle{App: app.Raw, Pages: rawMap(w.got[KindPage]), Elements: rawMap(w.got[KindElement]), Actions: rawMap(w.got[KindAction]), Warnings: res.Warnings}
-	if b.Warnings == nil {
-		b.Warnings = []Issue{}
+	res.Bundle = &Bundle{
+		App:      app.Raw,
+		Pages:    rawMap(pages, nil),
+		Elements: rawMap(classes[KindElement], used[KindElement]),
+		Actions:  rawMap(classes[KindAction], used[KindAction]),
+		Warnings: nonNil(res.Warnings),
 	}
-	res.Bundle = b
 	return res, nil
 }
 
-func rawMap(ds map[string]Descriptor) map[string]json.RawMessage {
-	out := make(map[string]json.RawMessage, len(ds))
+// rawMap returns the descriptors' JSON by ID, only those in keep unless it is nil.
+func rawMap(ds map[string]Descriptor, keep map[string]bool) map[string]json.RawMessage {
+	out := map[string]json.RawMessage{}
 	for id, d := range ds {
-		out[id] = d.Raw
+		if keep == nil || keep[id] {
+			out[id] = d.Raw
+		}
 	}
 	return out
 }
 
-func (w *walker) add(d Descriptor) {
-	w.got[d.Kind][d.ID] = d
-	b := d.Body
-	switch d.Kind {
-	case KindApp:
-		panes, _ := b["panes"].(map[string]any)
-		for _, pid := range slices.Sorted(maps.Keys(panes)) {
-			p, _ := panes[pid].(map[string]any)
-			w.ref(KindPage, str(p["page"]), site{KindApp, d.ID, "/panes/" + pid + "/page", nil})
+// loadPages fetches every page reachable from the app round by round: the
+// pages its panes name, then the pages their open-page instances open. Cycles
+// end because each ID is tried once. It returns the pages found and every
+// place that names a page.
+func loadPages(ctx context.Context, app Descriptor, actionClasses map[string]Descriptor, load Loader) (map[string]Descriptor, []pageRef, error) {
+	pages := map[string]Descriptor{}
+	tried := map[string]bool{}
+	var refs []pageRef
+	var pending []string
+	name := func(r pageRef) {
+		if r.to == "" {
+			return
 		}
-	case KindPage:
-		w.ref(KindAction, str(b["save_action"]), site{KindPage, d.ID, "/save_action", []string{"save"}})
-		w.input(b["input"], KindPage, d.ID, "/input")
-		els, _ := b["elements"].([]any)
-		for i, e := range els {
-			m, _ := e.(map[string]any)
-			path := "/elements/" + strconv.Itoa(i)
-			w.ref(KindElement, str(m["element"]), site{KindPage, d.ID, path + "/element", nil})
-			w.element(m, KindPage, d.ID, path)
+		refs = append(refs, r)
+		if !tried[r.to] {
+			tried[r.to] = true
+			pending = append(pending, r.to)
 		}
-	case KindElement:
-		w.element(b, KindElement, d.ID, "")
-	case KindAction:
-		w.action(b, KindAction, d.ID, "")
 	}
+	panes, _ := app.Body["panes"].(map[string]any)
+	for _, pid := range slices.Sorted(maps.Keys(panes)) {
+		p, _ := panes[pid].(map[string]any)
+		name(pageRef{KindApp, app.ID, "/panes/" + pid + "/page", str(p["page"])})
+	}
+	for len(pending) > 0 {
+		ids := slices.Sorted(slices.Values(pending))
+		pending = nil
+		found, err := load(ctx, KindPage, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, id := range ids {
+			d, ok := found[id]
+			if !ok {
+				continue
+			}
+			pages[id] = d
+			for _, pos := range actionPositions(d.Body) {
+				m, _ := pos.val.(map[string]any)
+				if str(m["action"]) == "open-page" {
+					merged := mergeInstance(actionClasses["open-page"].Body, instanceAttrs(m, "action"))
+					name(pageRef{KindPage, id, pos.path + "/page", str(merged["page"])})
+				}
+			}
+		}
+	}
+	return pages, refs, nil
 }
 
-func (w *walker) ref(kind Kind, id string, s site) {
-	if id != "" {
-		w.sites[kind][id] = append(w.sites[kind][id], s)
+// unboundSaveWarnings warns about attributes a page's save_action writes that
+// no read-write element on the page binds.
+func unboundSaveWarnings(pageID string, els []mergedElement, acts []mergedAction) []Issue {
+	bound := map[string]bool{}
+	for _, e := range els {
+		if str(e.body["binding_mode"]) == "read-write" {
+			if ref, isRef, err := parseRef(str(e.body["data_binding"])); isRef && err == nil {
+				bound[strings.Join(ref.Path, ".")] = true
+			}
+		}
 	}
-}
-
-func (w *walker) input(val any, kind Kind, id, path string) {
-	m, _ := val.(map[string]any)
-	w.ref(KindAction, str(m["action"]), site{kind, id, path + "/action", []string{"load"}})
-}
-
-func (w *walker) element(m map[string]any, kind Kind, id, path string) {
-	if src, ok := m["source"].(map[string]any); ok {
-		w.ref(KindAction, str(src["action"]), site{kind, id, path + "/source/action", []string{"load"}})
-	}
-	w.trigger(m["on_click"], kind, id, path+"/on_click")
-	w.trigger(m["on_row_click"], kind, id, path+"/on_row_click")
-	w.items(m["items"], kind, id, path+"/items")
-}
-
-func (w *walker) items(val any, kind Kind, id, path string) {
-	list, _ := val.([]any)
-	for i, it := range list {
-		m, _ := it.(map[string]any)
-		p := path + "/" + strconv.Itoa(i)
-		w.trigger(m["on_click"], kind, id, p+"/on_click")
-		w.items(m["children"], kind, id, p+"/children")
-	}
-}
-
-var triggerActionTypes = []string{"save", "open_page", "close_page"}
-
-func (w *walker) trigger(val any, kind Kind, id, path string) {
-	t, ok := val.(map[string]any)
-	if !ok {
-		return
-	}
-	if _, byID := t["action"]; byID {
-		w.ref(KindAction, str(t["action"]), site{kind, id, path + "/action", triggerActionTypes})
-		return
-	}
-	if typ := str(t["action_type"]); typ != "" && !slices.Contains(triggerActionTypes, typ) {
-		w.issues = append(w.issues, Issue{kind, id, path + "/action_type", fmt.Sprintf("a %s action cannot be triggered by an event (allowed: %v)", typ, triggerActionTypes)})
-	}
-	w.action(t, kind, id, path)
-}
-
-func (w *walker) action(a map[string]any, kind Kind, id, path string) {
-	w.actions = append(w.actions, actionSite{kind, id, path, a})
-	if str(a["action_type"]) == "open_page" {
-		w.ref(KindPage, str(a["page"]), site{kind, id, path + "/page", nil})
-		w.input(a["input"], kind, id, path+"/input")
-	}
-}
-
-func (w *walker) referenceErrors() []Issue {
 	var out []Issue
-	for _, kind := range []Kind{KindPage, KindElement, KindAction} {
-		for _, target := range slices.Sorted(maps.Keys(w.sites[kind])) {
-			d, exists := w.got[kind][target]
-			for _, s := range w.sites[kind][target] {
-				if !exists {
-					out = append(out, Issue{s.kind, s.id, s.path, fmt.Sprintf("%s %q does not exist", kind, target)})
-					continue
-				}
-				if typ := str(d.Body["action_type"]); s.expect != nil && !slices.Contains(s.expect, typ) {
-					out = append(out, Issue{s.kind, s.id, s.path, fmt.Sprintf("action %q is a %s action; expected %s", target, typ, strings.Join(s.expect, " or "))})
-				}
-			}
-		}
-	}
-	return out
-}
-
-// pageChecks validates element entries with overrides against their stored
-// element's type, and warns about save attributes no read-write element binds.
-func (w *walker) pageChecks() (errs, warnings []Issue) {
-	elementOK := map[string]bool{}
-	for id, d := range w.got[KindElement] {
-		elementOK[id] = len(ValidateDescriptor(KindElement, id, d.Body)) == 0
-	}
-	for _, pageID := range slices.Sorted(maps.Keys(w.got[KindPage])) {
-		page := w.got[KindPage][pageID].Body
-		bound := map[string]bool{}
-		els, _ := page["elements"].([]any)
-		for i, e := range els {
-			m, _ := e.(map[string]any)
-			el := m
-			if ref := str(m["element"]); ref != "" {
-				stored, ok := w.got[KindElement][ref]
-				if !ok || !elementOK[ref] {
-					continue
-				}
-				el = maps.Clone(stored.Body)
-				for k, v := range m {
-					if k != "element" {
-						el[k] = v
-					}
-				}
-				if len(m) > 1 {
-					v := &validator{kind: KindPage, id: pageID}
-					v.element(el, "/elements/"+strconv.Itoa(i), true)
-					errs = append(errs, v.issues...)
-				}
-			}
-			if str(el["binding_mode"]) == "read-write" {
-				if ref, isRef, err := parseRef(str(el["data_binding"])); isRef && err == nil {
-					bound[strings.Join(ref.Path, ".")] = true
-				}
-			}
-		}
-		save, ok := w.got[KindAction][str(page["save_action"])]
-		if !ok || str(save.Body["action_type"]) != "save" {
+	for _, a := range acts {
+		if a.path != "/save_action" {
 			continue
 		}
-		fields, _ := save.Body["fields"].([]any)
+		fields, _ := a.body["fields"].([]any)
 		for _, f := range fields {
 			m, _ := f.(map[string]any)
-			attr := str(m["attribute"])
-			if attr != "" && !bound[attr] {
-				warnings = append(warnings, Issue{KindPage, pageID, "/save_action", fmt.Sprintf("save action %q writes attribute %q, but no read-write element on this page binds $input_doc.%s", save.ID, attr, attr)})
+			if attr := str(m["attribute"]); attr != "" && !bound[attr] {
+				out = append(out, Issue{KindPage, pageID, "/save_action", fmt.Sprintf("the save action writes attribute %q, but no read-write element on this page binds $input_doc.%s", attr, attr)})
 			}
 		}
 	}
-	return errs, warnings
+	return out
 }
 
-func (w *walker) paneErrors(appID, tmpl string) []Issue {
+func paneErrors(appID, tmpl string, actions []mergedAction) []Issue {
 	panes, known := templatePanes[tmpl]
 	if !known {
 		return nil // reported by the app's structure check
 	}
 	var out []Issue
-	for _, a := range w.actions {
-		if str(a.body["action_type"]) != "open_page" {
-			continue
-		}
-		if pane := str(a.body["pane"]); pane != "" && !slices.Contains(panes, pane) {
-			out = append(out, Issue{a.kind, a.id, a.path + "/pane", fmt.Sprintf("pane %q is not part of layout template %q used by app %q", pane, tmpl, appID)})
+	for _, a := range actions {
+		if pane := str(a.body["pane"]); a.cls == "open-page" && pane != "" && !slices.Contains(panes, pane) {
+			out = append(out, Issue{KindPage, a.page, a.path + "/pane", fmt.Sprintf("pane %q is not part of layout template %q used by app %q", pane, tmpl, appID)})
 		}
 	}
 	return out
 }
 
-func (w *walker) tableErrors(ctx context.Context, columns Columns) ([]Issue, error) {
+func tableErrors(ctx context.Context, columns Columns, actions []mergedAction) ([]Issue, error) {
 	cache := map[string]map[string]bool{}
 	var out []Issue
-	for _, a := range w.actions {
-		typ := str(a.body["action_type"])
+	for _, a := range actions {
 		table := str(a.body["table"])
-		if (typ != "load" && typ != "save") || !tablePattern.MatchString(table) {
+		if (a.cls != "load" && a.cls != "save") || !tablePattern.MatchString(table) {
 			continue
 		}
 		cols, seen := cache[table]
@@ -331,12 +237,12 @@ func (w *walker) tableErrors(ctx context.Context, columns Columns) ([]Issue, err
 			cache[table] = cols
 		}
 		if cols == nil {
-			out = append(out, Issue{a.kind, a.id, a.path + "/table", fmt.Sprintf("table %q does not exist", table)})
+			out = append(out, Issue{KindPage, a.page, a.path + "/table", fmt.Sprintf("table %q does not exist", table)})
 			continue
 		}
 		for _, c := range actionColumns(a.body) {
 			if c.name != "" && !cols[c.name] {
-				out = append(out, Issue{a.kind, a.id, a.path + c.path, fmt.Sprintf("column %q does not exist in table %q", c.name, table)})
+				out = append(out, Issue{KindPage, a.page, a.path + c.path, fmt.Sprintf("column %q does not exist in table %q", c.name, table)})
 			}
 		}
 	}

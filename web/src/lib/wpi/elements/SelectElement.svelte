@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { getRuntime } from '../runtime.svelte';
-	import { fieldErrorText } from '../text';
+	import { fieldErrorText, localized } from '../text';
 	import type { ElementProps } from './index';
 
 	let { panelId, element }: ElementProps = $props();
@@ -21,7 +21,7 @@
 </script>
 
 <div class="flex flex-col gap-1 text-sm">
-	<label for={id} class="text-muted-foreground">{d.label}</label>
+	<label for={id} class="text-muted-foreground">{localized(d.label)}</label>
 	<select
 		{id}
 		class="border-input dark:bg-input/30 h-9 w-full rounded-md border bg-transparent px-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"

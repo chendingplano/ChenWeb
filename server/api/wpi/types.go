@@ -1,12 +1,13 @@
-// Package wpi is the backend of the Web Page Interpreter pilot: descriptor
-// storage and validation, the app bundle endpoint, and the load/save actions.
-// Design: KnowledgeStore devdoc 2026102601 and openspec/changes/wpi-pilot.
+// Package wpi is the backend of the Web Page Interpreter: descriptor storage
+// and validation, the app bundle endpoint, and the load/save actions.
+// Design: KnowledgeStore devdoc 2026102601, openspec/changes/wpi-pilot and
+// openspec/changes/wpi-classes-and-instances.
 package wpi
 
 import "encoding/json"
 
 // SchemaVersion is the only descriptor format this interpreter accepts.
-const SchemaVersion = "0.1"
+const SchemaVersion = "0.2"
 
 // Kind is the kind of a stored descriptor (kb.wpi_descriptors.kind).
 type Kind string
@@ -32,11 +33,7 @@ var templatePanes = map[string][]string{
 	"top-left-middle-right-bottom": {"top", "left", "middle", "right", "bottom"},
 }
 
-var (
-	layouters    = []string{"flow-layouter"}
-	elementTypes = []string{"text", "input", "select", "button", "list", "menu"}
-	actionTypes  = []string{"load", "save", "open_page", "close_page"}
-)
+var layouters = []string{"flow-layouter"}
 
 // Descriptor is the latest active version of one stored descriptor.
 type Descriptor struct {
@@ -56,7 +53,8 @@ type Issue struct {
 	Message      string `json:"message"`
 }
 
-// Bundle is an app with every descriptor reachable from it, keyed by ID.
+// Bundle is an app with every page reachable from it and the element and
+// action classes those pages use, keyed by ID.
 type Bundle struct {
 	App      json.RawMessage            `json:"app"`
 	Pages    map[string]json.RawMessage `json:"pages"`
@@ -86,15 +84,15 @@ type OrderBy struct {
 	Direction string `json:"direction"`
 }
 
-// Action is the typed view of a validated load or save action.
+// Action is the typed view of a validated, merged load or save instance.
 type Action struct {
-	ActionType string         `json:"action_type"`
-	Table      string         `json:"table"`
-	Result     string         `json:"result"`
-	Where      map[string]any `json:"where"`
-	Fields     []FieldMap     `json:"fields"`
-	OrderBy    []OrderBy      `json:"order_by"`
-	Limit      *int           `json:"limit"`
-	Mode       string         `json:"mode"`
-	Key        string         `json:"key"`
+	Class   string         `json:"action"`
+	Table   string         `json:"table"`
+	Result  string         `json:"result"`
+	Where   map[string]any `json:"where"`
+	Fields  []FieldMap     `json:"fields"`
+	OrderBy []OrderBy      `json:"order_by"`
+	Limit   *int           `json:"limit"`
+	Mode    string         `json:"mode"`
+	Key     string         `json:"key"`
 }

@@ -2,22 +2,23 @@
 	import { onMount } from 'svelte';
 	import { ChevronDownIcon, ChevronRightIcon, FileIcon, FolderIcon } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
+	import { actionRef } from '../entries';
 	import { getRuntime } from '../runtime.svelte';
 	import type { MenuItem } from '../types';
-	import { triggerOrigin, type ElementProps } from './index';
+	import type { ElementProps } from './index';
 
 	let { panelId, element }: ElementProps = $props();
 
 	const rt = getRuntime();
 	const d = $derived(element.desc);
 	// Bindings are per menu instance: this element in this panel.
-	const instance = $derived(`${panelId}/${d.descriptor_id}`);
+	const instance = $derived(`${panelId}${element.pointer}`);
 	let collapsed = $state<Record<string, boolean>>({});
 
 	// path is the JSON Pointer of the item below the element's "items" attribute.
 	function choose(item: MenuItem, path: string) {
 		if (!item.on_click) return;
-		void rt.runTrigger(item.on_click, triggerOrigin(element, 'items', `${path}/on_click`), {
+		void rt.runTrigger(item.on_click, actionRef(element, 'items', `${path}/on_click`), {
 			panelId,
 			binding: `${instance}/${item.item_id}`
 		});

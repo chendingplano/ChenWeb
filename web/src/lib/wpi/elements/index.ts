@@ -1,6 +1,7 @@
-// Element types by name (devdoc 2026102601 §3.5, design D10).
+// Element classes by class ID: the ID of an element class is the name its code
+// is registered under here (devdoc 2026102601 §3.5.1).
 import type { Component } from 'svelte';
-import type { Origin, ResolvedElement } from '../entries';
+import type { ResolvedElement } from '../entries';
 import ButtonElement from './ButtonElement.svelte';
 import InputElement from './InputElement.svelte';
 import ListElement from './ListElement.svelte';
@@ -10,7 +11,7 @@ import TextElement from './TextElement.svelte';
 
 export type ElementProps = { panelId: string; element: ResolvedElement };
 
-export const elementTypes: Record<string, Component<ElementProps>> = {
+export const elementClasses: Record<string, Component<ElementProps>> = {
 	text: TextElement,
 	input: InputElement,
 	select: SelectElement,
@@ -18,9 +19,3 @@ export const elementTypes: Record<string, Component<ElementProps>> = {
 	list: ListElement,
 	menu: MenuElement
 };
-
-// Where a trigger stored under attr (plus a deeper path) lives, for the server.
-export function triggerOrigin(element: ResolvedElement, attr: string, rest = ''): Origin & { pointer: string } {
-	const origin = element.origin(attr);
-	return { ...origin, pointer: `${origin.base}/${attr}${rest}` };
-}

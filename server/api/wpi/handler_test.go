@@ -47,14 +47,21 @@ func descriptorRows(rows ...[2]string) *sqlmock.Rows {
 	return r
 }
 
-const singlePaneApp = `{"descriptor_id": "hello", "schema_version": "0.1", "layout_template": "single-pane", "panes": {"main": {"page": "greeting"}}}`
-const greetingPage = `{"descriptor_id": "greeting", "schema_version": "0.1", "layouter": "flow-layouter", "elements": [{"descriptor_id": "t", "element_type": "text", "text": "Hello"}]}`
+const singlePaneApp = `{"descriptor_id": "hello", "schema_version": "0.2", "layout_template": "single-pane", "panes": {"main": {"page": "greeting"}}}`
+const greetingPage = `{"descriptor_id": "greeting", "schema_version": "0.2", "layouter": "flow-layouter", "elements": [{"element": "text", "text": "Hello"}]}`
+
+// expectClasses expects the bundle's load of all element and action classes.
+func expectClasses(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(latestAllQuery).WithArgs("element").WillReturnRows(descriptorRows([2]string{"text", testClasses()[KindElement]["text"]}))
+	mock.ExpectQuery(latestAllQuery).WithArgs("action").WillReturnRows(descriptorRows())
+}
 
 func TestGetApp(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
+		expectClasses(mock)
 		mock.ExpectQuery(latestQuery).WithArgs("page", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", greetingPage}))
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 200 {
@@ -80,6 +87,7 @@ func TestGetApp(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
+		expectClasses(mock)
 		mock.ExpectQuery(latestQuery).WithArgs("page", sqlmock.AnyArg()).WillReturnRows(descriptorRows())
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 422 || !strings.Contains(rec.Body.String(), `page \"greeting\" does not exist`) {
@@ -122,7 +130,7 @@ func TestPutDescriptor(t *testing.T) {
 		status               int
 		want                 string
 	}{
-		{"invalid element type", "element", "s", `{"descriptor_id": "s", "schema_version": "0.1", "element_type": "slider"}`, adminUser, 400, `element type \"slider\" is not supported`},
+		{"element class without code", "element", "slider", `{"descriptor_id": "slider", "schema_version": "0.2"}`, adminUser, 400, `element class \"slider\" has no code in this interpreter`},
 		{"ID mismatch", "page", "other", greetingPage, adminUser, 400, `does not match`},
 		{"unknown kind", "widget", "greeting", greetingPage, adminUser, 400, "Unknown descriptor kind"},
 		{"not JSON", "page", "greeting", `[1, 2]`, adminUser, 400, "JSON object"},

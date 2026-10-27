@@ -29,13 +29,13 @@ test('fetchApp surfaces validation errors', async () => {
 
 test('runAction sends the reference, args and input doc', async () => {
 	const seen: { init?: RequestInit } = {};
-	const res = await runAction({ kind: 'action', id: 'save-customer' }, { id: 7 }, { email: 'e@example.com' }, fakeFetch(200, { key_attribute: 'id', key_value: 7 }, seen));
-	assert.deepEqual(JSON.parse(String(seen.init?.body)), { ref: { kind: 'action', id: 'save-customer' }, args: { id: 7 }, input_doc: { email: 'e@example.com' } });
+	const res = await runAction({ kind: 'page', id: 'customer-form', pointer: '/save_action' }, { id: 7 }, { email: 'e@example.com' }, fakeFetch(200, { key_attribute: 'id', key_value: 7 }, seen));
+	assert.deepEqual(JSON.parse(String(seen.init?.body)), { ref: { kind: 'page', id: 'customer-form', pointer: '/save_action' }, args: { id: 7 }, input_doc: { email: 'e@example.com' } });
 	assert.equal(res.key_value, 7);
 });
 
 test('runAction carries field errors', async () => {
-	await assert.rejects(runAction({ kind: 'action', id: 's' }, {}, {}, fakeFetch(422, { field_errors: { email: ['required'] } })), (err: unknown) => {
+	await assert.rejects(runAction({ kind: 'page', id: 'p', pointer: '/save_action' }, {}, {}, fakeFetch(422, { field_errors: { email: ['required'] } })), (err: unknown) => {
 		assert.ok(err instanceof WpiError);
 		assert.deepEqual(err.fieldErrors, { email: ['required'] });
 		return true;

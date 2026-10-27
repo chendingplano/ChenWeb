@@ -7602,7 +7602,7 @@
 	"wpi_error_title": "Cannot show {descriptor}",
 	"wpi_unknown_template": "Layout template {name} is not supported.",
 	"wpi_unknown_layouter": "Layouter {name} is not supported.",
-	"wpi_unknown_element": "Element type {type} is not supported.",
+	"wpi_unknown_element": "Element class {name} has no code in this interpreter.",
 	"wpi_panel_loading": "Loading…",
 	"wpi_action_failed": "The action failed: {message}",
 	"wpi_list_empty": "No records.",

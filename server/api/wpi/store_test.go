@@ -7,6 +7,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+const latestAllQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_descriptors WHERE kind = \$1 AND status = 'active' ORDER BY descriptor_id, version DESC`
+
 const latestQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_descriptors WHERE kind = \$1 AND status = 'active' AND descriptor_id = ANY\(\$2\) ORDER BY descriptor_id, version DESC`
 
 func TestStoreLatest(t *testing.T) {
@@ -30,6 +32,20 @@ func TestStoreLatest(t *testing.T) {
 	}
 	if n, _ := asInt(d.Body["limit"]); n != 5 {
 		t.Fatalf("numbers must decode as json.Number: %#v", d.Body["limit"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreLatestAll(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(latestAllQuery).WithArgs("element").
+		WillReturnRows(descriptorRows([2]string{"input", `{}`}, [2]string{"text", `{}`}))
+	got, err := store{db}.latest(context.Background(), KindElement, nil)
+	if err != nil || len(got) != 2 || got["text"].Kind != KindElement {
+		t.Fatalf("got %+v, %v", got, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

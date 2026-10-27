@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { actionRef } from '../entries';
 	import { getRuntime } from '../runtime.svelte';
-	import { triggerOrigin, type ElementProps } from './index';
+	import { localized } from '../text';
+	import type { ElementProps } from './index';
 
 	let { panelId, element }: ElementProps = $props();
 
@@ -13,11 +15,11 @@
 		if (!d.on_click) return;
 		busy = true;
 		try {
-			await rt.runTrigger(d.on_click, triggerOrigin(element, 'on_click'), { panelId });
+			await rt.runTrigger(d.on_click, actionRef(element, 'on_click'), { panelId });
 		} finally {
 			busy = false;
 		}
 	}
 </script>
 
-<Button onclick={click} disabled={busy}>{d.label}</Button>
+<Button onclick={click} disabled={busy}>{localized(d.label)}</Button>

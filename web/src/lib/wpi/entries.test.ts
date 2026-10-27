@@ -1,37 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveEntry } from './entries';
+import { actionRef, mergeInstance, resolveEntry, textIn } from './entries';
 import type { Bundle } from './types';
 
 const bundle = {
 	elements: {
-		'customer-email': {
-			descriptor_id: 'customer-email',
-			element_type: 'input',
-			label: 'Email',
-			data_binding: '$input_doc.email',
+		input: {
+			descriptor_id: 'input',
+			schema_version: '0.2',
+			description: 'A field',
+			label: null,
+			data_binding: null,
 			binding_mode: 'read-write',
-			on_click: { action_type: 'close_page' }
+			width: 'elastic'
 		}
 	}
 } as unknown as Bundle;
 
-test('a referenced element takes the page overrides and tracks where each attribute lives', () => {
-	const r = resolveEntry(bundle, 'customer-form', { element: 'customer-email', binding_mode: 'read-only' }, 2);
+test('an instance takes its class defaults and overrides them', () => {
+	const r = resolveEntry(bundle, 'customer-form', { element: 'input', label: 'Email', data_binding: '$input_doc.email', binding_mode: 'read-only' }, 2);
 	assert.ok(!('error' in r));
+	assert.equal(r.desc.element, 'input');
 	assert.equal(r.desc.binding_mode, 'read-only');
+	assert.equal(r.desc.width, 'elastic');
 	assert.equal(r.desc.label, 'Email');
-	assert.equal('element' in r.desc, false);
-	assert.deepEqual(r.origin('binding_mode'), { kind: 'page', id: 'customer-form', base: '/elements/2' });
-	assert.deepEqual(r.origin('on_click'), { kind: 'element', id: 'customer-email', base: '' });
+	assert.equal(r.pointer, '/elements/2');
+	assert.equal('description' in r.desc, false, 'class attributes are not merged');
+	assert.equal('data_binding' in mergeInstance(bundle.elements.input, {}), false, 'null means no default');
 });
 
-test('an inline element lives in the page', () => {
-	const r = resolveEntry(bundle, 'p', { descriptor_id: 'save', element_type: 'button', label: 'Save' }, 0);
+test('action instances are named by their place in the page', () => {
+	const r = resolveEntry(bundle, 'customers', { element: 'input' }, 1);
 	assert.ok(!('error' in r));
-	assert.deepEqual(r.origin('on_click'), { kind: 'page', id: 'p', base: '/elements/0' });
+	assert.deepEqual(actionRef(r, 'items', '/0/on_click'), { kind: 'page', id: 'customers', pointer: '/elements/1/items/0/on_click' });
 });
 
-test('a reference missing from the bundle is an error', () => {
-	assert.deepEqual(resolveEntry(bundle, 'p', { element: 'nope' }, 0), { error: 'element "nope" is not in the bundle' });
+test('a class missing from the bundle is an error', () => {
+	assert.deepEqual(resolveEntry(bundle, 'p', { element: 'nope' }, 0), { error: 'element class "nope" is not in the bundle' });
+});
+
+test('text in the current language, else English', () => {
+	assert.equal(textIn({ en: 'Phone', 'zh-cn': '电话' }, 'zh-cn'), '电话');
+	assert.equal(textIn({ en: 'Phone' }, 'zh-cn'), 'Phone');
+	assert.equal(textIn('Phone', 'zh-cn'), 'Phone');
+	assert.equal(textIn(undefined, 'en'), '');
 });

@@ -4,16 +4,16 @@
 import { getContext, setContext } from 'svelte';
 import { runAction, WpiError } from './api';
 import { canonical } from './dirty';
-import type { Origin } from './entries';
+import { mergeInstance } from './entries';
 import { planOpen, removePanel, sharingKey, showPanel, type Bindings, type PaneModel, type PanelModel } from './panels';
 import { getPath, parseRef, resolveArgs, setPath } from './refs';
-import type { ActionRef, Bundle, InputSpec, Json, JsonObject, Trigger } from './types';
+import type { ActionInstance, ActionRef, Bundle, EmptyInput, InputSpec, Json, JsonObject } from './types';
 
 export type PanelState = PanelModel & {
 	doc: JsonObject;
 	// Canonical JSON of the doc as last loaded or saved.
 	snapshot: string;
-	// Resolved input: {} or a load action with argument values.
+	// Resolved input: {} or a load instance with argument values.
 	input: InputSpec;
 	// False until the first input load has finished.
 	ready: boolean;
@@ -71,7 +71,7 @@ export class AppRuntime {
 		const pane = this.panes[req.pane];
 		const page = this.bundle.pages[req.page];
 		if (!pane || !page) throw new Error(`cannot open page "${req.page}" in pane "${req.pane}"`);
-		const input = req.input ?? page.input ?? {};
+		const input = req.input ?? this.#pageInput(req.page);
 		const key = sharingKey(req.page, input);
 		const plan = planOpen(pane, this.panels, this.bindings, { key, binding: req.binding });
 		if (plan.current?.fate === 'close' && !(await this.closePanel(plan.current.id, false))) return;
@@ -86,7 +86,7 @@ export class AppRuntime {
 				doc: {},
 				snapshot: canonical({}),
 				input,
-				ready: !input.action,
+				ready: !input.ref,
 				loading: false,
 				error: null,
 				fieldErrors: {},
@@ -95,7 +95,22 @@ export class AppRuntime {
 		}
 		if (req.binding) this.bindings[req.binding] = id;
 		this.#show(req.pane, id);
-		if (!plan.reuse && input.action) await this.#loadInput(id);
+		if (!plan.reuse && input.ref) await this.#loadInput(id);
+	}
+
+	// A page's own input: {} or its load instance, whose args are literals.
+	#pageInput(pageId: string): InputSpec {
+		const input = this.bundle.pages[pageId].input;
+		if (!input || !('action' in input)) return {};
+		return { ref: { kind: 'page', id: pageId, pointer: '/input' }, args: resolveArgs(input.args, {}) };
+	}
+
+	// An open-page's input: {} or its nested load instance, which receives the
+	// open-page's arguments, or its own args resolved against them (design D7).
+	#nestedInput(input: ActionInstance | EmptyInput | undefined, ref: ActionRef, args: JsonObject): InputSpec | undefined {
+		if (!input) return undefined;
+		if (!('action' in input)) return {};
+		return { ref: { ...ref, pointer: `${ref.pointer}/input` }, args: input.args ? resolveArgs(input.args, { args }) : args };
 	}
 
 	#show(paneId: string, id: string): void {
@@ -105,18 +120,18 @@ export class AppRuntime {
 		if (!wasHidden) return;
 		const panel = this.panels[id];
 		panel.shown++;
-		if (this.bundle.pages[panel.pageId].refresh?.on_show && panel.input.action && !this.isDirty(id)) {
+		if (this.bundle.pages[panel.pageId].refresh?.on_show && panel.input.ref && !this.isDirty(id)) {
 			void this.#loadInput(id);
 		}
 	}
 
 	async #loadInput(id: string): Promise<void> {
 		const panel = this.panels[id];
-		if (!panel?.input.action) return;
+		if (!panel?.input.ref) return;
 		panel.loading = true;
 		panel.error = null;
 		try {
-			const res = await runAction({ kind: 'action', id: panel.input.action }, panel.input.args ?? {});
+			const res = await runAction(panel.input.ref, panel.input.args ?? {});
 			if (!this.panels[id]) return;
 			panel.doc = (res.result ?? {}) as JsonObject;
 			panel.snapshot = canonical(panel.doc);
@@ -176,7 +191,7 @@ export class AppRuntime {
 	async save(id: string, ref?: ActionRef): Promise<boolean> {
 		const panel = this.panels[id];
 		const saveAction = this.bundle.pages[panel.pageId].save_action;
-		const actionRef = ref ?? (saveAction ? ({ kind: 'action', id: saveAction } as const) : null);
+		const actionRef = ref ?? (saveAction ? ({ kind: 'page', id: panel.pageId, pointer: '/save_action' } as const) : null);
 		if (!actionRef) return false;
 		panel.error = null;
 		try {
@@ -192,32 +207,30 @@ export class AppRuntime {
 		}
 	}
 
-	// Runs an element's trigger. origin locates the trigger in its stored
-	// descriptor, for inline actions the server runs.
-	async runTrigger(t: Trigger, origin: Origin & { pointer: string }, ctx: TriggerContext): Promise<void> {
+	// Runs an action instance an element triggers; ref names it to the server.
+	async runTrigger(t: ActionInstance, ref: ActionRef, ctx: TriggerContext): Promise<void> {
 		const panel = this.panels[ctx.panelId];
-		const args = resolveArgs(t.args, { input_doc: panel?.doc, record: ctx.record });
-		const action = t.action ? this.bundle.actions[t.action] : t;
-		const ref: ActionRef = t.action ? { kind: 'action', id: t.action } : { kind: origin.kind, id: origin.id, pointer: origin.pointer };
-		switch (action.action_type) {
-			case 'open_page': {
-				const input = action.input?.action ? { action: action.input.action, args: resolveArgs(action.input.args, { args }) } : action.input;
-				await this.openPage({ page: action.page!, pane: action.pane!, input, binding: ctx.binding });
+		const a = mergeInstance(this.bundle.actions[t.action], t);
+		const args = resolveArgs(a.args, { input_doc: panel?.doc, record: ctx.record });
+		switch (a.action) {
+			case 'open-page':
+				await this.openPage({ page: a.page!, pane: a.pane!, input: this.#nestedInput(a.input, ref, args), binding: ctx.binding });
 				return;
-			}
-			case 'close_page':
+			case 'close-page':
 				await this.closePanel(ctx.panelId);
 				return;
 			case 'save':
 				await this.save(ctx.panelId, ref);
 				return;
+			case 'save-page':
+				await this.save(ctx.panelId);
+				return;
 		}
 	}
 
-	// Runs a list's source query in the context of its panel.
-	async queryList(panelId: string, source: { action: string; args?: JsonObject }): Promise<JsonObject[]> {
-		const args = resolveArgs(source.args, { input_doc: this.panels[panelId]?.doc });
-		const res = await runAction({ kind: 'action', id: source.action }, args);
+	// Runs a list's source load instance in the context of its panel.
+	async queryList(panelId: string, ref: ActionRef, args?: JsonObject): Promise<JsonObject[]> {
+		const res = await runAction(ref, resolveArgs(args, { input_doc: this.panels[panelId]?.doc }));
 		return (res.result ?? []) as JsonObject[];
 	}
 
