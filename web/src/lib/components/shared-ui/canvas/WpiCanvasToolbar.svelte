@@ -1,6 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/WpiCanvasToolbar.svelte -->
 <!-- The WPI editor's tool bar, above the canvas: flow name and picker, create nodes, load a page,
-     undo/redo, align and distribute the selection, save. -->
+     view JSON, undo/redo, align and distribute the selection, save. -->
 <script lang="ts" module>
   export type WpiNodeKind = 'page' | 'element' | 'action';
 </script>
@@ -16,6 +16,7 @@
   import SquareMousePointerIcon   from '@lucide/svelte/icons/square-mouse-pointer';
   import ZapIcon                  from '@lucide/svelte/icons/zap';
   import FolderOpenIcon           from '@lucide/svelte/icons/folder-open';
+  import BracesIcon               from '@lucide/svelte/icons/braces';
   import Undo2Icon                from '@lucide/svelte/icons/undo-2';
   import Redo2Icon                from '@lucide/svelte/icons/redo-2';
   import AlignStartVerticalIcon   from '@lucide/svelte/icons/align-start-vertical';
@@ -41,6 +42,7 @@
     onRename,
     onCreate,
     onLoadPage,
+    onViewJson,
     onUndo,
     onRedo,
     onAlign,
@@ -57,6 +59,7 @@
     onRename:         (name: string) => void;
     onCreate:         (kind: WpiNodeKind) => void;
     onLoadPage:       () => void;
+    onViewJson:       () => void;
     onUndo:           () => void;
     onRedo:           () => void;
     onAlign:          (mode: AlignMode) => void;
@@ -163,6 +166,12 @@
   <button onclick={onLoadPage} class="toolbar-btn" style="gap:4px;">
     <FolderOpenIcon class="w-4 h-4" />
     <span style="font-size:11px;">{m.wpi_toolbar_load_page()}</span>
+  </button>
+
+  <!-- View JSON: the selected node's, else the page's -->
+  <button onclick={onViewJson} class="toolbar-btn" style="gap:4px;">
+    <BracesIcon class="w-4 h-4" />
+    <span style="font-size:11px;">{m.wpi_toolbar_view_json()}</span>
   </button>
 
   <div style="width:1px; height:20px; background:var(--cv-border); margin:0 4px;"></div>

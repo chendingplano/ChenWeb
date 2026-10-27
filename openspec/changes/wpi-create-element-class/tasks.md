@@ -54,3 +54,8 @@
 - [x] 9.2 `WpiNode.svelte`: element nodes have no connection points; `wpi-editor.svelte`: a dropped or created node becomes the canvas selection (resize grips show at once)
 - [x] 9.3 `PropertiesPanel.svelte`: element class and instance attributes (help tip, default or required as placeholder) edited into `data.attrs`; `element-attributes.ts` + tests; messages in both languages
 - [x] 9.4 `go test`, `bun run check`, unit tests and the editor's browser run (no handles, grips, corner and edge resize, attribute edits) pass; spec, design, devdocs 2601/2603 and module docs (2.4.0) updated
+
+## 10. View JSON
+
+- [x] 10.1 Tool bar **View JSON**; `WpiJsonDialog.svelte` (read-only, Escape or outside click closes); `wpi-json.ts` (`nodeJson`, `pageJson`: element instances in reading order, schema 0.2, flow-layouter, no descriptor_id) + tests; messages in both languages
+- [x] 10.2 `bun run check`, unit tests and the editor's browser run (node JSON, page JSON order, closing) pass; spec and devdoc 2603 updated

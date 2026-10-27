@@ -25,6 +25,8 @@
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
+	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
+	import { isElementNode, nodeJson, pageJson } from './canvas/wpi-json';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import {
 		alignNodes,
@@ -124,6 +126,8 @@
 		}))
 	);
 	let showCreateElement = $state(false);
+	// View JSON shows the selected node's descriptor JSON, else the page's.
+	let showJson = $state(false);
 	// Size of the canvas area, for placing created nodes in the middle of the view.
 	let canvasWidth = $state(0);
 	let canvasHeight = $state(0);
@@ -463,8 +467,9 @@
 
 	// ── Keyboard shortcuts ───────────────────────────────────────────────────
 	function onKeydown(e: KeyboardEvent) {
-		// The Create Element form has its own fields; undo and save belong to the canvas.
-		if (showCreateElement) return;
+		// The Create Element form has its own fields, and View JSON covers the canvas; undo and
+		// save belong to the canvas.
+		if (showCreateElement || showJson) return;
 		const mod = e.ctrlKey || e.metaKey;
 		if (mod && e.key === 'z' && !e.shiftKey) {
 			e.preventDefault();
@@ -528,6 +533,7 @@
 			}}
 			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
 			onLoadPage={() => toast(m.wpi_toolbar_load_page_not_yet_implemented())}
+			onViewJson={() => (showJson = true)}
 			onUndo={undo}
 			onRedo={redo}
 			onAlign={alignSelected}
@@ -740,6 +746,22 @@
 			loadElementClasses();
 		}}
 		onClose={() => (showCreateElement = false)}
+	/>
+{/if}
+
+{#if showJson}
+	<WpiJsonDialog
+		{darkMode}
+		title={selectedNode
+			? m.wpi_view_json_node_title({ name: String(selectedNode.data.label ?? '') })
+			: m.wpi_view_json_page_title()}
+		note={!selectedNode
+			? m.wpi_view_json_page_note()
+			: isElementNode(selectedNode)
+				? ''
+				: m.wpi_view_json_node_data_note()}
+		json={selectedNode ? nodeJson(selectedNode) : pageJson(nodes)}
+		onClose={() => (showJson = false)}
 	/>
 {/if}
 

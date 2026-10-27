@@ -204,3 +204,20 @@ attributes.
 #### Scenario: Defaults shown
 - **WHEN** the author selects an `input` node whose `input_type` is unset
 - **THEN** the `input_type` field is empty and shows "Default: text"
+
+### Requirement: View JSON
+The editor's tool bar SHALL have **View JSON**, which opens a read-only view of WPI
+descriptor JSON. With one node selected it SHALL show that node: an element node as the
+element instance a page holds (`element`, then the attributes set in `data.attrs`); any other
+node's data as it is, saying it has no WPI descriptor yet. With no node selected it SHALL show
+the canvas as a page: `schema_version` `"0.2"`, `layouter` `"flow-layouter"` and `elements`,
+the element nodes' instances in reading order (top to bottom, then left to right), with no
+`descriptor_id`. Escape or a click outside SHALL close it.
+
+#### Scenario: Node selected
+- **WHEN** an `input` node with `label` `Name` is selected and the author clicks View JSON
+- **THEN** the view shows `{"element": "input", "label": "Name"}`
+
+#### Scenario: Nothing selected
+- **WHEN** a `button` node sits below an `input` node, nothing is selected, and the author clicks View JSON
+- **THEN** the view shows a page whose `elements` are the `input` instance, then the `button` instance
