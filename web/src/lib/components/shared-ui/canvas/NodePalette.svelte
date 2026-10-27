@@ -1,22 +1,30 @@
 <!-- web/src/lib/components/shared-ui/canvas/NodePalette.svelte -->
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
+  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import type { NodeType } from '$lib/types/flow';
 
   let {
-    nodeTypes  = [],
-    darkMode   = true,
+    nodeTypes       = [],
+    extraCategories = [],
+    darkMode        = true,
     onDragStart,
   }: {
-    nodeTypes:   NodeType[];
-    darkMode?:   boolean;
-    onDragStart: (event: DragEvent, nodeType: NodeType) => void;
+    nodeTypes:        NodeType[];
+    // Folders shown after the node-type categories, even while no node type belongs to them.
+    extraCategories?: string[];
+    darkMode?:        boolean;
+    onDragStart:      (event: DragEvent, nodeType: NodeType) => void;
   } = $props();
 
   let search = $state('');
+  // Folders start folded; while searching, every folder with a match is shown open.
+  let expanded = $state<Record<string, boolean>>({});
+
+  const searching = $derived(search !== '');
 
   const categories = $derived(
-    [...new Set(nodeTypes.map(n => n.category))]
+    [...new Set([...nodeTypes.map(n => n.category), ...extraCategories])]
   );
 
   function filteredByCategory(cat: string) {
@@ -24,6 +32,17 @@
       n.category === cat &&
       n.label.toLowerCase().includes(search.toLowerCase())
     );
+  }
+
+  function categoryLabel(cat: string) {
+    switch (cat) {
+      case 'AI':       return m.nodepalette_category_ai();
+      case 'Data':     return m.nodepalette_category_data();
+      case 'Actions':  return m.nodepalette_category_actions();
+      case 'Pages':    return m.nodepalette_category_pages();
+      case 'Elements': return m.nodepalette_category_elements();
+      default:         return cat.toUpperCase();
+    }
   }
 </script>
 
@@ -43,21 +62,37 @@
   <div class="flex-1 overflow-y-auto" style="padding:8px; scrollbar-width:thin; scrollbar-color:#374151 transparent;">
     {#each categories as cat}
       {@const items = filteredByCategory(cat)}
-      {#if items.length > 0}
-        <div style="font-size:8px; color:#4b5563; letter-spacing:1px; margin:8px 0 4px 4px;">{cat.toUpperCase()}</div>
-        {#each items as nodeType (nodeType.id)}
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            draggable="true"
-            ondragstart={(e) => onDragStart(e, nodeType)}
-            class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-white/5 transition-colors select-none"
-            style="background:#1e2535; border:1px solid transparent; font-size:10px; color:#e2e8f0;"
-            title={m.nodepalette_drag_onto_canvas()}
-          >
-            <span style="font-size:14px; flex-shrink:0;">{getIcon(nodeType.icon)}</span>
-            {nodeType.label}
-          </div>
-        {/each}
+      {#if items.length > 0 || !searching}
+        {@const open = searching || !!expanded[cat]}
+        <button
+          type="button"
+          onclick={() => (expanded[cat] = !expanded[cat])}
+          aria-expanded={open}
+          class="flex items-center gap-1 w-full text-left text-[#4b5563] hover:text-[#94a3b8] transition-colors"
+          style="font-size:8px; letter-spacing:1px; margin:8px 0 4px 0; padding:0 4px 0 0; background:none; border:none; cursor:pointer;"
+        >
+          <ChevronRightIcon size={10} class="flex-shrink-0 transition-transform {open ? 'rotate-90' : ''}" />
+          <span class="flex-1">{categoryLabel(cat)}</span>
+          <span>{items.length}</span>
+        </button>
+        {#if open}
+          {#if items.length === 0}
+            <div style="font-size:9px; color:#4b5563; font-style:italic; padding:2px 8px 4px 14px;">{m.nodepalette_no_nodes_yet()}</div>
+          {/if}
+          {#each items as nodeType (nodeType.id)}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              draggable="true"
+              ondragstart={(e) => onDragStart(e, nodeType)}
+              class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-white/5 transition-colors select-none"
+              style="background:#1e2535; border:1px solid transparent; font-size:10px; color:#e2e8f0;"
+              title={m.nodepalette_drag_onto_canvas()}
+            >
+              <span style="font-size:14px; flex-shrink:0;">{getIcon(nodeType.icon)}</span>
+              {nodeType.label}
+            </div>
+          {/each}
+        {/if}
       {/if}
     {/each}
   </div>

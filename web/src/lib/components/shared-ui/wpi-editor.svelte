@@ -88,6 +88,8 @@
 	let selectedNodeId = $state<string | null>(null);
 	let showPicker = $state(false);
 	let nodeTypes = $state<NodeType[]>([]);
+	// Palette folders for WPI building blocks; no node types belong to them yet.
+	const WPI_PALETTE_CATEGORIES = ['Pages', 'Elements'];
 	let toastMsg = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -415,7 +417,12 @@
 	<!-- 3-panel body -->
 	<div class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
-		<NodePalette {nodeTypes} {darkMode} onDragStart={onPaletteDragStart} />
+		<NodePalette
+			{nodeTypes}
+			extraCategories={WPI_PALETTE_CATEGORIES}
+			{darkMode}
+			onDragStart={onPaletteDragStart}
+		/>
 
 		<!-- Canvas -->
 		<div
