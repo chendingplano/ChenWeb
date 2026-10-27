@@ -7637,5 +7637,8 @@
 	"wpi_err_max_length": "This value is too long.",
 	"wpi_err_pattern": "This value does not have the expected form.",
 	"wpi_err_format": "This value is not valid.",
-	"wpi_err_unknown": "This value was rejected ({code})."
+	"wpi_err_unknown": "This value was rejected ({code}).",
+	"user_management_initial_password": "Initial password",
+	"user_management_create_help": "Create an account with an initial password. The email is marked verified; no email is sent.",
+	"user_management_created_account": "Created account for {email}."
 }

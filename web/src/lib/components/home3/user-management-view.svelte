@@ -2,6 +2,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { onMount } from 'svelte';
 	import {
+		createManagedUser,
 		deleteManagedUser,
 		listManagedRoles,
 		listManagedUsers,
@@ -54,6 +55,8 @@
 	let roleMenuOpen = $state(false);
 	let roleOptions = $state<RoleOption[]>([]);
 	let editDialogOpen = $state(false);
+	let creating = $state(false);
+	let initialPassword = $state('');
 	let canManageAll = $state(false);
 	let userScope = $state<'all' | 'self'>('all');
 	let editDraft = $state<EditDraft>({
@@ -152,12 +155,19 @@
 		}
 	}
 
-	function notImplemented(message: string) {
-		success = null;
-		error = message;
-	}
+	function startCreate() {
+  creating = true;
+  initialPassword = '';
+  error = null;
+  success = null;
+  editDraft = { id: '', email: '', phone: '', firstName: '', lastName: '', status: 'active', admin: false, roles: '' };
+  roleMenuOpen = false;
+  editDialogOpen = true;
+ }
 
 	function startEdit(user: UserRow) {
+		creating = false;
+		initialPassword = '';
 		success = null;
 		error = null;
 		editDraft = {
@@ -181,6 +191,7 @@
 	function closeEditDialog() {
 		if (saving) return;
 		editDialogOpen = false;
+		initialPassword = '';
 		roleMenuOpen = false;
 	}
 
@@ -216,17 +227,21 @@
 		success = null;
 		error = null;
 		try {
-			const updated = await updateManagedUser(editDraft.id, {
+			const input = {
 				first_name: editDraft.firstName.trim(),
 				last_name: editDraft.lastName.trim(),
 				status: editDraft.status,
 				admin: editDraft.admin,
 				roles: normalizeRoles(editDraft.roles, editDraft.admin)
-			});
-			managedUsers = managedUsers.map((user) => (user.id === updated.id ? updated : user));
+			};
+			const updated = creating
+				? await createManagedUser({ ...input, email: editDraft.email.trim(), password: initialPassword })
+				: await updateManagedUser(editDraft.id, input);
+			managedUsers = creating ? [...managedUsers, updated] : managedUsers.map((user) => (user.id === updated.id ? updated : user));
 			syncUsers();
 			editDialogOpen = false;
-			success = m.user_management_updated_account({ email: updated.email });
+			initialPassword = '';
+			success = creating ? m.user_management_created_account({ email: updated.email }) : m.user_management_updated_account({ email: updated.email });
 		} catch (err) {
 			error = err instanceof Error ? err.message : m.user_management_failed_to_update_user();
 		} finally {
@@ -269,7 +284,7 @@
 </script>
 
 <div
-	class="wrap"
+	class="wrap select-text"
 	style:--page={pageBg}
 	style:--card={card}
 	style:--panel={panel}
@@ -291,7 +306,7 @@
 			</p>
 		</div>
 		{#if canManageAll}
-			<button class="primary" onclick={() => notImplemented('Create user is not wired to Kratos yet.')}>
+			<button class="primary" onclick={startCreate}>
 				{m.user_management_add_user()}
 			</button>
 		{/if}
@@ -389,29 +404,37 @@
 			class="dialog"
 			role="dialog"
 			aria-modal="true"
-			aria-label={m.user_management_edit_user()}
+			aria-label={creating ? m.user_management_add_user() : m.user_management_edit_user()}
 			tabindex="-1"
 			onclick={(event) => event.stopPropagation()}
 			onkeydown={(event) => event.stopPropagation()}
 		>
 			<div class="dialog-head">
 				<div>
-					<div class="dialog-title">{m.user_management_edit_account()}</div>
-					<div class="dialog-subtitle">{m.user_management_use_the_email_or_phone()}</div>
+					<div class="dialog-title">{creating ? m.user_management_add_user() : m.user_management_edit_account()}</div>
+					<div class="dialog-subtitle">{creating ? m.user_management_create_help() : m.user_management_use_the_email_or_phone()}</div>
 				</div>
 				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>{m.user_management_close()}</button>
 			</div>
 			{#if error}
 				<div class="dialog-error" role="alert">{error}</div>
 			{/if}
-			<div class="dialog-body">
+			<form id="managed-user-form" class="dialog-body" onsubmit={(event) => { event.preventDefault(); void submitEdit(); }}>
 				<label>
 					<span>{m.user_management_email_address()}</span>
-					<input value={editDraft.email || 'No email on file'} readonly />
+					{#if creating}
+						<input type="email" bind:value={editDraft.email} required autocomplete="off" />
+					{:else}
+						<input value={editDraft.email} readonly />
+					{/if}
 				</label>
 				<label>
-					<span>{m.user_management_phone()}</span>
-					<input value={editDraft.phone || m.user_management_no_phone_on_file()} readonly />
+					<span>{creating ? m.user_management_initial_password() : m.user_management_phone()}</span>
+					{#if creating}
+						<input type="password" bind:value={initialPassword} required autocomplete="new-password" aria-label={m.user_management_initial_password()} />
+					{:else}
+						<input value={editDraft.phone || m.user_management_no_phone_on_file()} readonly />
+					{/if}
 				</label>
 				<label>
 					<span>{m.user_management_first_name()}</span>
@@ -481,11 +504,11 @@
 						</div>
 					</div>
 				</div>
-			</div>
+			</form>
 			<div class="dialog-foot">
 				<button type="button" class="ghost" onclick={closeEditDialog} disabled={saving}>{m.user_management_cancel()}</button>
-				<button type="button" class="primary" onclick={submitEdit} disabled={saving}>
-					{saving ? m.user_management_saving() : m.user_management_save_changes()}
+				<button type="submit" form="managed-user-form" class="primary" disabled={saving}>
+					{saving ? m.user_management_saving() : creating ? m.user_management_add_user() : m.user_management_save_changes()}
 				</button>
 			</div>
 		</div>
@@ -498,6 +521,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+		user-select: text;
 		background: var(--page);
 		min-height: 100%;
 		padding: 16px 20px 32px;

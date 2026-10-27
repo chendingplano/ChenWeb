@@ -497,6 +497,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.DELETE("/images/:id", imagehandler.DeleteImage)
 
 	apiGroup.GET("/system-admin/users", useradminhandler.ListUsers)
+	apiGroup.POST("/system-admin/users", useradminhandler.CreateUser)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)
 	apiGroup.GET("/system-admin/alert-logs", alertloghandler.List)
 	apiGroup.PUT("/system-admin/alert-logs/:id/assign", alertloghandler.Assign)

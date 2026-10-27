@@ -107,3 +107,12 @@ export async function deleteManagedUser(id: string): Promise<void> {
 		}
 	);
 }
+
+export type CreateManagedUserInput = UpdateManagedUserInput & { email: string; password: string };
+
+export async function createManagedUser(input: CreateManagedUserInput): Promise<ManagedUser> {
+ const response = await req<ManagedUserResponse>('/api/v1/system-admin/users', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
+ });
+ return response.user;
+}
