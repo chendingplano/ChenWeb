@@ -130,7 +130,7 @@ func TestPutDescriptor(t *testing.T) {
 		status               int
 		want                 string
 	}{
-		{"element class without code", "element", "slider", `{"descriptor_id": "slider", "schema_version": "0.2"}`, adminUser, 400, `element class \"slider\" has no code in this interpreter`},
+		{"element class without code", "element", "slider", `{"descriptor_id": "slider", "schema_version": "0.3"}`, adminUser, 400, `element class \"slider\" has no code in this interpreter`},
 		{"ID mismatch", "page", "other", greetingPage, adminUser, 400, `does not match`},
 		{"unknown kind", "widget", "greeting", greetingPage, adminUser, 400, "Unknown descriptor kind"},
 		{"not JSON", "page", "greeting", `[1, 2]`, adminUser, 400, "JSON object"},
@@ -152,13 +152,13 @@ func TestPutDescriptor(t *testing.T) {
 	}
 }
 
-const sliderDraft = `{"descriptor_id": "slider", "schema_version": "0.2", "description": {"en": "A slider"}, "label": null, "min": 0}`
+const sliderDraft = `{"descriptor_id": "slider", "schema_version": "0.3", "description": {"en": "A slider"}, "implement_notes": "A range input", "label": {"help_tip": "Caption", "default_value": null}, "min": {"default_value": 0}}`
 
 func TestCreateElementClass(t *testing.T) {
 	t.Run("stored as a draft", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectExec(insertDraftQuery).WithArgs("slider", SchemaVersion, sliderDraft, "admin@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec(insertDraftQuery).WithArgs("slider", ElementSchemaVersion, sliderDraft, "admin@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
 		rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", sliderDraft)
 		if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"status":"draft"`) || !strings.Contains(rec.Body.String(), `"version":1`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -182,8 +182,8 @@ func TestCreateElementClass(t *testing.T) {
 		status     int
 		want       string
 	}{
-		{"no description", `{"descriptor_id": "slider", "schema_version": "0.2"}`, adminUser, 400, `a draft class needs a description`},
-		{"action default", `{"descriptor_id": "slider", "schema_version": "0.2", "description": "x", "on_click": {"action": "close-page"}}`, adminUser, 400, `holds actions`},
+		{"no description", `{"descriptor_id": "slider", "schema_version": "0.3"}`, adminUser, 400, `a draft class needs a description`},
+		{"action default", `{"descriptor_id": "slider", "schema_version": "0.3", "description": "x", "on_click": {"default_value": {"action": "close-page"}}}`, adminUser, 400, `holds actions`},
 		{"not JSON", `[1]`, adminUser, 400, "JSON object"},
 		{"not an admin", sliderDraft, plainUser, 403, "Admin access required"},
 		{"not logged in", sliderDraft, nil, 401, "Authentication required"},

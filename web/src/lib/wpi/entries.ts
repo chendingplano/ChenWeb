@@ -3,12 +3,25 @@
 // mergeInstance in server/api/wpi.
 import type { ActionInstance, ActionRef, Bundle, ClassRow, ElementInstance, Input, InputSpec, JsonObject, PageDescriptor, Text } from './types';
 
-const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description']);
+const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description', 'implement_notes']);
 
+// An action class row holds each instance attribute's default itself.
 export function mergeInstance<T extends object>(row: ClassRow | undefined, own: T): T {
 	const defaults: Record<string, unknown> = {};
 	for (const [k, v] of Object.entries(row ?? {})) {
 		if (v !== null && !CLASS_ATTRS.has(k)) defaults[k] = v;
+	}
+	return { ...defaults, ...own } as T;
+}
+
+// An element class row (format 0.3) holds each instance attribute as
+// {help_tip, default_value}; null or no default_value is no default.
+export function mergeElement<T extends object>(row: ClassRow | undefined, own: T): T {
+	const defaults: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(row ?? {})) {
+		if (CLASS_ATTRS.has(k) || v === null || typeof v !== 'object') continue;
+		const dv = (v as { default_value?: unknown }).default_value;
+		if (dv !== undefined && dv !== null) defaults[k] = dv;
 	}
 	return { ...defaults, ...own } as T;
 }
@@ -29,7 +42,7 @@ export function resolveEntry(bundle: Bundle, page: PageDescriptor, entry: Elemen
 	const row = bundle.elements[entry.element];
 	if (!row) return { error: `element class "${entry.element}" is not in the bundle` };
 	const own = page.binding_mode && 'binding_mode' in row && entry.binding_mode === undefined ? { ...entry, binding_mode: page.binding_mode } : entry;
-	return { desc: mergeInstance(row, own), pageId: page.descriptor_id, pointer: `/elements/${index}` };
+	return { desc: mergeElement(row, own), pageId: page.descriptor_id, pointer: `/elements/${index}` };
 }
 
 // Names the action instance stored under attr (plus a deeper path) of an element.

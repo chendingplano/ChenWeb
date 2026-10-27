@@ -57,7 +57,7 @@ var actionAttrs = map[string]codeAttrs{
 }
 
 // classAttrs are shared by every instance of a class and set only in its row.
-var classAttrs = []string{"descriptor_id", "schema_version", "description"}
+var classAttrs = []string{"descriptor_id", "schema_version", "description", "implement_notes"}
 
 // actionHolding attributes hold action instances. A class row cannot give them
 // defaults, so every action instance is written in a page (design D5).
@@ -105,9 +105,7 @@ func ValidateDescriptor(kind Kind, id string, body map[string]any) []Issue {
 	if got, _ := body["descriptor_id"].(string); got != id {
 		v.errf("/descriptor_id", "descriptor_id %q does not match %q", got, id)
 	}
-	if sv, _ := body["schema_version"].(string); sv != SchemaVersion {
-		v.errf("/schema_version", "schema_version %q is not supported by this interpreter (supports %q)", sv, SchemaVersion)
-	}
+	v.schemaVersion(body)
 	switch kind {
 	case KindApp:
 		v.app(body)
@@ -119,6 +117,13 @@ func ValidateDescriptor(kind Kind, id string, body map[string]any) []Issue {
 		v.errf("", "unknown descriptor kind %q", kind)
 	}
 	return v.issues
+}
+
+func (v *validator) schemaVersion(body map[string]any) {
+	want := schemaVersionOf(v.kind)
+	if sv, _ := body["schema_version"].(string); sv != want {
+		v.errf("/schema_version", "schema_version %q is not supported by this interpreter for %s descriptors (supports %q)", sv, v.kind, want)
+	}
 }
 
 // keys reports missing required attributes and attributes not in either list.
@@ -307,7 +312,8 @@ func (v *validator) page(b map[string]any) {
 // classRow checks an element or action class row (design D2): besides the
 // class attributes, it holds instance attributes its code defines, each with a
 // default or null. Every attribute the code requires must be there, and
-// attributes that hold actions cannot have defaults.
+// attributes that hold actions cannot have defaults. An element class row
+// (format 0.3) holds each instance attribute as an object (elementClassAttrs).
 func (v *validator) classRow(b map[string]any) {
 	code, known := classCode(v.kind, v.id)
 	if !known {
@@ -315,6 +321,17 @@ func (v *validator) classRow(b map[string]any) {
 		return
 	}
 	v.text(b, "description", "")
+	v.text(b, "implement_notes", "")
+	if v.kind == KindElement {
+		defaults, given := v.elementClassAttrs(b, code.defines)
+		for _, k := range code.required {
+			if !given[k] {
+				v.errf("", "the class must give %q a default_value or null, because its code requires it", k)
+			}
+		}
+		v.element(v.id, defaults, "")
+		return
+	}
 	defaults := map[string]any{}
 	for _, k := range slices.Sorted(maps.Keys(b)) {
 		switch {
@@ -333,11 +350,51 @@ func (v *validator) classRow(b map[string]any) {
 			v.errf("", "the class must give %q a default or null, because its code requires it", k)
 		}
 	}
-	if v.kind == KindElement {
-		v.element(v.id, defaults, "")
-	} else {
-		v.action(v.id, defaults, "")
+	v.action(v.id, defaults, "")
+}
+
+// elementClassAttrs checks the instance attributes of an element class row
+// (format 0.3): each is an object with an optional help_tip (text for authors)
+// and an optional default_value, where null means every instance must set it
+// and leaving it out means the attribute is optional with no default. known
+// says which names the class's code defines; nil, for a draft whose code does
+// not exist yet, accepts any well-formed name. It returns the non-null defaults
+// and the names that have a default_value, null included.
+func (v *validator) elementClassAttrs(b map[string]any, known func(string) bool) (defaults map[string]any, given map[string]bool) {
+	defaults, given = map[string]any{}, map[string]bool{}
+	for _, k := range slices.Sorted(maps.Keys(b)) {
+		p := "/" + k
+		switch {
+		case slices.Contains(classAttrs, k):
+			continue
+		case known != nil && !known(k):
+			v.errf(p, "unknown attribute %q", k)
+			continue
+		case known == nil && (k == "element" || !segmentPattern.MatchString(k)):
+			v.errf(p, "%q cannot be an attribute name", k)
+			continue
+		}
+		attr, ok := b[k].(map[string]any)
+		if !ok {
+			v.errf(p, "must be an object with an optional %q and an optional %q", "help_tip", "default_value")
+			continue
+		}
+		v.keys(attr, p, nil, "help_tip", "default_value")
+		v.text(attr, "help_tip", p)
+		dv, has := attr["default_value"]
+		if !has {
+			continue
+		}
+		given[k] = true
+		switch {
+		case dv == nil:
+		case slices.Contains(actionHolding, k):
+			v.errf(p+"/default_value", "attribute %q holds actions, so it cannot have a default; use null or leave it out", k)
+		default:
+			defaults[k] = dv
+		}
 	}
+	return defaults, given
 }
 
 // ValidateDraftClass checks an element class row created as a draft, before its
@@ -351,27 +408,15 @@ func ValidateDraftClass(body map[string]any) []Issue {
 	if !idPattern.MatchString(id) {
 		v.errf("/descriptor_id", "descriptor ID %q must match %s", id, idPattern)
 	}
-	if sv, _ := body["schema_version"].(string); sv != SchemaVersion {
-		v.errf("/schema_version", "schema_version %q is not supported by this interpreter (supports %q)", sv, SchemaVersion)
-	}
-	// A draft has no code, so its description is all that says what to build.
+	v.schemaVersion(body)
+	// A draft has no code, so its description and implement_notes are what say
+	// what to build; the description is required.
 	if _, ok := body["description"]; !ok {
 		v.errf("/description", "a draft class needs a description")
 	}
 	v.text(body, "description", "")
-	defaults := map[string]any{}
-	for _, k := range slices.Sorted(maps.Keys(body)) {
-		switch {
-		case slices.Contains(classAttrs, k):
-		case k == "element" || !segmentPattern.MatchString(k):
-			v.errf("/"+k, "%q cannot be an attribute name", k)
-		case body[k] == nil:
-		case slices.Contains(actionHolding, k):
-			v.errf("/"+k, "attribute %q holds actions, so it cannot have a default; use null", k)
-		default:
-			defaults[k] = body[k]
-		}
-	}
+	v.text(body, "implement_notes", "")
+	defaults, _ := v.elementClassAttrs(body, nil)
 	for _, k := range elementSizeAttrs {
 		v.size(defaults, k, "")
 	}
@@ -759,21 +804,44 @@ func (v *validator) action(cls string, a map[string]any, path string, extra ...s
 	}
 }
 
-// mergeInstance overlays an instance's own attributes on its class row's
-// non-null defaults (devdoc 2026102601 §3.5.1).
-func mergeInstance(row, own map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, val := range row {
-		if val != nil && !slices.Contains(classAttrs, k) {
-			out[k] = val
+// classDefaults returns a class row's non-null defaults and the attributes
+// whose default is null, which every instance must set. An element class row
+// (format 0.3) holds each instance attribute as {help_tip, default_value}; an
+// action class row holds the default itself.
+func classDefaults(kind Kind, row map[string]any) (defaults map[string]any, required []string) {
+	defaults = map[string]any{}
+	for _, k := range slices.Sorted(maps.Keys(row)) {
+		if slices.Contains(classAttrs, k) {
+			continue
+		}
+		val := row[k]
+		if kind == KindElement {
+			attr, _ := val.(map[string]any)
+			dv, has := attr["default_value"]
+			if !has {
+				continue
+			}
+			val = dv
+		}
+		if val == nil {
+			required = append(required, k)
+		} else {
+			defaults[k] = val
 		}
 	}
+	return defaults, required
+}
+
+// mergeInstance overlays an instance's own attributes on its class row's
+// non-null defaults (devdoc 2026102601 §3.5.1).
+func mergeInstance(kind Kind, row, own map[string]any) map[string]any {
+	out, _ := classDefaults(kind, row)
 	maps.Copy(out, own)
 	return out
 }
 
 // againstClass checks an instance's own attributes against its class row and
-// returns the merged instance. Every attribute the row sets to null must be
+// returns the merged instance. Every attribute whose default is null must be
 // set by the instance.
 func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path string) (map[string]any, bool) {
 	row, ok := v.classes[kind][cls]
@@ -785,12 +853,13 @@ func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path
 		v.errf(path+"/"+key, "%s class %q does not exist", kind, cls)
 		return nil, false
 	}
-	for _, k := range slices.Sorted(maps.Keys(row.Body)) {
-		if _, set := own[k]; !set && row.Body[k] == nil {
+	_, required := classDefaults(kind, row.Body)
+	for _, k := range required {
+		if _, set := own[k]; !set {
 			v.errf(path, "attribute %q has no default in %s class %q, so this instance must set it", k, kind, cls)
 		}
 	}
-	return mergeInstance(row.Body, own), true
+	return mergeInstance(kind, row.Body, own), true
 }
 
 // actionComplete checks an action instance against its class row and returns

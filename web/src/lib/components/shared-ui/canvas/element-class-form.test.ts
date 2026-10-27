@@ -1,16 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+	applyEdit,
 	attributeProblem,
 	buildClassRow,
 	CLASS_ID_PATTERN,
-	draftAttribute,
-	editProblem,
+	defaultValue,
 	editText,
+	hasDefault,
+	helpTip,
 	initialAttributes,
 	isClassAttribute,
+	newAttribute,
 	parseDefault,
-	parseValue,
 	renameProblem,
 	rowProblem
 } from './element-class-form';
@@ -18,10 +20,11 @@ import {
 test('the form starts with the class attributes', () => {
 	assert.deepEqual(initialAttributes(), [
 		{ name: 'descriptor_id', value: '' },
-		{ name: 'schema_version', value: '0.2' },
-		{ name: 'description', value: { en: '', 'zh-cn': '' } }
+		{ name: 'schema_version', value: '0.3' },
+		{ name: 'description', value: { en: '', 'zh-cn': '' } },
+		{ name: 'implement_notes', value: '' }
 	]);
-	assert.ok(isClassAttribute('description'));
+	assert.ok(isClassAttribute('implement_notes'));
 	assert.ok(!isClassAttribute('label'));
 });
 
@@ -34,43 +37,66 @@ test('a default is JSON when it parses, otherwise text', () => {
 	assert.equal(parseDefault('read-write'), 'read-write');
 });
 
-test('an edit reads the ID and schema version as text, other values like defaults', () => {
-	assert.equal(parseValue('descriptor_id', ' 123 '), '123');
-	assert.equal(parseValue('schema_version', '0.2'), '0.2');
-	assert.equal(parseValue('description', "The element for 'input'"), "The element for 'input'");
-	assert.deepEqual(parseValue('description', '{"en": "A", "zh-cn": "甲"}'), { en: 'A', 'zh-cn': '甲' });
-	assert.equal(parseValue('max', '100'), 100);
-});
-
-test('an edit starts from text that reads back as the same value', () => {
-	for (const attr of [...initialAttributes(), { name: 'width', value: '240px' }, { name: 'n', value: '123' }, { name: 'label', value: null }]) {
-		assert.deepEqual(parseValue(attr.name, editText(attr)), attr.value, attr.name);
-	}
-	assert.equal(editText({ name: 'descriptor_id', value: 'slider' }), 'slider');
-	assert.equal(editText({ name: 'width', value: '240px' }), '"240px"');
-});
-
-test('an instance attribute cannot be edited to empty', () => {
-	assert.equal(editProblem('max', '  '), 'empty_value');
-	assert.equal(editProblem('max', 'null'), null);
-	assert.equal(editProblem('descriptor_id', ''), null);
-});
-
-test('a required attribute is stored as null', () => {
-	assert.deepEqual(draftAttribute('label', true, 'ignored'), { name: 'label', value: null });
-	assert.deepEqual(draftAttribute('max', false, '100'), { name: 'max', value: 100 });
+test('a new instance attribute is an object with a help tip and a default', () => {
+	assert.deepEqual(newAttribute('label', true, 'ignored', 'Caption', '标题'), { name: 'label', value: { help_tip: { en: 'Caption', 'zh-cn': '标题' }, default_value: null } });
+	assert.deepEqual(newAttribute('max', false, '100', 'Largest value', ''), { name: 'max', value: { help_tip: { en: 'Largest value' }, default_value: 100 } });
+	assert.deepEqual(newAttribute('on_change', false, '  ', '', ''), { name: 'on_change', value: {} }, 'no default: optional');
+	const required = newAttribute('label', true, '', '', '');
+	assert.ok(hasDefault(required));
+	assert.equal(defaultValue(required), null);
+	assert.ok(!hasDefault(newAttribute('x', false, '', '', '')));
 });
 
 test('attribute problems', () => {
-	const added = [...initialAttributes(), { name: 'label', value: null }];
-	assert.equal(attributeProblem('max-value', false, '1', added), 'name');
-	assert.equal(attributeProblem('', false, '1', added), 'name');
-	assert.equal(attributeProblem('element', true, '', added), 'reserved');
-	assert.equal(attributeProblem('description', true, '', added), 'reserved');
-	assert.equal(attributeProblem('label', true, '', added), 'duplicate');
-	assert.equal(attributeProblem('max', false, '  ', added), 'no_default');
-	assert.equal(attributeProblem('max', false, '100', added), null);
-	assert.equal(attributeProblem('on_change', true, '', added), null);
+	const added = [...initialAttributes(), newAttribute('label', true, '', '', '')];
+	assert.equal(attributeProblem('max-value', '', '', added), 'name');
+	assert.equal(attributeProblem('', '', '', added), 'name');
+	assert.equal(attributeProblem('element', '', '', added), 'reserved');
+	assert.equal(attributeProblem('implement_notes', '', '', added), 'reserved');
+	assert.equal(attributeProblem('label', '', '', added), 'duplicate');
+	assert.equal(attributeProblem('max', '', '最大值', added), 'help_tip_en');
+	assert.equal(attributeProblem('max', 'Largest', '最大值', added), null);
+});
+
+test('renaming an instance attribute', () => {
+	const attrs = [...initialAttributes(), newAttribute('label', true, '', '', ''), newAttribute('max', false, '100', '', '')];
+	assert.equal(renameProblem('max', 'max', attrs), null);
+	assert.equal(renameProblem('max', 'maximum', attrs), null);
+	assert.equal(renameProblem('max', 'label', attrs), 'duplicate');
+	assert.equal(renameProblem('max', 'description', attrs), 'reserved');
+	assert.equal(renameProblem('max', 'max-value', attrs), 'name');
+});
+
+test('editing class attributes: ID, version and notes are text, the description JSON or text', () => {
+	const [id, version, description, notes] = initialAttributes();
+	assert.deepEqual(applyEdit(id, 'value', ' 123 '), { name: 'descriptor_id', value: '123' });
+	assert.deepEqual(applyEdit(version, 'value', '0.3'), { name: 'schema_version', value: '0.3' });
+	assert.deepEqual(applyEdit(notes, 'value', 'Render {a range}\n'), { name: 'implement_notes', value: 'Render {a range}' });
+	assert.deepEqual(applyEdit(description, 'value', '{"en": "A", "zh-cn": "甲"}').value, { en: 'A', 'zh-cn': '甲' });
+	assert.equal(applyEdit(description, 'value', "The element for 'input'").value, "The element for 'input'");
+	for (const attr of initialAttributes()) {
+		assert.deepEqual(applyEdit(attr, 'value', editText(attr, 'value')), attr, attr.name);
+	}
+});
+
+test('editing an instance attribute: default and help tip', () => {
+	const max = newAttribute('max', false, '100', 'Largest', '');
+	assert.equal(editText(max, 'value'), '100');
+	assert.equal(editText(max, 'help_tip'), '{"en":"Largest"}');
+	assert.deepEqual(applyEdit(max, 'value', '50').value, { help_tip: { en: 'Largest' }, default_value: 50 });
+	assert.deepEqual(applyEdit(max, 'value', '').value, { help_tip: { en: 'Largest' } }, 'empty: no default');
+	assert.deepEqual(applyEdit(max, 'value', 'null').value, { help_tip: { en: 'Largest' }, default_value: null });
+	assert.deepEqual(applyEdit(max, 'help_tip', '').value, { default_value: 100 });
+	assert.deepEqual(applyEdit(max, 'help_tip', 'Plain tip').value, { help_tip: 'Plain tip', default_value: 100 });
+	const optional = newAttribute('on_change', false, '', '', '');
+	assert.equal(editText(optional, 'value'), '');
+	assert.deepEqual(applyEdit(optional, 'help_tip', '{"en": "Runs on change"}').value, { help_tip: { en: 'Runs on change' } });
+	for (const attr of [max, optional, newAttribute('label', true, '', 'Caption', '标题'), newAttribute('w', false, '"240px"', '', '')]) {
+		for (const field of ['value', 'help_tip'] as const) {
+			assert.deepEqual(applyEdit(attr, field, editText(attr, field)), attr, `${attr.name} ${field}`);
+		}
+	}
+	assert.deepEqual(helpTip(newAttribute('label', true, '', 'Caption', '')), { en: 'Caption' });
 });
 
 test('class IDs', () => {
@@ -80,21 +106,22 @@ test('class IDs', () => {
 	assert.ok(!CLASS_ID_PATTERN.test('date_range'));
 });
 
-test('the class row keeps the attributes in order and drops empty description texts', () => {
+test('the class row keeps the attributes in order, drops empty description texts and empty notes', () => {
 	const attrs = initialAttributes();
 	attrs[0].value = 'slider';
 	attrs[2].value = { en: 'A slider', 'zh-cn': '' };
-	attrs.push(draftAttribute('label', true, ''), draftAttribute('max', false, '100'));
+	attrs.push(newAttribute('label', true, '', 'Caption', ''), newAttribute('max', false, '100', '', ''));
 	const row = buildClassRow(attrs);
 	assert.deepEqual(row, {
 		descriptor_id: 'slider',
-		schema_version: '0.2',
+		schema_version: '0.3',
 		description: { en: 'A slider' },
-		label: null,
-		max: 100
+		label: { help_tip: { en: 'Caption' }, default_value: null },
+		max: { default_value: 100 }
 	});
 	assert.deepEqual(Object.keys(row), ['descriptor_id', 'schema_version', 'description', 'label', 'max']);
-	assert.equal(buildClassRow([{ name: 'description', value: 'Plain' }]).description, 'Plain');
+	attrs[3].value = 'Render a range input.';
+	assert.equal(buildClassRow(attrs).implement_notes, 'Render a range input.');
 });
 
 test('row problems', () => {
@@ -105,13 +132,4 @@ test('row problems', () => {
 	assert.equal(rowProblem(row('Slider', { en: 'A slider' })), 'class_id');
 	assert.equal(rowProblem(row('slider', { en: '', 'zh-cn': '滑块' })), 'description');
 	assert.equal(rowProblem(row('slider', '')), 'description');
-});
-
-test('renaming an instance attribute', () => {
-	const attrs = [...initialAttributes(), { name: 'label', value: null }, { name: 'max', value: 100 }];
-	assert.equal(renameProblem('max', 'max', attrs), null);
-	assert.equal(renameProblem('max', 'maximum', attrs), null);
-	assert.equal(renameProblem('max', 'label', attrs), 'duplicate');
-	assert.equal(renameProblem('max', 'description', attrs), 'reserved');
-	assert.equal(renameProblem('max', 'max-value', attrs), 'name');
 });

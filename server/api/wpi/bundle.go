@@ -180,7 +180,7 @@ func loadPages(ctx context.Context, app Descriptor, actionClasses map[string]Des
 			for _, pos := range actionPositions(d.Body) {
 				m, _ := pos.val.(map[string]any)
 				if str(m["action"]) == "open-page" {
-					merged := mergeInstance(actionClasses["open-page"].Body, instanceAttrs(m, "action"))
+					merged := mergeInstance(KindAction, actionClasses["open-page"].Body, instanceAttrs(m, "action"))
 					name(pageRef{KindPage, id, pos.path + "/page", str(merged["page"])})
 				}
 			}

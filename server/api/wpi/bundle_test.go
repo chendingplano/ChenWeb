@@ -104,7 +104,7 @@ func TestBuildBundleNotFound(t *testing.T) {
 
 func TestBuildBundleIgnoresBrokenUnusedClass(t *testing.T) {
 	fx := fixture()
-	fx[KindElement]["select"] = `{"descriptor_id": "select", "schema_version": "0.2"}`
+	fx[KindElement]["select"] = `{"descriptor_id": "select", "schema_version": "0.3"}`
 	res, err := build(t, fx, peopleTable)
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestBuildBundleErrors(t *testing.T) {
 			`attribute "label" has no default in element class "input"`},
 		{"structure error in a reached page", replace(KindPage, "form-page", `"$input_doc.name"`, `"$input_doc.__proto__"`), peopleTable,
 			`"__proto__" is not allowed`},
-		{"broken class row in use", replace(KindElement, "input", `"binding_mode": "read-write"`, `"binding_mode": "write"`), peopleTable,
+		{"broken class row in use", replace(KindElement, "input", `"binding_mode": {"default_value": "read-write"}`, `"binding_mode": {"default_value": "write"}`), peopleTable,
 			`"write" is not supported`},
 		{"page in format 0.1", replace(KindPage, "form-page", `"schema_version": "0.2"`, `"schema_version": "0.1"`), peopleTable,
 			`schema_version "0.1" is not supported`},

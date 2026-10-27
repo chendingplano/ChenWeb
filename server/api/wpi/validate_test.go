@@ -39,12 +39,12 @@ func expectIssue(t *testing.T, issues []Issue, want string) {
 func testClasses() map[Kind]map[string]string {
 	return map[Kind]map[string]string{
 		KindElement: {
-			"text":   `{"descriptor_id": "text", "schema_version": "0.2"}`,
-			"input":  `{"descriptor_id": "input", "schema_version": "0.2", "description": {"en": "A field", "zh-cn": "输入框"}, "label": null, "data_binding": null, "binding_mode": "read-write", "width": "elastic"}`,
-			"select": `{"descriptor_id": "select", "schema_version": "0.2", "label": null, "data_binding": null, "binding_mode": "read-write", "options": null}`,
-			"button": `{"descriptor_id": "button", "schema_version": "0.2", "label": null, "on_click": null}`,
-			"list":   `{"descriptor_id": "list", "schema_version": "0.2", "source": null, "presentation": "rows", "columns": null}`,
-			"menu":   `{"descriptor_id": "menu", "schema_version": "0.2", "items": null}`,
+			"text":   `{"descriptor_id": "text", "schema_version": "0.3", "text": {"help_tip": "The text to show"}}`,
+			"input":  `{"descriptor_id": "input", "schema_version": "0.3", "description": {"en": "A field", "zh-cn": "输入框"}, "implement_notes": "A one-line field", "label": {"help_tip": {"en": "Caption", "zh-cn": "标题"}, "default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "width": {"default_value": "elastic"}}`,
+			"select": `{"descriptor_id": "select", "schema_version": "0.3", "label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "options": {"default_value": null}}`,
+			"button": `{"descriptor_id": "button", "schema_version": "0.3", "label": {"default_value": null}, "on_click": {"default_value": null}}`,
+			"list":   `{"descriptor_id": "list", "schema_version": "0.3", "source": {"default_value": null}, "presentation": {"default_value": "rows"}, "columns": {"default_value": null}, "on_row_click": {"help_tip": "Runs when a row is clicked"}}`,
+			"menu":   `{"descriptor_id": "menu", "schema_version": "0.3", "items": {"default_value": null}}`,
 		},
 		KindAction: {
 			"load":       `{"descriptor_id": "load", "schema_version": "0.2", "table": null, "result": null, "fields": null}`,
@@ -244,12 +244,18 @@ func TestValidateClassRows(t *testing.T) {
 	}{
 		{KindElement, "slider", `{}`, `element class "slider" has no code in this interpreter`},
 		{KindAction, "navigate", `{}`, `action class "navigate" has no code in this interpreter`},
-		{KindElement, "input", `{"label": null, "data_binding": null, "binding_mode": "read-write", "on_row_click": null}`, `unknown attribute "on_row_click"`},
-		{KindElement, "input", `{"label": null, "binding_mode": "read-write"}`, `must give "data_binding" a default or null`},
-		{KindElement, "input", `{"label": null, "data_binding": null, "binding_mode": "write"}`, `"write" is not supported`},
-		{KindElement, "input", `{"label": null, "data_binding": null, "binding_mode": "read-write", "description": {"zh-cn": "输入框"}}`, `need an "en" entry`},
-		{KindElement, "button", `{"label": "Go", "on_click": {"action": "close-page"}}`, `attribute "on_click" holds actions`},
-		{KindElement, "list", `{"source": null, "columns": null, "presentation": "rows", "on_row_click": {"action": "close-page"}}`, `attribute "on_row_click" holds actions`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "on_row_click": {}}`, `unknown attribute "on_row_click"`},
+		{KindElement, "input", `{"label": {"default_value": null}, "binding_mode": {"default_value": "read-write"}}`, `must give "data_binding" a default_value or null`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"help_tip": "Bound attribute"}, "binding_mode": {"default_value": "read-write"}}`, `must give "data_binding" a default_value or null`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "write"}}`, `"write" is not supported`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "description": {"zh-cn": "输入框"}}`, `need an "en" entry`},
+		{KindElement, "input", `{"label": null, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}}`, `/label must be an object with an optional "help_tip"`},
+		{KindElement, "input", `{"label": {"default_value": null, "hint": "x"}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}}`, `/label/hint unknown attribute "hint"`},
+		{KindElement, "input", `{"label": {"help_tip": {"zh-cn": "标题"}, "default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}}`, `/label/help_tip texts by language need an "en" entry`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "implement_notes": ""}`, `/implement_notes must be a non-empty string`},
+		{KindElement, "button", `{"label": {"default_value": "Go"}, "on_click": {"default_value": {"action": "close-page"}}}`, `/on_click/default_value attribute "on_click" holds actions`},
+		{KindElement, "list", `{"source": {"default_value": null}, "columns": {"default_value": null}, "presentation": {"default_value": "rows"}, "on_row_click": {"default_value": {"action": "close-page"}}}`, `attribute "on_row_click" holds actions`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "schema_version": "0.2"}`, `schema_version "0.2" is not supported by this interpreter for element descriptors (supports "0.3")`},
 		{KindAction, "open-page", `{"page": null, "pane": null, "input": {}}`, `attribute "input" holds actions`},
 		{KindAction, "save", `{"table": null, "mode": "merge", "key": "id", "fields": null}`, `"merge" is not supported`},
 		{KindAction, "save-page", `{"args": {}}`, `unknown attribute "args"`},
@@ -257,33 +263,42 @@ func TestValidateClassRows(t *testing.T) {
 	for _, c := range cases {
 		body := decode(t, c.body)
 		body["descriptor_id"] = c.id
-		body["schema_version"] = SchemaVersion
+		if _, ok := body["schema_version"]; !ok {
+			body["schema_version"] = schemaVersionOf(c.kind)
+		}
 		expectIssue(t, ValidateDescriptor(c.kind, c.id, body), c.want)
 	}
 }
 
 func TestValidateDraftClass(t *testing.T) {
-	valid := `{"descriptor_id": "slider", "schema_version": "0.2", "description": {"en": "A slider", "zh-cn": "滑块"}, "label": null, "min": 0, "step": 5, "on_change": null, "width": "240px", "binding_mode": "read-write"}`
+	valid := `{"descriptor_id": "slider", "schema_version": "0.3", "description": {"en": "A slider", "zh-cn": "滑块"},
+		"implement_notes": "Render a range input bound to data_binding.",
+		"label": {"help_tip": {"en": "Caption", "zh-cn": "标题"}, "default_value": null}, "min": {"default_value": 0}, "step": {"default_value": 5},
+		"on_change": {"help_tip": "Runs when the value changes"}, "width": {"default_value": "240px"}, "binding_mode": {"default_value": "read-write"}}`
 	expectIssue(t, ValidateDraftClass(decode(t, valid)), "")
 	// A class that has code may be drafted too; its code is checked when it is made active.
-	expectIssue(t, ValidateDraftClass(decode(t, `{"descriptor_id": "input", "schema_version": "0.2", "description": "x"}`)), "")
+	expectIssue(t, ValidateDraftClass(decode(t, `{"descriptor_id": "input", "schema_version": "0.3", "description": "x"}`)), "")
 	cases := []struct{ body, want string }{
 		{`{"descriptor_id": "Slider", "description": "x"}`, `/descriptor_id descriptor ID "Slider"`},
-		{`{"descriptor_id": "slider", "schema_version": "0.1", "description": "x"}`, `schema_version "0.1" is not supported`},
+		{`{"descriptor_id": "slider", "schema_version": "0.2", "description": "x"}`, `schema_version "0.2" is not supported`},
 		{`{"descriptor_id": "slider"}`, `/description a draft class needs a description`},
 		{`{"descriptor_id": "slider", "description": {"zh-cn": "滑块"}}`, `need an "en" entry`},
-		{`{"descriptor_id": "slider", "description": "x", "element": null}`, `"element" cannot be an attribute name`},
-		{`{"descriptor_id": "slider", "description": "x", "max-value": 1}`, `"max-value" cannot be an attribute name`},
-		{`{"descriptor_id": "slider", "description": "x", "on_click": {"action": "close-page"}}`, `/on_click attribute "on_click" holds actions`},
-		{`{"descriptor_id": "slider", "description": "x", "width": "wide"}`, `/width "wide" must match`},
-		{`{"descriptor_id": "slider", "description": "x", "label": ""}`, `/label must be a non-empty string`},
-		{`{"descriptor_id": "slider", "description": "x", "data_binding": "$record.x"}`, `must be a $input_doc path`},
-		{`{"descriptor_id": "slider", "description": "x", "binding_mode": "write"}`, `"write" is not supported`},
+		{`{"descriptor_id": "slider", "description": "x", "implement_notes": ""}`, `/implement_notes must be a non-empty string`},
+		{`{"descriptor_id": "slider", "description": "x", "element": {}}`, `"element" cannot be an attribute name`},
+		{`{"descriptor_id": "slider", "description": "x", "max-value": {"default_value": 1}}`, `"max-value" cannot be an attribute name`},
+		{`{"descriptor_id": "slider", "description": "x", "max": 1}`, `/max must be an object with an optional "help_tip"`},
+		{`{"descriptor_id": "slider", "description": "x", "max": {"value": 1}}`, `/max/value unknown attribute "value"`},
+		{`{"descriptor_id": "slider", "description": "x", "max": {"help_tip": ""}}`, `/max/help_tip must be a non-empty string`},
+		{`{"descriptor_id": "slider", "description": "x", "on_click": {"default_value": {"action": "close-page"}}}`, `/on_click/default_value attribute "on_click" holds actions`},
+		{`{"descriptor_id": "slider", "description": "x", "width": {"default_value": "wide"}}`, `/width "wide" must match`},
+		{`{"descriptor_id": "slider", "description": "x", "label": {"default_value": ""}}`, `/label must be a non-empty string`},
+		{`{"descriptor_id": "slider", "description": "x", "data_binding": {"default_value": "$record.x"}}`, `must be a $input_doc path`},
+		{`{"descriptor_id": "slider", "description": "x", "binding_mode": {"default_value": "write"}}`, `"write" is not supported`},
 	}
 	for _, c := range cases {
 		body := decode(t, c.body)
 		if _, ok := body["schema_version"]; !ok {
-			body["schema_version"] = SchemaVersion
+			body["schema_version"] = ElementSchemaVersion
 		}
 		expectIssue(t, ValidateDraftClass(body), c.want)
 	}

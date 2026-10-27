@@ -7,8 +7,22 @@ package wpi
 
 import "encoding/json"
 
-// SchemaVersion is the only descriptor format this interpreter accepts.
-const SchemaVersion = "0.2"
+// SchemaVersion is the descriptor format of apps, pages and action classes.
+// Element class rows are written in ElementSchemaVersion, where each instance
+// attribute is an object with a help tip and a default (OpenSpec
+// wpi-create-element-class). These are the only formats this interpreter accepts.
+const (
+	SchemaVersion        = "0.2"
+	ElementSchemaVersion = "0.3"
+)
+
+// schemaVersionOf returns the descriptor format of a kind.
+func schemaVersionOf(kind Kind) string {
+	if kind == KindElement {
+		return ElementSchemaVersion
+	}
+	return SchemaVersion
+}
 
 // Kind is the kind of a stored descriptor: kb.wpi_descriptors.kind, or page
 // for a row of kb.frontend_pages.

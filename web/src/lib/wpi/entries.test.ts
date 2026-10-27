@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionRef, isAction, mergeInstance, resolveEntry, staticInput, textIn } from './entries';
+import { actionRef, isAction, mergeElement, mergeInstance, resolveEntry, staticInput, textIn } from './entries';
 import type { Bundle, PageDescriptor } from './types';
 
 const page = (descriptor_id: string, extra: Partial<PageDescriptor> = {}): PageDescriptor => ({
@@ -15,14 +15,16 @@ const bundle = {
 	elements: {
 		input: {
 			descriptor_id: 'input',
-			schema_version: '0.2',
+			schema_version: '0.3',
 			description: 'A field',
-			label: null,
-			data_binding: null,
-			binding_mode: 'read-write',
-			width: 'elastic'
+			implement_notes: 'A one-line field',
+			label: { help_tip: 'Caption', default_value: null },
+			data_binding: { default_value: null },
+			binding_mode: { default_value: 'read-write' },
+			input_type: { help_tip: 'text, number or email' },
+			width: { default_value: 'elastic' }
 		},
-		text: { descriptor_id: 'text', schema_version: '0.2' }
+		text: { descriptor_id: 'text', schema_version: '0.3' }
 	}
 } as unknown as Bundle;
 
@@ -35,7 +37,15 @@ test('an instance takes its class defaults and overrides them', () => {
 	assert.equal(r.desc.label, 'Email');
 	assert.equal(r.pointer, '/elements/2');
 	assert.equal('description' in r.desc, false, 'class attributes are not merged');
-	assert.equal('data_binding' in mergeInstance(bundle.elements.input, {}), false, 'null means no default');
+	assert.equal('implement_notes' in r.desc, false, 'class attributes are not merged');
+	const bare = mergeElement(bundle.elements.input, {});
+	assert.equal('data_binding' in bare, false, 'null means no default');
+	assert.equal('input_type' in bare, false, 'no default_value means no default');
+});
+
+test('an action instance takes its class defaults, held flat', () => {
+	const row = { descriptor_id: 'save', schema_version: '0.2', mode: 'upsert', key: 'id', fields: null };
+	assert.deepEqual(mergeInstance(row, { table: 't' }), { mode: 'upsert', key: 'id', table: 't' });
 });
 
 test('action instances are named by their place in the page', () => {

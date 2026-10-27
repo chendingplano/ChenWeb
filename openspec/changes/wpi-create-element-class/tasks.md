@@ -39,3 +39,11 @@
 
 - [x] 7.1 Default value is a multi-line editor using the rest of the name's line (Enter adds a line, Ctrl/Cmd+Enter adds the attribute); checkbox and Add Attribute on the next line
 - [x] 7.2 `bun run check` and the browser run (layout, multi-line JSON default) pass
+
+## 8. Element class format 0.3 and implement_notes
+
+- [x] 8.1 Validator: per-kind schema versions (element 0.3); `implement_notes` class attribute; attribute objects (`help_tip`, `default_value`) for active and draft element rows; `classDefaults` for merges and required attributes; tests
+- [x] 8.2 Migration `20261027000006_wpi_element_classes_0_3.sql` (version 2 of the six element classes, help tips en/zh-cn); seed tests read it; dry-run, then applied to dev
+- [x] 8.3 Frontend interpreter: `mergeElement` reads `default_value`; tests
+- [x] 8.4 Form: `implement_notes` in the list (multi-line editor), help tips entered and edited, empty default = no default; helpers and tests; messages in both languages
+- [x] 8.5 `go test`, `bun run check`, unit tests, the pilot app's browser run and the editor's browser run pass

@@ -1,25 +1,29 @@
 <!-- web/src/lib/components/shared-ui/canvas/CreateElementDialog.svelte -->
-<!-- The WPI editor's Create Element form: defines a new element class as a list of attributes,
-     starting with its class attributes, and stores it as a draft, to be implemented in code
-     afterwards (OpenSpec wpi-create-element-class). Double-clicking a value edits it; double-clicking
-     an instance attribute's name renames it. The corner grip resizes the dialog. -->
+<!-- The WPI editor's Create Element form: defines a new element class (format 0.3) as a list of
+     attributes, starting with its class attributes, and stores it as a draft, to be implemented in
+     code afterwards (OpenSpec wpi-create-element-class). Each instance attribute is an object with a
+     help tip and a default. Double-clicking a value, help tip or instance attribute name edits it.
+     The corner grip resizes the dialog. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import { createElementClass, WpiError } from '$lib/wpi/api';
   import type { Issue } from '$lib/wpi/types';
   import {
+    applyEdit,
     attributeProblem,
     buildClassRow,
-    draftAttribute,
-    editProblem,
+    defaultValue,
     editText,
+    hasDefault,
+    helpTip,
     initialAttributes,
     isClassAttribute,
-    parseValue,
+    newAttribute,
     renameProblem,
     rowProblem,
     type AttributeProblem,
     type DraftAttribute,
+    type EditField,
   } from './element-class-form';
 
   let {
@@ -35,13 +39,17 @@
   // The attribute being entered.
   let attrName     = $state('');
   let attrDefault  = $state('');
+  let attrTipEn    = $state('');
+  let attrTipZh    = $state('');
   let attrRequired = $state(false);
   let attrError    = $state('');
 
-  // The attribute whose name or value is being edited in the list.
-  let editing   = $state<{ name: string; field: 'name' | 'value' } | null>(null);
+  // The attribute whose name, value or help tip is being edited in the list.
+  let editing   = $state<{ name: string; field: EditField } | null>(null);
   let editValue = $state('');
   let editError = $state('');
+  // The implementation prompt is long, so it is edited in a multi-line editor.
+  const multiLine = $derived(editing?.name === 'implement_notes');
 
   // The dialog's size once the author has resized it; until then it fits its content.
   const MIN_WIDTH = 480;
@@ -64,22 +72,23 @@
       case 'name':        return m.wpi_create_element_err_attribute_name();
       case 'reserved':    return m.wpi_create_element_err_reserved({ name });
       case 'duplicate':   return m.wpi_create_element_err_duplicate({ name });
-      case 'no_default':  return m.wpi_create_element_err_no_default();
-      case 'empty_value': return m.wpi_create_element_err_empty_value();
+      case 'help_tip_en': return m.wpi_create_element_err_help_tip_en();
     }
   }
 
   function addAttribute() {
     const name = attrName.trim();
-    const p = attributeProblem(name, attrRequired, attrDefault, attributes);
+    const p = attributeProblem(name, attrTipEn, attrTipZh, attributes);
     if (p) {
       attrError = problemText(p, name);
       return;
     }
-    attributes = [...attributes, draftAttribute(name, attrRequired, attrDefault)];
+    attributes = [...attributes, newAttribute(name, attrRequired, attrDefault, attrTipEn, attrTipZh)];
     clearFormError();
     attrName = '';
     attrDefault = '';
+    attrTipEn = '';
+    attrTipZh = '';
     attrRequired = false;
     attrError = '';
   }
@@ -89,17 +98,17 @@
     clearFormError();
   }
 
-  function isEditing(attr: DraftAttribute, field: 'name' | 'value') {
+  function isEditing(attr: DraftAttribute, field: EditField) {
     return editing?.name === attr.name && editing.field === field;
   }
 
-  function startEdit(attr: DraftAttribute, field: 'name' | 'value') {
+  function startEdit(attr: DraftAttribute, field: EditField) {
     // A double-click inside the open editor selects a word; it must not restart the edit.
     if (isEditing(attr, field)) return;
-    // Class attribute names are fixed.
-    if (field === 'name' && isClassAttribute(attr.name)) return;
+    // Class attribute names are fixed, and class attributes have no help tip.
+    if (field !== 'value' && isClassAttribute(attr.name)) return;
     editing = { name: attr.name, field };
-    editValue = field === 'name' ? attr.name : editText(attr);
+    editValue = editText(attr, field);
     editError = '';
   }
 
@@ -115,12 +124,7 @@
       }
       attributes = attributes.map((a) => (a.name === name ? { name: newName, value: a.value } : a));
     } else {
-      const p = editProblem(name, editValue);
-      if (p) {
-        editError = problemText(p, name);
-        return;
-      }
-      attributes = attributes.map((a) => (a.name === name ? { name, value: parseValue(name, editValue) } : a));
+      attributes = attributes.map((a) => (a.name === name ? applyEdit(a, field, editValue) : a));
     }
     editing = null;
     editError = '';
@@ -132,8 +136,9 @@
     editError = '';
   }
 
+  // Enter keeps the edit; in the multi-line editor Enter starts a new line, so Ctrl/Cmd+Enter keeps it.
   function onEditKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && (!multiLine || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       commitEdit();
     } else if (e.key === 'Escape') {
@@ -143,12 +148,12 @@
     }
   }
 
-  function focusSelect(node: HTMLInputElement) {
+  function focusSelect(node: HTMLInputElement | HTMLTextAreaElement) {
     node.focus();
     node.select();
   }
 
-  function onEditStartKeydown(e: KeyboardEvent, attr: DraftAttribute, field: 'name' | 'value') {
+  function onEditStartKeydown(e: KeyboardEvent, attr: DraftAttribute, field: EditField) {
     if (e.key === 'Enter' || e.key === 'F2') {
       e.preventDefault();
       startEdit(attr, field);
@@ -209,9 +214,9 @@
     }
   }
 
-  // Enter adds the attribute from the name field; in the default, Enter starts a new line, so
-  // Ctrl/Cmd+Enter adds it.
-  function onNameKeydown(e: KeyboardEvent) {
+  // Enter adds the attribute from the one-line fields; in the default, Enter starts a new line,
+  // so Ctrl/Cmd+Enter adds it.
+  function onLineKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault();
       addAttribute();
@@ -236,7 +241,7 @@
 >
   <div bind:this={panel} class="rounded-xl overflow-hidden shadow-2xl"
     style="position:relative; background:#111827; border:1px solid #1e2a3a; display:flex; flex-direction:column;
-      width:{size ? `${size.width}px` : '620px'}; height:{size ? `${size.height}px` : 'auto'};
+      width:{size ? `${size.width}px` : '760px'}; height:{size ? `${size.height}px` : 'auto'};
       max-width:calc(100vw - 16px); max-height:{size ? 'calc(100vh - 16px)' : '85vh'};">
 
     <!-- Header -->
@@ -249,12 +254,13 @@
     </div>
 
     <div style="flex:1; overflow-y:auto; padding:16px 20px;">
-      <!-- New attribute -->
+      <!-- New attribute; a change to any of its fields clears the last add's error -->
       <div class="section" style="margin-top:0;">{m.wpi_create_element_attributes()}</div>
+      <div oninput={() => (attrError = '')}>
       <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
         <label class="field" style="flex:0 1 180px; min-width:120px; margin:0;">
           <span>{m.wpi_create_element_attribute_name()}</span>
-          <input bind:value={attrName} onkeydown={onNameKeydown} autocomplete="off" />
+          <input bind:value={attrName} onkeydown={onLineKeydown} autocomplete="off" />
         </label>
         <label class="field" style="flex:1 1 240px; margin:0;">
           <span>{m.wpi_create_element_default_value()}</span>
@@ -262,12 +268,23 @@
         </label>
       </div>
       <small class="hint">{m.wpi_create_element_default_hint()}</small>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <label class="field" style="flex:1 1 200px; margin:0;">
+          <span>{m.wpi_create_element_help_tip_en()}</span>
+          <input bind:value={attrTipEn} onkeydown={onLineKeydown} autocomplete="off" />
+        </label>
+        <label class="field" style="flex:1 1 200px; margin:0;">
+          <span>{m.wpi_create_element_help_tip_zh()}</span>
+          <input bind:value={attrTipZh} onkeydown={onLineKeydown} autocomplete="off" />
+        </label>
+      </div>
       <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px;">
         <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#94a3b8;">
           <input type="checkbox" bind:checked={attrRequired} style="accent-color:#6366f1;" />
           {m.wpi_create_element_required()}
         </label>
         <button type="button" class="btn" onclick={addAttribute} title={m.wpi_create_element_add_attribute_shortcut()}>{m.wpi_create_element_add_attribute()}</button>
+      </div>
       </div>
       {#if attrError}
         <div class="error" style="margin-top:6px;">{attrError}</div>
@@ -278,9 +295,10 @@
         <table style="width:100%; border-collapse:collapse; font-size:11px;">
           <thead>
             <tr style="background:#161b27; color:#6b7280; text-align:left;">
-              <th style="padding:6px 12px; font-weight:500; width:30%;">{m.wpi_create_element_attribute_name()}</th>
-              <th style="width:64px;"></th>
-              <th style="padding:6px 12px; font-weight:500;">{m.wpi_create_element_value()}</th>
+              <th style="padding:6px 12px; font-weight:500; width:22%;">{m.wpi_create_element_attribute_name()}</th>
+              <th style="width:56px;"></th>
+              <th style="padding:6px 12px; font-weight:500; width:38%;">{m.wpi_create_element_value()}</th>
+              <th style="padding:6px 12px; font-weight:500;">{m.wpi_create_element_help_tip()}</th>
               <th style="width:32px;"></th>
             </tr>
           </thead>
@@ -304,7 +322,11 @@
                 </td>
                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <td style="padding:3px 6px; font-family:monospace; word-break:break-all;" ondblclick={() => startEdit(attr, 'value')}>
-                  {#if isEditing(attr, 'value')}
+                  {#if isEditing(attr, 'value') && multiLine}
+                    <textarea class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit} rows="6"
+                      aria-label={m.wpi_create_element_edit_value({ name: attr.name })} title={m.wpi_create_element_multi_line_keys()}
+                      use:focusSelect></textarea>
+                  {:else if isEditing(attr, 'value')}
                     <input class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit}
                       aria-label={m.wpi_create_element_edit_value({ name: attr.name })} autocomplete="off" use:focusSelect />
                   {:else}
@@ -312,11 +334,35 @@
                       onkeydown={(e) => onEditStartKeydown(e, attr, 'value')}>
                       {#if attr.name === 'descriptor_id' && attr.value === ''}
                         <span class="muted">{m.wpi_create_element_double_click_to_set()}</span>
+                      {:else if attr.name === 'implement_notes' && attr.value === ''}
+                        <span class="muted">{m.wpi_create_element_double_click_to_write_notes()}</span>
+                      {:else if attr.name === 'implement_notes'}
+                        <span class="notes">{attr.value}</span>
                       {:else if attr.name === 'descriptor_id' || attr.name === 'schema_version'}
                         {attr.value}
-                      {:else}
+                      {:else if isClassAttribute(attr.name)}
                         {JSON.stringify(attr.value)}
-                        {#if attr.value === null}<span class="muted"> · {m.wpi_create_element_must_set()}</span>{/if}
+                      {:else if !hasDefault(attr)}
+                        <span class="muted">{m.wpi_create_element_no_default()}</span>
+                      {:else}
+                        {JSON.stringify(defaultValue(attr))}
+                        {#if defaultValue(attr) === null}<span class="muted"> · {m.wpi_create_element_must_set()}</span>{/if}
+                      {/if}
+                    </button>
+                  {/if}
+                </td>
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <td style="padding:3px 6px; font-family:monospace; word-break:break-all;" ondblclick={() => startEdit(attr, 'help_tip')}>
+                  {#if isEditing(attr, 'help_tip')}
+                    <input class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit}
+                      aria-label={m.wpi_create_element_edit_help_tip({ name: attr.name })} autocomplete="off" use:focusSelect />
+                  {:else if !isClassAttribute(attr.name)}
+                    <button type="button" class="value" title={m.wpi_create_element_double_click_to_edit()}
+                      onkeydown={(e) => onEditStartKeydown(e, attr, 'help_tip')}>
+                      {#if helpTip(attr) === undefined}
+                        <span class="muted">{m.wpi_create_element_double_click_to_add()}</span>
+                      {:else}
+                        {JSON.stringify(helpTip(attr))}
                       {/if}
                     </button>
                   {/if}
@@ -395,6 +441,8 @@
   }
   .name { display: block; padding: 3px 6px; border: 1px solid transparent; }
   .muted { color: #6b7280; font-family: system-ui, sans-serif; }
+  .notes { white-space: pre-wrap; font-family: system-ui, sans-serif; }
+  textarea.edit { display: block; resize: vertical; line-height: 1.4; font-family: system-ui, sans-serif; }
   .grip {
     position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; cursor: nwse-resize;
     background: linear-gradient(135deg, transparent 0 50%, #4b5563 50% 58%, transparent 58% 70%, #4b5563 70% 78%, transparent 78%);

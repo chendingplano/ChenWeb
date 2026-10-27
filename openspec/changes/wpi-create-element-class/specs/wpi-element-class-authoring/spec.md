@@ -8,7 +8,7 @@ success the response SHALL be 201 with `descriptor_id`, `version` 1 and `status`
 `draft`. Only admins (admin flag, owner, or `admin` role) SHALL be allowed.
 
 #### Scenario: New class stored as a draft
-- **WHEN** an admin posts `{"descriptor_id": "slider", "schema_version": "0.2", "description": {"en": "A slider"}, "label": null, "min": 0}`
+- **WHEN** an admin posts `{"descriptor_id": "slider", "schema_version": "0.3", "description": {"en": "A slider"}, "implement_notes": "A range input", "label": {"help_tip": {"en": "Caption"}, "default_value": null}, "min": {"default_value": 0}}`
 - **THEN** the response is 201 with version 1 and status `draft`, and the row is stored as `draft`
 
 #### Scenario: Non-admin is refused
@@ -35,13 +35,15 @@ error.
 
 ### Requirement: Draft rules
 A draft SHALL have `descriptor_id` matching `^[a-z0-9][a-z0-9-]{0,127}$`, `schema_version`
-`0.2`, and a `description` that is a non-empty string or texts by language including `en`.
-Every other key SHALL be an instance attribute: its name SHALL match
-`^[A-Za-z_][A-Za-z0-9_]*$` and SHALL NOT be `element`; its value SHALL be a default or
-`null`. Attributes that hold actions (`on_click`, `on_row_click`, `source`, `items`,
-`input`) SHALL be `null`. Defaults of `width`, `height`, `min_width` and `max_width` SHALL
-be lengths; of `label`, text; of `data_binding`, a `$input_doc` path; of `binding_mode`,
-`read-only` or `read-write`. Other attribute names SHALL be accepted. A draft that breaks a
+`0.3`, and a `description` that is a non-empty string or texts by language including `en`;
+`implement_notes`, if present, SHALL be text in the same forms. Every other key SHALL be an
+instance attribute: its name SHALL match `^[A-Za-z_][A-Za-z0-9_]*$` and SHALL NOT be
+`element`; its value SHALL be an object with only an optional `help_tip` (text) and an
+optional `default_value`. Attributes that hold actions (`on_click`, `on_row_click`,
+`source`, `items`, `input`) SHALL have a `default_value` of `null` or none. Defaults of
+`width`, `height`, `min_width` and `max_width` SHALL be lengths; of `label`, text; of
+`data_binding`, a `$input_doc` path; of `binding_mode`, `read-only` or `read-write`. Other
+attribute names SHALL be accepted. A draft that breaks a
 rule SHALL be refused with 400 listing the issues.
 
 #### Scenario: Description missing
@@ -49,19 +51,23 @@ rule SHALL be refused with 400 listing the issues.
 - **THEN** the response is 400 with an issue at `/description`
 
 #### Scenario: Default for an action-holding attribute
-- **WHEN** a draft sets `"on_click": {"action": "close-page"}`
-- **THEN** the response is 400 with an issue at `/on_click`
+- **WHEN** a draft sets `"on_click": {"default_value": {"action": "close-page"}}`
+- **THEN** the response is 400 with an issue at `/on_click/default_value`
+
+#### Scenario: Attribute that is not an object
+- **WHEN** a draft sets `"max": 1`
+- **THEN** the response is 400 with an issue at `/max`
 
 #### Scenario: Reserved or malformed attribute name
 - **WHEN** a draft has an attribute `element` or `max-value`
 - **THEN** the response is 400 with an issue at that attribute
 
 #### Scenario: Bad size default
-- **WHEN** a draft sets `"width": "wide"`
+- **WHEN** a draft sets `"width": {"default_value": "wide"}`
 - **THEN** the response is 400 with an issue at `/width`
 
 #### Scenario: Attribute unknown to the interpreter
-- **WHEN** a draft sets `"step": 5`
+- **WHEN** a draft sets `"step": {"help_tip": "Step size", "default_value": 5}`
 - **THEN** the draft is stored
 
 ### Requirement: Drafts are implemented through code and the existing write
@@ -95,19 +101,23 @@ left out. It SHALL require a logged-in user.
 ### Requirement: Create Element form
 In the WPI editor, **Create Nodes → Create Element** SHALL open a form that defines an
 element class as a list of its attributes. The list SHALL start with the class attributes
-`descriptor_id` (empty), `schema_version` (`"0.2"`) and `description`
-(`{"en": "", "zh-cn": ""}`), which are marked as class attributes in a column of their own
-and cannot be removed or renamed. An instance attribute SHALL be entered
-as a name and either a default value or "Every instance must set it" (stored as `null`), and
-added with **Add Attribute** to the list, which shows every attribute with its stored value;
-instance attributes can be removed. Double-clicking an attribute's value SHALL edit it in
-place, and double-clicking an instance attribute's name SHALL rename it in place: Enter or
-leaving the field keeps the edit, Escape drops it. A rename SHALL be refused for a
+`descriptor_id` (empty), `schema_version` (`"0.3"`), `description`
+(`{"en": "", "zh-cn": ""}`) and `implement_notes` (empty), which are marked as class
+attributes in a column of their own and cannot be removed or renamed. An instance attribute
+SHALL be entered as a name, a default value (empty for none) or "Every instance must set it"
+(stored as `null`), and a help tip in English and optionally Chinese, and added with
+**Add Attribute** to the list as `{"help_tip": …, "default_value": …}`; the list shows
+every attribute's value (an instance attribute's default, or "no default") and help tip;
+instance attributes can be removed. Double-clicking an attribute's value, an instance
+attribute's help tip or an instance attribute's name SHALL edit it in place: Enter or
+leaving the field keeps the edit, Escape drops it; `implement_notes` is edited in a
+multi-line editor, where Ctrl/Cmd+Enter keeps the edit. A rename SHALL be refused for a
 malformed, reserved or duplicate name. The author SHALL be able to resize the form by
 dragging its corner. A typed value SHALL be
 stored as JSON when it parses as JSON, otherwise as a string, except `descriptor_id` and
 `schema_version`, which are always strings; an instance attribute cannot be edited to empty.
-**Create Element** SHALL post the class, leaving out empty description texts, after
+**Create Element** SHALL post the class, leaving out empty description texts and empty
+`implement_notes`, after
 checking that `descriptor_id` is a valid class ID and `description` has an English text. On success the form SHALL close and the class SHALL appear
 in the ELEMENTS folder. On failure the form SHALL stay open and show the error, including
 "already exists" for a 409. All of the form's text SHALL be available in English and
@@ -135,7 +145,15 @@ Chinese.
 
 #### Scenario: Attributes listed as they are added
 - **WHEN** the author adds `label` with "Every instance must set it" and then `max` with default `100`
-- **THEN** the list shows `label: null` and `max: 100`, and the created row has `"label": null, "max": 100`
+- **THEN** the list shows `label: null` and `max: 100`, and the created row has `"label": {"default_value": null}, "max": {"default_value": 100}`
+
+#### Scenario: Optional attribute with a help tip
+- **WHEN** the author adds `on_change` with no default and the English help tip "Runs on change"
+- **THEN** the list shows "no default", and the created row has `"on_change": {"help_tip": {"en": "Runs on change"}}`
+
+#### Scenario: Implementation notes
+- **WHEN** the author double-clicks `implement_notes`, types two lines and presses Ctrl+Enter
+- **THEN** the list shows both lines, and the created row has them in `implement_notes`
 
 #### Scenario: Duplicate attribute name
 - **WHEN** the author adds `label` twice

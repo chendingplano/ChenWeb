@@ -85,7 +85,7 @@ func (s store) insertVersion(ctx context.Context, kind Kind, id string, raw []by
 	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
 		SELECT $1::text, $2::text, COALESCE(MAX(version), 0) + 1, $3::text, $4::jsonb, 'active', $5::text, $5::text
 		FROM kb.wpi_descriptors WHERE kind = $1::text AND descriptor_id = $2::text
-		RETURNING version`, string(kind), id, SchemaVersion, string(raw), actor).Scan(&version)
+		RETURNING version`, string(kind), id, schemaVersionOf(kind), string(raw), actor).Scan(&version)
 	return version, err
 }
 
@@ -156,7 +156,7 @@ func (s store) insertDraftClass(ctx context.Context, id string, raw []byte, acto
 	res, err := s.db.ExecContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
 		SELECT 'element', $1::text, 1, $2::text, $3::jsonb, 'draft', $4::text, $4::text
 		WHERE NOT EXISTS (SELECT 1 FROM kb.wpi_descriptors WHERE kind = 'element' AND descriptor_id = $1::text)`,
-		id, SchemaVersion, string(raw), actor)
+		id, ElementSchemaVersion, string(raw), actor)
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 		return errClassExists

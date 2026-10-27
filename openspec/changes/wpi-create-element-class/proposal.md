@@ -28,6 +28,16 @@ implement.
 - **New endpoints**: `POST /api/v1/wpi/classes/element` creates a draft (admins only), and
   `GET /api/v1/wpi/classes/element` lists the latest draft or active version of every
   element class (logged-in users).
+- **Element class rows move to format `0.3`.** Each instance attribute is an object
+  `{"help_tip": {"en": …, "zh-cn": …}, "default_value": …}`: `default_value` `null` means
+  every instance must set it, and leaving it out means optional with no default. This holds
+  for drafts and active classes; apps, pages and action classes stay `0.2`. A migration
+  stores the six seeded element classes as version 2 in the new format, with help tips, and
+  both interpreters read `default_value` when they merge an instance with its class.
+- **New class attribute `implement_notes`**: the prompt for implementing the element, which
+  also helps authors understand it. The form lists it from the start and edits it in a
+  multi-line editor; the help tips are entered in English and Chinese next to each new
+  attribute.
 - **The palette's ELEMENTS folder lists the stored element classes.** A draft is shown as
   not yet implemented. Dragging a class onto the canvas adds an element node labelled with
   that class, which is what Create Element used to do.
@@ -43,7 +53,12 @@ implement.
 ### Modified Capabilities
 
 - `wpi-classes`: a class row with no code may be stored as a `draft` through the create
-  endpoint. An `active` class row, and every instance, still needs code.
+  endpoint. An `active` class row, and every instance, still needs code. Element class rows
+  are format `0.3`, with each instance attribute an object holding a help tip and a
+  default, and every class may have `implement_notes`; `help_tip` and `implement_notes` are
+  text attributes.
+- `wpi-descriptor-store`: the validator checks each descriptor in its kind's format (`0.3`
+  for element class rows, `0.2` otherwise), and an element class draft only for structure.
 
 ## Impact
 
@@ -52,6 +67,10 @@ implement.
 - Frontend: `web/src/lib/wpi/api.ts` (two calls), a new form component under
   `web/src/lib/components/shared-ui/canvas/`, `wpi-editor.svelte` (Create Element opens the
   form; ELEMENTS folder from the class list), and new message keys in `web/messages/*.json`.
-- No migration: `kb.wpi_descriptors.status` already allows `draft`.
+- Migration `20261027000006_wpi_element_classes_0_3.sql` (version 2 of the six element
+  classes in format `0.3`); no table change, since `kb.wpi_descriptors.status` already
+  allows `draft`.
+- Interpreter: `classDefaults`/`mergeInstance` in `server/api/wpi/validate.go`,
+  `mergeElement` in `web/src/lib/wpi/entries.ts`; seed tests read the new migration.
 - Docs: devdoc 2026102601 §3.5.1, §6 and §9 (classes may be drafted before their code),
   devdoc 2026102603, and the WPI reusable-module entries for the new endpoints.

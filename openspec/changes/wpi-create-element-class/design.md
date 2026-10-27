@@ -40,12 +40,11 @@ implement the class afterwards.
 
 ## Decisions
 
-**D1. A draft is a format-`0.2` class row.** The body is the same shape as an active class
-row: `descriptor_id`, `schema_version`, `description`, then one key per instance attribute,
-whose value is its default, or `null` meaning every instance must set it. When the class is
-implemented, its code and the row must agree, as for any class. *Alternative:* a separate
-"class spec" format with types and per-attribute descriptions. Rejected because it would be
-a second format to validate and convert, and the user asked only for names and values.
+**D1. A draft is an ordinary element class row.** The body has the same shape as an active
+element class row (format `0.3`, D9): the class attributes, then one key per instance
+attribute. When the class is implemented, its code and the row must agree, as for any
+class. *Alternative:* a separate "class spec" format for drafts. Rejected because it would
+be a second format to validate and convert when the class becomes active.
 
 **D2. A separate create endpoint: `POST /api/v1/wpi/classes/element`.** The PUT means "the
 next version, active" and needs code. Create means "a new ID, draft, version 1" and fails
@@ -64,13 +63,16 @@ keeps one meaning.
 validator can apply without code:
 
 - the body's `descriptor_id` matches the ID pattern (the URL holds no ID), and
-  `schema_version` is `0.2`;
+  `schema_version` is `0.3`;
 - `description` is **required** and is a text attribute (string, or texts by language with
-  `en`). A draft has no code, so its description is the only statement of what to build;
+  `en`); `implement_notes`, if present, is a text attribute too. A draft has no code, so
+  these are what say what to build;
 - every other key is an attribute name matching `^[A-Za-z_][A-Za-z0-9_]*$`, and is not
   `element`, the key with which an instance names its class;
+- each attribute is an object with only an optional `help_tip` (text) and an optional
+  `default_value` (D9);
 - attributes that hold actions (`on_click`, `on_row_click`, `source`, `items`, `input`)
-  have no default (`null` only);
+  have no default: `default_value` is `null` or left out;
 - defaults of attributes whose meaning is shared by all classes are checked: sizes
   (`width`, `height`, `min_width`, `max_width`), `label` (text), `data_binding` (a
   `$input_doc` path) and `binding_mode`.
@@ -93,9 +95,11 @@ out. Any logged-in user may read it, as with page search.
 
 **D7. The form.** `CreateElementDialog.svelte` is a modal over the editor, styled like the
 editor's other dark panels. The descriptor is one list of attributes, in row order. It
-starts with the class attributes (`descriptor_id` empty, `schema_version` `"0.2"`,
-`description` `{"en": "", "zh-cn": ""}`), which are tagged "class" in a column of their
-own and cannot be removed or renamed.
+starts with the class attributes (`descriptor_id` empty, `schema_version` `"0.3"`,
+`description` `{"en": "", "zh-cn": ""}`, `implement_notes` empty), which are tagged
+"class" in a column of their own and cannot be removed or renamed and have no help tip.
+The list's columns are the name, the class tag, the value (an instance attribute's
+`default_value`: "no default" when it has none) and the help tip.
 Above the list, the attribute entry appends instance attributes, which have a remove
 button. Its first line holds the name and a multi-line default value that takes the
 remaining width (Enter starts a new line, so Ctrl/Cmd+Enter adds the attribute, as Enter
@@ -126,6 +130,38 @@ description inputs.
 - The pure parts (the initial list, parsing a value, checking a name, building and checking
   the body) are in `element-class-form.ts`, with unit tests.
 
+**D9. Element class rows are format `0.3`: each instance attribute is an object.** The
+user decided (2026-10-27) that an attribute is an object
+`{"help_tip": <text>, "default_value": <value>}` and that this holds for every element
+class row, drafts and active ones alike. `help_tip` is text for authors (a string, or texts
+by language with `en`); `default_value` is the default, `null` means every instance must
+set it, and leaving it out means the attribute is optional with no default, which the flat
+format could not write down. Both keys are optional, and no other key is allowed.
+
+- `schema_version` is per kind: element class rows are `0.3`; apps, pages and action
+  classes stay `0.2` (`SchemaVersion`, `ElementSchemaVersion`, `schemaVersionOf` in
+  `types.go`). Only element class rows changed shape, so only they changed version, and an
+  interpreter that knows only `0.2` rejects them instead of misreading them.
+  *Alternative:* bump every descriptor to `0.3`. Rejected because every app and page would
+  need a new version for no change of shape.
+- `classDefaults(kind, row)` in `validate.go` reads a row's defaults and its required
+  attributes for both formats; `mergeInstance` and `againstClass` use it. The frontend has
+  `mergeElement` (format `0.3`) next to `mergeInstance` (action rows) in `entries.ts`.
+- Migration `20261027000006_wpi_element_classes_0_3.sql` stores version 2 of the six seeded
+  element classes in the new format, with the same defaults and a help tip in English and
+  Chinese for every attribute. It also lists the list's `on_row_click` and the menu's
+  `initial_item`, which are optional with no default. `seed_test.go` reads the seed
+  migrations in order, a later row replacing an earlier one.
+- Action classes keep the flat format for now.
+
+**D10. `implement_notes` is a class attribute.** The user asked for an attribute holding the
+prompt for implementing the element, which also helps authors understand it, one per
+element. Instances cannot set it, so it is a class attribute next to `descriptor_id`,
+`schema_version` and `description` (`classAttrs` in Go, `CLASS_ATTRS` in TypeScript), for
+action classes too. It is optional, a text attribute, and is never merged into instances.
+The form lists it from the start, edits it in a multi-line editor (Enter starts a line,
+Ctrl/Cmd+Enter keeps the text), and leaves it out of the row while it is empty.
+
 **D8. The ELEMENTS folder shows the class list.** The editor loads the list when it opens,
 and again after a create. Each class becomes a palette entry in the `Elements` category
 with ID `wpi-element:<class>`, which is unique, as the palette's keyed list requires. A
@@ -147,6 +183,10 @@ does what Create Element did before, now with a class.
 
 ## Migration Plan
 
-No schema change. Deploy the backend and frontend together; rollback is reverting both. A
-draft created before a rollback stays in the table and is ignored, because only active
-rows are read.
+No table change. Migration `20261027000006` adds version 2 of the six element classes in
+format `0.3`; the backend that reads them must be deployed with it, because an older
+backend rejects `0.3` rows and a newer one rejects `0.2` rows. Deploy the backend, the
+frontend and the migration together. Rollback: revert the code and run the migration's
+Down, which deletes the version-2 rows, so version 1 (format `0.2`) is used again. A draft
+created before a rollback stays in the table and is ignored, because only active rows are
+read.

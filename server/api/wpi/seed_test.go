@@ -13,26 +13,44 @@ import (
 // so a broken seed fails here instead of at startup.
 const seedMigration = "../../../project_migrations/20261027000002_seed_wpi_classes_and_instances.sql"
 
-var seedRow = regexp.MustCompile(`(?s)\('(app|page|element|action)', '([a-z0-9-]+)', [0-9]+, '0\.2', \$wpi\$(.*?)\$wpi\$::jsonb`)
+// elementClassesMigration stores the element classes in format 0.3 as version
+// 2, replacing those of seedMigration.
+const elementClassesMigration = "../../../project_migrations/20261027000006_wpi_element_classes_0_3.sql"
+
+var seedRow = regexp.MustCompile(`(?s)\('(app|page|element|action)', '([a-z0-9-]+)', [0-9]+, '0\.[23]', \$wpi\$(.*?)\$wpi\$::jsonb`)
+
+// seedRows reads the descriptor rows of seed migrations, in order; a later
+// file's row replaces an earlier one of the same kind and ID, as a newer version
+// does. count is the number of rows read.
+func seedRows(t *testing.T, files ...string) (rows map[Kind]map[string]string, count int) {
+	t.Helper()
+	rows = map[Kind]map[string]string{}
+	for _, f := range files {
+		sqlText, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range seedRow.FindAllStringSubmatch(string(sqlText), -1) {
+			kind, id, body := Kind(m[1]), m[2], m[3]
+			if rows[kind] == nil {
+				rows[kind] = map[string]string{}
+			}
+			rows[kind][id] = body
+			count++
+		}
+	}
+	return rows, count
+}
 
 func TestSeedCustomerAdminIsValid(t *testing.T) {
-	sqlText, err := os.ReadFile(seedMigration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	all := map[Kind]map[string]string{}
-	count := 0
-	for _, m := range seedRow.FindAllStringSubmatch(string(sqlText), -1) {
-		kind, id, body := Kind(m[1]), m[2], m[3]
-		if all[kind] == nil {
-			all[kind] = map[string]string{}
-		}
-		all[kind][id] = body
-		count++
-	}
-	if len(all[KindElement]) != 6 || len(all[KindAction]) != 5 || len(all[KindPage]) != 4 || count != 16 {
+	first, count := seedRows(t, seedMigration)
+	if len(first[KindElement]) != 6 || len(first[KindAction]) != 5 || len(first[KindPage]) != 4 || count != 16 {
 		t.Fatalf("seed has %d element and %d action classes, %d pages, %d rows; want 6, 5, 4, 16",
-			len(all[KindElement]), len(all[KindAction]), len(all[KindPage]), count)
+			len(first[KindElement]), len(first[KindAction]), len(first[KindPage]), count)
+	}
+	all, _ := seedRows(t, seedMigration, elementClassesMigration)
+	if classes, n := seedRows(t, elementClassesMigration); n != 6 || len(classes[KindElement]) != 6 {
+		t.Fatalf("%s has %d rows; want the 6 element classes", elementClassesMigration, n)
 	}
 	for _, kind := range []Kind{KindElement, KindAction} {
 		for id, body := range all[kind] {
@@ -68,25 +86,13 @@ var (
 )
 
 func TestSeedPagesDemoIsValid(t *testing.T) {
-	base, err := os.ReadFile(seedMigration)
-	if err != nil {
-		t.Fatal(err)
-	}
 	demo, err := os.ReadFile(pagesSeedMigration)
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := map[Kind]map[string]string{KindPage: {}}
-	for _, src := range []string{string(base), string(demo)} {
-		for _, m := range seedRow.FindAllStringSubmatch(src, -1) {
-			if kind := Kind(m[1]); kind != KindPage {
-				if all[kind] == nil {
-					all[kind] = map[string]string{}
-				}
-				all[kind][m[2]] = m[3]
-			}
-		}
-	}
+	all, _ := seedRows(t, seedMigration, pagesSeedMigration, elementClassesMigration)
+	// The pages of seedMigration are replaced by those of the demo, in kb.frontend_pages.
+	all[KindPage] = map[string]string{}
 	for _, m := range pageSeedRow.FindAllStringSubmatch(string(demo), -1) {
 		all[KindPage][m[1]] = m[2]
 	}

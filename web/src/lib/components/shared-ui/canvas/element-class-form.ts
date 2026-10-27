@@ -1,34 +1,64 @@
-// The Create Element form's logic: an element class draft built from the
-// attributes the author lists (OpenSpec wpi-create-element-class, design D7).
-// The server's rules are the ones that count; these checks give quick feedback.
+// The Create Element form's logic: an element class draft (format 0.3) built
+// from the attributes the author lists (OpenSpec wpi-create-element-class,
+// design D7, D9). The server's rules are the ones that count; these checks give
+// quick feedback.
 import type { Json, JsonObject } from '$lib/wpi/types';
 
 export const CLASS_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-// Every class row has these (devdoc 2026102601 §3.5.1); the form lists them from the start.
-const CLASS_ATTRIBUTES = ['descriptor_id', 'schema_version', 'description'];
+// Every class row may have these (devdoc 2026102601 §3.5.1); the form lists them from the start.
+const CLASS_ATTRIBUTES = ['descriptor_id', 'schema_version', 'description', 'implement_notes'];
 // Values that are always text, never read as JSON.
-const TEXT_ONLY = ['descriptor_id', 'schema_version'];
+const TEXT_ONLY = ['descriptor_id', 'schema_version', 'implement_notes'];
 // The key with which an instance names its class.
 const RESERVED_NAMES = [...CLASS_ATTRIBUTES, 'element'];
 
-// One attribute of the class row. For an instance attribute, null means every
-// instance must set it.
+// One attribute of the class row. A class attribute's value is the value itself;
+// an instance attribute's value is an object with an optional help_tip and an
+// optional default_value, null meaning every instance must set it.
 export type DraftAttribute = { name: string; value: Json };
+export type EditField = 'name' | 'value' | 'help_tip';
 
-export type AttributeProblem = 'name' | 'reserved' | 'duplicate' | 'no_default' | 'empty_value';
+export type AttributeProblem = 'name' | 'reserved' | 'duplicate' | 'help_tip_en';
 export type RowProblem = 'class_id' | 'description';
 
 export function initialAttributes(): DraftAttribute[] {
 	return [
 		{ name: 'descriptor_id', value: '' },
-		{ name: 'schema_version', value: '0.2' },
-		{ name: 'description', value: { en: '', 'zh-cn': '' } }
+		{ name: 'schema_version', value: '0.3' },
+		{ name: 'description', value: { en: '', 'zh-cn': '' } },
+		{ name: 'implement_notes', value: '' }
 	];
 }
 
 export function isClassAttribute(name: string): boolean {
 	return CLASS_ATTRIBUTES.includes(name);
+}
+
+// An instance attribute's object, or an empty one.
+function attrObject(attr: DraftAttribute): JsonObject {
+	const v = attr.value;
+	return v !== null && typeof v === 'object' && !Array.isArray(v) ? v : {};
+}
+
+export function hasDefault(attr: DraftAttribute): boolean {
+	return 'default_value' in attrObject(attr);
+}
+
+export function defaultValue(attr: DraftAttribute): Json | undefined {
+	return attrObject(attr).default_value;
+}
+
+export function helpTip(attr: DraftAttribute): Json | undefined {
+	return attrObject(attr).help_tip;
+}
+
+// help_tip first, then default_value, each only when there is one.
+function withParts(tip: Json | undefined, dv: Json | undefined, keepDefault: boolean): JsonObject {
+	const out: JsonObject = {};
+	if (tip !== undefined) out.help_tip = tip;
+	if (keepDefault) out.default_value = dv ?? null;
+	return out;
 }
 
 // A default as typed: JSON when it parses (200, true, {"en": "Name"}),
@@ -42,15 +72,12 @@ export function parseDefault(text: string): Json {
 	}
 }
 
-// The value an edit of the named attribute stores.
-export function parseValue(name: string, text: string): Json {
-	return TEXT_ONLY.includes(name) ? text.trim() : parseDefault(text);
-}
-
-// The text an edit of the named attribute starts from; parseValue reads it back
-// as the same value.
-export function editText(attr: DraftAttribute): string {
-	return TEXT_ONLY.includes(attr.name) ? String(attr.value) : JSON.stringify(attr.value);
+// The help tip from its English and Chinese texts, the empty ones left out.
+function tipFrom(en: string, zh: string): Json | undefined {
+	const tip: JsonObject = {};
+	if (en.trim() !== '') tip.en = en.trim();
+	if (zh.trim() !== '') tip['zh-cn'] = zh.trim();
+	return Object.keys(tip).length > 0 ? tip : undefined;
 }
 
 function nameProblem(name: string, others: DraftAttribute[]): AttributeProblem | null {
@@ -60,13 +87,15 @@ function nameProblem(name: string, others: DraftAttribute[]): AttributeProblem |
 	return null;
 }
 
-export function attributeProblem(
-	name: string,
-	required: boolean,
-	defaultText: string,
-	added: DraftAttribute[]
-): AttributeProblem | null {
-	return nameProblem(name, added) ?? (!required && defaultText.trim() === '' ? 'no_default' : null);
+export function attributeProblem(name: string, tipEn: string, tipZh: string, added: DraftAttribute[]): AttributeProblem | null {
+	return nameProblem(name, added) ?? (tipZh.trim() !== '' && tipEn.trim() === '' ? 'help_tip_en' : null);
+}
+
+// A new instance attribute: required gives default_value null; an empty default
+// leaves it out (optional, no default).
+export function newAttribute(name: string, required: boolean, defaultText: string, tipEn: string, tipZh: string): DraftAttribute {
+	const empty = defaultText.trim() === '';
+	return { name, value: withParts(tipFrom(tipEn, tipZh), required ? null : empty ? undefined : parseDefault(defaultText), required || !empty) };
 }
 
 // Renaming an instance attribute; class attribute names cannot change.
@@ -75,14 +104,26 @@ export function renameProblem(oldName: string, newName: string, attributes: Draf
 	return nameProblem(newName, attributes.filter((a) => a.name !== oldName));
 }
 
-// An edit may leave a class attribute empty (create reports it), but not an
-// instance attribute: its value is a default, or null.
-export function editProblem(name: string, text: string): AttributeProblem | null {
-	return !isClassAttribute(name) && text.trim() === '' ? 'empty_value' : null;
+// The text an edit of a field starts from; applyEdit reads it back as the same value.
+export function editText(attr: DraftAttribute, field: EditField): string {
+	if (field === 'name') return attr.name;
+	if (isClassAttribute(attr.name)) return TEXT_ONLY.includes(attr.name) ? String(attr.value) : JSON.stringify(attr.value);
+	if (field === 'value' && !hasDefault(attr)) return '';
+	const part = field === 'help_tip' ? helpTip(attr) : defaultValue(attr);
+	return part === undefined ? '' : JSON.stringify(part);
 }
 
-export function draftAttribute(name: string, required: boolean, defaultText: string): DraftAttribute {
-	return { name, value: required ? null : parseDefault(defaultText) };
+// The attribute after an edit of its value or help tip. For an instance
+// attribute, empty text removes the default (optional, no default) or the help tip.
+export function applyEdit(attr: DraftAttribute, field: 'value' | 'help_tip', text: string): DraftAttribute {
+	if (isClassAttribute(attr.name)) {
+		return { name: attr.name, value: TEXT_ONLY.includes(attr.name) ? text.trim() : parseDefault(text) };
+	}
+	const empty = text.trim() === '';
+	if (field === 'help_tip') {
+		return { name: attr.name, value: withParts(empty ? undefined : parseDefault(text), defaultValue(attr), hasDefault(attr)) };
+	}
+	return { name: attr.name, value: withParts(helpTip(attr), empty ? undefined : parseDefault(text), !empty) };
 }
 
 // Texts by language with the empty ones left out, so that an unfilled
@@ -92,10 +133,14 @@ function withoutEmptyTexts(value: Json): Json {
 	return Object.fromEntries(Object.entries(value).filter(([, t]) => t !== ''));
 }
 
-// The class row the create endpoint stores as a draft.
+// The class row the create endpoint stores as a draft. Empty implement_notes
+// are left out.
 export function buildClassRow(attributes: DraftAttribute[]): JsonObject {
 	const row: JsonObject = {};
-	for (const a of attributes) row[a.name] = a.name === 'description' ? withoutEmptyTexts(a.value) : a.value;
+	for (const a of attributes) {
+		if (a.name === 'implement_notes' && a.value === '') continue;
+		row[a.name] = a.name === 'description' ? withoutEmptyTexts(a.value) : a.value;
+	}
 	return row;
 }
 

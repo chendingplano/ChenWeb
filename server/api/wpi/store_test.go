@@ -73,7 +73,7 @@ func TestStoreInsertDraftClass(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	ctx := context.Background()
-	mock.ExpectExec(insertDraftQuery).WithArgs("slider", SchemaVersion, `{"a":1}`, "cding@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(insertDraftQuery).WithArgs("slider", ElementSchemaVersion, `{"a":1}`, "cding@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
 	if err := (store{db}).insertDraftClass(ctx, "slider", []byte(`{"a":1}`), "cding@example.com"); err != nil {
 		t.Fatal(err)
 	}
