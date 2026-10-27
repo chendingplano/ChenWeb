@@ -30,6 +30,10 @@ const (
 const catalogQuery = `SELECT column_name FROM information_schema.columns`
 
 func stored(mock sqlmock.Sqlmock, kind Kind, id, body string) {
+	if kind == KindPage {
+		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{id, body}))
+		return
+	}
 	mock.ExpectQuery(latestQuery).WithArgs(string(kind), sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{id, body}))
 }
 
@@ -159,8 +163,8 @@ func TestRunActionRefused(t *testing.T) {
 		status     int
 		want       string
 	}{
-		{"not load or save", `{"ref": {"kind": "page", "id": "customers", "pointer": "/elements/0/on_row_click"}}`,
-			func(m sqlmock.Sqlmock) { stored(m, KindPage, "customers", customersPage) }, 400, `only load and save actions run on the server`},
+		{"not a server action", `{"ref": {"kind": "page", "id": "customers", "pointer": "/elements/0/on_row_click"}}`,
+			func(m sqlmock.Sqlmock) { stored(m, KindPage, "customers", customersPage) }, 400, `only load, save, query, load-file actions run on the server`},
 		{"missing argument", `{` + loadOneRef + `, "args": {}}`,
 			func(m sqlmock.Sqlmock) {
 				stored(m, KindPage, "customers", customersPage)
@@ -174,7 +178,7 @@ func TestRunActionRefused(t *testing.T) {
 				m.ExpectQuery(catalogQuery).WillReturnRows(sqlmock.NewRows([]string{"column_name"}))
 			}, 400, `table \"kb.wpi_demo_customers\" does not exist`},
 		{"unknown page", `{"ref": {"kind": "page", "id": "nope", "pointer": "/save_action"}}`,
-			func(m sqlmock.Sqlmock) { m.ExpectQuery(latestQuery).WillReturnRows(descriptorRows()) }, 404, `page \"nope\" does not exist`},
+			func(m sqlmock.Sqlmock) { m.ExpectQuery(latestPagesQuery).WillReturnRows(descriptorRows()) }, 404, `page \"nope\" does not exist`},
 		{"action class row missing", `{` + saveRef + `, "input_doc": {}}`,
 			func(m sqlmock.Sqlmock) {
 				stored(m, KindPage, "customer-form", formPage)
@@ -183,7 +187,7 @@ func TestRunActionRefused(t *testing.T) {
 		{"pointer at a non-action", `{"ref": {"kind": "page", "id": "customers", "pointer": "/elements/0"}}`,
 			func(m sqlmock.Sqlmock) { stored(m, KindPage, "customers", customersPage) }, 400, "does not point at an action instance"},
 		{"pointer at an empty input", `{"ref": {"kind": "page", "id": "customer-form", "pointer": "/input"}}`,
-			func(m sqlmock.Sqlmock) { stored(m, KindPage, "customer-form", formPage) }, 400, "only load and save actions run on the server"},
+			func(m sqlmock.Sqlmock) { stored(m, KindPage, "customer-form", formPage) }, 400, "points at static data"},
 		{"pointer missing", `{"ref": {"kind": "page", "id": "customer-form"}}`, nil, 400, "ref.pointer is required"},
 		{"stored action by ID", `{"ref": {"kind": "action", "id": "load"}}`, nil, 400, "ref.kind must be page"},
 		{"browser-supplied descriptor kind", `{"ref": {"kind": "app", "id": "x"}}`, nil, 400, "ref.kind must be page"},

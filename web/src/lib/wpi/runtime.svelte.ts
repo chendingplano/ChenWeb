@@ -4,16 +4,16 @@
 import { getContext, setContext } from 'svelte';
 import { runAction, WpiError } from './api';
 import { canonical } from './dirty';
-import { mergeInstance } from './entries';
+import { isAction, mergeInstance, staticInput } from './entries';
 import { planOpen, removePanel, sharingKey, showPanel, type Bindings, type PaneModel, type PanelModel } from './panels';
 import { getPath, parseRef, resolveArgs, setPath } from './refs';
-import type { ActionInstance, ActionRef, Bundle, EmptyInput, InputSpec, Json, JsonObject } from './types';
+import type { ActionInstance, ActionRef, Bundle, Input, InputSpec, Json, JsonObject } from './types';
 
 export type PanelState = PanelModel & {
 	doc: JsonObject;
 	// Canonical JSON of the doc as last loaded or saved.
 	snapshot: string;
-	// Resolved input: {} or a load instance with argument values.
+	// Resolved input: {}, static data, or an action instance with argument values.
 	input: InputSpec;
 	// False until the first input load has finished.
 	ready: boolean;
@@ -47,6 +47,7 @@ function message(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
+
 export class AppRuntime {
 	readonly bundle: Bundle;
 	panes = $state<Record<string, PaneModel>>({});
@@ -78,13 +79,14 @@ export class AppRuntime {
 		let id = plan.reuse;
 		if (!id) {
 			id = `${req.page}#${++this.#seq}`;
+			const doc = $state.snapshot<unknown>(input.doc ?? {}) as JsonObject;
 			this.panels[id] = {
 				id,
 				paneId: req.pane,
 				pageId: req.page,
 				key,
-				doc: {},
-				snapshot: canonical({}),
+				doc,
+				snapshot: canonical(doc),
 				input,
 				ready: !input.ref,
 				loading: false,
@@ -98,18 +100,21 @@ export class AppRuntime {
 		if (!plan.reuse && input.ref) await this.#loadInput(id);
 	}
 
-	// A page's own input: {} or its load instance, whose args are literals.
+	// A page's own input: static data or its action instance, whose args are
+	// literals.
 	#pageInput(pageId: string): InputSpec {
 		const input = this.bundle.pages[pageId].input;
-		if (!input || !('action' in input)) return {};
+		if (!input) return {};
+		if (!isAction(input)) return staticInput(input);
 		return { ref: { kind: 'page', id: pageId, pointer: '/input' }, args: resolveArgs(input.args, {}) };
 	}
 
-	// An open-page's input: {} or its nested load instance, which receives the
-	// open-page's arguments, or its own args resolved against them (design D7).
-	#nestedInput(input: ActionInstance | EmptyInput | undefined, ref: ActionRef, args: JsonObject): InputSpec | undefined {
+	// An open-page's input: static data or its nested action instance, which
+	// receives the open-page's arguments, or its own args resolved against them
+	// (design D7).
+	#nestedInput(input: Input | undefined, ref: ActionRef, args: JsonObject): InputSpec | undefined {
 		if (!input) return undefined;
-		if (!('action' in input)) return {};
+		if (!isAction(input)) return staticInput(input);
 		return { ref: { ...ref, pointer: `${ref.pointer}/input` }, args: input.args ? resolveArgs(input.args, { args }) : args };
 	}
 
@@ -195,7 +200,7 @@ export class AppRuntime {
 		if (!actionRef) return false;
 		panel.error = null;
 		try {
-			const res = await runAction(actionRef, {}, $state.snapshot(panel.doc) as JsonObject);
+			const res = await runAction(actionRef, {}, $state.snapshot<unknown>(panel.doc) as JsonObject);
 			setPath(panel.doc, [String(res.key_attribute)], res.key_value);
 			panel.snapshot = canonical(panel.doc);
 			panel.fieldErrors = {};

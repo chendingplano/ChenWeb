@@ -413,12 +413,14 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.UpsertEntry)
 	apiGroup.DELETE("/page-config/admin/pages/:pageKey/entries/:entryKey", pageconfighandler.DeleteEntry)
 
-	// Web Page Interpreter pilot (openspec/changes/wpi-pilot): app bundles,
-	// admin descriptor writes, and stored load/save actions.
+	// Web Page Interpreter (devdoc 2026102601): app bundles, admin descriptor
+	// writes, actions that run on the server, and page search for authors.
 	wpiHandler := wpi.New(ApiTypes.ProjectDBHandle)
 	apiGroup.GET("/wpi/apps/:appId", wpiHandler.GetApp)
 	apiGroup.PUT("/wpi/descriptors/:kind/:descriptorId", wpiHandler.PutDescriptor)
 	apiGroup.POST("/wpi/actions/run", wpiHandler.RunAction)
+	apiGroup.GET("/wpi/pages", wpiHandler.SearchPages)
+	apiGroup.GET("/wpi/pages/:pageId", wpiHandler.GetPage)
 
 	// Holiday calendar admin (System Admin > System > Calendar). Admin-only:
 	// year-independent holiday definitions plus year-specific date bindings

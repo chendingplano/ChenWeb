@@ -15,10 +15,14 @@ var (
 	columnPattern = segmentPattern
 	tablePattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 	sizePattern   = regexp.MustCompile(`^(auto|elastic|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
-	localePattern = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
+	// A page's size is set, not computed by a layouter, so it cannot be elastic.
+	pageSizePattern = regexp.MustCompile(`^(auto|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
+	localePattern   = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
 )
 
 var elementSizeAttrs = []string{"width", "height", "min_width", "max_width"}
+
+var bindingModes = []string{"read-only", "read-write"}
 
 // codeAttrs lists the instance attributes a class's code defines: required
 // ones the code cannot work without, and optional ones.
@@ -48,6 +52,8 @@ var actionAttrs = map[string]codeAttrs{
 	"open-page":  {[]string{"page", "pane"}, []string{"input"}},
 	"close-page": {},
 	"save-page":  {},
+	"query":      {[]string{"sql_stmt_id", "result"}, []string{"params"}},
+	"load-file":  {[]string{"file_id"}, nil},
 }
 
 // classAttrs are shared by every instance of a class and set only in its row.
@@ -59,7 +65,8 @@ var actionHolding = []string{"on_click", "on_row_click", "source", "items", "inp
 
 var (
 	triggerClasses = []string{"save", "open-page", "close-page", "save-page"}
-	loadClass      = []string{"load"}
+	inputClasses   = []string{"load", "query", "load-file"}
+	sourceClasses  = []string{"load", "query"}
 	saveClass      = []string{"save"}
 )
 
@@ -266,8 +273,16 @@ func (v *validator) app(b map[string]any) {
 }
 
 func (v *validator) page(b map[string]any) {
-	v.keys(b, "", []string{"descriptor_id", "schema_version", "layouter", "elements"}, "input", "save_action", "refresh")
+	v.keys(b, "", []string{"descriptor_id", "schema_version", "layouter", "elements"}, "input", "save_action", "refresh",
+		"page_name", "description", "page_alignment", "width", "height", "min_width", "max_width", "binding_mode")
 	v.oneOf(b, "layouter", "", layouters)
+	v.text(b, "page_name", "")
+	v.text(b, "description", "")
+	v.oneOf(b, "page_alignment", "", []string{"left", "center", "right"})
+	for _, k := range elementSizeAttrs {
+		v.matching(b, k, "", pageSizePattern)
+	}
+	v.oneOf(b, "binding_mode", "", bindingModes)
 	if r, ok := b["refresh"]; ok {
 		if m, ok := v.object(r, "/refresh"); ok {
 			v.keys(m, "/refresh", nil, "on_show")
@@ -384,7 +399,7 @@ func (v *validator) element(cls string, e map[string]any, path string) {
 	case "input", "select":
 		v.text(e, "label", path)
 		v.binding(e, path)
-		v.oneOf(e, "binding_mode", path, []string{"read-only", "read-write"})
+		v.oneOf(e, "binding_mode", path, bindingModes)
 		v.oneOf(e, "input_type", path, []string{"text", "number", "email"})
 		if _, ok := e["options"]; ok {
 			v.options(e, path)
@@ -562,11 +577,19 @@ func menuLeaves(items any) map[string]bool {
 
 // actionPos is a place in a page that holds an action instance.
 type actionPos struct {
-	val     any
-	path    string
-	allowed []string // action classes allowed here
-	roots   []string // reference roots its args may use
-	emptyOK bool     // {} is allowed and means an empty input doc
+	val      any
+	path     string
+	allowed  []string // action classes allowed here
+	roots    []string // reference roots its args may use
+	staticOK bool     // an object without "action" is static data: the input doc itself
+}
+
+// isStatic reports whether the value at pos is static data rather than an
+// action instance (devdoc 2026102601 §3.2.2).
+func (pos actionPos) isStatic() bool {
+	m, _ := pos.val.(map[string]any)
+	_, hasAction := m["action"]
+	return pos.staticOK && m != nil && !hasAction
 }
 
 // actionPositions lists every place in a page that holds an action instance
@@ -575,7 +598,7 @@ type actionPos struct {
 func actionPositions(page map[string]any) []actionPos {
 	var out []actionPos
 	if in, ok := page["input"]; ok {
-		out = append(out, actionPos{in, "/input", loadClass, nil, true})
+		out = append(out, actionPos{in, "/input", inputClasses, nil, true})
 	}
 	if s, ok := page["save_action"]; ok {
 		out = append(out, actionPos{s, "/save_action", saveClass, nil, false})
@@ -591,7 +614,7 @@ func actionPositions(page map[string]any) []actionPos {
 			}
 		}
 		add("on_click", triggerClasses, []string{RootInputDoc})
-		add("source", loadClass, []string{RootInputDoc})
+		add("source", sourceClasses, []string{RootInputDoc})
 		add("on_row_click", triggerClasses, []string{RootInputDoc, RootRecord})
 		if code.defines("items") {
 			out = append(out, itemPositions(m["items"], path+"/items")...)
@@ -600,7 +623,7 @@ func actionPositions(page map[string]any) []actionPos {
 	for i := 0; i < len(out); i++ {
 		m, _ := out[i].val.(map[string]any)
 		if in, ok := m["input"]; ok && str(m["action"]) == "open-page" {
-			out = append(out, actionPos{in, out[i].path + "/input", loadClass, []string{RootArgs}, true})
+			out = append(out, actionPos{in, out[i].path + "/input", inputClasses, []string{RootArgs}, true})
 		}
 	}
 	return out
@@ -625,7 +648,7 @@ func itemPositions(items any, path string) []actionPos {
 // defined by that code and valid.
 func (v *validator) actionInstance(pos actionPos) {
 	m, ok := v.object(pos.val, pos.path)
-	if !ok || (pos.emptyOK && len(m) == 0) {
+	if !ok || pos.isStatic() {
 		return
 	}
 	cls, ok := v.str(m, "action", pos.path)
@@ -678,6 +701,20 @@ func (v *validator) action(cls string, a map[string]any, path string, extra ...s
 	case "open-page":
 		v.matching(a, "page", path, idPattern)
 		v.str(a, "pane", path)
+	case "query":
+		v.matching(a, "sql_stmt_id", path, idPattern)
+		v.oneOf(a, "result", path, []string{"record", "list"})
+		if p, ok := a["params"]; ok {
+			if list, ok := v.array(p, path+"/params", false); ok {
+				for i, val := range list {
+					if err := checkValue(val, RootArgs); err != nil {
+						v.errf(path+"/params/"+strconv.Itoa(i), "%v", err)
+					}
+				}
+			}
+		}
+	case "load-file":
+		v.matching(a, "file_id", path, idPattern)
 	}
 }
 
@@ -716,8 +753,8 @@ func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path
 }
 
 // actionComplete checks an action instance against its class row and returns
-// the merged instance, or nil for an empty input doc or an instance whose
-// class problems actionInstance reports.
+// the merged instance, or nil for static data or an instance whose class
+// problems actionInstance reports.
 func (v *validator) actionComplete(pos actionPos) map[string]any {
 	m, _ := pos.val.(map[string]any)
 	cls := str(m["action"])
@@ -730,6 +767,17 @@ func (v *validator) actionComplete(pos actionPos) map[string]any {
 	}
 	v.required(merged, pos.path, actionAttrs[cls].required)
 	return merged
+}
+
+// withPageDefaults gives an element instance that does not set binding_mode
+// the page's, when its class defines one, so the order is instance, page,
+// class (devdoc 2026102601 §3.2.1, design D4).
+func withPageDefaults(page map[string]any, cls string, own map[string]any) map[string]any {
+	mode, set := page["binding_mode"]
+	if _, ownMode := own["binding_mode"]; set && !ownMode && elementAttrs[cls].defines("binding_mode") {
+		own["binding_mode"] = mode
+	}
+	return own
 }
 
 // mergedElement is an element instance merged with its class.
@@ -752,7 +800,7 @@ func (v *validator) pageInstances(page map[string]any) ([]mergedElement, []merge
 	for i, e := range list {
 		m, _ := e.(map[string]any)
 		cls, path := str(m["element"]), "/elements/"+strconv.Itoa(i)
-		if merged, ok := v.againstClass(KindElement, cls, instanceAttrs(m, "element"), path); ok {
+		if merged, ok := v.againstClass(KindElement, cls, withPageDefaults(page, cls, instanceAttrs(m, "element")), path); ok {
 			v.elementComplete(cls, merged, path)
 			els = append(els, mergedElement{cls, path, merged})
 		}

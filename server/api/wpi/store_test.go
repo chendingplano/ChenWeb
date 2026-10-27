@@ -11,6 +11,8 @@ const latestAllQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, vers
 
 const latestQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_descriptors WHERE kind = \$1 AND status = 'active' AND descriptor_id = ANY\(\$2\) ORDER BY descriptor_id, version DESC`
 
+const latestPagesQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.frontend_pages WHERE status = 'active' AND descriptor_id = ANY\(\$1\) ORDER BY descriptor_id, version DESC`
+
 func TestStoreLatest(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -19,7 +21,7 @@ func TestStoreLatest(t *testing.T) {
 	defer db.Close()
 	// The query returns one row per descriptor (DISTINCT ON); drafts and
 	// older versions are filtered out by SQL, so only version 2 arrives here.
-	mock.ExpectQuery(latestQuery).WithArgs("page", sqlmock.AnyArg()).
+	mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).
 			AddRow("customer-form", 2, []byte(`{"descriptor_id": "customer-form", "limit": 5}`)))
 	got, err := store{db}.latest(context.Background(), KindPage, []string{"customer-form", "missing"})
@@ -55,7 +57,7 @@ func TestStoreLatestAll(t *testing.T) {
 func TestStoreLatestRejectsNonObjectBody(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	mock.ExpectQuery(latestQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).AddRow("x", 1, []byte(`null`)))
+	mock.ExpectQuery(latestPagesQuery).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).AddRow("x", 1, []byte(`null`)))
 	if _, err := (store{db}).latest(context.Background(), KindPage, []string{"x"}); err == nil {
 		t.Fatal("a null body must be an error")
 	}
@@ -64,8 +66,8 @@ func TestStoreLatestRejectsNonObjectBody(t *testing.T) {
 func TestStoreInsertVersion(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	mock.ExpectQuery(`INSERT INTO kb\.wpi_descriptors .+ COALESCE\(MAX\(version\), 0\) \+ 1,.+ RETURNING version`).
-		WithArgs("page", "customers", SchemaVersion, `{"a":1}`, "cding@example.com").
+	mock.ExpectQuery(`INSERT INTO kb\.frontend_pages .+ COALESCE\(MAX\(version\), 0\) \+ 1,.+ FROM kb\.frontend_pages .+ RETURNING version`).
+		WithArgs("customers", SchemaVersion, `{"a":1}`, "cding@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
 	v, err := store{db}.insertVersion(context.Background(), KindPage, "customers", []byte(`{"a":1}`), "cding@example.com")
 	if err != nil || v != 3 {

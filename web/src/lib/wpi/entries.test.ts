@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionRef, mergeInstance, resolveEntry, textIn } from './entries';
-import type { Bundle } from './types';
+import { actionRef, isAction, mergeInstance, resolveEntry, staticInput, textIn } from './entries';
+import type { Bundle, PageDescriptor } from './types';
+
+const page = (descriptor_id: string, extra: Partial<PageDescriptor> = {}): PageDescriptor => ({
+	descriptor_id,
+	schema_version: '0.2',
+	layouter: 'flow-layouter',
+	elements: [],
+	...extra
+});
 
 const bundle = {
 	elements: {
@@ -13,12 +21,13 @@ const bundle = {
 			data_binding: null,
 			binding_mode: 'read-write',
 			width: 'elastic'
-		}
+		},
+		text: { descriptor_id: 'text', schema_version: '0.2' }
 	}
 } as unknown as Bundle;
 
 test('an instance takes its class defaults and overrides them', () => {
-	const r = resolveEntry(bundle, 'customer-form', { element: 'input', label: 'Email', data_binding: '$input_doc.email', binding_mode: 'read-only' }, 2);
+	const r = resolveEntry(bundle, page('customer-form'), { element: 'input', label: 'Email', data_binding: '$input_doc.email', binding_mode: 'read-only' }, 2);
 	assert.ok(!('error' in r));
 	assert.equal(r.desc.element, 'input');
 	assert.equal(r.desc.binding_mode, 'read-only');
@@ -30,13 +39,33 @@ test('an instance takes its class defaults and overrides them', () => {
 });
 
 test('action instances are named by their place in the page', () => {
-	const r = resolveEntry(bundle, 'customers', { element: 'input' }, 1);
+	const r = resolveEntry(bundle, page('customers'), { element: 'input' }, 1);
 	assert.ok(!('error' in r));
 	assert.deepEqual(actionRef(r, 'items', '/0/on_click'), { kind: 'page', id: 'customers', pointer: '/elements/1/items/0/on_click' });
 });
 
 test('a class missing from the bundle is an error', () => {
-	assert.deepEqual(resolveEntry(bundle, 'p', { element: 'nope' }, 0), { error: 'element class "nope" is not in the bundle' });
+	assert.deepEqual(resolveEntry(bundle, page('p'), { element: 'nope' }, 0), { error: 'element class "nope" is not in the bundle' });
+});
+
+test('binding mode: instance, then page, then class', () => {
+	const viewer = page('viewer', { binding_mode: 'read-only' });
+	const mode = (p: PageDescriptor, entry: { element: string; binding_mode?: 'read-only' | 'read-write' }) => {
+		const r = resolveEntry(bundle, p, entry, 0);
+		assert.ok(!('error' in r));
+		return r.desc.binding_mode;
+	};
+	assert.equal(mode(viewer, { element: 'input' }), 'read-only');
+	assert.equal(mode(viewer, { element: 'input', binding_mode: 'read-write' }), 'read-write');
+	assert.equal(mode(page('editor'), { element: 'input' }), 'read-write');
+	assert.equal(mode(viewer, { element: 'text' }), undefined, 'only classes with a binding mode take the page\'s');
+});
+
+test('static data versus action instances as input', () => {
+	assert.equal(isAction({ action: 'load-file', file_id: 'about' } as never), true);
+	assert.equal(isAction({ title: 'About' }), false);
+	assert.deepEqual(staticInput({}), {});
+	assert.deepEqual(staticInput({ title: 'About' }), { doc: { title: 'About' } });
 });
 
 test('text in the current language, else English', () => {

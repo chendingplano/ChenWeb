@@ -58,7 +58,20 @@ func build(t *testing.T, fx map[Kind]map[string]string, tables map[string][]stri
 		}
 		return m, nil
 	}
-	return BuildBundle(context.Background(), "demo", fixtureLoader(t, fx), columns)
+	return BuildBundle(context.Background(), "demo", fixtureLoader(t, fx), columns, registeredIn(nil))
+}
+
+// registeredIn fakes the stored statements and files, by kind.
+func registeredIn(rows map[string][]string) Registered {
+	return func(_ context.Context, kind string, names []string) (map[string]bool, error) {
+		out := map[string]bool{}
+		for _, n := range names {
+			if slices.Contains(rows[kind], n) {
+				out[n] = true
+			}
+		}
+		return out, nil
+	}
 }
 
 var peopleTable = map[string][]string{"people": {"id", "name"}}
@@ -127,7 +140,7 @@ func TestBuildBundleErrors(t *testing.T) {
 		{"missing column", nil, map[string][]string{"people": {"id"}}, `column "name" does not exist in table "people"`},
 		{"missing table", nil, map[string][]string{}, `table "people" does not exist`},
 		{"wrong class in a position", replace(KindPage, "list-page", `"source": {"action": "load"`, `"source": {"action": "save"`), peopleTable,
-			"a save action is not allowed here (allowed: load)"},
+			"a save action is not allowed here (allowed: load, query)"},
 		{"null attribute not set", replace(KindPage, "form-page", `"label": "Name", `, ``), peopleTable,
 			`attribute "label" has no default in element class "input"`},
 		{"structure error in a reached page", replace(KindPage, "form-page", `"$input_doc.name"`, `"$input_doc.__proto__"`), peopleTable,
@@ -155,6 +168,45 @@ func TestBuildBundleErrors(t *testing.T) {
 	}
 }
 
+func TestBuildBundleStoredRows(t *testing.T) {
+	fx := fixture()
+	fx[KindPage]["list-page"] = strings.Replace(fx[KindPage]["list-page"],
+		`"source": {"action": "load", "table": "people", "result": "list", "fields": [{"column": "id", "attribute": "id"}, {"column": "name", "attribute": "name"}]}`,
+		`"source": {"action": "query", "sql_stmt_id": "people-by-name", "result": "list"}`, 1)
+	fx[KindPage]["form-page"] = strings.Replace(fx[KindPage]["form-page"], `"input": {}`, `"input": {"action": "load-file", "file_id": "new-person"}`, 1)
+	columns := func(context.Context, string) (map[string]bool, error) { return map[string]bool{"id": true, "name": true}, nil }
+	cases := []struct {
+		name string
+		rows map[string][]string
+		want []string
+	}{
+		{"both registered", map[string][]string{storedStatement: {"people-by-name"}, storedFile: {"new-person"}}, nil},
+		{"neither registered", nil, []string{
+			`/elements/0/source/sql_stmt_id SQL statement "people-by-name" is not registered in kb.stored_stmts`,
+			`/input/file_id file "new-person" is not registered in kb.stored_files`}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res, err := BuildBundle(context.Background(), "demo", fixtureLoader(t, fx), columns, registeredIn(c.rows))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Errors) != len(c.want) {
+				t.Fatalf("errors %+v", res.Errors)
+			}
+			for _, w := range c.want {
+				expectIssue(t, res.Errors, w)
+			}
+		})
+	}
+	t.Run("registry error", func(t *testing.T) {
+		failing := func(context.Context, string, []string) (map[string]bool, error) { return nil, errors.New("db down") }
+		if _, err := BuildBundle(context.Background(), "demo", fixtureLoader(t, fx), columns, failing); err == nil {
+			t.Fatal("a registry error must fail the bundle")
+		}
+	})
+}
+
 func TestBuildBundleWarnsAboutUnboundSaveAttribute(t *testing.T) {
 	fx := fixture()
 	fx[KindPage]["form-page"] = strings.Replace(fx[KindPage]["form-page"], `"data_binding": "$input_doc.name"`, `"data_binding": "$input_doc.name", "binding_mode": "read-only"`, 1)
@@ -164,6 +216,14 @@ func TestBuildBundleWarnsAboutUnboundSaveAttribute(t *testing.T) {
 	}
 	if len(res.Errors) != 0 || res.Bundle == nil {
 		t.Fatalf("errors %+v", res.Errors)
+	}
+	expectIssue(t, res.Warnings, `writes attribute "name", but no read-write element on this page binds`)
+
+	// A read-only page makes its inputs read-only too.
+	fx = fixture()
+	fx[KindPage]["form-page"] = strings.Replace(fx[KindPage]["form-page"], `"input": {}`, `"input": {}, "binding_mode": "read-only"`, 1)
+	if res, err = build(t, fx, peopleTable); err != nil || len(res.Errors) != 0 {
+		t.Fatalf("errors %+v, %v", res, err)
 	}
 	expectIssue(t, res.Warnings, `writes attribute "name", but no read-write element on this page binds`)
 }

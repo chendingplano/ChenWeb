@@ -52,6 +52,8 @@ func testClasses() map[Kind]map[string]string {
 			"open-page":  `{"descriptor_id": "open-page", "schema_version": "0.2", "page": null, "pane": null}`,
 			"close-page": `{"descriptor_id": "close-page", "schema_version": "0.2"}`,
 			"save-page":  `{"descriptor_id": "save-page", "schema_version": "0.2"}`,
+			"query":      `{"descriptor_id": "query", "schema_version": "0.2", "sql_stmt_id": null, "result": null}`,
+			"load-file":  `{"descriptor_id": "load-file", "schema_version": "0.2", "file_id": null}`,
 		},
 	}
 }
@@ -117,7 +119,7 @@ func TestValidatePage(t *testing.T) {
 	cases := []struct{ from, to, want string }{
 		{`"layouter": "flow-layouter"`, `"layouter": "grid"`, `"grid" is not supported`},
 		{`"input": {}`, `"input": {"action": "load", "table": "c", "result": "record", "fields": [{"column": "id", "attribute": "id"}], "args": {"id": "$input_doc.id"}}`, "$input_doc is not allowed"},
-		{`"input": {}`, `"input": {"action": "save-page"}`, "a save-page action is not allowed here (allowed: load)"},
+		{`"input": {}`, `"input": {"action": "save-page"}`, "a save-page action is not allowed here (allowed: load, query, load-file)"},
 		{`"input": {}`, `"input": {}, "color": "red"`, `unknown attribute "color"`},
 		{`"input": {}`, `"input": {}, "refresh": {"every_seconds": 5}`, `unknown attribute "every_seconds"`},
 		{`"save_action": {"action": "save"`, `"save_action": {"action": "load"`, "a load action is not allowed here (allowed: save)"},
@@ -130,6 +132,16 @@ func TestValidatePage(t *testing.T) {
 		{`"element": "input"`, `"description": "x", "element": "input"`, `"description" is a class attribute`},
 		{`{"element": "button", "label": "Save"`, `{"label": "Save"`, `missing attribute "element"`},
 		{`"binding_mode": "read-only"`, `"binding_mode": "read-only", "on_click": {"action": "close-page"}`, `unknown attribute "on_click"`},
+		{`"input": {}`, `"input": {}, "page_name": {"en": "Customer", "zh-cn": "客户"}, "description": "One customer",
+		  "page_alignment": "center", "width": "100%", "max_width": "640px", "height": "auto", "binding_mode": "read-only"`, ""},
+		{`"input": {}`, `"input": {"title": "Customer admin", "nested": {"tags": [1, 2]}}`, ""},
+		{`"input": {}`, `"input": {}, "page_name": {"zh-cn": "客户"}`, `/page_name texts by language need an "en" entry`},
+		{`"input": {}`, `"input": {}, "description": ""`, `/description must be a non-empty string`},
+		{`"input": {}`, `"input": {}, "page_alignment": "justify"`, `"justify" is not supported`},
+		{`"input": {}`, `"input": {}, "width": "elastic"`, `/width "elastic" must match`},
+		{`"input": {}`, `"input": {}, "max_width": "wide"`, `/max_width "wide" must match`},
+		{`"input": {}`, `"input": {}, "binding_mode": "write"`, `/binding_mode "write" is not supported`},
+		{`"input": {}`, `"input": "customers"`, "/input must be an object"},
 	}
 	for _, c := range cases {
 		body := strings.Replace(validFormPage, c.from, c.to, 1)
@@ -161,7 +173,10 @@ func TestValidateElementInstances(t *testing.T) {
 		   "columns": [{"field": "email", "label": "Email"}],
 		   "on_row_click": {"action": "open-page", "page": "f", "pane": "right", "args": {"id": "$record.id"}}}`, ""},
 		{`{"element": "list", "presentation": "cards"}`, `"cards" is not supported`},
-		{`{"element": "list", "source": {"action": "save", "table": "c", "fields": [{"attribute": "a", "column": "a"}]}}`, "a save action is not allowed here (allowed: load)"},
+		{`{"element": "list", "source": {"action": "save", "table": "c", "fields": [{"attribute": "a", "column": "a"}]}}`, "a save action is not allowed here (allowed: load, query)"},
+		{`{"element": "list", "source": {"action": "query", "sql_stmt_id": "wpi-demo-customer-directory", "result": "list"}, "columns": [{"field": "email", "label": "Email"}]}`, ""},
+		{`{"element": "list", "source": {"action": "load-file", "file_id": "f"}}`, "a load-file action is not allowed here (allowed: load, query)"},
+		{`{"element": "list", "source": {"title": "static"}}`, `/elements/0/source missing attribute "action"`},
 		{`{"element": "menu", "initial_item": "a", "items": [{"item_id": "a", "label": "A", "on_click": {"action": "open-page", "page": "p", "pane": "middle"}}, {"item_id": "f", "label": "F", "children": [{"item_id": "b", "label": "B", "on_click": {"action": "open-page", "page": "q", "pane": "middle"}}]}]}`, ""},
 		{`{"element": "menu", "items": [{"item_id": "a", "label": "A", "on_click": {"action": "load"}}]}`, "a load action is not allowed here"},
 		{`{"element": "menu", "items": [{"item_id": "a", "label": "A"}]}`, "exactly one of"},
@@ -194,9 +209,21 @@ func TestValidateActionInstances(t *testing.T) {
 		{onSave(`{"action": "save", "table": "c", "fields": []}`), "must not be empty"},
 		{onClick(`{"action": "open-page", "page": "customer-form", "pane": "right", "args": {"id": "$input_doc.id"}, "input": {"action": "load", "table": "c", "result": "record", "where": {"id": "$args.id"}, "fields": [{"column": "id", "attribute": "id"}]}}`), ""},
 		{onClick(`{"action": "open-page", "page": "customer-form", "pane": "right", "input": {"action": "load", "table": "c", "result": "record", "fields": [{"column": "id", "attribute": "id"}], "args": {"id": "$record.id"}}}`), "$record is not allowed"},
-		{onClick(`{"action": "open-page", "page": "customer-form", "pane": "right", "input": {"action": "save-page"}}`), "a save-page action is not allowed here (allowed: load)"},
+		{onClick(`{"action": "open-page", "page": "customer-form", "pane": "right", "input": {"action": "save-page"}}`), "a save-page action is not allowed here (allowed: load, query, load-file)"},
 		{onClick(`{"action": "open-page", "page": "customer-form", "pane": "right", "input": {}}`), ""},
 		{onClick(`{"action": "save-page"}`), ""},
+		{onInput(`{"action": "query", "sql_stmt_id": "wpi-demo-customer-by-id", "result": "record", "params": ["$args.id", 5, "x", null]}`), ""},
+		{onInput(`{"action": "query", "sql_stmt_id": "Customers By ID", "result": "record"}`), "/input/sql_stmt_id"},
+		{onInput(`{"action": "query", "sql_stmt_id": "x", "result": "table"}`), `"table" is not supported`},
+		{onInput(`{"action": "query", "sql_stmt_id": "x", "result": "list", "params": ["$input_doc.id"]}`), "/input/params/0 $input_doc is not allowed"},
+		{onInput(`{"action": "query", "sql_stmt_id": "x", "result": "list", "params": {"id": 1}}`), "/input/params must be an array"},
+		{onInput(`{"action": "query", "sql_stmt_id": "x", "result": "list", "sql": "SELECT 1"}`), `unknown attribute "sql"`},
+		{onInput(`{"action": "load-file", "file_id": "wpi-demo-about"}`), ""},
+		{onInput(`{"action": "load-file", "file_id": "../etc/passwd"}`), "/input/file_id"},
+		{onClick(`{"action": "open-page", "page": "about", "pane": "right", "input": {"action": "load-file", "file_id": "wpi-demo-about"}}`), ""},
+		{onClick(`{"action": "open-page", "page": "about", "pane": "right", "input": {"title": "Static"}}`), ""},
+		{onClick(`{"action": "open-page", "page": "f", "pane": "right", "args": {"id": "$input_doc.id"}, "input": {"action": "query", "sql_stmt_id": "x", "result": "record", "params": ["$args.id"]}}`), ""},
+		{onClick(`{"page": "about"}`), `missing attribute "action"`},
 		{onClick(`{"action": "save", "table": "c", "fields": [{"attribute": "a", "column": "a"}]}`), ""},
 	}
 	for _, c := range cases {
@@ -278,6 +305,8 @@ func TestPageInstances(t *testing.T) {
 			`attribute "pane" has no default in action class "open-page"`, nil},
 		{"action class row missing", `{"element": "button", "label": "Go", "on_click": {"action": "save-page"}}`,
 			`action class "save-page" does not exist`, func(c map[Kind]map[string]string) { delete(c[KindAction], "save-page") }},
+		{"query without result", `{"element": "list", "source": {"action": "query", "sql_stmt_id": "x"}, "columns": [{"field": "a", "label": "A"}]}`,
+			`attribute "result" has no default in action class "query"`, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -288,6 +317,46 @@ func TestPageInstances(t *testing.T) {
 			_, _, issues := check(t, classes, pageWith(c.element))
 			expectIssue(t, issues, c.want)
 		})
+	}
+}
+
+func TestPageWideBindingMode(t *testing.T) {
+	page := `{"descriptor_id": "p", "schema_version": "0.2", "layouter": "flow-layouter", "binding_mode": "read-only", "elements": [
+	  {"element": "input", "label": "A", "data_binding": "$input_doc.a"},
+	  {"element": "input", "label": "B", "data_binding": "$input_doc.b", "binding_mode": "read-write"},
+	  {"element": "select", "label": "C", "data_binding": "$input_doc.c", "options": [{"value": 1, "label": "One"}]},
+	  {"element": "text", "text": "x"}]}`
+	classes := testClasses()
+	// A class that leaves binding_mode to every instance is satisfied by the page.
+	classes[KindElement]["select"] = strings.Replace(classes[KindElement]["select"], `"binding_mode": "read-write"`, `"binding_mode": null`, 1)
+	v := &validator{kind: KindPage, id: "p", classes: classDescriptors(t, classes)}
+	els, _ := v.pageInstances(decode(t, page))
+	expectIssue(t, v.issues, "")
+	var got []string
+	for _, e := range els {
+		got = append(got, str(e.body["binding_mode"]))
+	}
+	if strings.Join(got, ",") != "read-only,read-write,read-only," {
+		t.Fatalf("binding modes %q; want instance, then page, then class, and none for text", got)
+	}
+}
+
+func TestStaticInputPositions(t *testing.T) {
+	page := decode(t, `{"input": {"title": "x"}, "elements": [
+	  {"element": "button", "on_click": {"page": "p"}},
+	  {"element": "button", "on_click": {"action": "open-page", "input": {"a": 1}}}]}`)
+	got := map[string]bool{}
+	for _, p := range actionPositions(page) {
+		got[p.path] = p.isStatic()
+	}
+	want := map[string]bool{"/input": true, "/elements/0/on_click": false, "/elements/1/on_click": false, "/elements/1/on_click/input": true}
+	if len(got) != len(want) {
+		t.Fatalf("positions %v", got)
+	}
+	for path, static := range want {
+		if got[path] != static {
+			t.Fatalf("%s static = %v, want %v", path, got[path], static)
+		}
 	}
 }
 

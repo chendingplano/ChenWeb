@@ -22,6 +22,10 @@ type Loader func(ctx context.Context, kind Kind, ids []string) (map[string]Descr
 // Columns returns a table's column names, or nil when the table does not exist.
 type Columns func(ctx context.Context, table string) (map[string]bool, error)
 
+// Registered returns which of names exist as stored rows of kind
+// (storedStatement or storedFile).
+type Registered func(ctx context.Context, kind string, names []string) (map[string]bool, error)
+
 // BundleResult is a built bundle, or the errors that prevent building it.
 type BundleResult struct {
 	Bundle   *Bundle
@@ -42,8 +46,9 @@ func str(v any) string {
 
 // BuildBundle loads appID, every page reachable from it and all classes, then
 // validates the whole set: structure, instances against their classes,
-// references, panes, tables and columns, bindings.
-func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns) (*BundleResult, error) {
+// references, panes, tables and columns, stored statements and files,
+// bindings.
+func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns, registered Registered) (*BundleResult, error) {
 	apps, err := load(ctx, KindApp, []string{appID})
 	if err != nil {
 		return nil, err
@@ -105,6 +110,11 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 		return nil, err
 	}
 	res.Errors = append(res.Errors, tableErrs...)
+	storedErrs, err := storedErrors(ctx, registered, actions)
+	if err != nil {
+		return nil, err
+	}
+	res.Errors = append(res.Errors, storedErrs...)
 	if len(res.Errors) > 0 {
 		return res, nil
 	}
@@ -244,6 +254,39 @@ func tableErrors(ctx context.Context, columns Columns, actions []mergedAction) (
 			if c.name != "" && !cols[c.name] {
 				out = append(out, Issue{KindPage, a.page, a.path + c.path, fmt.Sprintf("column %q does not exist in table %q", c.name, table)})
 			}
+		}
+	}
+	return out, nil
+}
+
+// storedRefs says which attribute of a query or load-file instance names a
+// stored row, of which kind.
+var storedRefs = map[string]struct{ kind, attr, what string }{
+	"query":     {storedStatement, "sql_stmt_id", "SQL statement %q is not registered in kb.stored_stmts"},
+	"load-file": {storedFile, "file_id", "file %q is not registered in kb.stored_files"},
+}
+
+// storedErrors reports query and load-file instances whose statement or file
+// does not exist (design D9). Access is checked when an instance runs.
+func storedErrors(ctx context.Context, registered Registered, actions []mergedAction) ([]Issue, error) {
+	names := map[string][]string{}
+	for _, a := range actions {
+		if r, ok := storedRefs[a.cls]; ok && idPattern.MatchString(str(a.body[r.attr])) {
+			names[r.kind] = append(names[r.kind], str(a.body[r.attr]))
+		}
+	}
+	found := map[string]map[string]bool{}
+	for _, kind := range slices.Sorted(maps.Keys(names)) {
+		var err error
+		if found[kind], err = registered(ctx, kind, names[kind]); err != nil {
+			return nil, err
+		}
+	}
+	var out []Issue
+	for _, a := range actions {
+		r, ok := storedRefs[a.cls]
+		if name := str(a.body[r.attr]); ok && idPattern.MatchString(name) && !found[r.kind][name] {
+			out = append(out, Issue{KindPage, a.page, a.path + "/" + r.attr, fmt.Sprintf(r.what, name)})
 		}
 	}
 	return out, nil

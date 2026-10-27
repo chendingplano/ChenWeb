@@ -1,7 +1,7 @@
 // Merges instances with their class rows (devdoc 2026102601 §3.5.1): the row's
 // non-null defaults overlaid with the instance's own attributes. Same rule as
 // mergeInstance in server/api/wpi.
-import type { ActionRef, Bundle, ClassRow, ElementInstance, Text } from './types';
+import type { ActionInstance, ActionRef, Bundle, ClassRow, ElementInstance, Input, InputSpec, JsonObject, PageDescriptor, Text } from './types';
 
 const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description']);
 
@@ -22,10 +22,14 @@ export type ResolvedElement = {
 	pointer: string;
 };
 
-export function resolveEntry(bundle: Bundle, pageId: string, entry: ElementInstance, index: number): ResolvedElement | { error: string } {
+// An element instance that does not set binding_mode takes its page's, when its
+// class has one, so the order is instance, page, class (devdoc §3.2.1). Same rule
+// as withPageDefaults in server/api/wpi.
+export function resolveEntry(bundle: Bundle, page: PageDescriptor, entry: ElementInstance, index: number): ResolvedElement | { error: string } {
 	const row = bundle.elements[entry.element];
 	if (!row) return { error: `element class "${entry.element}" is not in the bundle` };
-	return { desc: mergeInstance(row, entry), pageId, pointer: `/elements/${index}` };
+	const own = page.binding_mode && 'binding_mode' in row && entry.binding_mode === undefined ? { ...entry, binding_mode: page.binding_mode } : entry;
+	return { desc: mergeInstance(row, own), pageId: page.descriptor_id, pointer: `/elements/${index}` };
 }
 
 // Names the action instance stored under attr (plus a deeper path) of an element.
@@ -38,4 +42,15 @@ export function textIn(text: Text | undefined, locale: string): string {
 	if (text === undefined) return '';
 	if (typeof text === 'string') return text;
 	return text[locale] ?? text.en ?? '';
+}
+
+// An input with an action attribute is an action instance; any other object is
+// static data, the input doc itself (devdoc §3.2.2).
+export function isAction(input: Input): input is ActionInstance {
+	return typeof input.action === 'string';
+}
+
+// Static data as a panel input; {} stays the plain empty input.
+export function staticInput(doc: JsonObject): InputSpec {
+	return Object.keys(doc).length ? { doc } : {};
 }

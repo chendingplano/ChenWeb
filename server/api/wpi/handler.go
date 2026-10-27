@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -62,7 +64,8 @@ func (h *Handler) GetApp(c echo.Context) error {
 	if !idPattern.MatchString(appID) {
 		return errorJSON(c, http.StatusNotFound, "App not found")
 	}
-	res, err := BuildBundle(c.Request().Context(), appID, store{h.DB}.latest, catalogColumns(h.DB))
+	st := store{h.DB}
+	res, err := BuildBundle(c.Request().Context(), appID, st.latest, catalogColumns(h.DB), st.registered)
 	if errors.Is(err, ErrNotFound) {
 		return errorJSON(c, http.StatusNotFound, "App not found")
 	}
@@ -117,4 +120,68 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 	}
 	handlerLog.Info("WPI descriptor stored", "kind", kind, "id", id, "version", version, "user", actorName(user))
 	return c.JSON(http.StatusOK, map[string]any{"kind": kind, "descriptor_id": id, "version": version})
+}
+
+// Limits of a page search (design D10).
+const (
+	defaultPageLimit = 50
+	maxPageLimit     = 200
+)
+
+// SearchPages lists the latest active version of every page whose ID, name or
+// description contains q, ignoring case, so an author can find one to reuse
+// (devdoc 2026102601 §3.2.3).
+// Endpoint: GET /api/v1/wpi/pages?q=&limit=
+func (h *Handler) SearchPages(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	limit := defaultPageLimit
+	if s := c.QueryParam("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n <= 0 {
+			return errorJSON(c, http.StatusBadRequest, "limit must be a positive integer")
+		}
+		limit = min(n, maxPageLimit)
+	}
+	all, err := store{h.DB}.pageSummaries(c.Request().Context())
+	if err != nil {
+		handlerLog.Error("WPI page search failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to search pages")
+	}
+	q := strings.ToLower(strings.TrimSpace(c.QueryParam("q")))
+	pages := []PageSummary{}
+	for _, p := range all {
+		if len(pages) < limit && (q == "" || p.matches(q)) {
+			pages = append(pages, p)
+		}
+	}
+	handlerLog.Info("WPI pages searched", "user", actorName(user), "q", q, "found", len(pages))
+	return c.JSON(http.StatusOK, map[string]any{"pages": pages})
+}
+
+// GetPage returns the latest active version of a page, so an author can copy
+// it and save the copy under a new ID.
+// Endpoint: GET /api/v1/wpi/pages/:pageId
+func (h *Handler) GetPage(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	id := c.Param("pageId")
+	if !idPattern.MatchString(id) {
+		return errorJSON(c, http.StatusNotFound, "Page not found")
+	}
+	found, err := store{h.DB}.latest(c.Request().Context(), KindPage, []string{id})
+	if err != nil {
+		handlerLog.Error("WPI page read failed", "page", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to read page")
+	}
+	d, ok := found[id]
+	if !ok {
+		return errorJSON(c, http.StatusNotFound, "Page not found")
+	}
+	handlerLog.Info("WPI page read", "page", id, "version", d.Version, "user", actorName(user))
+	return c.JSON(http.StatusOK, map[string]any{"version": d.Version, "page": d.Raw})
 }

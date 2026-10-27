@@ -27,18 +27,20 @@ export type AppDescriptor = {
 // Text shown the same in every language, or one text per language code.
 export type Text = string | Record<string, string>;
 
-// `{}` as an input: open the page with an empty input doc.
-export type EmptyInput = Record<string, never>;
-
 // An action instance, written where it is used and named by its action class
-// (devdoc 2026102601 §5). load and save attributes are read only by the server.
+// (devdoc 2026102601 §5). The attributes of load, save, query and load-file are
+// read only by the server.
 export type ActionInstance = {
 	action: string;
 	args?: JsonObject;
 	page?: string;
 	pane?: string;
-	input?: ActionInstance | EmptyInput;
+	input?: Input;
 };
+
+// A page's or an open-page's input: an action instance that produces the doc,
+// or static data, the doc itself ({} is the empty doc; devdoc §3.2.2).
+export type Input = ActionInstance | JsonObject;
 
 export type MenuItem = {
 	item_id: string;
@@ -74,14 +76,20 @@ export type ElementInstance = SizeAttrs & {
 // null (every instance must set it).
 export type ClassRow = { descriptor_id: string; schema_version: string; description?: Text; [attr: string]: unknown };
 
-export type PageDescriptor = {
+// A page (devdoc §3.2.1). Its sizes place it inside its pane; binding_mode is
+// the default of its elements that show data.
+export type PageDescriptor = SizeAttrs & {
 	descriptor_id: string;
 	schema_version: string;
 	layouter: string;
 	elements: ElementInstance[];
-	input?: ActionInstance | EmptyInput;
+	page_name?: Text;
+	description?: Text;
+	input?: Input;
 	save_action?: ActionInstance;
 	refresh?: { on_show?: boolean };
+	page_alignment?: 'left' | 'center' | 'right';
+	binding_mode?: 'read-only' | 'read-write';
 };
 
 export type Issue = { kind: string; descriptor_id: string; path: string; message: string };
@@ -98,6 +106,6 @@ export type Bundle = {
 // Names an action instance by its place in a stored page.
 export type ActionRef = { kind: 'page'; id: string; pointer: string };
 
-// A panel's input: {} for an empty doc, or the load instance that produces it
-// and its argument values.
-export type InputSpec = { ref?: ActionRef; args?: JsonObject };
+// A panel's input: {} for an empty doc, static data, or the action instance
+// that produces it and its argument values.
+export type InputSpec = { ref?: ActionRef; args?: JsonObject; doc?: JsonObject };

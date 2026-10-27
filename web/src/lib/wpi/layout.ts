@@ -1,7 +1,7 @@
 // Size attributes → CSS (design D9). The flow layouter is a wrapping flex
 // container: a fixed size is used as given, "elastic" grows into the space
 // left in its row within min/max, and "auto" (or nothing) sizes to content.
-import type { PaneSpec, SizeAttrs } from './types';
+import type { PageDescriptor, PaneSpec, SizeAttrs } from './types';
 
 function isFixed(size: string | undefined): size is string {
 	return !!size && size !== 'auto' && size !== 'elastic';
@@ -50,4 +50,19 @@ export function clampPx(value: number, min?: string, max?: string): number {
 	const lo = min?.endsWith('px') ? parseFloat(min) : 0;
 	const hi = max?.endsWith('px') ? parseFloat(max) : Infinity;
 	return Math.min(Math.max(value, lo), hi);
+}
+
+// The page's box inside its pane (devdoc 2026102601 §3.2.1): its sizes as
+// given, and auto margins that place it when it is narrower than the pane.
+// Without a width it fills the pane, so alignment only shows with a width or
+// max_width.
+export function pageStyle(page: PageDescriptor): string {
+	const css: string[] = [];
+	if (isFixed(page.width)) css.push(`width: ${page.width}`);
+	if (isFixed(page.height)) css.push(`height: ${page.height}`);
+	if (page.min_width) css.push(`min-width: ${page.min_width}`);
+	if (page.max_width) css.push(`max-width: ${page.max_width}`);
+	if (page.page_alignment === 'center') css.push('margin-left: auto', 'margin-right: auto');
+	if (page.page_alignment === 'right') css.push('margin-left: auto');
+	return css.join('; ');
 }

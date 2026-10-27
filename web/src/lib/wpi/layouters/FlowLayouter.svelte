@@ -10,7 +10,7 @@
 	let { panelId, page }: LayouterProps = $props();
 
 	const rt = getRuntime();
-	const entries = $derived(page.elements.map((entry, i) => resolveEntry(rt.bundle, page.descriptor_id, entry, i)));
+	const entries = $derived(page.elements.map((entry, i) => resolveEntry(rt.bundle, page, entry, i)));
 </script>
 
 <div class="flex flex-wrap items-start gap-3">

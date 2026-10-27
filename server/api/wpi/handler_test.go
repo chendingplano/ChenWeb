@@ -62,7 +62,7 @@ func TestGetApp(t *testing.T) {
 		defer db.Close()
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
 		expectClasses(mock)
-		mock.ExpectQuery(latestQuery).WithArgs("page", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", greetingPage}))
+		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", greetingPage}))
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 200 {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -88,7 +88,7 @@ func TestGetApp(t *testing.T) {
 		defer db.Close()
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
 		expectClasses(mock)
-		mock.ExpectQuery(latestQuery).WithArgs("page", sqlmock.AnyArg()).WillReturnRows(descriptorRows())
+		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows())
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 422 || !strings.Contains(rec.Body.String(), `page \"greeting\" does not exist`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -114,7 +114,7 @@ func TestPutDescriptor(t *testing.T) {
 	t.Run("stored", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(`INSERT INTO kb\.wpi_descriptors`).WithArgs("page", "greeting", SchemaVersion, greetingPage, "admin@example.com").
+		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, greetingPage, "admin@example.com").
 			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", greetingPage, "kind", "page", "descriptorId", "greeting")
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"version":1`) {

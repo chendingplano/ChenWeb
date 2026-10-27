@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampPx, flowItemStyle, isResizable, paneStyle } from './layout';
+import { clampPx, flowItemStyle, isResizable, pageStyle, paneStyle } from './layout';
+import type { PageDescriptor } from './types';
 
 test('flow item sizes', () => {
 	assert.equal(flowItemStyle({ width: '160px' }), 'flex: 0 0 160px; width: 160px');
@@ -25,4 +26,12 @@ test('only fixed-pixel panes are drag-resizable, within min/max', () => {
 	assert.equal(clampPx(100, '160px', '400px'), 160);
 	assert.equal(clampPx(500, '160px', '400px'), 400);
 	assert.equal(clampPx(250), 250);
+});
+
+test('page box: sizes and alignment in the pane', () => {
+	const page = (extra: Partial<PageDescriptor>): PageDescriptor => ({ descriptor_id: 'p', schema_version: '0.2', layouter: 'flow-layouter', elements: [], ...extra });
+	assert.equal(pageStyle(page({})), '');
+	assert.equal(pageStyle(page({ max_width: '640px', page_alignment: 'center' })), 'max-width: 640px; margin-left: auto; margin-right: auto');
+	assert.equal(pageStyle(page({ width: '50%', page_alignment: 'right' })), 'width: 50%; margin-left: auto');
+	assert.equal(pageStyle(page({ width: 'auto', height: '400px', min_width: '320px', page_alignment: 'left' })), 'height: 400px; min-width: 320px');
 });

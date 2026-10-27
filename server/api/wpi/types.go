@@ -1,7 +1,8 @@
 // Package wpi is the backend of the Web Page Interpreter: descriptor storage
-// and validation, the app bundle endpoint, and the load/save actions.
-// Design: KnowledgeStore devdoc 2026102601, openspec/changes/wpi-pilot and
-// openspec/changes/wpi-classes-and-instances.
+// and validation, the app bundle endpoint, page search, and the actions that
+// run on the server (load, save, query, load-file).
+// Design: KnowledgeStore devdoc 2026102601 and the OpenSpec changes wpi-pilot,
+// wpi-classes-and-instances and wpi-pages.
 package wpi
 
 import "encoding/json"
@@ -9,7 +10,8 @@ import "encoding/json"
 // SchemaVersion is the only descriptor format this interpreter accepts.
 const SchemaVersion = "0.2"
 
-// Kind is the kind of a stored descriptor (kb.wpi_descriptors.kind).
+// Kind is the kind of a stored descriptor: kb.wpi_descriptors.kind, or page
+// for a row of kb.frontend_pages.
 type Kind string
 
 const (
@@ -84,15 +86,19 @@ type OrderBy struct {
 	Direction string `json:"direction"`
 }
 
-// Action is the typed view of a validated, merged load or save instance.
+// Action is the typed view of a validated, merged load, save, query or
+// load-file instance.
 type Action struct {
-	Class   string         `json:"action"`
-	Table   string         `json:"table"`
-	Result  string         `json:"result"`
-	Where   map[string]any `json:"where"`
-	Fields  []FieldMap     `json:"fields"`
-	OrderBy []OrderBy      `json:"order_by"`
-	Limit   *int           `json:"limit"`
-	Mode    string         `json:"mode"`
-	Key     string         `json:"key"`
+	Class     string         `json:"action"`
+	Table     string         `json:"table"`
+	SQLStmtID string         `json:"sql_stmt_id"`
+	Params    []any          `json:"params"`
+	FileID    string         `json:"file_id"`
+	Result    string         `json:"result"`
+	Where     map[string]any `json:"where"`
+	Fields    []FieldMap     `json:"fields"`
+	OrderBy   []OrderBy      `json:"order_by"`
+	Limit     *int           `json:"limit"`
+	Mode      string         `json:"mode"`
+	Key       string         `json:"key"`
 }
