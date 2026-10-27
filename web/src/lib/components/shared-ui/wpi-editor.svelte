@@ -92,8 +92,6 @@
 
 	// ── Viewport (for drop position calculation) ─────────────────────────
 	let viewport = $state({ x: 0, y: 0, zoom: 1 });
-	// Track if viewport has been set by actual content (not just fitView on empty canvas)
-	let hasContent = $state(false);
 
 	// ── Core state ────────────────────────────────────────────────────────
 	let activeFlow = $state<Flow | null>(null);
@@ -213,7 +211,6 @@
 		activeFlow = flow;
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
 		edges = (flow.flow_data?.edges ?? []) as Edge[];
-		hasContent = nodes.length > 0;
 		lastSavedSnapshot = {
 			nodes: JSON.parse(JSON.stringify(nodes)),
 			edges: JSON.parse(JSON.stringify(edges))
@@ -286,24 +283,11 @@
 		const nodeType: NodeType = JSON.parse(raw);
 		const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
 
-		// Calculate position relative to canvas bounds
-		const canvasX = event.clientX - bounds.left;
-		const canvasY = event.clientY - bounds.top;
-
-		// Convert to flow coordinates using viewport transform
-		// Only apply viewport offset if we have existing content
-		// (fitView on empty canvas centers the viewport, which would offset the drop position)
-		const zoom = hasContent ? viewport.zoom || 1 : 1;
-		const panX = hasContent ? viewport.x || 0 : 0;
-		const panY = hasContent ? viewport.y || 0 : 0;
-
-		// Calculate final position with snap-to-grid
-		const rawX = (canvasX - panX) / zoom;
-		const rawY = (canvasY - panY) / zoom;
-
+		// The node's top-left corner goes where it was dropped: screen → flow coordinates.
+		const zoom = viewport.zoom || 1;
 		const position = {
-			x: snapToGridValue(rawX),
-			y: snapToGridValue(rawY)
+			x: snapToGridValue((event.clientX - bounds.left - viewport.x) / zoom),
+			y: snapToGridValue((event.clientY - bounds.top - viewport.y) / zoom)
 		};
 
 		const cls = nodeType.id.startsWith(ELEMENT_CLASS_PREFIX) ? nodeType.id.slice(ELEMENT_CLASS_PREFIX.length) : null;
@@ -319,7 +303,6 @@
 				data: cls ? { label: cls, element: cls } : { ...nodeType.defaultData, label: nodeType.label }
 			}
 		];
-		hasContent = true;
 		selectedNodeId = id;
 		checkLimits();
 	}
@@ -355,7 +338,6 @@
 			...nodes,
 			{ id, type: nodeType.id, position, data: { ...nodeType.defaultData, label: nodeType.label } }
 		];
-		hasContent = true;
 		selectedNodeId = id;
 		checkLimits();
 	}
@@ -417,7 +399,6 @@
 		lastSavedSnapshot = emptySnap;
 		nodes = [];
 		edges = [];
-		hasContent = false;
 		undoStack = [];
 		redoStack = [];
 		try {
@@ -554,13 +535,17 @@
 			role="application"
 			aria-label={m.canvas_01_flow_canvas()}
 		>
+			<!-- Svelte Flow reads fitView once, when it mounts, and on an empty canvas it waits and
+			     fits the first node added — moving it from where it was dropped to the middle. So it
+			     mounts again for each flow and fits only a flow that already has nodes. -->
+			{#key activeFlow?.flow_id}
 			<SvelteFlow
 				bind:nodes
 				bind:edges
 				bind:viewport
 				nodeTypes={NODE_TYPES}
 				colorMode={darkMode ? 'dark' : 'light'}
-				fitView
+				fitView={nodes.length > 0}
 				fitViewOptions={{ maxZoom: 1 }}
 				snapGrid={snapToGrid ? [gridResolution, gridResolution] : undefined}
 				onselectionchange={(params: { nodes: Node[] }) => {
@@ -699,6 +684,7 @@
 					{/if}
 				</Panel>
 			</SvelteFlow>
+			{/key}
 		</div>
 		</div>
 
