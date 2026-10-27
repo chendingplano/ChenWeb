@@ -6,7 +6,6 @@
 </script>
 <BaseNode {id} {selected} label={String(data.label ?? 'File')} icon="📁"
   inputHandles={[]} outputHandles={['file']}
-  onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.file_type ?? 'txt'} · {data.file_path ? String(data.file_path).split('/').pop() : m.filenode_no_file()}

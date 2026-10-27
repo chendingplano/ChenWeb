@@ -27,6 +27,7 @@
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import { isElementNode, nodeJson, pageJson } from './canvas/wpi-json';
+	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import {
 		alignNodes,
@@ -126,6 +127,8 @@
 		}))
 	);
 	let showCreateElement = $state(false);
+	// The element class being edited from a node's tool bar.
+	let editClassId = $state<string | null>(null);
 	// View JSON shows the selected node's descriptor JSON, else the page's.
 	let showJson = $state(false);
 	// Size of the canvas area, for placing created nodes in the middle of the view.
@@ -355,6 +358,30 @@
 		checkLimits();
 	}
 
+	// ── Node tool bar ───────────────────────────────────────────────────────
+	setNodeActions({
+		duplicate(id) {
+			const src = nodes.find((n) => n.id === id);
+			if (!src) return;
+			const newId = `${src.type}-${Date.now()}`;
+			takeSnapshot();
+			nodes = duplicateNode(nodes, id, newId, gridResolution);
+			selectedNodeId = newId;
+			checkLimits();
+		},
+		remove(id) {
+			takeSnapshot();
+			const next = removeNode(nodes, edges, id);
+			nodes = next.nodes;
+			edges = next.edges;
+			if (selectedNodeId === id) selectedNodeId = null;
+		},
+		editClass(id) {
+			const cls = nodes.find((n) => n.id === id)?.data.element;
+			if (typeof cls === 'string' && cls !== '') editClassId = cls;
+		}
+	});
+
 	async function loadElementClasses() {
 		try {
 			elementClasses = await listElementClasses();
@@ -467,9 +494,9 @@
 
 	// ── Keyboard shortcuts ───────────────────────────────────────────────────
 	function onKeydown(e: KeyboardEvent) {
-		// The Create Element form has its own fields, and View JSON covers the canvas; undo and
-		// save belong to the canvas.
-		if (showCreateElement || showJson) return;
+		// The element class forms have their own fields, and View JSON covers the canvas; undo
+		// and save belong to the canvas.
+		if (showCreateElement || editClassId !== null || showJson) return;
 		const mod = e.ctrlKey || e.metaKey;
 		if (mod && e.key === 'z' && !e.shiftKey) {
 			e.preventDefault();
@@ -741,12 +768,25 @@
 {#if showCreateElement}
 	<CreateElementDialog
 		{darkMode}
-		onCreated={(id) => {
+		onSaved={(id) => {
 			showCreateElement = false;
 			toast(m.wpi_editor_element_class_created({ id }));
 			loadElementClasses();
 		}}
 		onClose={() => (showCreateElement = false)}
+	/>
+{/if}
+
+{#if editClassId !== null}
+	<CreateElementDialog
+		{darkMode}
+		classId={editClassId}
+		onSaved={(id) => {
+			editClassId = null;
+			toast(m.wpi_editor_element_class_saved({ id }));
+			loadElementClasses();
+		}}
+		onClose={() => (editClassId = null)}
 	/>
 {/if}
 

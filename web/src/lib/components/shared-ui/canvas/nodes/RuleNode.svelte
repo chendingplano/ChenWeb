@@ -6,7 +6,6 @@
 </script>
 <BaseNode {id} {selected} label={String(data.label ?? 'Rule')} icon="📋"
   inputHandles={['data']} outputHandles={['pass','fail']}
-  onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">
     {data.description || data.rule_expression || m.rulenode_no_rule()}

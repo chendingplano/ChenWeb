@@ -111,6 +111,43 @@ func TestStoreElementClasses(t *testing.T) {
 	}
 }
 
+const elementClassQuery = `SELECT version, status, body FROM kb\.wpi_descriptors\s+WHERE kind = 'element' AND descriptor_id = \$1 AND status IN \('draft', 'active'\) ORDER BY version DESC LIMIT 1`
+
+const insertClassVersionQuery = `INSERT INTO kb\.wpi_descriptors .+ SELECT 'element', \$1::text, COALESCE\(MAX\(version\), 0\) \+ 1, \$2::text, \$3::jsonb, \$4::text, .+ FROM kb\.wpi_descriptors WHERE kind = 'element' AND descriptor_id = \$1::text\s+RETURNING version`
+
+func TestStoreElementClass(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	ctx := context.Background()
+	mock.ExpectQuery(elementClassQuery).WithArgs("slider").
+		WillReturnRows(sqlmock.NewRows([]string{"version", "status", "body"}).AddRow(2, "draft", []byte(`{"a":1}`)))
+	got, found, err := store{db}.elementClass(ctx, "slider")
+	if err != nil || !found || got.Version != 2 || got.Status != "draft" || string(got.Class) != `{"a":1}` {
+		t.Fatalf("got %+v, %v, %v", got, found, err)
+	}
+	mock.ExpectQuery(elementClassQuery).WithArgs("missing").WillReturnRows(sqlmock.NewRows([]string{"version", "status", "body"}))
+	if _, found, err := (store{db}).elementClass(ctx, "missing"); found || err != nil {
+		t.Fatalf("missing class: found %v, %v", found, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreInsertClassVersion(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(insertClassVersionQuery).WithArgs("slider", ElementSchemaVersion, `{"a":1}`, "draft", "cding@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
+	v, err := store{db}.insertClassVersion(context.Background(), "slider", "draft", []byte(`{"a":1}`), "cding@example.com")
+	if err != nil || v != 2 {
+		t.Fatalf("got %d, %v", v, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoreInsertVersion(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()

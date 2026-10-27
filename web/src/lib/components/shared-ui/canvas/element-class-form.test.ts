@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	applyEdit,
+	attributesFromRow,
 	attributeProblem,
 	buildClassRow,
 	CLASS_ID_PATTERN,
@@ -132,4 +133,32 @@ test('row problems', () => {
 	assert.equal(rowProblem(row('Slider', { en: 'A slider' })), 'class_id');
 	assert.equal(rowProblem(row('slider', { en: '', 'zh-cn': '滑块' })), 'description');
 	assert.equal(rowProblem(row('slider', '')), 'description');
+});
+
+test('a stored row becomes the form attributes, class attributes first', () => {
+	const row = {
+		label: { help_tip: { en: 'Caption' }, default_value: null },
+		description: { en: 'A field' },
+		descriptor_id: 'input',
+		schema_version: '0.3',
+		width: { default_value: 'elastic' }
+	};
+	const attrs = attributesFromRow(row);
+	assert.deepEqual(attrs, [
+		{ name: 'descriptor_id', value: 'input' },
+		{ name: 'schema_version', value: '0.3' },
+		{ name: 'description', value: { en: 'A field', 'zh-cn': '' } },
+		{ name: 'implement_notes', value: '' },
+		{ name: 'label', value: { help_tip: { en: 'Caption' }, default_value: null } },
+		{ name: 'width', value: { default_value: 'elastic' } }
+	]);
+	// Saved unchanged, it is the same row.
+	assert.deepEqual(buildClassRow(attrs), row);
+	// A description that is plain text stays text.
+	assert.equal(attributesFromRow({ description: 'A field' })[2].value, 'A field');
+});
+
+test('an empty description is left out of the row', () => {
+	const attrs = attributesFromRow({ descriptor_id: 'text', schema_version: '0.3' });
+	assert.deepEqual(buildClassRow(attrs), { descriptor_id: 'text', schema_version: '0.3' });
 });

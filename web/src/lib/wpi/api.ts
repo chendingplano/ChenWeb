@@ -90,3 +90,38 @@ export async function createElementClass(classRow: JsonObject, fetchFn: typeof f
 		throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
 	}
 }
+
+// The latest draft or active version of an element class, whole, for the
+// editor's edit form.
+export type ElementClassRow = { version: number; status: 'draft' | 'active'; class: JsonObject };
+
+export async function getElementClass(classId: string, fetchFn: typeof fetch = fetch): Promise<ElementClassRow> {
+	const res = await fetchFn(`/api/v1/wpi/classes/element/${encodeURIComponent(classId)}`, { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) {
+		throw new WpiError(String(body.error ?? res.statusText), res.status);
+	}
+	return body as unknown as ElementClassRow;
+}
+
+// Stores an edited element class as its next version, keeping its status: a
+// draft stays a draft, an active class must still match its code. Throws
+// WpiError: 404 when the class has no draft or active row, 400 with issues
+// when the row breaks a rule.
+export async function updateElementClass(
+	classId: string,
+	classRow: JsonObject,
+	fetchFn: typeof fetch = fetch
+): Promise<{ version: number; status: 'draft' | 'active' }> {
+	const res = await fetchFn(`/api/v1/wpi/classes/element/${encodeURIComponent(classId)}`, {
+		method: 'PUT',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(classRow)
+	});
+	const body = await parse(res);
+	if (!res.ok) {
+		throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+	}
+	return body as { version: number; status: 'draft' | 'active' };
+}

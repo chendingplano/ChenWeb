@@ -24,6 +24,7 @@
 	import NodePalette from './canvas/NodePalette.svelte';
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
 	import { canvasThemeVars } from './canvas/canvas-theme';
+	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 
 	// Node type components
 	import AiAssistantNode from './canvas/nodes/AiAssistantNode.svelte';
@@ -281,6 +282,26 @@
 			warnedEdges = true;
 		}
 	}
+
+	// ── Node tool bar ───────────────────────────────────────────────────────
+	setNodeActions({
+		duplicate(id) {
+			const src = nodes.find((n) => n.id === id);
+			if (!src) return;
+			const newId = `${src.type}-${Date.now()}`;
+			takeSnapshot();
+			nodes = duplicateNode(nodes, id, newId, gridResolution);
+			selectedNodeId = newId;
+			checkLimits();
+		},
+		remove(id) {
+			takeSnapshot();
+			const next = removeNode(nodes, edges, id);
+			nodes = next.nodes;
+			edges = next.edges;
+			if (selectedNodeId === id) selectedNodeId = null;
+		}
+	});
 
 	// ── Close with guard ────────────────────────────────────────────────────
 	function requestClose() {

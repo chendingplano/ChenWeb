@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createElementClass, fetchApp, listElementClasses, runAction, WpiError } from './api';
+import { createElementClass, fetchApp, getElementClass, listElementClasses, runAction, updateElementClass, WpiError } from './api';
 
 function fakeFetch(status: number, body: unknown, seen: { url?: string; init?: RequestInit } = {}): typeof fetch {
 	return (async (url: string, init?: RequestInit) => {
@@ -66,6 +66,33 @@ test('createElementClass carries the status and issues', async () => {
 	});
 	const issues = [{ kind: 'element', descriptor_id: 'slider', path: '/description', message: 'a draft class needs a description' }];
 	await assert.rejects(createElementClass({}, fakeFetch(400, { errors: issues })), (err: unknown) => {
+		assert.ok(err instanceof WpiError);
+		assert.deepEqual(err.issues, issues);
+		return true;
+	});
+});
+
+test('getElementClass returns the whole class row', async () => {
+	const seen: { url?: string } = {};
+	const row = await getElementClass('slider', fakeFetch(200, { version: 2, status: 'draft', class: { descriptor_id: 'slider' } }, seen));
+	assert.equal(seen.url, '/api/v1/wpi/classes/element/slider');
+	assert.deepEqual(row, { version: 2, status: 'draft', class: { descriptor_id: 'slider' } });
+	await assert.rejects(getElementClass('gone', fakeFetch(404, { error: 'Element class not found' })), (err: unknown) => {
+		assert.ok(err instanceof WpiError);
+		assert.equal(err.status, 404);
+		return true;
+	});
+});
+
+test('updateElementClass puts the class row and carries the issues', async () => {
+	const seen: { url?: string; init?: RequestInit } = {};
+	const res = await updateElementClass('slider', { descriptor_id: 'slider' }, fakeFetch(200, { descriptor_id: 'slider', version: 3, status: 'draft' }, seen));
+	assert.equal(seen.url, '/api/v1/wpi/classes/element/slider');
+	assert.equal(seen.init?.method, 'PUT');
+	assert.deepEqual(JSON.parse(String(seen.init?.body)), { descriptor_id: 'slider' });
+	assert.equal(res.version, 3);
+	const issues = [{ kind: 'element', descriptor_id: 'input', path: '/slider_min', message: 'unknown attribute "slider_min"' }];
+	await assert.rejects(updateElementClass('input', {}, fakeFetch(400, { errors: issues })), (err: unknown) => {
 		assert.ok(err instanceof WpiError);
 		assert.deepEqual(err.issues, issues);
 		return true;

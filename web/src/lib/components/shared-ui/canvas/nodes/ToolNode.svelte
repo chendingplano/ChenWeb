@@ -6,7 +6,6 @@
 </script>
 <BaseNode {id} {selected} label={String(data.label ?? 'Tool')} icon="🔧"
   inputHandles={['args']} outputHandles={['result']}
-  onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.tool_name ?? m.toolnode_unnamed_tool()}

@@ -31,6 +31,25 @@ export function initialAttributes(): DraftAttribute[] {
 	];
 }
 
+// The form's attributes for a stored class row, to edit it: the class
+// attributes first, in the order the create form lists them, then the instance
+// attributes in the row's order. A description by language gets both language
+// slots, as in the create form.
+export function attributesFromRow(row: JsonObject): DraftAttribute[] {
+	const classAttrs = initialAttributes().map((a) => {
+		if (!(a.name in row)) return a;
+		const v = row[a.name];
+		if (a.name === 'description' && v !== null && typeof v === 'object' && !Array.isArray(v)) {
+			return { name: a.name, value: { en: '', 'zh-cn': '', ...v } };
+		}
+		return { name: a.name, value: v };
+	});
+	const instanceAttrs = Object.entries(row)
+		.filter(([name]) => !isClassAttribute(name))
+		.map(([name, value]) => ({ name, value }));
+	return [...classAttrs, ...instanceAttrs];
+}
+
 export function isClassAttribute(name: string): boolean {
 	return CLASS_ATTRIBUTES.includes(name);
 }
@@ -133,13 +152,15 @@ function withoutEmptyTexts(value: Json): Json {
 	return Object.fromEntries(Object.entries(value).filter(([, t]) => t !== ''));
 }
 
-// The class row the create endpoint stores as a draft. Empty implement_notes
-// are left out.
+// The class row the create and update endpoints store. Empty implement_notes
+// and an empty description are left out (an active class may have none).
 export function buildClassRow(attributes: DraftAttribute[]): JsonObject {
 	const row: JsonObject = {};
 	for (const a of attributes) {
 		if (a.name === 'implement_notes' && a.value === '') continue;
-		row[a.name] = a.name === 'description' ? withoutEmptyTexts(a.value) : a.value;
+		const value = a.name === 'description' ? withoutEmptyTexts(a.value) : a.value;
+		if (a.name === 'description' && (value === '' || (typeof value === 'object' && value !== null && Object.keys(value).length === 0))) continue;
+		row[a.name] = value;
 	}
 	return row;
 }

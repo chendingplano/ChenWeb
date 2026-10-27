@@ -415,7 +415,7 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Web Page Interpreter (devdoc 2026102601): app bundles, admin descriptor
 	// writes, actions that run on the server, page search for authors, and
-	// element classes for the WPI editor (created as drafts).
+	// element classes for the WPI editor (created as drafts, then edited).
 	wpiHandler := wpi.New(ApiTypes.ProjectDBHandle)
 	apiGroup.GET("/wpi/apps/:appId", wpiHandler.GetApp)
 	apiGroup.PUT("/wpi/descriptors/:kind/:descriptorId", wpiHandler.PutDescriptor)
@@ -424,6 +424,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/wpi/pages/:pageId", wpiHandler.GetPage)
 	apiGroup.GET("/wpi/classes/element", wpiHandler.ListElementClasses)
 	apiGroup.POST("/wpi/classes/element", wpiHandler.CreateElementClass)
+	apiGroup.GET("/wpi/classes/element/:classId", wpiHandler.GetElementClass)
+	apiGroup.PUT("/wpi/classes/element/:classId", wpiHandler.UpdateElementClass)
 
 	// Holiday calendar admin (System Admin > System > Calendar). Admin-only:
 	// year-independent holiday definitions plus year-specific date bindings

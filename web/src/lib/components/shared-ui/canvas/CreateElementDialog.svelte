@@ -3,14 +3,18 @@
      attributes, starting with its class attributes, and stores it as a draft, to be implemented in
      code afterwards (OpenSpec wpi-create-element-class). Each instance attribute is an object with a
      help tip and a default. Double-clicking a value, help tip or instance attribute name edits it.
-     The corner grip resizes the dialog. -->
+     The corner grip resizes the dialog. Given a classId, the same form edits that class's latest
+     row instead (from an element node's tool bar); its class ID is fixed, and saving stores the
+     next version with the same status. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
-  import { createElementClass, WpiError } from '$lib/wpi/api';
+  import { onMount } from 'svelte';
+  import { createElementClass, getElementClass, updateElementClass, WpiError } from '$lib/wpi/api';
   import type { Issue } from '$lib/wpi/types';
   import {
     applyEdit,
     attributeProblem,
+    attributesFromRow,
     buildClassRow,
     defaultValue,
     editText,
@@ -29,15 +33,38 @@
 
   let {
     darkMode = true,
-    onCreated,
+    classId,
+    onSaved,
     onClose,
   }: {
     darkMode?: boolean;
-    onCreated: (classId: string) => void;
+    // The class to edit; without it the form creates a new class.
+    classId?:  string;
+    onSaved:   (classId: string) => void;
     onClose:   () => void;
   } = $props();
 
   let attributes = $state<DraftAttribute[]>(initialAttributes());
+
+  // Editing: the class row is loaded first, and its status decides how the server checks it.
+  const editMode = $derived(classId !== undefined);
+  let loaded    = $state(false);
+  let loadError = $state('');
+  let status    = $state<'draft' | 'active'>('draft');
+
+  onMount(async () => {
+    if (classId === undefined) return;
+    try {
+      const row = await getElementClass(classId);
+      attributes = attributesFromRow(row.class);
+      status = row.status;
+      loaded = true;
+    } catch (e) {
+      loadError = e instanceof WpiError && e.status === 404
+        ? m.wpi_edit_element_err_not_found({ id: classId })
+        : m.wpi_edit_element_err_load({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
 
   // The attribute being entered.
   let attrName     = $state('');
@@ -110,6 +137,8 @@
     if (isEditing(attr, field)) return;
     // Class attribute names are fixed, and class attributes have no help tip.
     if (field !== 'value' && isClassAttribute(attr.name)) return;
+    // An edited class keeps its ID.
+    if (editMode && attr.name === 'descriptor_id') return;
     editing = { name: attr.name, field };
     editValue = editText(attr, field);
     editError = '';
@@ -156,6 +185,11 @@
     node.select();
   }
 
+  // A save's error sits below the attribute list, which may be longer than the dialog.
+  function reveal(node: HTMLElement) {
+    node.scrollIntoView({ block: 'nearest' });
+  }
+
   function onEditStartKeydown(e: KeyboardEvent, attr: DraftAttribute, field: EditField) {
     if (e.key === 'Enter' || e.key === 'F2') {
       e.preventDefault();
@@ -188,7 +222,7 @@
     handle.addEventListener('pointercancel', stop);
   }
 
-  async function create() {
+  async function save() {
     clearFormError();
     const row = buildClassRow(attributes);
     const p = rowProblem(row);
@@ -196,22 +230,28 @@
       formError = m.wpi_create_element_err_class_id();
       return;
     }
-    if (p === 'description') {
+    // Only a draft needs a description: an active class's code says what it is.
+    if (p === 'description' && !(editMode && status === 'active')) {
       formError = m.wpi_create_element_err_description();
       return;
     }
     const id = row.descriptor_id as string;
     saving = true;
     try {
-      await createElementClass(row);
-      onCreated(id);
+      if (classId !== undefined) await updateElementClass(classId, row);
+      else await createElementClass(row);
+      onSaved(id);
     } catch (e) {
       if (e instanceof WpiError && e.status === 409) formError = m.wpi_create_element_err_exists({ id });
-      else if (e instanceof WpiError && e.status === 403) formError = m.wpi_create_element_err_admin();
+      else if (e instanceof WpiError && e.status === 404) formError = m.wpi_edit_element_err_not_found({ id });
+      else if (e instanceof WpiError && e.status === 403) formError = editMode ? m.wpi_edit_element_err_admin() : m.wpi_create_element_err_admin();
       else if (e instanceof WpiError && e.issues.length > 0) {
-        formError = m.wpi_create_element_err_refused();
+        formError = editMode ? m.wpi_edit_element_err_refused() : m.wpi_create_element_err_refused();
         issues = e.issues;
-      } else formError = m.wpi_create_element_err_failed({ error: e instanceof Error ? e.message : String(e) });
+      } else {
+        const error = e instanceof Error ? e.message : String(e);
+        formError = editMode ? m.wpi_edit_element_err_failed({ error }) : m.wpi_create_element_err_failed({ error });
+      }
     } finally {
       saving = false;
     }
@@ -250,13 +290,23 @@
     <!-- Header -->
     <div style="padding:16px 20px; border-bottom:1px solid var(--cv-divider); display:flex; justify-content:space-between; align-items:flex-start;">
       <div>
-        <div id="create-element-title" style="font-size:15px; font-weight:600; color:var(--cv-text);">{m.wpi_create_element_title()}</div>
-        <div style="font-size:11px; color:var(--cv-text-muted); margin-top:2px;">{m.wpi_create_element_subtitle()}</div>
+        <div id="create-element-title" style="font-size:15px; font-weight:600; color:var(--cv-text);">
+          {classId !== undefined ? m.wpi_edit_element_title({ id: classId }) : m.wpi_create_element_title()}
+        </div>
+        <div style="font-size:11px; color:var(--cv-text-muted); margin-top:2px;">
+          {#if !editMode}{m.wpi_create_element_subtitle()}
+          {:else if loaded}{status === 'draft' ? m.wpi_edit_element_subtitle_draft() : m.wpi_edit_element_subtitle_active()}{/if}
+        </div>
       </div>
       <button onclick={onClose} style="color:var(--cv-text-muted); font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_create_element_close()}>✕</button>
     </div>
 
     <div style="flex:1; overflow-y:auto; padding:16px 20px;">
+      {#if loadError}
+        <div class="error">{loadError}</div>
+      {:else if editMode && !loaded}
+        <div style="font-size:11px; color:var(--cv-text-muted);">{m.wpi_edit_element_loading()}</div>
+      {:else}
       <!-- New attribute; a change to any of its fields clears the last add's error -->
       <div class="section" style="margin-top:0;">{m.wpi_create_element_attributes()}</div>
       <div oninput={() => (attrError = '')}>
@@ -332,6 +382,8 @@
                   {:else if isEditing(attr, 'value')}
                     <input class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit}
                       aria-label={m.wpi_create_element_edit_value({ name: attr.name })} autocomplete="off" use:focusSelect />
+                  {:else if editMode && attr.name === 'descriptor_id'}
+                    <span class="name" title={m.wpi_edit_element_class_id_fixed()}>{attr.value}</span>
                   {:else}
                     <button type="button" class="value" title={m.wpi_create_element_double_click_to_edit()}
                       onkeydown={(e) => onEditStartKeydown(e, attr, 'value')}>
@@ -389,7 +441,7 @@
       {/if}
 
       {#if formError}
-        <div class="error" style="margin-top:12px;">
+        <div class="error" style="margin-top:12px;" use:reveal>
           {formError}
           {#if issues.length > 0}
             <ul style="margin:4px 0 0 16px; list-style:disc;">
@@ -400,13 +452,18 @@
           {/if}
         </div>
       {/if}
+      {/if}
     </div>
 
     <!-- Footer -->
     <div style="padding:12px 20px; border-top:1px solid var(--cv-divider); display:flex; justify-content:flex-end; gap:8px;">
       <button type="button" class="btn" onclick={onClose}>{m.wpi_create_element_cancel()}</button>
-      <button type="button" class="btn primary" onclick={create} disabled={saving}>
-        {saving ? m.wpi_create_element_creating() : m.wpi_create_element_create()}
+      <button type="button" class="btn primary" onclick={save} disabled={saving || (editMode && !loaded)}>
+        {#if editMode}
+          {saving ? m.wpi_edit_element_saving() : m.wpi_edit_element_save()}
+        {:else}
+          {saving ? m.wpi_create_element_creating() : m.wpi_create_element_create()}
+        {/if}
       </button>
     </div>
 

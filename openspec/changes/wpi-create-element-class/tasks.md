@@ -65,3 +65,10 @@
 - [x] 11.1 `PropertiesPanel.svelte`: tabs Properties and Node (`nodeTab`, set by the WPI editor only; the Flow page keeps one panel); the editor's panel starts at 390 px
 - [x] 11.2 `NodeDescriptorEditor.svelte`: the node's descriptor as name/value rows — add (Enter in the name), rename (on leaving the field; a refused name is put back), change, remove; `element` fixed; `node-descriptor.ts` + tests, `wpi-json.ts` `nodeData` (inverse of `nodeJson`) + tests; messages in both languages
 - [x] 11.3 `bun run check`, unit tests and the editor's browser run (English and Chinese, light and dark: add, rename, refused names, remove, Properties tab and View JSON agree, page node data) pass; spec and devdocs 2603/2701 updated
+
+## 12. Node tool bar: Duplicate, Delete, Edit class
+
+- [x] 12.1 `BaseNode.svelte`: Configure removed; Duplicate and Delete from `node-actions.ts` context (`setNodeActions`, `duplicateNode`, `removeNode` + tests), provided by `wpi-editor.svelte` and `canvas-01.svelte` with undo snapshots; node components no longer pass tool bar callbacks
+- [x] 12.2 Backend: `GET`/`PUT /api/v1/wpi/classes/element/:classId` (`GetElementClass`, `UpdateElementClass`; store `elementClass`, `insertClassVersion`): next version keeps the status, drafts checked as drafts, active classes against their code; store and handler tests
+- [x] 12.3 `WpiNode.svelte`: Edit class on element nodes; `CreateElementDialog.svelte` given `classId` edits that class (`attributesFromRow` + tests, fixed ID, Save, errors scrolled into view); `api.ts` `getElementClass`, `updateElementClass` + tests; messages in both languages
+- [x] 12.4 `go test`, `bun run check`, unit tests, and the browser runs (WPI editor: tool bar buttons, duplicate + undo, delete with edge + undo, draft edit saved as version 2, active edit refused, Chinese; Flow page: duplicate, delete, undo) pass; verification rows removed; spec, design and devdocs updated

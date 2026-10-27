@@ -41,6 +41,11 @@ implement.
 - **The palette's ELEMENTS folder lists the stored element classes.** A draft is shown as
   not yet implemented. Dragging a class onto the canvas adds an element node labelled with
   that class, which is what Create Element used to do.
+- **The node tool bar works** (added 2026-10-27). The no-op Configure button is gone;
+  Duplicate copies the node and Delete removes it with its edges, both undoable, on the WPI
+  editor and the Flow page. An element node also gets **Edit class**, which opens the Create
+  Element form on that class's latest row; saving stores the class's next version with the
+  same status, through the new `GET`/`PUT /api/v1/wpi/classes/element/:classId`.
 
 ## Capabilities
 
@@ -72,5 +77,8 @@ implement.
   allows `draft`.
 - Interpreter: `classDefaults`/`mergeInstance` in `server/api/wpi/validate.go`,
   `mergeElement` in `web/src/lib/wpi/entries.ts`; seed tests read the new migration.
+- Node tool bar (2026-10-27): `canvas/nodes/BaseNode.svelte` and the node components that
+  passed no-op tool bar callbacks, `canvas/node-actions.ts` (+ tests), `canvas-01.svelte`;
+  `GetElementClass`/`UpdateElementClass` and two store methods for the class edit.
 - Docs: devdoc 2026102601 §3.5.1, §6 and §9 (classes may be drafted before their code),
   devdoc 2026102603, and the WPI reusable-module entries for the new endpoints.

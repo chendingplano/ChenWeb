@@ -178,6 +178,86 @@ func (h *Handler) ListElementClasses(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"classes": classes})
 }
 
+// GetElementClass returns the latest draft or active version of an element
+// class, for the editor's edit form.
+// Endpoint: GET /api/v1/wpi/classes/element/:classId
+func (h *Handler) GetElementClass(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	id := c.Param("classId")
+	if !idPattern.MatchString(id) {
+		return errorJSON(c, http.StatusNotFound, "Element class not found")
+	}
+	row, found, err := store{h.DB}.elementClass(c.Request().Context(), id)
+	if err != nil {
+		handlerLog.Error("WPI element class read failed", "id", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to read element class")
+	}
+	if !found {
+		return errorJSON(c, http.StatusNotFound, "Element class not found")
+	}
+	handlerLog.Info("WPI element class read", "id", id, "version", row.Version, "status", row.Status, "user", actorName(user))
+	return c.JSON(http.StatusOK, row)
+}
+
+// UpdateElementClass stores an edited element class as its next version, with
+// the status of its latest one: a draft stays a draft and is checked as one; an
+// active class is checked against its code, as PutDescriptor does. The class
+// ID cannot change (OpenSpec wpi-create-element-class).
+// Endpoint: PUT /api/v1/wpi/classes/element/:classId (admins only)
+func (h *Handler) UpdateElementClass(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	if !isAdmin(user) {
+		return errorJSON(c, http.StatusForbidden, "Admin access required")
+	}
+	id := c.Param("classId")
+	if !idPattern.MatchString(id) {
+		return errorJSON(c, http.StatusNotFound, "Element class not found")
+	}
+	raw, err := io.ReadAll(io.LimitReader(c.Request().Body, maxBodyBytes))
+	if err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Unable to read request body")
+	}
+	body, err := decodeBody(raw)
+	if err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
+	}
+	if got, _ := body["descriptor_id"].(string); got != id {
+		return errorJSON(c, http.StatusBadRequest, fmt.Sprintf("descriptor_id %q does not match %q", got, id))
+	}
+	st := store{h.DB}
+	ctx := c.Request().Context()
+	cur, found, err := st.elementClass(ctx, id)
+	if err != nil {
+		handlerLog.Error("WPI element class read failed", "id", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to read element class")
+	}
+	if !found {
+		return errorJSON(c, http.StatusNotFound, "Element class not found")
+	}
+	var issues []Issue
+	if cur.Status == "draft" {
+		issues = ValidateDraftClass(body)
+	} else {
+		issues = ValidateDescriptor(KindElement, id, body)
+	}
+	if len(issues) > 0 {
+		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+	}
+	version, err := st.insertClassVersion(ctx, id, cur.Status, raw, actorName(user))
+	if err != nil {
+		handlerLog.Error("WPI element class update failed", "id", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to store element class")
+	}
+	handlerLog.Info("WPI element class updated", "id", id, "version", version, "status", cur.Status, "user", actorName(user))
+	return c.JSON(http.StatusOK, map[string]any{"descriptor_id": id, "version": version, "status": cur.Status})
+}
+
 // Limits of a page search (design D10).
 const (
 	defaultPageLimit = 50

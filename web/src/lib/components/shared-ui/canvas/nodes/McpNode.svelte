@@ -6,7 +6,6 @@
 </script>
 <BaseNode {id} {selected} label={String(data.label ?? 'MCP')} icon="🔌"
   inputHandles={['request']} outputHandles={['response']}
-  onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">
     {data.server_url ?? m.mcpnode_no_server()}

@@ -247,3 +247,58 @@ page's properties panel SHALL have no tabs.
 #### Scenario: Class key fixed
 - **WHEN** an element node is selected on the Node tab
 - **THEN** its `element` row has a read-only name and no remove button
+
+### Requirement: Admins edit element classes
+`GET /api/v1/wpi/classes/element/:classId` SHALL return the class's latest row whose status
+is `draft` or `active` as `version`, `status` and `class` (the whole row), or 404 when it
+has none; it SHALL require a logged-in user. `PUT` on the same path SHALL take an edited
+class row and store it as the class's next version with the status of its latest draft or
+active row: a draft SHALL be checked by the draft rules, an active class as the descriptor
+PUT checks it, against its code. The response SHALL be 200 with `descriptor_id`, `version`
+and `status`. A body whose `descriptor_id` differs from the path SHALL be refused with 400,
+a class with no draft or active row with 404, and a row that breaks a rule with 400 listing
+the issues; nothing SHALL be stored then. Only admins SHALL be allowed.
+
+#### Scenario: Draft edited
+- **WHEN** draft `slider` is at version 1 and an admin PUTs an edited `slider` row
+- **THEN** version 2 is stored with status `draft` and the response says version 2, status `draft`
+
+#### Scenario: Active class edited
+- **WHEN** `input` is active at version 2 and an admin PUTs it with a changed help tip
+- **THEN** version 3 is stored with status `active`
+
+#### Scenario: Attribute the code lacks
+- **WHEN** an admin PUTs `input` with an attribute `slider_min`
+- **THEN** the response is 400 with the issue `unknown attribute "slider_min"` and nothing is stored
+
+#### Scenario: Class ID changed
+- **WHEN** an admin PUTs a body with `descriptor_id` `slider` to `/classes/element/dial`
+- **THEN** the response is 400 and nothing is stored
+
+### Requirement: Node tool bar
+A selected node on the WPI editor's canvas and on the Flow page SHALL show a tool bar with
+**Duplicate** and **Delete**, and no Configure button. Duplicate SHALL add a copy of the
+node, with its data and size, one grid cell right of and below it (further while another
+node sits there), and select the copy; edges SHALL NOT be copied. Delete SHALL remove the
+node and every edge that touches it. Both SHALL be undoable. On the WPI editor, an element
+node's tool bar SHALL also have **Edit class**, which opens the Create Element form on the
+node's class: the class's latest row, with `descriptor_id` read-only, a note saying whether
+the class is a draft or implemented, and **Save** in place of Create Element. Saving SHALL
+store the edited row through the class PUT, close the form, say the class was saved, and
+reload the class list; a refused save SHALL show the server's issues in the form.
+
+#### Scenario: Duplicate an element node
+- **WHEN** an `input` node with `label` `Name` is selected and the author clicks Duplicate
+- **THEN** a second `input` node with `label` `Name` and the same size appears one grid cell down-right and is selected
+
+#### Scenario: Delete a wired node
+- **WHEN** a page node with an edge to an action node is selected and the author clicks Delete
+- **THEN** the page node and the edge are removed, and undo brings both back
+
+#### Scenario: No edit for pages
+- **WHEN** a page node is selected
+- **THEN** its tool bar has Duplicate and Delete only
+
+#### Scenario: Edit a draft class from its node
+- **WHEN** the author clicks Edit class on a node of draft `slider`, changes a default and saves
+- **THEN** draft version 2 of `slider` is stored with the change and the form closes

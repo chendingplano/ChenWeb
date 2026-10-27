@@ -5,7 +5,6 @@
 </script>
 <BaseNode {id} {selected} label={String(data.label ?? 'GIT')} icon="🗂"
   inputHandles={['files']} outputHandles={['result']}
-  onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.operation ?? 'status'} · {data.branch ?? 'main'}

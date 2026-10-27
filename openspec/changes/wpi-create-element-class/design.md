@@ -164,6 +164,40 @@ action classes too. It is optional, a text attribute, and is never merged into i
 The form lists it from the start, edits it in a multi-line editor (Enter starts a line,
 Ctrl/Cmd+Enter keeps the text), and leaves it out of the row while it is empty.
 
+**D11. Editing a class stores its next version with the same status.** The user asked
+(2026-10-27) for an edit button on a node that opens the node's class descriptor in a form
+like Create Element. Only element nodes have a class in the editor (pages have none, and
+action nodes do not name one yet), so only they get the button. `GET
+/api/v1/wpi/classes/element/:classId` returns the class's latest draft or active row whole
+(`{version, status, class}`); `PUT` on the same path takes the edited row and stores version
+N+1 with the status of the latest row, decided on the server: a draft stays a draft and is
+checked by the draft rules (D4); an active class is checked by `ValidateDescriptor`, as the
+descriptor PUT does, so an attribute its code does not define is refused and nothing is
+stored. The class ID cannot change (a 400 if the body's `descriptor_id` differs; the form
+shows it read-only). Admins only; last save wins, as for every descriptor.
+*Alternatives:* save every edit as a draft version on top of an active class (the editor
+and the running interpreter would then disagree about the class); edit drafts only
+(implemented classes could not get help tips or new defaults from the editor). Both
+rejected.
+The form is `CreateElementDialog.svelte` given a `classId`: it loads the row
+(`attributesFromRow` puts the class attributes first, in the create form's order, and gives
+a description by language both language slots), fixes `descriptor_id`, says whether the
+class is a draft or implemented, and its button is **Save**. `buildClassRow` now leaves out
+an empty description, since an active class may have none; the form asks for one only for
+drafts.
+
+**D12. The node tool bar's actions come from the canvas.** `BaseNode`, shared by the WPI
+editor and the Flow page, had three buttons whose callbacks every node component set to
+no-ops. The user asked to remove the first (Configure) and make the other two work.
+Duplicate and Delete change the canvas's node list and must be undoable, which only the
+canvas that holds the nodes can do, so each canvas provides them through Svelte context
+(`setNodeActions` in `node-actions.ts`), and `BaseNode` reads them; the node components no
+longer pass tool bar callbacks. Duplicate copies the node's data and size one grid cell
+down-right (further while another node sits there) and selects the copy; edges are not
+copied. Delete removes the node and the edges that touch it. A tool bar click stops
+propagation, or Svelte Flow's node click would select the clicked node again, and the bar
+is `nodrag`. `WpiNode` passes `onEdit` (the Edit class button) for element nodes only.
+
 **D8. The ELEMENTS folder shows the class list.** The editor loads the list when it opens,
 and again after a create. Each class becomes a palette entry in the `Elements` category
 with ID `wpi-element:<class>`, which is unique, as the palette's keyed list requires. A

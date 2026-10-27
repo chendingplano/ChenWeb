@@ -218,6 +218,39 @@ func (s store) elementClasses(ctx context.Context) ([]ClassSummary, error) {
 	return out, rows.Err()
 }
 
+// ClassRow is the latest draft or active version of an element class, whole,
+// for the editor's edit form.
+type ClassRow struct {
+	Version int             `json:"version"`
+	Status  string          `json:"status"`
+	Class   json.RawMessage `json:"class"`
+}
+
+// elementClass returns the latest draft or active version of an element class;
+// found is false when it has none.
+func (s store) elementClass(ctx context.Context, id string) (c ClassRow, found bool, err error) {
+	var raw []byte
+	err = s.db.QueryRowContext(ctx, `SELECT version, status, body FROM kb.wpi_descriptors
+		WHERE kind = 'element' AND descriptor_id = $1 AND status IN ('draft', 'active') ORDER BY version DESC LIMIT 1`, id).
+		Scan(&c.Version, &c.Status, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClassRow{}, false, nil
+	}
+	c.Class = raw
+	return c, err == nil, err
+}
+
+// insertClassVersion stores body as the next version of an element class with
+// the given status, so an edited draft stays a draft.
+func (s store) insertClassVersion(ctx context.Context, id, status string, raw []byte, actor string) (int, error) {
+	var version int
+	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
+		SELECT 'element', $1::text, COALESCE(MAX(version), 0) + 1, $2::text, $3::jsonb, $4::text, $5::text, $5::text
+		FROM kb.wpi_descriptors WHERE kind = 'element' AND descriptor_id = $1::text
+		RETURNING version`, id, ElementSchemaVersion, string(raw), status, actor).Scan(&version)
+	return version, err
+}
+
 // Kinds of stored rows that query and load-file name (design D8).
 const (
 	storedStatement = "statement"

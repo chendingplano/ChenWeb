@@ -6,7 +6,6 @@
 </script>
 <BaseNode {id} {selected} label={String(data.label ?? 'AI Assistant')} icon="🤖"
   inputHandles={['text','context']} outputHandles={['response']}
-  onConfigure={() => {}} onDuplicate={() => {}} onDelete={() => {}}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
     {data.model ?? 'gpt-4o'}
