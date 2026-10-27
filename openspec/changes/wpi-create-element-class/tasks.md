@@ -28,3 +28,9 @@
 - [x] 5.1 `element-class-form.ts`: initial class attributes, value parsing per attribute, edit text, edit and row checks; unit tests
 - [x] 5.2 `CreateElementDialog.svelte`: drop the class ID and description inputs; list starts with the class attributes (not removable); double-click (or Enter/F2) edits a value in place; stale create errors cleared on change
 - [x] 5.3 Messages updated in both languages; `bun run check`, unit tests and the browser run pass; spec, design and devdocs updated
+
+## 6. Form revision (aligned class column, resizing, renaming)
+
+- [x] 6.1 Class tags in a column of their own; resize grip (bottom-right, centred dialog grows by twice the drag, 480×320 minimum)
+- [x] 6.2 Double-click an instance attribute's name to rename it (`renameProblem`); class attribute names read-only; unit tests
+- [x] 6.3 Messages in both languages; `bun run check`, unit tests and the browser run (alignment, rename, resize) pass; spec, design and devdocs updated

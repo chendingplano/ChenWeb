@@ -53,17 +53,26 @@ export function editText(attr: DraftAttribute): string {
 	return TEXT_ONLY.includes(attr.name) ? String(attr.value) : JSON.stringify(attr.value);
 }
 
+function nameProblem(name: string, others: DraftAttribute[]): AttributeProblem | null {
+	if (!ATTRIBUTE_NAME_PATTERN.test(name)) return 'name';
+	if (RESERVED_NAMES.includes(name)) return 'reserved';
+	if (others.some((a) => a.name === name)) return 'duplicate';
+	return null;
+}
+
 export function attributeProblem(
 	name: string,
 	required: boolean,
 	defaultText: string,
 	added: DraftAttribute[]
 ): AttributeProblem | null {
-	if (!ATTRIBUTE_NAME_PATTERN.test(name)) return 'name';
-	if (RESERVED_NAMES.includes(name)) return 'reserved';
-	if (added.some((a) => a.name === name)) return 'duplicate';
-	if (!required && defaultText.trim() === '') return 'no_default';
-	return null;
+	return nameProblem(name, added) ?? (!required && defaultText.trim() === '' ? 'no_default' : null);
+}
+
+// Renaming an instance attribute; class attribute names cannot change.
+export function renameProblem(oldName: string, newName: string, attributes: DraftAttribute[]): AttributeProblem | null {
+	if (newName === oldName) return null;
+	return nameProblem(newName, attributes.filter((a) => a.name !== oldName));
 }
 
 // An edit may leave a class attribute empty (create reports it), but not an

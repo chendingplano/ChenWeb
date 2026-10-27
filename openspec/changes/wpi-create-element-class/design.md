@@ -94,11 +94,16 @@ out. Any logged-in user may read it, as with page search.
 **D7. The form.** `CreateElementDialog.svelte` is a modal over the editor, styled like the
 editor's other dark panels. The descriptor is one list of attributes, in row order. It
 starts with the class attributes (`descriptor_id` empty, `schema_version` `"0.2"`,
-`description` `{"en": "", "zh-cn": ""}`), which are tagged "class" and cannot be removed.
+`description` `{"en": "", "zh-cn": ""}`), which are tagged "class" in a column of their
+own and cannot be removed or renamed.
 Above the list, an attribute row (name, default value, "Every instance must set it") and
 **Add Attribute** append instance attributes, which have a remove button. Double-clicking a
-row edits its value in place (Enter or blur keeps it, Escape drops it without closing the
-form; Enter or F2 on the focused value does the same from the keyboard). **Create Element**
+value edits it in place, and double-clicking an instance attribute's name renames it in
+place, keeping its position and value (Enter or blur keeps the edit, Escape drops it
+without closing the form; Enter or F2 on the focused value or name does the same from the
+keyboard). A grip in the bottom-right corner resizes the form. The form is centred, so a
+drag changes its size by twice the pointer's movement, which keeps the corner under the
+pointer; the size is limited to at least 480×320 and at most the window. **Create Element**
 sends the descriptor. The user decided (2026-10-27) that the class attributes are created
 automatically and that the list is their only editor, replacing separate class ID and
 description inputs.

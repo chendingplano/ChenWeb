@@ -96,11 +96,15 @@ left out. It SHALL require a logged-in user.
 In the WPI editor, **Create Nodes → Create Element** SHALL open a form that defines an
 element class as a list of its attributes. The list SHALL start with the class attributes
 `descriptor_id` (empty), `schema_version` (`"0.2"`) and `description`
-(`{"en": "", "zh-cn": ""}`), which cannot be removed. An instance attribute SHALL be entered
+(`{"en": "", "zh-cn": ""}`), which are marked as class attributes in a column of their own
+and cannot be removed or renamed. An instance attribute SHALL be entered
 as a name and either a default value or "Every instance must set it" (stored as `null`), and
 added with **Add Attribute** to the list, which shows every attribute with its stored value;
-instance attributes can be removed. Double-clicking an attribute SHALL edit its value in
-place: Enter or leaving the field keeps the edit, Escape drops it. A typed value SHALL be
+instance attributes can be removed. Double-clicking an attribute's value SHALL edit it in
+place, and double-clicking an instance attribute's name SHALL rename it in place: Enter or
+leaving the field keeps the edit, Escape drops it. A rename SHALL be refused for a
+malformed, reserved or duplicate name. The author SHALL be able to resize the form by
+dragging its corner. A typed value SHALL be
 stored as JSON when it parses as JSON, otherwise as a string, except `descriptor_id` and
 `schema_version`, which are always strings; an instance attribute cannot be edited to empty.
 **Create Element** SHALL post the class, leaving out empty description texts, after
@@ -116,6 +120,14 @@ Chinese.
 #### Scenario: Value edited by double-click
 - **WHEN** the author double-clicks `descriptor_id`, types `slider` and presses Enter
 - **THEN** the list shows `slider`, and the created row has `"descriptor_id": "slider"`
+
+#### Scenario: Instance attribute renamed
+- **WHEN** the author double-clicks the name `max` and types `maximum`
+- **THEN** the list shows `maximum` with the same value, and the created row has `maximum`, not `max`
+
+#### Scenario: Class attribute name is read-only
+- **WHEN** the author double-clicks the name `description`
+- **THEN** nothing becomes editable
 
 #### Scenario: Class ID missing
 - **WHEN** the author presses Create Element without setting `descriptor_id`

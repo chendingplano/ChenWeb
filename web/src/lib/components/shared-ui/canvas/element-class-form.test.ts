@@ -11,6 +11,7 @@ import {
 	isClassAttribute,
 	parseDefault,
 	parseValue,
+	renameProblem,
 	rowProblem
 } from './element-class-form';
 
@@ -104,4 +105,13 @@ test('row problems', () => {
 	assert.equal(rowProblem(row('Slider', { en: 'A slider' })), 'class_id');
 	assert.equal(rowProblem(row('slider', { en: '', 'zh-cn': '滑块' })), 'description');
 	assert.equal(rowProblem(row('slider', '')), 'description');
+});
+
+test('renaming an instance attribute', () => {
+	const attrs = [...initialAttributes(), { name: 'label', value: null }, { name: 'max', value: 100 }];
+	assert.equal(renameProblem('max', 'max', attrs), null);
+	assert.equal(renameProblem('max', 'maximum', attrs), null);
+	assert.equal(renameProblem('max', 'label', attrs), 'duplicate');
+	assert.equal(renameProblem('max', 'description', attrs), 'reserved');
+	assert.equal(renameProblem('max', 'max-value', attrs), 'name');
 });

@@ -1,7 +1,8 @@
 <!-- web/src/lib/components/shared-ui/canvas/CreateElementDialog.svelte -->
 <!-- The WPI editor's Create Element form: defines a new element class as a list of attributes,
      starting with its class attributes, and stores it as a draft, to be implemented in code
-     afterwards (OpenSpec wpi-create-element-class). Double-clicking an attribute edits its value. -->
+     afterwards (OpenSpec wpi-create-element-class). Double-clicking a value edits it; double-clicking
+     an instance attribute's name renames it. The corner grip resizes the dialog. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import { createElementClass, WpiError } from '$lib/wpi/api';
@@ -15,6 +16,7 @@
     initialAttributes,
     isClassAttribute,
     parseValue,
+    renameProblem,
     rowProblem,
     type AttributeProblem,
     type DraftAttribute,
@@ -36,10 +38,16 @@
   let attrRequired = $state(false);
   let attrError    = $state('');
 
-  // The attribute whose value is being edited in the list.
-  let editing   = $state<string | null>(null);
+  // The attribute whose name or value is being edited in the list.
+  let editing   = $state<{ name: string; field: 'name' | 'value' } | null>(null);
   let editValue = $state('');
   let editError = $state('');
+
+  // The dialog's size once the author has resized it; until then it fits its content.
+  const MIN_WIDTH = 480;
+  const MIN_HEIGHT = 320;
+  let panel = $state<HTMLDivElement>();
+  let size  = $state<{ width: number; height: number } | null>(null);
 
   let formError = $state('');
   let issues    = $state<Issue[]>([]);
@@ -81,23 +89,39 @@
     clearFormError();
   }
 
-  function startEdit(attr: DraftAttribute) {
+  function isEditing(attr: DraftAttribute, field: 'name' | 'value') {
+    return editing?.name === attr.name && editing.field === field;
+  }
+
+  function startEdit(attr: DraftAttribute, field: 'name' | 'value') {
     // A double-click inside the open editor selects a word; it must not restart the edit.
-    if (editing === attr.name) return;
-    editing = attr.name;
-    editValue = editText(attr);
+    if (isEditing(attr, field)) return;
+    // Class attribute names are fixed.
+    if (field === 'name' && isClassAttribute(attr.name)) return;
+    editing = { name: attr.name, field };
+    editValue = field === 'name' ? attr.name : editText(attr);
     editError = '';
   }
 
   function commitEdit() {
-    const name = editing;
-    if (name === null) return;
-    const p = editProblem(name, editValue);
-    if (p) {
-      editError = problemText(p, name);
-      return;
+    if (editing === null) return;
+    const { name, field } = editing;
+    if (field === 'name') {
+      const newName = editValue.trim();
+      const p = renameProblem(name, newName, attributes);
+      if (p) {
+        editError = problemText(p, newName);
+        return;
+      }
+      attributes = attributes.map((a) => (a.name === name ? { name: newName, value: a.value } : a));
+    } else {
+      const p = editProblem(name, editValue);
+      if (p) {
+        editError = problemText(p, name);
+        return;
+      }
+      attributes = attributes.map((a) => (a.name === name ? { name, value: parseValue(name, editValue) } : a));
     }
-    attributes = attributes.map((a) => (a.name === name ? { name, value: parseValue(name, editValue) } : a));
     editing = null;
     editError = '';
     clearFormError();
@@ -122,6 +146,38 @@
   function focusSelect(node: HTMLInputElement) {
     node.focus();
     node.select();
+  }
+
+  function onEditStartKeydown(e: KeyboardEvent, attr: DraftAttribute, field: 'name' | 'value') {
+    if (e.key === 'Enter' || e.key === 'F2') {
+      e.preventDefault();
+      startEdit(attr, field);
+    }
+  }
+
+  // The dialog is centred, so it grows on both sides: twice the pointer's movement keeps the
+  // corner under the pointer.
+  function startResize(e: PointerEvent) {
+    if (!panel) return;
+    e.preventDefault();
+    const rect = panel.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, width: rect.width, height: rect.height };
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      size = {
+        width: Math.max(MIN_WIDTH, Math.min(window.innerWidth - 16, start.width + 2 * (ev.clientX - start.x))),
+        height: Math.max(MIN_HEIGHT, Math.min(window.innerHeight - 16, start.height + 2 * (ev.clientY - start.y))),
+      };
+    };
+    const stop = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', stop);
+      handle.removeEventListener('pointercancel', stop);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
   }
 
   async function create() {
@@ -169,8 +225,10 @@
   role="dialog" aria-modal="true" aria-labelledby="create-element-title"
   tabindex="-1"
 >
-  <div class="rounded-xl overflow-hidden shadow-2xl"
-    style="background:#111827; border:1px solid #1e2a3a; width:620px; max-width:95vw; max-height:85vh; display:flex; flex-direction:column;">
+  <div bind:this={panel} class="rounded-xl overflow-hidden shadow-2xl"
+    style="position:relative; background:#111827; border:1px solid #1e2a3a; display:flex; flex-direction:column;
+      width:{size ? `${size.width}px` : '620px'}; height:{size ? `${size.height}px` : 'auto'};
+      max-width:calc(100vw - 16px); max-height:{size ? 'calc(100vh - 16px)' : '85vh'};">
 
     <!-- Header -->
     <div style="padding:16px 20px; border-bottom:1px solid #1e2a3a; display:flex; justify-content:space-between; align-items:flex-start;">
@@ -209,26 +267,38 @@
         <table style="width:100%; border-collapse:collapse; font-size:11px;">
           <thead>
             <tr style="background:#161b27; color:#6b7280; text-align:left;">
-              <th style="padding:6px 12px; font-weight:500; width:34%;">{m.wpi_create_element_attribute_name()}</th>
+              <th style="padding:6px 12px; font-weight:500; width:30%;">{m.wpi_create_element_attribute_name()}</th>
+              <th style="width:64px;"></th>
               <th style="padding:6px 12px; font-weight:500;">{m.wpi_create_element_value()}</th>
               <th style="width:32px;"></th>
             </tr>
           </thead>
           <tbody>
             {#each attributes as attr (attr.name)}
-              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <tr class="attr-row" style="border-top:1px solid #1e2a3a; color:#e2e8f0;" ondblclick={() => startEdit(attr)}>
-                <td style="padding:6px 12px; font-family:monospace;">
-                  {attr.name}
+              <tr class="attr-row" style="border-top:1px solid #1e2a3a; color:#e2e8f0;">
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <td style="padding:3px 6px; font-family:monospace; word-break:break-all;" ondblclick={() => startEdit(attr, 'name')}>
+                  {#if isEditing(attr, 'name')}
+                    <input class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit}
+                      aria-label={m.wpi_create_element_rename({ name: attr.name })} autocomplete="off" use:focusSelect />
+                  {:else if isClassAttribute(attr.name)}
+                    <span class="name">{attr.name}</span>
+                  {:else}
+                    <button type="button" class="value" title={m.wpi_create_element_double_click_to_rename()}
+                      onkeydown={(e) => onEditStartKeydown(e, attr, 'name')}>{attr.name}</button>
+                  {/if}
+                </td>
+                <td style="padding:0 6px;">
                   {#if isClassAttribute(attr.name)}<span class="tag">{m.wpi_create_element_class_attribute()}</span>{/if}
                 </td>
-                <td style="padding:3px 6px; font-family:monospace; word-break:break-all;">
-                  {#if editing === attr.name}
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <td style="padding:3px 6px; font-family:monospace; word-break:break-all;" ondblclick={() => startEdit(attr, 'value')}>
+                  {#if isEditing(attr, 'value')}
                     <input class="edit" bind:value={editValue} onkeydown={onEditKeydown} onblur={commitEdit}
                       aria-label={m.wpi_create_element_edit_value({ name: attr.name })} autocomplete="off" use:focusSelect />
                   {:else}
-                    <button type="button" class="value" title={m.wpi_create_element_edit_hint()}
-                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(attr); } }}>
+                    <button type="button" class="value" title={m.wpi_create_element_double_click_to_edit()}
+                      onkeydown={(e) => onEditStartKeydown(e, attr, 'value')}>
                       {#if attr.name === 'descriptor_id' && attr.value === ''}
                         <span class="muted">{m.wpi_create_element_double_click_to_set()}</span>
                       {:else if attr.name === 'descriptor_id' || attr.name === 'schema_version'}
@@ -279,6 +349,9 @@
         {saving ? m.wpi_create_element_creating() : m.wpi_create_element_create()}
       </button>
     </div>
+
+    <!-- Resize grip -->
+    <div class="grip select-none" title={m.wpi_create_element_resize()} aria-hidden="true" onpointerdown={startResize}></div>
   </div>
 </div>
 
@@ -308,9 +381,14 @@
     background: #0d1117; border: 1px solid #6366f1; border-radius: 4px;
     padding: 3px 6px; font: inherit; color: #e2e8f0;
   }
+  .name { display: block; padding: 3px 6px; border: 1px solid transparent; }
   .muted { color: #6b7280; font-family: system-ui, sans-serif; }
+  .grip {
+    position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 0 50%, #4b5563 50% 58%, transparent 58% 70%, #4b5563 70% 78%, transparent 78%);
+  }
   .tag {
-    margin-left: 6px; padding: 0 5px; border-radius: 3px;
+    padding: 0 5px; border-radius: 3px;
     background: #1e2535; color: #818cf8; font-size: 9px; font-family: system-ui, sans-serif;
   }
   .btn {
