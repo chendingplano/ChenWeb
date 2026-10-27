@@ -1,17 +1,18 @@
 # wpi-data-actions Specification
 
 ## Purpose
-Server-side `load` and `save` for WPI apps: only action instances written in stored pages
-run, the browser supplies argument values but never table or column names, values go to the
-database as parameters, and saves are validated on the server with per-attribute errors.
+Server-side actions for WPI apps (`load`, `save`, and the `query` and `load-file` of
+capability `wpi-stored-sources`): only action instances written in stored pages run, the
+browser supplies argument values but never table or column names, values go to the database
+as parameters, and saves are validated on the server with per-attribute errors.
 ## Requirements
 ### Requirement: Only stored actions run
-`POST /api/v1/wpi/actions/run` SHALL run only `load` and `save` action instances written in
-pages stored in `kb.wpi_descriptors`, named by `ref` as
+`POST /api/v1/wpi/actions/run` SHALL run only `load`, `save`, `query` and `load-file` action
+instances written in stored pages, named by `ref` as
 `{"kind": "page", "id": page ID, "pointer": JSON Pointer}`. The system SHALL load the
 instance's action class, check the instance against it and run the merged instance. The
-request SHALL NOT be able to supply a table name, column name or action body. A logged-in
-user SHALL be required.
+request SHALL NOT be able to supply a table name, column name, statement, file or action
+body. A logged-in user SHALL be required.
 
 #### Scenario: Action instance by pointer
 - **WHEN** a logged-in user runs `{"ref": {"kind": "page", "id": "customer-form", "pointer": "/save_action"}, "input_doc": {...}}`
@@ -29,8 +30,12 @@ user SHALL be required.
 - **WHEN** the request body also contains `"table": "kb.users"`
 - **THEN** the system ignores it and uses only the stored instance's table
 
-#### Scenario: Action that is not load or save
+#### Scenario: Action that does not run on the server
 - **WHEN** the pointer names an `open-page` instance
+- **THEN** the response is 400
+
+#### Scenario: Static input is not an action
+- **WHEN** the pointer names a page's `input` that is static data
 - **THEN** the response is 400
 
 #### Scenario: Not logged in

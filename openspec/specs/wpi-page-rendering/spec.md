@@ -22,7 +22,7 @@ naming the page and the class.
 - **THEN** it is drawn as a folder that expands and collapses to show its child items
 
 ### Requirement: Lists query their own records
-A `list` element SHALL run its `source` `load` instance when first drawn, show one row per
+A `list` element SHALL run its `source` instance (`load` or `query`) when first drawn, show one row per
 returned record with the configured columns, and on a row click run `on_row_click` with
 `$record` set to that row's record. It SHALL show a loading state while querying, an empty
 state when there are no records, and an error box when the query fails.

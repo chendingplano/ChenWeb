@@ -1,14 +1,16 @@
 # wpi-descriptor-store Specification
 
 ## Purpose
-Storage and validation of WPI descriptors in `kb.wpi_descriptors`: versioned rows where the
-latest active version wins, the admin write endpoint, the validation rules, and the app bundle
-that returns an app with its pages and the classes they use.
+Storage and validation of WPI descriptors — apps and classes in `kb.wpi_descriptors`, pages
+in `kb.frontend_pages`: versioned rows where the latest active version wins, the admin write
+endpoint, the validation rules, and the app bundle that returns an app with its pages and the
+classes they use.
 ## Requirements
 ### Requirement: Versioned descriptor storage
-The system SHALL store app, page, element and action descriptors in `kb.wpi_descriptors`,
-one row per version, identified by `(kind, descriptor_id, version)`. The descriptor in use
-SHALL be the highest `version` whose `status` is `active`.
+The system SHALL store app, element and action descriptors in `kb.wpi_descriptors`, one row
+per version, identified by `(kind, descriptor_id, version)`, and pages in
+`kb.frontend_pages` (capability `wpi-pages`). The descriptor in use SHALL be the highest
+`version` whose `status` is `active`.
 
 #### Scenario: Latest active version wins
 - **WHEN** page `customer-form` has version 1 `active` and version 2 `active`
@@ -17,6 +19,10 @@ SHALL be the highest `version` whose `status` is `active`.
 #### Scenario: Retired and draft versions are ignored
 - **WHEN** page `customer-form` has version 1 `active` and version 2 `draft`
 - **THEN** the system uses version 1
+
+#### Scenario: No pages in the descriptor table
+- **WHEN** a row of kind `page` is inserted into `kb.wpi_descriptors`
+- **THEN** the database rejects it
 
 ### Requirement: Admins write descriptors as new versions
 `PUT /api/v1/wpi/descriptors/:kind/:descriptorId` SHALL validate the body's structure and
@@ -46,8 +52,9 @@ be made at this point. Only admins (admin flag, owner, or `admin` role) SHALL be
 ### Requirement: App bundle
 `GET /api/v1/wpi/apps/:appId` SHALL return the app descriptor, every page reachable from
 it, and the element and action classes those pages use, keyed by ID, after validating the
-whole set. It SHALL load all active classes of each kind with one query per kind. It SHALL
-require a logged-in user.
+whole set, including that every statement a `query` names and every file a `load-file`
+names is registered. It SHALL load all active classes of each kind with one query per kind.
+It SHALL require a logged-in user.
 
 #### Scenario: Valid app
 - **WHEN** a logged-in user requests `customer-admin`
@@ -69,6 +76,10 @@ require a logged-in user.
 #### Scenario: Broken unused class
 - **WHEN** an active class row that no page of the app uses is invalid
 - **THEN** the app's bundle is still returned
+
+#### Scenario: Unregistered statement
+- **WHEN** a page reachable from the app has a `query` whose `sql_stmt_id` is not in `kb.stored_stmts`
+- **THEN** the response is 422 with an error at that instance's `/sql_stmt_id`
 
 ### Requirement: Validation rules
 The validator SHALL check, for format `schema_version` `"0.2"`:
