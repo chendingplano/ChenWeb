@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -97,43 +96,41 @@ type PageSummary struct {
 	Version      int       `json:"version"`
 	PageName     any       `json:"page_name"`
 	Description  any       `json:"description"`
+	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// matches reports whether q (lower case) occurs in the page's ID, or in its
-// name or description in any language.
-func (p PageSummary) matches(q string) bool {
-	return strings.Contains(strings.ToLower(p.DescriptorID), q) || textContains(p.PageName, q) || textContains(p.Description, q)
+// pageSearch filters only after choosing the latest active version.
+type pageSearch struct {
+	Query, ID, Description                         string
+	CreatedFrom, CreatedTo, UpdatedFrom, UpdatedTo *time.Time
+	Limit, Offset                                  int
 }
 
-func textContains(t any, q string) bool {
-	switch x := t.(type) {
-	case string:
-		return strings.Contains(strings.ToLower(x), q)
-	case map[string]any:
-		for _, s := range x {
-			if textContains(s, q) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// pageSummaries returns every page's latest active version, ordered by ID.
-// Pages are few, so callers filter them in Go (design D10).
-func (s store) pageSummaries(ctx context.Context) ([]PageSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body->'page_name', body->'description', updated_at
-		FROM kb.frontend_pages WHERE status = 'active' ORDER BY descriptor_id, version DESC`)
+func (s store) searchPages(ctx context.Context, f pageSearch) ([]PageSummary, error) {
+	query := `WITH latest AS (
+ SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body, created_at, updated_at
+ FROM kb.frontend_pages WHERE status = 'active' ORDER BY descriptor_id, version DESC
+ ) SELECT descriptor_id, version, body->'page_name', body->'description', created_at, updated_at
+ FROM latest WHERE
+ ($1 = '' OR strpos(lower(descriptor_id), $1) > 0 OR strpos(lower(COALESCE(body->>'page_name', '')), $1) > 0 OR strpos(lower(COALESCE(body->>'description', '')), $1) > 0)
+ AND ($2 = '' OR strpos(lower(descriptor_id), $2) > 0)
+ AND ($3 = '' OR strpos(lower(COALESCE(body->>'description', '')), $3) > 0)
+ AND ($4::timestamptz IS NULL OR created_at >= $4)
+ AND ($5::timestamptz IS NULL OR created_at < $5)
+ AND ($6::timestamptz IS NULL OR updated_at >= $6)
+ AND ($7::timestamptz IS NULL OR updated_at < $7)
+ ORDER BY descriptor_id LIMIT $8 OFFSET $9`
+	rows, err := s.db.QueryContext(ctx, query, f.Query, f.ID, f.Description, f.CreatedFrom, f.CreatedTo, f.UpdatedFrom, f.UpdatedTo, f.Limit+1, f.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []PageSummary
+	out := []PageSummary{}
 	for rows.Next() {
 		var p PageSummary
 		var name, desc []byte
-		if err := rows.Scan(&p.DescriptorID, &p.Version, &name, &desc, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.DescriptorID, &p.Version, &name, &desc, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if name != nil {

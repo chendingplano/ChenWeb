@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { JsonObject } from '$lib/wpi/types';
 import type { Node } from '@xyflow/svelte';
-import { nodeData, nodeJson, pageJson } from './wpi-json';
+import { nodeData, nodeJson, pageJson, pageNodes } from './wpi-json';
 
 function element(id: string, cls: string, x: number, y: number, attrs?: Record<string, unknown>): Node {
 	return { id, type: 'wpi-element', position: { x, y }, data: { label: `name of ${id}`, element: cls, ...(attrs ? { attrs } : {}) } };
@@ -48,4 +49,20 @@ test('the page lists element nodes in reading order and skips other nodes', () =
 
 test('an empty canvas is a page with no elements', () => {
 	assert.deepEqual(pageJson([]), { schema_version: '0.2', layouter: 'flow-layouter', elements: [] });
+});
+
+test('loading preserves instance order, duplicate classes and nested attributes', () => {
+	const page: JsonObject = {
+		elements: [
+			{ element: 'input', binding: { path: '$input_doc.name' }, width: 200 },
+			{ element: 'input', label: { en: 'Email', 'zh-cn': '邮箱' } },
+			{ element: 'button', on_click: { action: 'save' } }
+		]
+	};
+	const nodes = pageNodes(page);
+	assert.equal(new Set(nodes.map((n) => n.id)).size, 3);
+	assert.deepEqual(pageJson(nodes).elements, page.elements);
+	assert.deepEqual(pageNodes({ elements: [] }), []);
+	assert.throws(() => pageNodes({ elements: [null] }));
+	assert.throws(() => pageNodes({}));
 });

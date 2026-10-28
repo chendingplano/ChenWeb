@@ -90,10 +90,17 @@ server call, and SHALL NOT reload it on refresh.
 - **THEN** the panel is dirty, and the page's stored descriptor is unchanged
 
 ### Requirement: Page search and read
-`GET /api/v1/wpi/pages?q=<text>&limit=<n>` SHALL return, for the latest active version of
-each page, `descriptor_id`, `version`, `page_name`, `description` and `updated_at`, keeping
+`GET /api/v1/wpi/pages?q=<text>&limit=<n>&offset=<n>` SHALL return, for the latest active version of
+each page, `descriptor_id`, `version`, `page_name`, `description`, `created_at` and `updated_at`, keeping
 pages whose ID, name or description (in any language) contains `q`, ignoring case, ordered by
-ID; `limit` SHALL default to 50 and be at most 200. `GET /api/v1/wpi/pages/:pageId` SHALL
+ID; `limit` SHALL default to 50 and be at most 200. `offset` SHALL default to zero
+and be a non-negative integer. The response SHALL contain `pages` and `has_more`.
+Optional `descriptor_id` and `description` SHALL filter by case-insensitive substring;
+all filters SHALL be combined with AND and applied after selecting the latest active
+version. `created_from` and `updated_from` SHALL be inclusive RFC3339 timestamps;
+`created_to` and `updated_to` SHALL be exclusive RFC3339 timestamps. Invalid bounds
+or pagination parameters SHALL return 400. Filtering and pagination SHALL run in the
+database. `GET /api/v1/wpi/pages/:pageId` SHALL
 return `{"version": n, "page": <descriptor>}` for the latest active version. Both SHALL
 require a logged-in user.
 
@@ -113,3 +120,16 @@ require a logged-in user.
 - **WHEN** the request has no valid session
 - **THEN** the response is 401
 
+
+### Requirement: Load a page into the editor
+The WPI editor's Load Page button SHALL open a modal listing the latest active version
+of each page, 20 per page, with descriptor ID, localized name and description, created
+and updated timestamps. Authors SHALL be able to filter by descriptor ID, description,
+and inclusive local calendar date ranges for creation and update, and navigate pages.
+Loading SHALL fetch the full descriptor before replacing the canvas with one editable
+node per element instance, preserving order, repeated classes and all attributes.
+The descriptor SHALL stay in memory and View JSON SHALL retain its page metadata.
+A nonempty canvas SHALL require confirmation before replacement; undo SHALL restore
+the prior canvas and page metadata. Failed requests SHALL leave the canvas unchanged
+and display a translated error. The dialog SHALL support English and Chinese,
+keyboard focus containment, Escape dismissal and text selection.

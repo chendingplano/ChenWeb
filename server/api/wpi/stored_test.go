@@ -2,6 +2,7 @@ package wpi
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -173,17 +174,8 @@ func TestWrapStatement(t *testing.T) {
 	}
 }
 
-const summariesQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body->'page_name', body->'description', updated_at\s+FROM kb\.frontend_pages`
+const summariesQuery = `WITH latest AS \(.*FROM kb\.frontend_pages.*ORDER BY descriptor_id LIMIT \$8 OFFSET \$9`
 
-func summaryRows() *sqlmock.Rows {
-	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	return sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "updated_at"}).
-		AddRow("app-header", 3, nil, nil, at).
-		AddRow("customer-form", 3, []byte(`"Customer"`), []byte(`{"en": "Edit one customer", "zh-cn": "编辑客户"}`), at).
-		AddRow("customers", 3, []byte(`{"en": "Customers", "zh-cn": "客户列表"}`), nil, at)
-}
-
-// callQuery runs a handler with a query string.
 func callQuery(t *testing.T, fn echo.HandlerFunc, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest("GET", "/?"+query, nil)
@@ -195,51 +187,67 @@ func callQuery(t *testing.T, fn echo.HandlerFunc, query string) *httptest.Respon
 }
 
 func TestSearchPages(t *testing.T) {
-	cases := []struct {
-		name, query string
-		status      int
-		want        []string
+	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		query, q, id, desc  string
+		limit, offset, rows int
+		more                bool
 	}{
-		{"everything", "", 200, []string{"app-header", "customer-form", "customers"}},
-		{"by ID", "q=HEADER", 200, []string{"app-header"}},
-		{"by Chinese name", "q=%E5%AE%A2%E6%88%B7%E5%88%97%E8%A1%A8", 200, []string{"customers"}},
-		{"by description in Chinese", "q=%E7%BC%96%E8%BE%91", 200, []string{"customer-form"}},
-		{"limit", "q=customer&limit=1", 200, []string{"customer-form"}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
+		{"", "", "", "", 50, 0, 2, false},
+		{"q=HEADER", "header", "", "", 50, 0, 1, false},
+		{"descriptor_id=Customer&description=%E7%BC%96%E8%BE%91&limit=1&offset=20", "", "customer", "编辑", 1, 20, 2, true},
+		{"limit=999", "", "", "", 200, 0, 0, false},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
-			mock.ExpectQuery(summariesQuery).WillReturnRows(summaryRows())
-			rec := callQuery(t, testHandler(db, plainUser).SearchPages, c.query)
-			body := rec.Body.String()
-			if rec.Code != c.status || strings.Count(body, `"descriptor_id"`) != len(c.want) {
-				t.Fatalf("status %d: %s", rec.Code, body)
+			rows := sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "created_at", "updated_at"})
+			for i := 0; i < tc.rows; i++ {
+				rows.AddRow("customer-form", 3, []byte(`"Customer"`), []byte(`{"zh-cn":"编辑客户"}`), at, at)
 			}
-			for _, id := range c.want {
-				if !strings.Contains(body, `"descriptor_id":"`+id+`"`) {
-					t.Fatalf("%s missing: %s", id, body)
-				}
+			mock.ExpectQuery(summariesQuery).WithArgs(tc.q, tc.id, tc.desc, nil, nil, nil, nil, tc.limit+1, tc.offset).WillReturnRows(rows)
+			rec := callQuery(t, testHandler(db, plainUser).SearchPages, tc.query)
+			var body struct {
+				Pages []PageSummary `json:"pages"`
+				More  bool          `json:"has_more"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != 200 || len(body.Pages) != min(tc.rows, tc.limit) || body.More != tc.more {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if len(body.Pages) > 0 && (!body.Pages[0].CreatedAt.Equal(at) || !body.Pages[0].UpdatedAt.Equal(at)) {
+				t.Fatal("missing timestamps")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
-	t.Run("summary fields", func(t *testing.T) {
+	t.Run("date bounds", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(summariesQuery).WillReturnRows(summaryRows())
-		body := callQuery(t, testHandler(db, plainUser).SearchPages, "q=customer-form").Body.String()
-		want := `{"pages":[{"descriptor_id":"customer-form","version":3,"page_name":"Customer","description":{"en":"Edit one customer","zh-cn":"编辑客户"},"updated_at":"2026-10-27T09:00:00Z"}]}`
-		if strings.TrimSpace(body) != want {
-			t.Fatalf("got  %s\nwant %s", body, want)
+		from := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+		to := from.Add(24 * time.Hour)
+		mock.ExpectQuery(summariesQuery).WithArgs("", "", "", from, to, from, to, 51, 0).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "created_at", "updated_at"}))
+		rec := callQuery(t, testHandler(db, plainUser).SearchPages, "created_from=2026-10-27T00:00:00Z&created_to=2026-10-28T00:00:00Z&updated_from=2026-10-27T00:00:00Z&updated_to=2026-10-28T00:00:00Z")
+		if rec.Code != 200 {
+			t.Fatalf("%d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
-	t.Run("bad limit", func(t *testing.T) {
-		db, _, _ := sqlmock.New()
-		defer db.Close()
-		if rec := callQuery(t, testHandler(db, plainUser).SearchPages, "limit=0"); rec.Code != 400 {
-			t.Fatalf("status %d", rec.Code)
-		}
-	})
+	for _, query := range []string{"limit=0", "limit=no", "offset=-1", "offset=no", "created_from=bad", "updated_to=bad", "created_from=2026-10-28T00:00:00Z&created_to=2026-10-27T00:00:00Z"} {
+		t.Run(query, func(t *testing.T) {
+			db, _, _ := sqlmock.New()
+			defer db.Close()
+			if rec := callQuery(t, testHandler(db, plainUser).SearchPages, query); rec.Code != 400 {
+				t.Fatalf("%d: %s", rec.Code, rec.Body)
+			}
+		})
+	}
 	t.Run("not logged in", func(t *testing.T) {
 		db, _, _ := sqlmock.New()
 		defer db.Close()

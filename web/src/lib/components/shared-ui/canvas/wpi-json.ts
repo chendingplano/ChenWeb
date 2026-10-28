@@ -38,3 +38,25 @@ export function pageJson(nodes: Node[]): JsonObject {
 		.map(nodeJson);
 	return { schema_version: PAGE_SCHEMA_VERSION, layouter: PAGE_LAYOUTER, elements };
 }
+
+// Import every instance, including repeated classes, retaining all its attributes.
+export function pageNodes(page: JsonObject): Node[] {
+	if (!Array.isArray(page.elements)) throw new Error('Invalid page elements');
+	return page.elements.map((instance, index) => {
+		if (
+			!instance ||
+			typeof instance !== 'object' ||
+			Array.isArray(instance) ||
+			typeof instance.element !== 'string'
+		) {
+			throw new Error('Invalid element instance');
+		}
+		const { element, ...attrs } = instance;
+		return {
+			id: `wpi-element-loaded-${index}`,
+			type: 'wpi-element',
+			position: { x: 60 + (index % 4) * 240, y: 60 + Math.floor(index / 4) * 160 },
+			data: { label: element, element, attrs }
+		};
+	});
+}

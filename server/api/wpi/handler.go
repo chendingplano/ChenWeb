@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -338,7 +339,8 @@ const (
 // SearchPages lists the latest active version of every page whose ID, name or
 // description contains q, ignoring case, so an author can find one to reuse
 // (devdoc 2026102601 §3.2.3).
-// Endpoint: GET /api/v1/wpi/pages?q=&limit=
+// Endpoint: GET /api/v1/wpi/pages?q=&descriptor_id=&description=&limit=&offset=
+// created_from/updated_from are inclusive; created_to/updated_to are exclusive RFC3339 timestamps.
 func (h *Handler) SearchPages(c echo.Context) error {
 	user := h.User(c)
 	if user == nil {
@@ -352,20 +354,39 @@ func (h *Handler) SearchPages(c echo.Context) error {
 		}
 		limit = min(n, maxPageLimit)
 	}
-	all, err := store{h.DB}.pageSummaries(c.Request().Context())
+	f := pageSearch{Limit: limit, Query: strings.ToLower(strings.TrimSpace(c.QueryParam("q"))), ID: strings.ToLower(strings.TrimSpace(c.QueryParam("descriptor_id"))), Description: strings.ToLower(strings.TrimSpace(c.QueryParam("description")))}
+	if raw := c.QueryParam("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return errorJSON(c, http.StatusBadRequest, "offset must be a non-negative integer")
+		}
+		f.Offset = n
+	}
+	for key, dest := range map[string]**time.Time{"created_from": &f.CreatedFrom, "created_to": &f.CreatedTo, "updated_from": &f.UpdatedFrom, "updated_to": &f.UpdatedTo} {
+		if raw := c.QueryParam(key); raw != "" {
+			at, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				return errorJSON(c, http.StatusBadRequest, key+" must be an RFC3339 timestamp")
+			}
+			*dest = &at
+		}
+	}
+	for _, bounds := range [][2]*time.Time{{f.CreatedFrom, f.CreatedTo}, {f.UpdatedFrom, f.UpdatedTo}} {
+		if bounds[0] != nil && bounds[1] != nil && !bounds[0].Before(*bounds[1]) {
+			return errorJSON(c, http.StatusBadRequest, "date range start must precede its end")
+		}
+	}
+	pages, err := store{h.DB}.searchPages(c.Request().Context(), f)
 	if err != nil {
 		handlerLog.Error("WPI page search failed", "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to search pages")
 	}
-	q := strings.ToLower(strings.TrimSpace(c.QueryParam("q")))
-	pages := []PageSummary{}
-	for _, p := range all {
-		if len(pages) < limit && (q == "" || p.matches(q)) {
-			pages = append(pages, p)
-		}
+	hasMore := len(pages) > limit
+	if hasMore {
+		pages = pages[:limit]
 	}
-	handlerLog.Info("WPI pages searched", "user", actorName(user), "q", q, "found", len(pages))
-	return c.JSON(http.StatusOK, map[string]any{"pages": pages})
+	handlerLog.Info("WPI pages searched", "user", actorName(user), "q", f.Query, "offset", f.Offset, "found", len(pages))
+	return c.JSON(http.StatusOK, map[string]any{"pages": pages, "has_more": hasMore})
 }
 
 // GetPage returns the latest active version of a page, so an author can copy

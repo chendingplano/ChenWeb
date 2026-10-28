@@ -152,3 +152,35 @@ export async function updateElementClass(
 	const saved = body as { version: number; status: 'draft' | 'active'; warnings?: Issue[] };
 	return { version: saved.version, status: saved.status, warnings: saved.warnings ?? [] };
 }
+
+export type PageSummary = {
+	descriptor_id: string;
+	version: number;
+	page_name: Text | null;
+	description: Text | null;
+	created_at: string;
+	updated_at: string;
+};
+
+export async function searchPages(
+	params: URLSearchParams,
+	signal?: AbortSignal
+): Promise<{ pages: PageSummary[]; has_more: boolean }> {
+	const res = await fetch(`/api/v1/wpi/pages?${params}`, { credentials: 'same-origin', signal });
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return body as unknown as { pages: PageSummary[]; has_more: boolean };
+}
+
+export async function getPage(
+	id: string,
+	signal?: AbortSignal
+): Promise<{ page: JsonObject; version: number }> {
+	const res = await fetch(`/api/v1/wpi/pages/${encodeURIComponent(id)}`, {
+		credentials: 'same-origin',
+		signal
+	});
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return body as unknown as { page: JsonObject; version: number };
+}

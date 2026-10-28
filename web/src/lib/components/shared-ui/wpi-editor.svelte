@@ -26,7 +26,9 @@
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
-	import { isElementNode, nodeJson, pageJson } from './canvas/wpi-json';
+	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
+	import type { JsonObject } from '$lib/wpi/types';
+	import { isElementNode, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import {
@@ -131,6 +133,9 @@
 	let editClassId = $state<string | null>(null);
 	// View JSON shows the selected node's descriptor JSON, else the page's.
 	let showJson = $state(false);
+	let showLoadPage = $state(false);
+	let loadedPage = $state<JsonObject | null>(null);
+	let canvasRevision = $state(0);
 	// Size of the canvas area, for placing created nodes in the middle of the view.
 	let canvasWidth = $state(0);
 	let canvasHeight = $state(0);
@@ -145,8 +150,9 @@
 	let resizing: number | null = null;
 
 	// Undo / redo
-	let undoStack = $state<Snapshot[]>([]);
-	let redoStack = $state<Snapshot[]>([]);
+	type PageSnapshot = Snapshot & { page: JsonObject | null };
+	let undoStack = $state<PageSnapshot[]>([]);
+	let redoStack = $state<PageSnapshot[]>([]);
 	let lastSavedSnapshot = $state<Snapshot | null>(null);
 	// Threshold warning flags (fire once)
 	let warnedNodes = $state(false);
@@ -188,7 +194,8 @@
 
 	// ── Snapshot helpers ────────────────────────────────────────────────────
 	function takeSnapshot() {
-		const snap: Snapshot = {
+		const snap: PageSnapshot = {
+			page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
 			nodes: JSON.parse(JSON.stringify(nodes)),
 			edges: JSON.parse(JSON.stringify(edges))
 		};
@@ -200,10 +207,15 @@
 		if (!undoStack.length) return;
 		const [top, ...rest] = undoStack;
 		redoStack = [
-			{ nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+			{
+				nodes: JSON.parse(JSON.stringify(nodes)),
+				edges: JSON.parse(JSON.stringify(edges)),
+				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null
+			},
 			...redoStack
 		];
 		undoStack = rest;
+		loadedPage = top.page;
 		nodes = top.nodes;
 		edges = top.edges;
 	}
@@ -212,10 +224,15 @@
 		if (!redoStack.length) return;
 		const [top, ...rest] = redoStack;
 		undoStack = [
-			{ nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+			{
+				nodes: JSON.parse(JSON.stringify(nodes)),
+				edges: JSON.parse(JSON.stringify(edges)),
+				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null
+			},
 			...undoStack
 		].slice(0, MAX_UNDO);
 		redoStack = rest;
+		loadedPage = top.page;
 		nodes = top.nodes;
 		edges = top.edges;
 	}
@@ -223,6 +240,7 @@
 	// ── Load flow ───────────────────────────────────────────────────────────
 	async function loadFlow(flow: Flow) {
 		activeFlow = flow;
+		loadedPage = null;
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
 		edges = (flow.flow_data?.edges ?? []) as Edge[];
 		lastSavedSnapshot = {
@@ -243,6 +261,18 @@
 		} catch {
 			showPicker = true;
 		}
+	}
+
+	function loadPage(page: JsonObject) {
+		const next = pageNodes(page);
+		takeSnapshot();
+		nodes = next;
+		edges = [];
+		loadedPage = page;
+		selectedNodeId = null;
+		canvasRevision++;
+		showLoadPage = false;
+		checkLimits();
 	}
 
 	// ── Save ────────────────────────────────────────────────────────────────
@@ -435,6 +465,7 @@
 
 	// ── New empty flow ───────────────────────────────────────────────────────
 	async function createNewEmpty() {
+		loadedPage = null;
 		const emptySnap: Snapshot = { nodes: [], edges: [] };
 		lastSavedSnapshot = emptySnap;
 		nodes = [];
@@ -496,7 +527,7 @@
 	function onKeydown(e: KeyboardEvent) {
 		// The element class forms have their own fields, and View JSON covers the canvas; undo
 		// and save belong to the canvas.
-		if (showCreateElement || editClassId !== null || showJson) return;
+		if (showCreateElement || editClassId !== null || showJson || showLoadPage) return;
 		const mod = e.ctrlKey || e.metaKey;
 		if (mod && e.key === 'z' && !e.shiftKey) {
 			e.preventDefault();
@@ -528,7 +559,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <!-- Starts below the sticky site header (routes/semos/components/SiteHeader.svelte: h-[4.25rem] + 1px border, z-50), which would otherwise cover the top of the editor. -->
-<div class="fixed bottom-0 right-0 flex flex-col" style="{canvasThemeVars(darkMode)} background:var(--cv-canvas); z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
+<div class="fixed bottom-0 right-0 flex flex-col select-text" style="{canvasThemeVars(darkMode)} background:var(--cv-canvas); z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
 	<!-- 3-panel body -->
 	<div bind:this={body} class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
@@ -559,7 +590,7 @@
 				}
 			}}
 			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
-			onLoadPage={() => toast(m.wpi_toolbar_load_page_not_yet_implemented())}
+			onLoadPage={() => (showLoadPage = true)}
 			onViewJson={() => (showJson = true)}
 			onUndo={undo}
 			onRedo={redo}
@@ -580,7 +611,7 @@
 			<!-- Svelte Flow reads fitView once, when it mounts, and on an empty canvas it waits and
 			     fits the first node added — moving it from where it was dropped to the middle. So it
 			     mounts again for each flow and fits only a flow that already has nodes. -->
-			{#key activeFlow?.flow_id}
+			{#key `${activeFlow?.flow_id}-${canvasRevision}`}
 			<SvelteFlow
 				bind:nodes
 				bind:edges
@@ -797,11 +828,11 @@
 			? m.wpi_view_json_node_title({ name: String(selectedNode.data.label ?? '') })
 			: m.wpi_view_json_page_title()}
 		note={!selectedNode
-			? m.wpi_view_json_page_note()
+			? (loadedPage ? String(loadedPage.descriptor_id ?? '') : m.wpi_view_json_page_note())
 			: isElementNode(selectedNode)
 				? ''
 				: m.wpi_view_json_node_data_note()}
-		json={selectedNode ? nodeJson(selectedNode) : pageJson(nodes)}
+		json={selectedNode ? nodeJson(selectedNode) : { ...pageJson(nodes), ...loadedPage, elements: pageJson(nodes).elements }}
 		onClose={() => (showJson = false)}
 	/>
 {/if}
@@ -816,6 +847,17 @@
 		onClose={() => {
 			if (!activeFlow) requestClose();
 			else showPicker = false;
+		}}
+	/>
+{/if}
+
+{#if showLoadPage}
+	<LoadPageDialog
+		{darkMode}
+		onClose={() => (showLoadPage = false)}
+		onLoad={(page) => {
+			if (nodes.length && !confirm(m.wpi_load_replace())) return;
+			loadPage(page);
 		}}
 	/>
 {/if}
