@@ -64,6 +64,7 @@
   // is left, so reading it as JSON does not rewrite it under the cursor.
   let typing = $state<{ nodeId: string; name: string; text: string } | null>(null);
   let newColumn = $state({ label: '', field: '', width: '' });
+  let addingColumn = $state(false);
   let newField = $state({ column: '', attribute: '' });
   let addingField = $state(false);
 
@@ -75,6 +76,7 @@
   $effect(() => {
     node?.id;
     newColumn = { label: '', field: '', width: '' };
+    addingColumn = false;
     newField = { column: '', attribute: '' };
     addingField = false;
   });
@@ -84,6 +86,7 @@
     const columns = columnsOf(node, attr);
     update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify([...columns, { label: newColumn.label.trim(), field: newColumn.field.trim(), ...(newColumn.width.trim() ? { width: newColumn.width.trim() } : {}) }])));
     newColumn = { label: '', field: '', width: '' };
+    addingColumn = false;
   }
 
   function attrText(n: FlowNode, name: string): string {
@@ -158,9 +161,19 @@
         {:else}
           {#each Object.entries(elementClass.attributes) as [name, attr] (name)}
             <div style="margin-bottom:10px;">
-              <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">
-                {name}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
-              </label>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
+                <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted);">
+                  {name}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
+                </label>
+                {#if name === 'columns' && node.data.element === 'list' && attr.instance_modifiable !== false}
+                  <div style="display:flex; gap:3px;">
+                    <button class="column-remove" type="button" onclick={() => (addingColumn = true)}>{m.propertiespanel_add_column()}</button>
+                    {#if addingColumn}
+                      <button class="column-remove" type="button" onclick={() => { addingColumn = false; newColumn = { label: '', field: '', width: '' }; }}>{m.wpi_create_element_cancel()}</button>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
               {#if attr.instance_modifiable === false}
                 <!-- The class fixes it: every instance has the class's value, so the node cannot set it. -->
                 <textarea
@@ -173,20 +186,23 @@
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.propertiespanel_fixed()}</div>
               {:else if name === 'columns' && node.data.element === 'list'}
             {@const columns = columnsOf(node, attr)}
+            {#if addingColumn}
+              <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr) 25px; gap:3px; margin-bottom:4px;">
+                <input class="column-input" aria-label={m.propertiespanel_column_label()} placeholder={m.propertiespanel_column_label()} bind:value={newColumn.label} />
+                <input class="column-input" aria-label={m.propertiespanel_column_field()} placeholder={m.propertiespanel_column_field()} bind:value={newColumn.field} />
+                <input class="column-input" aria-label={m.propertiespanel_column_width()} placeholder={m.propertiespanel_column_width()} bind:value={newColumn.width} />
+                <button class="column-remove" type="button" aria-label={m.wpi_json_apply()} disabled={!newColumn.label.trim() || !newColumn.field.trim()} onclick={() => addColumn(attr)}>+</button>
+              </div>
+            {/if}
             {#each columns as column, index (index)}
-              <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr) auto; gap:3px; margin-bottom:4px;">
+              <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr) 25px; gap:3px; margin-bottom:4px;">
                 <input class="column-input" aria-label={m.propertiespanel_column_label()} value={column.label} oninput={(e) => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.map((c, i) => i === index ? { ...c, label: (e.target as HTMLInputElement).value } : c))))} />
                 <input class="column-input" aria-label={m.propertiespanel_column_field()} value={column.field} oninput={(e) => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.map((c, i) => i === index ? { ...c, field: (e.target as HTMLInputElement).value } : c))))} />
                 <input class="column-input" aria-label={m.propertiespanel_column_width()} placeholder={m.propertiespanel_column_width()} value={column.width ?? ''} oninput={(e) => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.map((c, i) => i === index ? { ...c, width: (e.target as HTMLInputElement).value } : c))))} />
                 <button class="column-remove" type="button" aria-label={m.propertiespanel_remove_column()} onclick={() => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.filter((_, i) => i !== index))))}>×</button>
               </div>
             {/each}
-            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr); gap:3px;">
-              <input class="column-input" aria-label={m.propertiespanel_column_label()} placeholder={m.propertiespanel_column_label()} bind:value={newColumn.label} />
-              <input class="column-input" aria-label={m.propertiespanel_column_field()} placeholder={m.propertiespanel_column_field()} bind:value={newColumn.field} />
-              <input class="column-input" aria-label={m.propertiespanel_column_width()} placeholder={m.propertiespanel_column_width()} bind:value={newColumn.width} />
-            </div>
-            <button class="column-add" type="button" disabled={!newColumn.label.trim() || !newColumn.field.trim()} onclick={() => addColumn(attr)}>{m.propertiespanel_add_column()}</button>
+
               {:else}
                 <textarea
                   id={`prop-attr-${name}`}
