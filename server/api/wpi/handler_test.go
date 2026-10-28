@@ -1,6 +1,7 @@
 package wpi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http/httptest"
@@ -67,6 +68,26 @@ func expectModules(mock sqlmock.Sqlmock, active ...string) {
 }
 
 func TestGetApp(t *testing.T) {
+	t.Run("client canceled request", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := httptest.NewRequest("GET", "/api/v1/wpi/apps/hello", nil).WithContext(ctx)
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(req, rec)
+		c.SetParamNames("appId")
+		c.SetParamValues("hello")
+		if err := testHandler(db, plainUser).GetApp(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Body.Len() != 0 {
+			t.Fatalf("canceled request must not write an error response: %s", rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("valid", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
@@ -117,6 +138,18 @@ func TestGetApp(t *testing.T) {
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 500 || strings.Contains(rec.Body.String(), "connection") {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("cancellation error on an active request is still a failure", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		mock.ExpectQuery(latestQuery).WillReturnError(context.Canceled)
+		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
+		if rec.Code != 500 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
 }

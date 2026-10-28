@@ -18,6 +18,11 @@ errors instead of the app. The app's root SHALL allow text selection.
 - **WHEN** the bundle request returns 422
 - **THEN** the page shows each validation error and draws no panes
 
+#### Scenario: Client cancels a bundle request
+- **WHEN** bundle loading fails after the HTTP request context is canceled
+- **THEN** the server records an informational cancellation and does not write a server-error response
+- **AND** bundle-loading failures on requests that have not been canceled remain errors
+
 #### Scenario: Not logged in
 - **WHEN** a user without a session opens `/wpi/customer-admin`
 - **THEN** the browser is redirected to `/login`

@@ -1,6 +1,7 @@
 package wpi
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -71,6 +72,10 @@ func (h *Handler) GetApp(c echo.Context) error {
 		return errorJSON(c, http.StatusNotFound, "App not found")
 	}
 	if err != nil {
+		if errors.Is(c.Request().Context().Err(), context.Canceled) {
+			handlerLog.Info("WPI app bundle request canceled", "app", appID, "user", actorName(user))
+			return nil
+		}
 		handlerLog.Error("WPI app bundle failed", "app", appID, "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to load app")
 	}
