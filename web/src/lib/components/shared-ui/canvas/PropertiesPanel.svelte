@@ -204,7 +204,12 @@
                   {@const fields = Array.isArray(source.fields) ? source.fields : []}
                   <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;">
                     <span style="font-size:9px; color:var(--cv-text-muted);">{m.propertiespanel_source_fields()}</span>
-                    <button class="column-remove" type="button" onclick={() => (addingField = true)}>{m.propertiespanel_add_source_field()}</button>
+                    <div style="display:flex; gap:3px;">
+                      <button class="column-remove" type="button" onclick={() => (addingField = true)}>{m.propertiespanel_add_source_field()}</button>
+                      {#if addingField}
+                        <button class="column-remove" type="button" onclick={() => { addingField = false; newField = { column: '', attribute: '' }; }}>{m.wpi_create_element_cancel()}</button>
+                      {/if}
+                    </div>
                   </div>
                   {#if addingField}
                     <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 25px; gap:3px; margin-bottom:4px;">
