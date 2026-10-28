@@ -1,7 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampPx, flowItemStyle, isResizable, pageStyle, paneStyle } from './layout';
+import { clampPx, flowItemStyle, flowStyle, isResizable, pageStyle, paneStyle } from './layout';
 import type { PageDescriptor } from './types';
+
+test('flow defaults preserve content height and start alignment', () => {
+	const css = flowStyle({});
+	assert.match(css, /column-gap: 0.75rem/);
+	assert.match(css, /row-gap: 0.75rem/);
+	assert.match(css, /justify-content: start/);
+	assert.match(css, /align-items: flex-start/);
+	assert.match(css, /align-content: flex-start/);
+	assert.doesNotMatch(css, /height:/);
+});
+
+test('flow configuration maps both alignment axes and propagates definite height', () => {
+	const css = flowStyle({ height: '400px', layouter_config: {
+		column_gap: '0px', row_gap: '2rem', horizontal_alignment: 'end',
+		vertical_alignment: 'stretch', rows_alignment: 'bottom'
+	} });
+	assert.match(css, /column-gap: 0px/);
+	assert.match(css, /row-gap: 2rem/);
+	assert.match(css, /justify-content: end/);
+	assert.match(css, /align-items: stretch/);
+	assert.match(css, /align-content: safe flex-end/);
+	assert.match(css, /height: 100%/);
+	assert.match(flowStyle({ layouter_config: { rows_alignment: 'center', vertical_alignment: 'bottom' } }), /align-content: safe center/);
+	assert.match(flowStyle({ layouter_config: { rows_alignment: 'space-between', horizontal_alignment: 'space-between' } }), /align-content: space-between/);
+	assert.doesNotMatch(flowStyle({ height: 'auto' }), /height:/);
+});
 
 test('flow item sizes', () => {
 	assert.equal(flowItemStyle({ width: '160px' }), 'flex: 0 0 160px; width: 160px');

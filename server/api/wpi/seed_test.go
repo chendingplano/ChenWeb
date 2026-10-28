@@ -27,6 +27,27 @@ const codeModulesMigration = "../../../project_migrations/20261028000002_create_
 
 var moduleSeedRow = regexp.MustCompile(`\('([a-z0-9-]+)',\s*'[^']+',\s*'[^']*',\s*'(element|action|page|layouter)',\s*'([^']*)'`)
 
+func TestSeedFlowLayouter(t *testing.T) {
+	sqlText, err := os.ReadFile("../../../project_migrations/20261028000003_register_flow_layouter.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded := map[string]string{}
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(string(sqlText), -1) {
+		if m[2] == "layouter" {
+			seeded[m[1]] = m[3]
+		}
+	}
+	if len(seeded) != len(layouters) {
+		t.Fatalf("seeded layouters %v; registered layouters %v", seeded, layouters)
+	}
+	for _, id := range layouters {
+		if seeded[id] != "interpreter-layouter-flow.md" {
+			t.Fatalf("layouter %q: unexpected document %q", id, seeded[id])
+		}
+	}
+}
+
 // seededModules returns the element modules codeModulesMigration stores, all active.
 func seededModules(t *testing.T) map[string][]string {
 	t.Helper()

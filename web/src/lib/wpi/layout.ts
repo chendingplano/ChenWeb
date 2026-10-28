@@ -7,6 +7,23 @@ function isFixed(size: string | undefined): size is string {
 	return !!size && size !== 'auto' && size !== 'elastic';
 }
 
+// Safe alignment keeps the start of overflowing content reachable. Explicit
+// align-content also prevents flexbox's default stretching of row heights.
+export function flowStyle(page: Pick<PageDescriptor, 'height' | 'layouter_config'>): string {
+	const c = page.layouter_config ?? {};
+	const vertical = { top: 'flex-start', center: 'center', bottom: 'flex-end', stretch: 'stretch' };
+	const rows = { top: 'flex-start', center: 'safe center', bottom: 'safe flex-end', 'space-between': 'space-between' };
+	const css = [
+		`column-gap: ${c.column_gap ?? '0.75rem'}`,
+		`row-gap: ${c.row_gap ?? '0.75rem'}`,
+		`justify-content: ${c.horizontal_alignment ?? 'start'}`,
+		`align-items: ${vertical[c.vertical_alignment ?? 'top']}`,
+		`align-content: ${rows[c.rows_alignment ?? 'top']}`
+	];
+	if (isFixed(page.height)) css.push('height: 100%');
+	return css.join('; ');
+}
+
 export function flowItemStyle(el: SizeAttrs): string {
 	const css: string[] = [];
 	if (el.width === 'elastic') {

@@ -90,10 +90,19 @@ export type ClassRow = {
 
 // A page (devdoc §3.2.1). Its sizes place it inside its pane; binding_mode is
 // the default of its elements that show data.
+export type FlowLayouterConfig = {
+	column_gap?: string;
+	row_gap?: string;
+	horizontal_alignment?: 'start' | 'center' | 'end' | 'space-between';
+	vertical_alignment?: 'top' | 'center' | 'bottom' | 'stretch';
+	rows_alignment?: 'top' | 'center' | 'bottom' | 'space-between';
+};
+
 export type PageDescriptor = SizeAttrs & {
 	descriptor_id: string;
 	schema_version: string;
 	layouter: string;
+	layouter_config?: FlowLayouterConfig;
 	elements: ElementInstance[];
 	page_name?: Text;
 	description?: Text;

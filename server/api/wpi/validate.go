@@ -17,6 +17,7 @@ var (
 	sizePattern   = regexp.MustCompile(`^(auto|elastic|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
 	// A page's size is set, not computed by a layouter, so it cannot be elastic.
 	pageSizePattern = regexp.MustCompile(`^(auto|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
+	flowGapPattern  = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(px|rem)$`)
 	localePattern   = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
 )
 
@@ -279,8 +280,18 @@ func (v *validator) app(b map[string]any) {
 
 func (v *validator) page(b map[string]any) {
 	v.keys(b, "", []string{"descriptor_id", "schema_version", "layouter", "elements"}, "input", "save_action", "refresh",
-		"page_name", "description", "page_alignment", "width", "height", "min_width", "max_width", "binding_mode")
+		"page_name", "description", "page_alignment", "width", "height", "min_width", "max_width", "binding_mode", "layouter_config")
 	v.oneOf(b, "layouter", "", layouters)
+	if config, present := b["layouter_config"]; present {
+		if m, ok := v.object(config, "/layouter_config"); ok {
+			v.keys(m, "/layouter_config", nil, "column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment")
+			v.matching(m, "column_gap", "/layouter_config", flowGapPattern)
+			v.matching(m, "row_gap", "/layouter_config", flowGapPattern)
+			v.oneOf(m, "horizontal_alignment", "/layouter_config", []string{"start", "center", "end", "space-between"})
+			v.oneOf(m, "vertical_alignment", "/layouter_config", []string{"top", "center", "bottom", "stretch"})
+			v.oneOf(m, "rows_alignment", "/layouter_config", []string{"top", "center", "bottom", "space-between"})
+		}
+	}
 	v.text(b, "page_name", "")
 	v.text(b, "description", "")
 	v.oneOf(b, "page_alignment", "", []string{"left", "center", "right"})

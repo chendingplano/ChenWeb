@@ -49,6 +49,39 @@ SHALL size the element to its content. Widths SHALL follow pane resizes.
 - **WHEN** the next element's minimum width does not fit in what is left of the row
 - **THEN** it starts a new row
 
+### Requirement: Flow spacing and alignment
+A page MAY set `layouter_config` for `flow-layouter`. It SHALL accept only
+`column_gap` and `row_gap` (nonnegative decimal lengths in `px` or `rem`, default
+`0.75rem`), `horizontal_alignment` (`start`, `center`, `end`, `space-between`,
+default `start`), `vertical_alignment` (`top`, `center`, `bottom`, `stretch`, default
+`top`), and `rows_alignment` (`top`, `center`, `bottom`, `space-between`, default
+`top`). Unknown keys, non-object config and unsupported values SHALL be rejected
+at their descriptor paths. An omitted or empty config SHALL preserve existing layout.
+
+Horizontal alignment SHALL distribute leftover space independently in each row after
+elastic growth and width limits. Row breaks and source order SHALL be preserved.
+Vertical alignment SHALL position unequal-height items within each row; stretch SHALL
+fill auto-height wrappers and their rendered element roots while retaining explicit
+heights. Definite page height SHALL reach the flow container. Rows alignment SHALL
+distribute spare vertical space without stretching rows; overflowing rows SHALL fall
+back to top placement. Content-height pages SHALL have no extra height to distribute.
+Space-between SHALL retain configured minimum gaps; a single item or row SHALL start
+at the start/top edge. Fixed oversized items SHALL retain normal overflow.
+
+#### Scenario: Exact fit and resized pane
+- **WHEN** seven 240px elements have 16px gaps in a 1008px layout
+- **THEN** four elements fit in the first row and three in the second
+- **WHEN** the usable width becomes 1007px
+- **THEN** only three elements fit in the first row, preserving source order
+
+#### Scenario: Centered last row
+- **WHEN** three 240px elements form the last row in 1008px with 16px gaps and horizontal center
+- **THEN** the row has 128px of space on each side
+
+#### Scenario: Overflow remains reachable
+- **WHEN** centered or bottom-aligned rows exceed a definite page height
+- **THEN** the first row stays at the top and subsequent rows overflow normally
+
 ### Requirement: Data binding
 An element with `data_binding` `$input_doc.<path>` SHALL show the value at that path. With
 `binding_mode` `read-write` the user SHALL be able to edit it and each edit SHALL be written
