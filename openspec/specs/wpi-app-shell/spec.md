@@ -37,6 +37,12 @@ used by customer-admin, whose actions target that app's other panes.
 - **AND** the list loads at most 200 records from `kb.wpi_demo_customers`, ordered by user name ascending
 - **AND** leaving and reopening the demo loads the records again
 
+#### Scenario: Embedded page follows the site theme
+- **WHEN** the Customers demo is open and the user switches between light and dark mode
+- **THEN** the dashboard and embedded WPI page update their backgrounds and text colours together
+- **AND** the running page and loaded records are preserved without reloading the iframe
+- **AND** other open same-origin tabs follow the selected mode
+
 ### Requirement: Layout templates and panes
 The app SHALL divide the viewport into panes with its layout template. `single-pane` SHALL
 provide pane `main`. `top-left-middle-right-bottom` SHALL provide `top`, `middle` and

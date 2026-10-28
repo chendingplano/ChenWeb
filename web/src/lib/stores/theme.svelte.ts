@@ -25,10 +25,17 @@ class Theme {
 		return this.mode === 'dark';
 	}
 
-	/** Call once from the root layout (browser only) to re-sync after hydration. */
+	/** Sync after hydration and follow changes from other same-origin frames/tabs. */
 	init() {
 		this.mode = storedMode();
 		this.apply();
+		const sync = (event: StorageEvent) => {
+			if (event.storageArea !== localStorage || (event.key !== STORAGE_KEY && event.key !== null)) return;
+			this.mode = storedMode();
+			this.apply();
+		};
+		window.addEventListener('storage', sync);
+		return () => window.removeEventListener('storage', sync);
 	}
 
 	toggle() {
