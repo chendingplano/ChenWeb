@@ -27,6 +27,12 @@
   let status = $state('');
   let valid = $state(false);
   let backdropPressed = false;
+  let gutter: HTMLPreElement;
+  let lineNumbers = $derived(text.split('\n').map((_, index) => index + 1).join('\n'));
+
+  function syncScroll(event: Event) {
+    if (gutter) gutter.scrollTop = (event.currentTarget as HTMLElement).scrollTop;
+  }
 
   function check() {
     try {
@@ -82,16 +88,54 @@
       {#if editing}<button class="json-action" onclick={apply}>{m.wpi_json_apply()}</button>{/if}
       <span role="status" style="font-size:12px; color:{valid ? 'var(--cv-text)' : '#ef7777'};">{status}</span>
     </div>
-    {#if editing}
-      <textarea aria-label={m.wpi_json_edit()} bind:value={text} oninput={() => (status = '')} spellcheck="false" style="flex:1; min-height:50vh; resize:vertical; padding:16px 20px; font-size:11px; line-height:1.5; color:var(--cv-text); background:var(--cv-panel); border:0; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;"></textarea>
-    {:else}
-    <pre style="flex:1; overflow:auto; margin:0; padding:16px 20px; font-size:11px; line-height:1.5; color:var(--cv-text);
-      font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">{text}</pre>
-    {/if}
+    <div class="json-content">
+      <pre class="line-numbers" bind:this={gutter} aria-hidden="true">{lineNumbers}</pre>
+      {#if editing}
+        <textarea class="json-text" aria-label={m.wpi_json_edit()} bind:value={text} oninput={() => (status = '')} onscroll={syncScroll} spellcheck="false"></textarea>
+      {:else}
+        <pre class="json-text" onscroll={syncScroll}>{text}</pre>
+      {/if}
+    </div>
   </div>
 </div>
 
 <style>
+  .json-content {
+    display: flex;
+    height: 60vh;
+    min-height: 0;
+    overflow: hidden;
+    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .line-numbers, .json-text {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 16px 0;
+    font: inherit;
+    line-height: inherit;
+  }
+  .line-numbers {
+    flex: none;
+    overflow: hidden;
+    padding-left: 16px;
+    padding-right: 12px;
+    text-align: right;
+    color: var(--cv-text-muted);
+    opacity: 0.6;
+    user-select: none;
+  }
+  .json-text {
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    padding-right: 20px;
+    color: var(--cv-text);
+    background: var(--cv-panel);
+    border: 0;
+    resize: none;
+    white-space: pre;
+    tab-size: 2;
+  }
   .json-action {
     background: var(--cv-surface);
     color: var(--cv-text);
