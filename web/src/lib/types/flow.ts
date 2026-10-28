@@ -34,6 +34,7 @@ export interface FlowEdge {
 export interface FlowData {
   nodes: FlowNode[];
   edges: FlowEdge[];
+  wpi_page?: import('$lib/wpi/types').JsonObject | null;
 }
 
 export interface Flow {

@@ -7766,5 +7766,6 @@
 	"wpi_load_search_failed": "Unable to search pages. Check the date range and try again.",
 	"wpi_load_page_failed": "Unable to load this page. Please try again.",
 	"wpi_load_replace": "Replace the canvas with this page? You can undo this change.",
-	"wpi_load_description_label": "Description"
+	"wpi_load_description_label": "Description",
+	"wpi_preview_select": "Select element {name}"
 }

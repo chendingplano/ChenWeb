@@ -7766,5 +7766,6 @@
 	"wpi_load_search_failed": "无法搜索页面。请检查日期范围后重试。",
 	"wpi_load_page_failed": "无法加载此页面，请重试。",
 	"wpi_load_replace": "要用此页面替换画布吗？此更改可以撤销。",
-	"wpi_load_description_label": "描述"
+	"wpi_load_description_label": "描述",
+	"wpi_preview_select": "选择元素 {name}"
 }

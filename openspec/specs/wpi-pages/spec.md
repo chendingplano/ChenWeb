@@ -133,3 +133,12 @@ A nonempty canvas SHALL require confirmation before replacement; undo SHALL rest
 the prior canvas and page metadata. Failed requests SHALL leave the canvas unchanged
 and display a translated error. The dialog SHALL support English and Chinese,
 keyboard focus containment, Escape dismissal and text selection.
+
+### Requirement: Canvas page preview
+When a page is loaded, the editor SHALL render its elements with the interpreter's
+layout and element components inside a fixed-size page surface on the canvas. Each
+rendered element SHALL have a transparent selection overlay that selects its editor
+node and opens its properties without triggering its page action. The preview SHALL
+use the page's stored data sources and preserve element instance attributes when
+properties change. When flow storage supports persistence, the flow data carries the
+loaded page alongside its editable elements.

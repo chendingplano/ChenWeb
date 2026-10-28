@@ -4,6 +4,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		SvelteFlow,
+		ViewportPortal,
 		Controls,
 		MiniMap,
 		Background,
@@ -26,6 +27,7 @@
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
+	import PagePreview from './canvas/PagePreview.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
 	import type { JsonObject } from '$lib/wpi/types';
 	import { isElementNode, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
@@ -153,7 +155,7 @@
 	type PageSnapshot = Snapshot & { page: JsonObject | null };
 	let undoStack = $state<PageSnapshot[]>([]);
 	let redoStack = $state<PageSnapshot[]>([]);
-	let lastSavedSnapshot = $state<Snapshot | null>(null);
+	let lastSavedSnapshot = $state<PageSnapshot | null>(null);
 	// Threshold warning flags (fire once)
 	let warnedNodes = $state(false);
 	let warnedEdges = $state(false);
@@ -162,7 +164,8 @@
 
 	const isDirty = $derived(
 		lastSavedSnapshot !== null &&
-			JSON.stringify({ nodes, edges }) !== JSON.stringify(lastSavedSnapshot)
+			(JSON.stringify({ nodes, edges }) !== JSON.stringify({ nodes: lastSavedSnapshot.nodes, edges: lastSavedSnapshot.edges }) ||
+			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page))
 	);
 	const canUndo = $derived(undoStack.length > 0);
 	const canRedo = $derived(redoStack.length > 0);
@@ -240,10 +243,11 @@
 	// ── Load flow ───────────────────────────────────────────────────────────
 	async function loadFlow(flow: Flow) {
 		activeFlow = flow;
-		loadedPage = null;
+		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? null;
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
 		edges = (flow.flow_data?.edges ?? []) as Edge[];
 		lastSavedSnapshot = {
+			page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
 			nodes: JSON.parse(JSON.stringify(nodes)),
 			edges: JSON.parse(JSON.stringify(edges))
 		};
@@ -266,9 +270,10 @@
 	function loadPage(page: JsonObject) {
 		const next = pageNodes(page);
 		takeSnapshot();
-		nodes = next;
+		nodes = next.map((node) => ({ ...node, hidden: true }));
 		edges = [];
 		loadedPage = page;
+		viewport = { x: 40, y: 40, zoom: 1 };
 		selectedNodeId = null;
 		canvasRevision++;
 		showLoadPage = false;
@@ -281,11 +286,12 @@
 		try {
 			const res = await flowService.update(activeFlow.flow_id, {
 				flow_name: activeFlow.flow_name,
-				flow_data: { nodes: nodes as any, edges: edges as any },
+				flow_data: { nodes: nodes as any, edges: edges as any, wpi_page: loadedPage },
 				thumbnail_svg: generateThumbnail()
 			});
 			activeFlow = res.flow;
 			lastSavedSnapshot = {
+				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges))
 			};
@@ -344,6 +350,7 @@
 			{
 				id,
 				type,
+				hidden: !!loadedPage && type === 'wpi-element',
 				position,
 				selected: true,
 				data: cls ? { label: cls, element: cls } : { ...nodeType.defaultData, label: nodeType.label }
@@ -382,7 +389,7 @@
 		takeSnapshot();
 		nodes = [
 			...nodes.map((n) => ({ ...n, selected: false })),
-			{ id, type: nodeType.id, position, selected: true, data: { ...nodeType.defaultData, label: nodeType.label } }
+			{ id, type: nodeType.id, hidden: !!loadedPage && nodeType.id === 'wpi-element', position, selected: true, data: { ...nodeType.defaultData, label: nodeType.label } }
 		];
 		selectedNodeId = id;
 		checkLimits();
@@ -466,7 +473,7 @@
 	// ── New empty flow ───────────────────────────────────────────────────────
 	async function createNewEmpty() {
 		loadedPage = null;
-		const emptySnap: Snapshot = { nodes: [], edges: [] };
+		const emptySnap: PageSnapshot = { nodes: [], edges: [], page: null };
 		lastSavedSnapshot = emptySnap;
 		nodes = [];
 		edges = [];
@@ -480,7 +487,7 @@
 				thumbnail_svg: null
 			});
 			activeFlow = res.flow;
-			lastSavedSnapshot = { nodes: [], edges: [] };
+			lastSavedSnapshot = { nodes: [], edges: [], page: null };
 		} catch {
 			toast(m.canvas_01_could_not_create_flow_on());
 			activeFlow = {
@@ -618,7 +625,7 @@
 				bind:viewport
 				nodeTypes={NODE_TYPES}
 				colorMode={darkMode ? 'dark' : 'light'}
-				fitView={nodes.length > 0}
+				fitView={nodes.length > 0 && !loadedPage}
 				fitViewOptions={{ maxZoom: 1 }}
 				snapGrid={snapToGrid ? [gridResolution, gridResolution] : undefined}
 				onselectionchange={(params: { nodes: Node[] }) => {
@@ -670,6 +677,13 @@
 				ondelete={() => takeSnapshot()}
 				style="background:var(--cv-canvas);"
 			>
+				{#if loadedPage}
+					<ViewportPortal target="front">
+						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
+							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} onSelect={(id) => { selectedNodeId = id; }} />
+						{/key}
+					</ViewportPortal>
+				{/if}
 				<Background
 					variant={BackgroundVariant.Dots}
 					gap={gridResolution}
