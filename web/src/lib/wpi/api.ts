@@ -184,3 +184,13 @@ export async function getPage(
 	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
 	return body as unknown as { page: JsonObject; version: number };
 }
+
+// Save a page as a new active descriptor version. Validation errors are returned to the author.
+export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch): Promise<number> {
+	const res = await fetchFn(`/api/v1/wpi/descriptors/page/${encodeURIComponent(id)}`, {
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(page)
+	});
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+	return body.version as number;
+}

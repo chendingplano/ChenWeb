@@ -17,7 +17,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, savePage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 
@@ -369,45 +369,34 @@
 	let savingTabs = new Set<number>();
 	async function save() {
 		if (savingTabs.has(activeTabId)) return;
+		if (!loadedPage || typeof loadedPage.descriptor_id !== 'string' || !loadedPage.descriptor_id) {
+			toast(m.wpi_save_requires_page());
+			return;
+		}
+		if (edges.length || nodes.some((node) => !isElementNode(node))) {
+			toast(m.wpi_save_page_elements_only());
+			return;
+		}
 		const id = activeTabId;
 		savingTabs.add(id);
 		const snapshot = currentSnapshot();
-		const flow = activeFlow;
-		const flowName = flow?.flow_name ?? String(loadedPage?.descriptor_id || m.canvas_01_untitled_flow());
-		const flowData = { nodes: snapshot.nodes as any, edges: snapshot.edges as any, wpi_page: snapshot.page, wpi_preview_size: snapshot.previewSize };
-		const thumbnail = generateThumbnail();
+		const name = activeFlow?.flow_name ?? '';
+		const page = { ...snapshot.page, elements: pageJson(snapshot.nodes).elements } as JsonObject;
 		try {
-			const res = flow && flow.flow_id >= 0
-				? await flowService.update(flow.flow_id, { flow_name: flowName, flow_data: flowData, thumbnail_svg: thumbnail })
-				: await flowService.create({ flow_name: flowName, flow_data: flowData, is_shared: false, thumbnail_svg: thumbnail });
+			await savePage(String(page.descriptor_id), page);
 			if (id === activeTabId) {
-				activeFlow = { ...res.flow, flow_name: activeFlow?.flow_name ?? flowName };
 				lastSavedSnapshot = snapshot;
-				savedName = flowName;
+				savedName = name;
 			} else {
-				tabs = tabs.map((tab) => tab.id === id ? { ...tab, flow: { ...res.flow, flow_name: tab.flow?.flow_name ?? flowName }, savedName: flowName, saved: snapshot, dirty: tab.flow?.flow_name !== flowName || (!sameCanvasContent(tab.snapshot, snapshot) || JSON.stringify(tab.snapshot.page) !== JSON.stringify(snapshot.page) || JSON.stringify(tab.snapshot.previewSize) !== JSON.stringify(snapshot.previewSize)) } : tab);
+				tabs = tabs.map((tab) => tab.id === id ? { ...tab, savedName: name, saved: snapshot, dirty: tab.flow?.flow_name !== name || !sameCanvasContent(tab.snapshot, snapshot) || JSON.stringify(tab.snapshot.page) !== JSON.stringify(snapshot.page) || JSON.stringify(tab.snapshot.previewSize) !== JSON.stringify(snapshot.previewSize) } : tab);
 			}
 			toast(m.canvas_01_saved());
-		} catch {
-			toast(m.canvas_01_failed_to_save_your_changes());
+		} catch (error) {
+			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : '';
+			toast(detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes());
 		} finally {
 			savingTabs.delete(id);
 		}
-	}
-
-	// ── Thumbnail (simple SVG preview) ─────────────────────────────────────
-	function generateThumbnail(): string {
-		const W = 200,
-			H = 120;
-		const rects = nodes
-			.slice(0, 8)
-			.map((n) => {
-				const x = Math.round((n.position.x / 2000) * W);
-				const y = Math.round((n.position.y / 1200) * H);
-				return `<rect x="${x}" y="${y}" width="28" height="16" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>`;
-			})
-			.join('');
-		return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="background:#0d1117;">${rects}</svg>`;
 	}
 
 	// ── Drag-and-drop from palette ──────────────────────────────────────────
