@@ -29,6 +29,7 @@
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import PagePreview from './canvas/PagePreview.svelte';
 	import PageControl from './canvas/PageControl.svelte';
+	import CenterPage from './canvas/CenterPage.svelte';
 	import PageConfigPanel from './canvas/PageConfigPanel.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
 	import type { JsonObject } from '$lib/wpi/types';
@@ -141,6 +142,12 @@
 	let loadedPage = $state<JsonObject | null>(null);
 	let configMode = $state<'page' | 'layouter' | null>(null);
 	let canvasRevision = $state(0);
+	const DEFAULT_PREVIEW_SIZE = { width: 1000, height: 650 };
+	let previewSize = $state({ ...DEFAULT_PREVIEW_SIZE });
+	function centerPreview() {
+		const zoom = Math.max(0.1, Math.min(1, (canvasWidth - 80) / previewSize.width, (canvasHeight - 80) / previewSize.height));
+		viewport = { x: (canvasWidth - previewSize.width * zoom) / 2, y: (canvasHeight - previewSize.height * zoom) / 2, zoom };
+	}
 	// Size of the canvas area, for placing created nodes in the middle of the view.
 	let canvasWidth = $state(0);
 	let canvasHeight = $state(0);
@@ -155,7 +162,7 @@
 	let resizing: number | null = null;
 
 	// Undo / redo
-	type PageSnapshot = Snapshot & { page: JsonObject | null };
+	type PageSnapshot = Snapshot & { page: JsonObject | null; previewSize: { width: number; height: number } };
 	let undoStack = $state<PageSnapshot[]>([]);
 	let redoStack = $state<PageSnapshot[]>([]);
 	let lastSavedSnapshot = $state<PageSnapshot | null>(null);
@@ -168,7 +175,8 @@
 	const isDirty = $derived(
 		lastSavedSnapshot !== null &&
 			(JSON.stringify({ nodes, edges }) !== JSON.stringify({ nodes: lastSavedSnapshot.nodes, edges: lastSavedSnapshot.edges }) ||
-			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page))
+			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page) ||
+			 JSON.stringify(previewSize) !== JSON.stringify(lastSavedSnapshot.previewSize))
 	);
 	const canUndo = $derived(undoStack.length > 0);
 	const canRedo = $derived(redoStack.length > 0);
@@ -202,6 +210,7 @@
 	function takeSnapshot() {
 		const snap: PageSnapshot = {
 			page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
+			previewSize: { ...previewSize },
 			nodes: JSON.parse(JSON.stringify(nodes)),
 			edges: JSON.parse(JSON.stringify(edges))
 		};
@@ -216,12 +225,14 @@
 			{
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges)),
-				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null
+				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
+				previewSize: { ...previewSize }
 			},
 			...redoStack
 		];
 		undoStack = rest;
 		loadedPage = top.page;
+		previewSize = { ...top.previewSize };
 		nodes = top.nodes;
 		edges = top.edges;
 	}
@@ -233,12 +244,14 @@
 			{
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges)),
-				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null
+				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
+				previewSize: { ...previewSize }
 			},
 			...undoStack
 		].slice(0, MAX_UNDO);
 		redoStack = rest;
 		loadedPage = top.page;
+		previewSize = { ...top.previewSize };
 		nodes = top.nodes;
 		edges = top.edges;
 	}
@@ -248,10 +261,13 @@
 		activeFlow = flow;
 		configMode = null;
 		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? null;
+		previewSize = flow.flow_data?.wpi_preview_size ?? { ...DEFAULT_PREVIEW_SIZE };
+		if (loadedPage) centerPreview();
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
 		edges = (flow.flow_data?.edges ?? []) as Edge[];
 		lastSavedSnapshot = {
 			page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
+			previewSize: { ...previewSize },
 			nodes: JSON.parse(JSON.stringify(nodes)),
 			edges: JSON.parse(JSON.stringify(edges))
 		};
@@ -278,7 +294,8 @@
 		edges = [];
 		loadedPage = page;
 		configMode = null;
-		viewport = { x: 40, y: 40, zoom: 1 };
+		previewSize = { ...DEFAULT_PREVIEW_SIZE };
+		centerPreview();
 		selectedNodeId = null;
 		canvasRevision++;
 		showLoadPage = false;
@@ -291,12 +308,13 @@
 		try {
 			const res = await flowService.update(activeFlow.flow_id, {
 				flow_name: activeFlow.flow_name,
-				flow_data: { nodes: nodes as any, edges: edges as any, wpi_page: loadedPage },
+				flow_data: { nodes: nodes as any, edges: edges as any, wpi_page: loadedPage, wpi_preview_size: previewSize },
 				thumbnail_svg: generateThumbnail()
 			});
 			activeFlow = res.flow;
 			lastSavedSnapshot = {
 				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
+			previewSize: { ...previewSize },
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges))
 			};
@@ -479,7 +497,8 @@
 	async function createNewEmpty() {
 		loadedPage = null;
 		configMode = null;
-		const emptySnap: PageSnapshot = { nodes: [], edges: [], page: null };
+		previewSize = { ...DEFAULT_PREVIEW_SIZE };
+		const emptySnap: PageSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...previewSize } };
 		lastSavedSnapshot = emptySnap;
 		nodes = [];
 		edges = [];
@@ -493,7 +512,7 @@
 				thumbnail_svg: null
 			});
 			activeFlow = res.flow;
-			lastSavedSnapshot = { nodes: [], edges: [], page: null };
+			lastSavedSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...previewSize } };
 		} catch {
 			toast(m.canvas_01_could_not_create_flow_on());
 			activeFlow = {
@@ -629,6 +648,7 @@
 				bind:nodes
 				bind:edges
 				bind:viewport
+				initialViewport={viewport}
 				nodeTypes={NODE_TYPES}
 				colorMode={darkMode ? 'dark' : 'light'}
 				fitView={nodes.length > 0 && !loadedPage}
@@ -687,9 +707,10 @@
 				style="background:var(--cv-canvas);"
 			>
 				{#if loadedPage}
+					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} onSelect={(id) => { configMode = null; selectedNodeId = id; }} />
+							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} size={previewSize} zoom={viewport.zoom} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -700,11 +721,6 @@
 					bgColor="var(--cv-canvas)"
 					patternColor="var(--cv-grid)"
 				/>
-				{#if loadedPage}
-					<Panel position="top-right" style="margin: 46px 8px 0 0;">
-						<PageControl mode={configMode} onChoose={(mode) => { configMode = mode; selectedNodeId = null; }} />
-					</Panel>
-				{/if}
 				<Controls />
 				<MiniMap style="background:var(--cv-raised);" />
 
@@ -713,6 +729,8 @@
 					position="top-right"
 					style="display:flex; flex-direction:column; align-items:flex-end; gap:4px; margin:6px;"
 				>
+					<div style="display:flex; align-items:center; gap:4px;">
+						{#if loadedPage}<PageControl mode={configMode} onChoose={(mode) => { configMode = mode; selectedNodeId = null; }} />{/if}
 					<button
 						onclick={() => {
 							showConfig = !showConfig;
@@ -726,6 +744,7 @@
 					>
 						<SettingsIcon size={14} />
 					</button>
+					</div>
 					{#if showConfig}
 						<div
 							style="background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:8px; padding:10px 12px; min-width:170px; box-shadow:0 4px 16px var(--cv-shadow);"

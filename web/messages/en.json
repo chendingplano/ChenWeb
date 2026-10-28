@@ -7773,5 +7773,6 @@
 	"wpi_view_page_config": "View page config",
 	"wpi_layouter_title": "Layouter",
 	"wpi_page_config_title": "Page configuration",
-	"wpi_layouter_type": "Layouter type"
+	"wpi_layouter_type": "Layouter type",
+	"wpi_resize_preview": "Resize page preview (arrow keys also resize)"
 }

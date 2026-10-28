@@ -136,7 +136,7 @@ keyboard focus containment, Escape dismissal and text selection.
 
 ### Requirement: Canvas page preview
 When a page is loaded, the editor SHALL render its elements with the interpreter's
-layout and element components inside a fixed-size page surface on the canvas. Each
+layout and element components inside a resizable page surface on the canvas, initially centered and scaled to fit. Each
 rendered element SHALL have a transparent selection overlay that selects its editor
 node and opens its properties without triggering its page action. The preview SHALL
 use the page's stored data sources and preserve element instance attributes when
@@ -148,4 +148,4 @@ When a page is loaded, the editor SHALL show a movable control frame at the uppe
 right of the canvas. Its page configuration and layouter buttons SHALL display the
 corresponding descriptor properties in the Properties panel. Selecting an element
 SHALL return the panel to that element. Edits SHALL update the in-memory descriptor,
-refresh the preview and be undoable. The frame SHALL be movable by pointer and keyboard.
+refresh the preview and be undoable. The frame SHALL be movable by pointer and keyboard and initially aligned immediately left of the canvas settings button. The preview SHALL be resizable by pointer and keyboard; resizing changes the editor surface rather than page descriptor dimensions, and SHALL be undoable.

@@ -7773,5 +7773,6 @@
 	"wpi_view_page_config": "查看页面配置",
 	"wpi_layouter_title": "布局器",
 	"wpi_page_config_title": "页面配置",
-	"wpi_layouter_type": "布局器类型"
+	"wpi_layouter_type": "布局器类型",
+	"wpi_resize_preview": "调整页面预览大小（也可使用方向键）"
 }
