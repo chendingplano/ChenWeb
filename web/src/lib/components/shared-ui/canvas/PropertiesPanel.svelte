@@ -65,6 +65,7 @@
   let typing = $state<{ nodeId: string; name: string; text: string } | null>(null);
   let newColumn = $state({ label: '', field: '', width: '' });
   let newField = $state({ column: '', attribute: '' });
+  let addingField = $state(false);
 
   function columnsOf(n: FlowNode, attr: ElementAttribute): { label: string; field: string; width?: string }[] {
     const value = attrsOf(n).columns ?? attr.default_value;
@@ -75,6 +76,7 @@
     node?.id;
     newColumn = { label: '', field: '', width: '' };
     newField = { column: '', attribute: '' };
+    addingField = false;
   });
 
   function addColumn(attr: ElementAttribute) {
@@ -200,7 +202,10 @@
                 {@const source = attrsOf(node).source ?? attr.default_value}
                 {#if source && typeof source === 'object' && !Array.isArray(source)}
                   {@const fields = Array.isArray(source.fields) ? source.fields : []}
-                  <div style="font-size:9px; color:var(--cv-text-muted); margin:6px 0 3px;">{m.propertiespanel_source_fields()}</div>
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;">
+                    <span style="font-size:9px; color:var(--cv-text-muted);">{m.propertiespanel_source_fields()}</span>
+                    <button class="column-remove" type="button" onclick={() => (addingField = true)}>{m.propertiespanel_add_source_field()}</button>
+                  </div>
                   {#each fields as field, index (index)}
                     {#if field && typeof field === 'object' && !Array.isArray(field)}
                       <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:3px; margin-bottom:4px;">
@@ -210,11 +215,13 @@
                       </div>
                     {/if}
                   {/each}
-                  <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:3px;">
-                    <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newField.column} />
-                    <input class="column-input" aria-label={m.propertiespanel_source_attribute()} placeholder={m.propertiespanel_source_attribute()} bind:value={newField.attribute} />
-                  </div>
-                  <button class="column-add" type="button" disabled={!newField.column.trim() || !newField.attribute.trim()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, [...fields, { column: newField.column.trim(), attribute: newField.attribute.trim() }])); newField = { column: '', attribute: '' }; }}>{m.propertiespanel_add_source_field()}</button>
+                  {#if addingField}
+                    <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:3px;">
+                      <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newField.column} />
+                      <input class="column-input" aria-label={m.propertiespanel_source_attribute()} placeholder={m.propertiespanel_source_attribute()} bind:value={newField.attribute} />
+                    </div>
+                    <button class="column-add" type="button" disabled={!newField.column.trim() || !newField.attribute.trim()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, [...fields, { column: newField.column.trim(), attribute: newField.attribute.trim() }])); newField = { column: '', attribute: '' }; addingField = false; }}>{m.wpi_json_apply()}</button>
+                  {/if}
                 {/if}
               {/if}
               {#if attr.help_tip}
