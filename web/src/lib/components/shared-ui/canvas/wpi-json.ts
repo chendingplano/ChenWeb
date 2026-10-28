@@ -60,3 +60,10 @@ export function pageNodes(page: JsonObject): Node[] {
 		};
 	});
 }
+
+// The editor can apply JSON objects as page or node descriptors.
+export function parseJsonObject(text: string): JsonObject {
+	const value: unknown = JSON.parse(text);
+	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an object');
+	return value as JsonObject;
+}

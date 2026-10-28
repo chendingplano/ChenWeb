@@ -1,8 +1,9 @@
 <!-- web/src/lib/components/shared-ui/canvas/WpiJsonDialog.svelte -->
-<!-- The WPI editor's View JSON: the descriptor JSON of the selected node or of the page, read-only. -->
+<!-- The WPI editor's View JSON: the descriptor JSON of the selected node or of the page, with editing and syntax checking. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import type { JsonObject } from '$lib/wpi/types';
+  import { parseJsonObject } from './wpi-json';
   import { canvasThemeVars } from './canvas-theme';
 
   let {
@@ -11,13 +12,44 @@
     json,
     darkMode = true,
     onClose,
+    onApply,
   }: {
     title:     string;
     note?:     string;
     json:      JsonObject;
     darkMode?: boolean;
     onClose:   () => void;
+    onApply:   (value: JsonObject) => boolean;
   } = $props();
+
+  let editing = $state(false);
+  let text = $state(JSON.stringify(json, null, 2));
+  let status = $state('');
+  let valid = $state(false);
+
+  function check() {
+    try {
+      JSON.parse(text);
+      valid = true;
+      status = m.wpi_json_valid();
+    } catch (error) {
+      valid = false;
+      status = m.wpi_json_invalid({ error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  function apply() {
+    check();
+    if (!valid) return;
+    try {
+      const value = parseJsonObject(text);
+      if (!onApply(value)) { status = m.wpi_json_invalid_descriptor(); valid = false; return; }
+      onClose();
+    } catch {
+      status = m.wpi_json_object_required();
+      valid = false;
+    }
+  }
 
   function focus(node: HTMLElement) { node.focus(); }
 </script>
@@ -42,7 +74,17 @@
       </div>
       <button use:focus onclick={onClose} style="color:var(--cv-text-muted); font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_view_json_close()}>✕</button>
     </div>
+    <div style="padding:10px 20px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--cv-divider);">
+      <button onclick={() => { editing = true; status = ''; }} disabled={editing}>{m.wpi_json_edit()}</button>
+      <button onclick={check}>{m.wpi_json_check()}</button>
+      {#if editing}<button onclick={apply}>{m.wpi_json_apply()}</button>{/if}
+      <span role="status" style="font-size:12px; color:{valid ? 'var(--cv-text)' : '#ef7777'};">{status}</span>
+    </div>
+    {#if editing}
+      <textarea aria-label={m.wpi_json_edit()} bind:value={text} oninput={() => (status = '')} spellcheck="false" style="flex:1; min-height:50vh; resize:vertical; padding:16px 20px; font-size:11px; line-height:1.5; color:var(--cv-text); background:var(--cv-panel); border:0; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;"></textarea>
+    {:else}
     <pre style="flex:1; overflow:auto; margin:0; padding:16px 20px; font-size:11px; line-height:1.5; color:var(--cv-text);
-      font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">{JSON.stringify(json, null, 2)}</pre>
+      font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">{text}</pre>
+    {/if}
   </div>
 </div>

@@ -33,7 +33,7 @@
 	import PageConfigPanel from './canvas/PageConfigPanel.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
 	import type { JsonObject } from '$lib/wpi/types';
-	import { isElementNode, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
+	import { isElementNode, nodeData, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
@@ -957,6 +957,33 @@
 				? ''
 				: m.wpi_view_json_node_data_note()}
 		json={selectedNode ? nodeJson(selectedNode) : { ...pageJson(nodes), ...loadedPage, elements: pageJson(nodes).elements }}
+		onApply={(value) => {
+			if (selectedNode) {
+				if (isElementNode(selectedNode) && typeof value.element !== 'string') return false;
+				takeSnapshot();
+				updateNodeData(selectedNode.id, nodeData(selectedNode, value));
+			} else {
+				let next: Node[];
+				try { next = pageNodes(value); } catch { return false; }
+				const existing = nodes.filter(isElementNode).sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+				takeSnapshot();
+				const used = new Set(nodes.map((node) => node.id));
+				const elements = next.map((node, index) => {
+					const old = existing[index];
+					if (old) return { ...old, hidden: true, data: nodeData(old, nodeJson(node)) };
+					let id = node.id;
+					while (used.has(id)) id += '-new';
+					used.add(id);
+					return { ...node, id, hidden: true };
+				});
+				const removed = new Set(existing.slice(elements.length).map((node) => node.id));
+				nodes = [...nodes.filter((node) => !isElementNode(node)), ...elements];
+				edges = edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target));
+				loadedPage = value;
+				canvasRevision++;
+			}
+			return true;
+		}}
 		onClose={() => (showJson = false)}
 	/>
 {/if}

@@ -66,3 +66,11 @@ test('loading preserves instance order, duplicate classes and nested attributes'
 	assert.throws(() => pageNodes({ elements: [null] }));
 	assert.throws(() => pageNodes({}));
 });
+
+test('JSON editing accepts objects and reports invalid syntax or non-objects', async () => {
+	const { parseJsonObject } = await import('./wpi-json');
+	assert.deepEqual(parseJsonObject('{"name":"example"}'), { name: 'example' });
+	assert.throws(() => parseJsonObject('{broken'));
+	assert.throws(() => parseJsonObject('[]'));
+	assert.throws(() => parseJsonObject('null'));
+});
