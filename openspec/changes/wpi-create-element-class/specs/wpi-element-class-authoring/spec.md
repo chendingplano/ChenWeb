@@ -300,6 +300,19 @@ node's class: the class's latest row, with `descriptor_id` read-only, a note say
 the class is a draft or implemented, and **Save** in place of Create Element. Saving SHALL
 store the edited row through the class PUT, close the form, say the class was saved, and
 reload the class list; a refused save SHALL show the server's issues in the form.
+In edit mode, Save SHALL remain disabled until the descriptor differs from its loaded
+values or an existing attribute has unapplied edits. Opening an attribute without editing
+it SHALL NOT enable Save. Restoring the original descriptor SHALL disable Save again;
+JSON object key order SHALL NOT count as a change. Save SHALL also be disabled while
+loading or saving. An unchanged descriptor SHALL NOT send an update request.
+
+#### Scenario: Save requires changes
+- **WHEN** an admin opens Edit class and then opens an attribute without changing it
+- **THEN** Save is disabled
+- **WHEN** the admin changes a default or help tip, adds an attribute, or removes one
+- **THEN** Save is enabled, with pending attribute edits handled by the existing Apply/Abandon prompt
+- **WHEN** the admin restores the original values
+- **THEN** Save is disabled and no update request is sent
 
 #### Scenario: Duplicate an element node
 - **WHEN** an `input` node with `label` `Name` is selected and the author clicks Duplicate

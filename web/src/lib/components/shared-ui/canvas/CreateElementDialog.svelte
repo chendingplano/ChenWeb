@@ -28,6 +28,7 @@
     type DraftAttribute,
   } from './element-class-form';
   import { canvasThemeVars } from './canvas-theme';
+  import { classRowKey } from './element-class-dirty';
 
   let {
     darkMode = true,
@@ -47,6 +48,7 @@
   // Editing: the class row is loaded first; its status is preserved when saved.
   const editMode = $derived(classId !== undefined);
   let loaded    = $state(false);
+  let savedDescriptor = $state('');
   let loadError = $state('');
   let status    = $state<'draft' | 'active'>('draft');
 
@@ -55,6 +57,7 @@
     try {
       const row = await getElementClass(classId);
       attributes = attributesFromRow(row.class);
+      savedDescriptor = classRowKey(attributes);
       status = row.status;
       loaded = true;
     } catch (e) {
@@ -82,6 +85,7 @@
   const classEdit   = $derived(attrEditing !== null && isClassAttribute(attrEditing));
   const descEdit    = $derived(attrEditing === 'description');
   const attrDirty  = $derived(attrEditing !== null && formKey() !== attrBase);
+  const descriptorDirty = $derived(classRowKey(attributes) !== savedDescriptor || attrDirty);
 
   // The dialog's size once the author has resized it; until then it fits its content.
   const MIN_WIDTH = 480;
@@ -247,6 +251,7 @@
   }
 
   async function save() {
+    if (saving || (editMode && (!loaded || classRowKey(attributes) === savedDescriptor))) return;
     clearFormError();
     const row = buildClassRow(attributes);
     const p = rowProblem(row);
@@ -264,6 +269,7 @@
     try {
       if (classId !== undefined) await updateElementClass(classId, row);
       else await createElementClass(row);
+      savedDescriptor = classRowKey(attributes);
       onSaved(id);
     } catch (e) {
       if (e instanceof WpiError && e.status === 409) formError = m.wpi_create_element_err_exists({ id });
@@ -467,7 +473,7 @@
     <!-- Footer -->
     <div style="padding:12px 20px; border-top:1px solid var(--cv-divider); display:flex; justify-content:flex-end; gap:8px;">
       <button type="button" class="btn" onclick={requestClose}>{m.wpi_create_element_cancel()}</button>
-      <button type="button" class="btn primary" onclick={() => guard(save)} disabled={saving || (editMode && !loaded)}>
+      <button type="button" class="btn primary" onclick={() => guard(save)} disabled={saving || (editMode && (!loaded || !descriptorDirty))}>
         {#if editMode}
           {saving ? m.wpi_edit_element_saving() : m.wpi_edit_element_save()}
         {:else}
