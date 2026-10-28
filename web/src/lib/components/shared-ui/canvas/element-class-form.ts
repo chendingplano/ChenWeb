@@ -172,3 +172,41 @@ export function rowProblem(row: JsonObject): RowProblem | null {
 	if (typeof english !== 'string' || english.trim() === '') return 'description';
 	return null;
 }
+
+// The add form's fields for an instance attribute, so that the form can edit it (the inverse of
+// newAttribute). A default shows as JSON, as in the list; a help tip by language fills both fields.
+export type AttributeFields = { name: string; defaultText: string; tipEn: string; tipZh: string; required: boolean };
+
+export function attributeFields(attr: DraftAttribute): AttributeFields {
+	// A class attribute uses the same fields: a description by language fills the two help tip
+	// fields, any other text the default value field.
+	if (isClassAttribute(attr.name)) {
+		const v = attr.value;
+		const texts = attr.name === 'description' && v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null;
+		return {
+			name: attr.name,
+			defaultText: attr.name === 'description' ? '' : String(attr.value),
+			tipEn: texts ? String(texts.en ?? '') : '',
+			tipZh: texts ? String(texts['zh-cn'] ?? '') : '',
+			required: false
+		};
+	}
+	const dv = defaultValue(attr);
+	const tip = helpTip(attr);
+	const byLanguage = tip !== null && typeof tip === 'object' && !Array.isArray(tip);
+	return {
+		name: attr.name,
+		defaultText: hasDefault(attr) && dv !== null ? JSON.stringify(dv) : '',
+		tipEn: typeof tip === 'string' ? tip : byLanguage ? String(tip.en ?? '') : '',
+		tipZh: byLanguage ? String(tip['zh-cn'] ?? '') : '',
+		required: hasDefault(attr) && dv === null
+	};
+}
+
+// The attribute the fields describe (the inverse of attributeFields): a class attribute keeps its
+// name and takes its text from the fields, an instance attribute is built as newAttribute does.
+export function attributeFromFields(f: AttributeFields): DraftAttribute {
+	if (!isClassAttribute(f.name)) return newAttribute(f.name, f.required, f.defaultText, f.tipEn, f.tipZh);
+	if (f.name === 'description') return { name: f.name, value: { en: f.tipEn.trim(), 'zh-cn': f.tipZh.trim() } };
+	return { name: f.name, value: f.defaultText.trim() };
+}

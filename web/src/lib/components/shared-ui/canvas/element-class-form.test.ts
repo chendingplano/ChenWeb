@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	applyEdit,
+	attributeFields,
+	attributeFromFields,
 	attributesFromRow,
 	attributeProblem,
 	buildClassRow,
@@ -161,4 +163,29 @@ test('a stored row becomes the form attributes, class attributes first', () => {
 test('an empty description is left out of the row', () => {
 	const attrs = attributesFromRow({ descriptor_id: 'text', schema_version: '0.3' });
 	assert.deepEqual(buildClassRow(attrs), { descriptor_id: 'text', schema_version: '0.3' });
+});
+
+test('attributeFields is the inverse of newAttribute', () => {
+	for (const [name, required, def, en, zh] of [
+		['width', false, '200', 'Width', '宽度'],
+		['label', true, '', 'Label', ''],
+		['mode', false, '"read-write"', '', ''],
+		['plain', false, '', '', '']
+	] as const) {
+		const attr = newAttribute(name, required, def, en, zh);
+		const fields = attributeFields(attr);
+		assert.deepEqual(fields, { name, defaultText: def, tipEn: en, tipZh: zh, required });
+		assert.deepEqual(newAttribute(fields.name, fields.required, fields.defaultText, fields.tipEn, fields.tipZh), attr);
+	}
+});
+
+test('class attributes go through the same fields', () => {
+	for (const attr of [
+		{ name: 'description', value: { en: 'A button', 'zh-cn': '按钮' } },
+		{ name: 'implement_notes', value: 'line 1\nline 2' },
+		{ name: 'schema_version', value: '0.3' }
+	]) {
+		assert.deepEqual(attributeFromFields(attributeFields(attr)), attr);
+	}
+	assert.deepEqual(attributeFields({ name: 'description', value: { en: 'A', 'zh-cn': '甲' } }).tipZh, '甲');
 });

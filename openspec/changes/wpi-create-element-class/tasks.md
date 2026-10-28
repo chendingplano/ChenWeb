@@ -72,3 +72,9 @@
 - [x] 12.2 Backend: `GET`/`PUT /api/v1/wpi/classes/element/:classId` (`GetElementClass`, `UpdateElementClass`; store `elementClass`, `insertClassVersion`): next version keeps the status, drafts checked as drafts, active classes against their code; store and handler tests
 - [x] 12.3 `WpiNode.svelte`: Edit class on element nodes; `CreateElementDialog.svelte` given `classId` edits that class (`attributesFromRow` + tests, fixed ID, Save, errors scrolled into view); `api.ts` `getElementClass`, `updateElementClass` + tests; messages in both languages
 - [x] 12.4 `go test`, `bun run check`, unit tests, and the browser runs (WPI editor: tool bar buttons, duplicate + undo, delete with edge + undo, draft edit saved as version 2, active edit refused, Chinese; Flow page: duplicate, delete, undo) pass; verification rows removed; spec, design and devdocs updated
+
+## 13. Create Element form: multi-line help tips, modify an attribute
+
+- [x] 13.1 `CreateElementDialog.svelte`: the two help tip fields are multi-line, as tall as the default value; each instance attribute row has an edit icon that loads it into the add fields (`attributeFields`, inverse of `newAttribute`, + test); **Modify** replaces it (rename allowed, same checks), **Cancel** resets the fields; messages in both languages
+- [x] 13.2 Unapplied changes (fields differ from what was loaded): closing the dialog (✕, Cancel, backdrop, Escape), saving the class, or editing another row asks Apply / Abandon / Keep editing; Apply that is refused stays on the form
+- [ ] 13.3 Browser run of the editor (both entry points, English and Chinese, light and dark) — not done; unit tests and `bun run check` pass
