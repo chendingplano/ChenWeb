@@ -27,3 +27,11 @@ export function withSourceFields(attrs: JsonObject, fallback: Json | undefined, 
 	if (!source || typeof source !== 'object' || Array.isArray(source)) return attrs;
 	return { ...attrs, source: { ...source, fields } };
 }
+
+export function withSourceProperty(attrs: JsonObject, fallback: Json | undefined, key: string, value: Json | undefined): JsonObject {
+	const current = attrs.source ?? fallback;
+	const source: JsonObject = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {};
+	if (value === undefined) delete source[key];
+	else source[key] = value;
+	return { ...attrs, source };
+}

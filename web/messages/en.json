@@ -7798,5 +7798,22 @@
 	"propertiespanel_source_column": "Column",
 	"propertiespanel_source_attribute": "Attribute",
 	"propertiespanel_remove_source_field": "Remove field",
-	"propertiespanel_add_source_field": "Add field"
+	"propertiespanel_add_source_field": "Add field",
+	"propertiespanel_source_limit": "Limit",
+	"propertiespanel_source_table": "Table",
+	"propertiespanel_source_action": "Action",
+	"propertiespanel_source_result": "Result",
+	"propertiespanel_select_table": "Select table",
+	"propertiespanel_select_action": "Select action",
+	"propertiespanel_select_result": "Select result",
+	"propertiespanel_tables_unavailable": "Could not load tables.",
+	"propertiespanel_order_by": "Order by",
+	"propertiespanel_add_order": "Add order",
+	"propertiespanel_direction": "Direction",
+	"propertiespanel_remove_order": "Remove order",
+	"propertiespanel_action_load": "Load",
+	"propertiespanel_action_query": "Query",
+	"propertiespanel_result_list": "List",
+	"propertiespanel_direction_asc": "Ascending",
+	"propertiespanel_direction_desc": "Descending"
 }

@@ -5,7 +5,7 @@
   import type { ElementAttribute, ElementClassSummary } from '$lib/wpi/api';
   import type { JsonObject } from '$lib/wpi/types';
   import { localized } from '$lib/wpi/text';
-  import { valueText, withAttribute, withSourceFields } from './element-attributes';
+  import { valueText, withAttribute, withSourceFields, withSourceProperty } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
 
   let {
@@ -67,6 +67,20 @@
   let addingColumn = $state(false);
   let newField = $state({ column: '', attribute: '' });
   let addingField = $state(false);
+  let addingOrder = $state(false);
+  let newOrder = $state({ column: '', direction: 'asc' });
+  let tables = $state<string[]>([]);
+  let tableError = $state(false);
+  let tablesRequested = false;
+  $effect(() => {
+    if (elementClass?.attributes.source && !tablesRequested) {
+      tablesRequested = true;
+      fetch('/api/v1/data-sync/schema/tables', { credentials: 'same-origin' })
+        .then((response) => { if (!response.ok) throw new Error('table catalog'); return response.json(); })
+        .then((body) => { tables = (body.tables ?? []).map((t: { schema: string; table: string }) => `${t.schema}.${t.table}`); })
+        .catch(() => { tableError = true; });
+    }
+  });
 
   function columnsOf(n: FlowNode, attr: ElementAttribute): { label: string; field: string; width?: string }[] {
     const value = attrsOf(n).columns ?? attr.default_value;
@@ -79,6 +93,8 @@
     addingColumn = false;
     newField = { column: '', attribute: '' };
     addingField = false;
+    addingOrder = false;
+    newOrder = { column: '', direction: 'asc' };
   });
 
   function addColumn(attr: ElementAttribute) {
@@ -184,6 +200,28 @@
                   style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); resize:none; field-sizing:content; box-sizing:border-box;"
                 ></textarea>
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.propertiespanel_fixed()}</div>
+              {:else if name === 'source' && node.data.element === 'list'}
+                {@const sourceValue = attrsOf(node).source ?? attr.default_value}
+                {@const source = sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue) ? sourceValue : {}}
+                <div class="source-properties">
+                  <label for="source-limit">{m.propertiespanel_source_limit()}</label>
+                  <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
+                  <label for="source-table">{m.propertiespanel_source_table()}</label>
+                  <select id="source-table" class="column-input" value={String(source.table ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', (e.target as HTMLSelectElement).value))}>
+                    <option value="">{m.propertiespanel_select_table()}</option>
+                    {#if source.table && !tables.includes(String(source.table))}<option value={String(source.table)}>{String(source.table)}</option>{/if}
+                    {#each tables as table}<option value={table}>{table}</option>{/each}
+                  </select>
+                  <label for="source-action">{m.propertiespanel_source_action()}</label>
+                  <select id="source-action" class="column-input" value={String(source.action ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'action', (e.target as HTMLSelectElement).value))}>
+                    <option value="">{m.propertiespanel_select_action()}</option><option value="load">{m.propertiespanel_action_load()}</option><option value="query">{m.propertiespanel_action_query()}</option>
+                  </select>
+                  <label for="source-result">{m.propertiespanel_source_result()}</label>
+                  <select id="source-result" class="column-input" value={String(source.result ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'result', (e.target as HTMLSelectElement).value))}>
+                    <option value="">{m.propertiespanel_select_result()}</option><option value="list">{m.propertiespanel_result_list()}</option>
+                  </select>
+                </div>
+                {#if tableError}<div style="font-size:9px; color:var(--cv-text-faint);">{m.propertiespanel_tables_unavailable()}</div>{/if}
               {:else if name === 'columns' && node.data.element === 'list'}
             {@const columns = columnsOf(node, attr)}
             {#if addingColumn}
@@ -214,7 +252,7 @@
                   style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); resize:vertical; field-sizing:content; box-sizing:border-box;"
                 ></textarea>
               {/if}
-              {#if name === 'source' && attr.instance_modifiable !== false}
+              {#if name === 'source' && node.data.element === 'list' && attr.instance_modifiable !== false}
                 {@const source = attrsOf(node).source ?? attr.default_value}
                 {#if source && typeof source === 'object' && !Array.isArray(source)}
                   {@const fields = Array.isArray(source.fields) ? source.fields : []}
@@ -244,6 +282,30 @@
                     {/if}
                   {/each}
 
+                  {@const order = Array.isArray(source.order_by) ? source.order_by : []}
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;">
+                    <span style="font-size:9px; color:var(--cv-text-muted);">{m.propertiespanel_order_by()}</span>
+                    <div style="display:flex; gap:3px;">
+                      <button class="column-remove" type="button" onclick={() => (addingOrder = true)}>{m.propertiespanel_add_order()}</button>
+                      {#if addingOrder}<button class="column-remove" type="button" onclick={() => { addingOrder = false; newOrder = { column: '', direction: 'asc' }; }}>{m.wpi_create_element_cancel()}</button>{/if}
+                    </div>
+                  </div>
+                  {#if addingOrder}
+                    <div class="order-row">
+                      <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newOrder.column} />
+                      <select class="column-input" aria-label={m.propertiespanel_direction()} bind:value={newOrder.direction}><option value="asc">{m.propertiespanel_direction_asc()}</option><option value="desc">{m.propertiespanel_direction_desc()}</option></select>
+                      <button class="column-remove" type="button" aria-label={m.wpi_json_apply()} disabled={!newOrder.column.trim()} onclick={() => { update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'order_by', [...order, { column: newOrder.column.trim(), direction: newOrder.direction }])); newOrder = { column: '', direction: 'asc' }; addingOrder = false; }}>+</button>
+                    </div>
+                  {/if}
+                  {#each order as item, index (index)}
+                    {#if item && typeof item === 'object' && !Array.isArray(item)}
+                      <div class="order-row">
+                        <input class="column-input" aria-label={m.propertiespanel_source_column()} value={String(item.column ?? '')} oninput={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'order_by', order.map((v, i) => i === index ? { ...item, column: (e.target as HTMLInputElement).value } : v)))} />
+                        <select class="column-input" aria-label={m.propertiespanel_direction()} value={String(item.direction ?? 'asc')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'order_by', order.map((v, i) => i === index ? { ...item, direction: (e.target as HTMLSelectElement).value } : v)))}><option value="asc">{m.propertiespanel_direction_asc()}</option><option value="desc">{m.propertiespanel_direction_desc()}</option></select>
+                        <button class="column-remove" type="button" aria-label={m.propertiespanel_remove_order()} onclick={() => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'order_by', order.filter((_, i) => i !== index)))}>×</button>
+                      </div>
+                    {/if}
+                  {/each}
                 {/if}
               {/if}
               {#if attr.help_tip}
@@ -321,6 +383,8 @@
 </aside>
 
 <style>
+  .source-properties { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 4px; align-items: center; font-size: 9px; color: var(--cv-text-muted); }
+  .order-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 25px; gap: 3px; margin-bottom: 4px; }
   .column-input { min-width: 0; width: 100%; box-sizing: border-box; background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px; font-size: 10px; color: var(--cv-text); }
   .column-remove, .column-add { background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px 7px; font-size: 10px; color: var(--cv-text); cursor: pointer; }
   .column-add { margin-top: 5px; }

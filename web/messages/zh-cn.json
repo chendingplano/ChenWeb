@@ -7798,5 +7798,22 @@
 	"propertiespanel_source_column": "列",
 	"propertiespanel_source_attribute": "属性",
 	"propertiespanel_remove_source_field": "删除字段",
-	"propertiespanel_add_source_field": "添加字段"
+	"propertiespanel_add_source_field": "添加字段",
+	"propertiespanel_source_limit": "数量限制",
+	"propertiespanel_source_table": "表",
+	"propertiespanel_source_action": "操作",
+	"propertiespanel_source_result": "结果",
+	"propertiespanel_select_table": "选择表",
+	"propertiespanel_select_action": "选择操作",
+	"propertiespanel_select_result": "选择结果",
+	"propertiespanel_tables_unavailable": "无法加载表。",
+	"propertiespanel_order_by": "排序",
+	"propertiespanel_add_order": "添加排序",
+	"propertiespanel_direction": "方向",
+	"propertiespanel_remove_order": "删除排序",
+	"propertiespanel_action_load": "加载",
+	"propertiespanel_action_query": "查询",
+	"propertiespanel_result_list": "列表",
+	"propertiespanel_direction_asc": "升序",
+	"propertiespanel_direction_desc": "降序"
 }

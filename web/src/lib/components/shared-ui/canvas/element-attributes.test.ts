@@ -44,3 +44,10 @@ test('source field edits preserve the source and other attributes, including def
 		source: { action: 'query', limit: 20, fields: [] }
 	});
 });
+
+test('source property edits retain other settings and can initialize a source', async () => {
+	const { withSourceProperty } = await import('./element-attributes');
+	assert.deepEqual(withSourceProperty({ source: { action: 'load', where: { id: 1 } } }, undefined, 'limit', 25), { source: { action: 'load', where: { id: 1 }, limit: 25 } });
+	assert.deepEqual(withSourceProperty({}, null, 'action', 'load'), { source: { action: 'load' } });
+	assert.deepEqual(withSourceProperty({ source: { limit: 25, action: 'load' } }, undefined, 'limit', undefined), { source: { action: 'load' } });
+});
