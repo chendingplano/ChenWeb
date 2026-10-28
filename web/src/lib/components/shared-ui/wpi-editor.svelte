@@ -36,6 +36,7 @@
 	import { isElementNode, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
+	import { sameCanvasContent } from './canvas/canvas-dirty';
 	import {
 		alignNodes,
 		distributeNodes,
@@ -175,7 +176,7 @@
 
 	const isDirty = $derived(
 		lastSavedSnapshot !== null &&
-			(activeFlow?.flow_name !== savedName || JSON.stringify({ nodes, edges }) !== JSON.stringify({ nodes: lastSavedSnapshot.nodes, edges: lastSavedSnapshot.edges }) ||
+			(activeFlow?.flow_name !== savedName || !sameCanvasContent({ nodes, edges }, lastSavedSnapshot) ||
 			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page) ||
 			 JSON.stringify(previewSize) !== JSON.stringify(lastSavedSnapshot.previewSize))
 	);
@@ -216,7 +217,24 @@
 		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false };
 		tabs = [...tabs, tab];
 		switchTab(id);
-		if (page) loadPage(page);
+		if (page) {
+			loadPage(page);
+			lastSavedSnapshot = currentSnapshot();
+			undoStack = [];
+			redoStack = [];
+		}
+	}
+	function closeTab(id: number) {
+		const tab = tabs.find((item) => item.id === id);
+		if (!tab) return;
+		if ((id === activeTabId ? isDirty : tab.dirty) && !confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
+		if (id === activeTabId) {
+			const index = tabs.findIndex((item) => item.id === id);
+			const next = tabs[index + 1] ?? tabs[index - 1];
+			if (next) switchTab(next.id);
+			else addTab();
+		}
+		tabs = tabs.filter((item) => item.id !== id);
 	}
 	function tabTitle(tab: CanvasTab): string {
 		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
@@ -367,7 +385,7 @@
 				lastSavedSnapshot = snapshot;
 				savedName = flowName;
 			} else {
-				tabs = tabs.map((tab) => tab.id === id ? { ...tab, flow: { ...res.flow, flow_name: tab.flow?.flow_name ?? flowName }, savedName: flowName, saved: snapshot, dirty: tab.flow?.flow_name !== flowName || JSON.stringify(tab.snapshot) !== JSON.stringify(snapshot) } : tab);
+				tabs = tabs.map((tab) => tab.id === id ? { ...tab, flow: { ...res.flow, flow_name: tab.flow?.flow_name ?? flowName }, savedName: flowName, saved: snapshot, dirty: tab.flow?.flow_name !== flowName || (!sameCanvasContent(tab.snapshot, snapshot) || JSON.stringify(tab.snapshot.page) !== JSON.stringify(snapshot.page) || JSON.stringify(tab.snapshot.previewSize) !== JSON.stringify(snapshot.previewSize)) } : tab);
 			}
 			toast(m.canvas_01_saved());
 		} catch {
@@ -688,9 +706,12 @@
 		/>
 		<div class="canvas-tabs" role="tablist" aria-label={m.wpi_canvas_tabs()}>
 			{#each tabs as tab (tab.id)}
-				<button type="button" role="tab" aria-selected={tab.id === activeTabId} class:active={tab.id === activeTabId} onclick={() => switchTab(tab.id)}>
-					{tabTitle(tab)}{#if tab.id === activeTabId ? isDirty : tab.dirty}<span aria-label={m.wpi_tab_unsaved()}> *</span>{/if}
-				</button>
+				<div class="canvas-tab" class:active={tab.id === activeTabId}>
+					<button type="button" role="tab" aria-selected={tab.id === activeTabId} onclick={() => switchTab(tab.id)}>
+						{tabTitle(tab)}{#if tab.id === activeTabId ? isDirty : tab.dirty}<span aria-label={m.wpi_tab_unsaved()}> *</span>{/if}
+					</button>
+					<button type="button" class="close-tab" aria-label={m.wpi_close_canvas_tab({ name: tabTitle(tab) })} title={m.wpi_close_canvas_tab({ name: tabTitle(tab) })} onclick={() => closeTab(tab.id)}>×</button>
+				</div>
 			{/each}
 			<button type="button" class="add-tab" aria-label={m.wpi_add_canvas_tab()} title={m.wpi_add_canvas_tab()} onclick={() => addTab()}>+</button>
 		</div>
@@ -975,8 +996,11 @@
 
 <style>
 	.canvas-tabs { display: flex; align-items: stretch; flex-shrink: 0; overflow-x: auto; background: var(--cv-raised); border-bottom: 1px solid var(--cv-divider); }
-	.canvas-tabs button { flex-shrink: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 14px; border: 0; border-right: 1px solid var(--cv-divider); border-bottom: 2px solid transparent; background: transparent; color: var(--cv-text-muted); font-size: 11px; cursor: pointer; }
-	.canvas-tabs button.active { color: var(--cv-text); background: var(--cv-canvas); border-bottom-color: var(--cv-accent); }
+	.canvas-tab { display: flex; align-items: center; flex-shrink: 0; border-right: 1px solid var(--cv-divider); border-bottom: 2px solid transparent; }
+	.canvas-tabs button { flex-shrink: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 14px; border: 0; background: transparent; color: var(--cv-text-muted); font-size: 11px; cursor: pointer; }
+	.canvas-tab.active { color: var(--cv-text); background: var(--cv-canvas); border-bottom-color: var(--cv-accent); }
 	.canvas-tabs button:hover { background: var(--cv-hover); }
+	.canvas-tabs .close-tab { opacity: 0; padding: 2px 6px; margin-right: 4px; font-size: 14px; }
+	.canvas-tab:hover .close-tab, .canvas-tab:focus-within .close-tab { opacity: 1; }
 	.canvas-tabs .add-tab { font-size: 16px; padding: 3px 12px; }
 </style>

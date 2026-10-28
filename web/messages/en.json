@@ -7782,5 +7782,6 @@
 	"propertiespanel_add_column": "Add column",
 	"wpi_canvas_tabs": "Canvas tabs",
 	"wpi_tab_unsaved": "Unsaved changes",
-	"wpi_add_canvas_tab": "Add empty canvas tab"
+	"wpi_add_canvas_tab": "Add empty canvas tab",
+	"wpi_close_canvas_tab": "Close {name}"
 }

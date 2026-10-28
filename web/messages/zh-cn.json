@@ -7782,5 +7782,6 @@
 	"propertiespanel_add_column": "添加列",
 	"wpi_canvas_tabs": "画布标签页",
 	"wpi_tab_unsaved": "未保存的更改",
-	"wpi_add_canvas_tab": "添加空白画布标签页"
+	"wpi_add_canvas_tab": "添加空白画布标签页",
+	"wpi_close_canvas_tab": "关闭 {name}"
 }
