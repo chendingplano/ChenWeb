@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/auth"
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -253,7 +254,9 @@ func (c *DeepSeekBalanceClient) FetchBalance(ctx context.Context, baseURL string
 	if user == nil || strings.TrimSpace(user.UserId) == "" || user.UserStatus != "active" {
 		return BalanceFetchResult{}, errors.New("balance capture requires an active scheduler identity")
 	}
-	result, err := sharedllm.NewDeepSeekBalanceClient(c.HTTPClient).Fetch(ctx, baseURL, apiKey, &sharedllm.RequestCapture{UserID: user.UserId})
+	client := sharedllm.NewDeepSeekBalanceClient(c.HTTPClient)
+	client.ModelName = config.AppConfig.ModelBalanceQueries["deepseek"]
+	result, err := client.Fetch(ctx, baseURL, apiKey, &sharedllm.RequestCapture{UserID: user.UserId})
 	if err != nil {
 		return BalanceFetchResult{}, err
 	}

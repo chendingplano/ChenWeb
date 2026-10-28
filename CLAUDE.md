@@ -108,3 +108,20 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   Keep translated menu arrays and other computed copy in `$derived`, not one-time constants.
   Dashboard menus store stable IDs in `view`/`child` query parameters; Knowledge Base uses
   `section`. These also preserve the selected view across ordinary reloads.
+
+# Balance Query Usage Attribution
+
+`[model-balance-queries]` in `config.toml` / `config.local.toml` maps provider IDs
+to model names recorded in balance-query usage events. For example:
+
+```toml
+[model-balance-queries]
+deepseek = "deepseek-flash-processor"
+```
+
+The DeepSeek reconciliation adapter passes this name to the shared balance client
+for successful and failed reads. The usage sink resolves the model profile within
+the account using this name; a matching `llm_account_model_profile.model_name`
+is needed for profile linkage. An absent setting preserves the empty model name.
+Restart the API after changing this configuration. This setting controls usage
+attribution; the provider request remains `GET /user/balance`.

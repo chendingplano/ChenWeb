@@ -236,6 +236,8 @@ type AppConfigDef struct {
 	RelationSearchWeights           RelationSearchWeightsConfig           `mapstructure:"relations_search_weights"`
 	LLM                             LLMConfig                             `mapstructure:"llm"`
 	Languages                       LanguagesConfig                       `mapstructure:"languages"`
+	// ModelBalanceQueries maps provider IDs to model names for balance usage attribution.
+	ModelBalanceQueries map[string]string `mapstructure:"model-balance-queries"`
 	// SiteConfig names the tenant-independent site-config file for the
 	// customer-facing frontend (ADR 2026071102). Tenant-dependent config
 	// filenames come from the site_tenants table, never from here.
