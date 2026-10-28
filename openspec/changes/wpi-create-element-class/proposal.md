@@ -44,7 +44,7 @@ implement.
 - **The node tool bar works** (added 2026-10-27). The no-op Configure button is gone;
   Duplicate copies the node and Delete removes it with its edges, both undoable, on the WPI
   editor and the Flow page. An element node also gets **Edit class**, which opens the Create
-  Element form on that class's latest row; saving stores the class's next version with the
+  Element form on that class's latest row; saving updates the class's existing record in place with the
   same status, through the new `GET`/`PUT /api/v1/wpi/classes/element/:classId`.
 
 ## Capabilities

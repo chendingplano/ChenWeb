@@ -252,8 +252,10 @@ page's properties panel SHALL have no tabs.
 `GET /api/v1/wpi/classes/element/:classId` SHALL return the class's latest row whose status
 is `draft` or `active` as `version`, `status` and `class` (the whole row), or 404 when it
 has none; it SHALL require a logged-in user. `PUT` on the same path SHALL take an edited
-class row and store it as the class's next version with the status of its latest draft or
-active row. Both SHALL be checked for valid class structure, attribute names, help tips,
+class row and update its latest draft or active row in place, preserving its version,
+status, ID and creation audit fields. It SHALL update the body, schema version, updated
+user and updated timestamp without inserting any record. If the selected row no longer
+exists when saving, it SHALL return 404 without creating a replacement. Both SHALL be checked for valid class structure, attribute names, help tips,
 action-default restrictions and shared defaults, independently of the current interpreter's
 attribute list. Admins SHALL be able to add, remove and rename instance attributes and edit
 their defaults and help tips, including attributes required or unknown by the current code.
@@ -265,19 +267,19 @@ the issues; nothing SHALL be stored then. Only admins SHALL be allowed.
 
 #### Scenario: Draft edited
 - **WHEN** draft `slider` is at version 1 and an admin PUTs an edited `slider` row
-- **THEN** version 2 is stored with status `draft` and the response says version 2, status `draft`
+- **THEN** the existing version 1 row is updated with status `draft`, no row is inserted, and the response says version 1, status `draft`
 
 #### Scenario: Active class edited
 - **WHEN** `input` is active at version 2 and an admin PUTs it with a changed help tip
-- **THEN** version 3 is stored with status `active`
+- **THEN** the existing version 2 row is updated with status `active` and no row is inserted
 
 #### Scenario: Attributes the code lacks
 - **WHEN** an admin adds `label_horizontal_align` and `label_vertical_align` to active `button`, both with default `center`, and saves
-- **THEN** the next active version stores both attributes without an unknown-attribute error
+- **THEN** the existing active row stores both attributes without an unknown-attribute error
 
 #### Scenario: Attributes removed or renamed
 - **WHEN** an admin removes `on_click` or renames `label` to `caption` in active `button` and saves
-- **THEN** the next active version stores the edited row without requiring those code-defined attributes
+- **THEN** the existing active row stores the edited row without requiring those code-defined attributes
 
 #### Scenario: Malformed attribute
 - **WHEN** an admin saves a class with an invalid attribute name or a scalar instead of an attribute object

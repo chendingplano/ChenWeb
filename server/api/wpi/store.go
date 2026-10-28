@@ -240,14 +240,14 @@ func (s store) elementClass(ctx context.Context, id string) (c ClassRow, found b
 	return c, err == nil, err
 }
 
-// insertClassVersion stores body as the next version of an element class with
-// the given status, so an edited draft stays a draft.
-func (s store) insertClassVersion(ctx context.Context, id, status string, raw []byte, actor string) (int, error) {
+// updateClass modifies the loaded element class row in place. Its version,
+// status and creation audit fields stay unchanged; a missing row is an error.
+func (s store) updateClass(ctx context.Context, id string, current ClassRow, raw []byte, actor string) (int, error) {
 	var version int
-	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
-		SELECT 'element', $1::text, COALESCE(MAX(version), 0) + 1, $2::text, $3::jsonb, $4::text, $5::text, $5::text
-		FROM kb.wpi_descriptors WHERE kind = 'element' AND descriptor_id = $1::text
-		RETURNING version`, id, ElementSchemaVersion, string(raw), status, actor).Scan(&version)
+	err := s.db.QueryRowContext(ctx, `UPDATE kb.wpi_descriptors
+		SET schema_version = $2::text, body = $3::jsonb, updated_by = $4::text, updated_at = NOW()
+		WHERE kind = 'element' AND descriptor_id = $1::text AND version = $5 AND status = $6::text
+		RETURNING version`, id, ElementSchemaVersion, string(raw), actor, current.Version, current.Status).Scan(&version)
 	return version, err
 }
 

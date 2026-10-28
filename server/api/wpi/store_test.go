@@ -2,6 +2,7 @@ package wpi
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -113,7 +114,7 @@ func TestStoreElementClasses(t *testing.T) {
 
 const elementClassQuery = `SELECT version, status, body FROM kb\.wpi_descriptors\s+WHERE kind = 'element' AND descriptor_id = \$1 AND status IN \('draft', 'active'\) ORDER BY version DESC LIMIT 1`
 
-const insertClassVersionQuery = `INSERT INTO kb\.wpi_descriptors .+ SELECT 'element', \$1::text, COALESCE\(MAX\(version\), 0\) \+ 1, \$2::text, \$3::jsonb, \$4::text, .+ FROM kb\.wpi_descriptors WHERE kind = 'element' AND descriptor_id = \$1::text\s+RETURNING version`
+const updateClassQuery = `UPDATE kb\.wpi_descriptors SET schema_version = \$2::text, body = \$3::jsonb, updated_by = \$4::text, updated_at = NOW\(\) WHERE kind = 'element' AND descriptor_id = \$1::text AND version = \$5 AND status = \$6::text RETURNING version`
 
 func TestStoreElementClass(t *testing.T) {
 	db, mock, _ := sqlmock.New()
@@ -134,14 +135,28 @@ func TestStoreElementClass(t *testing.T) {
 	}
 }
 
-func TestStoreInsertClassVersion(t *testing.T) {
+func TestStoreUpdateClass(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	mock.ExpectQuery(insertClassVersionQuery).WithArgs("slider", ElementSchemaVersion, `{"a":1}`, "draft", "cding@example.com").
+	mock.ExpectQuery(updateClassQuery).WithArgs("slider", ElementSchemaVersion, `{"a":1}`, "cding@example.com", 2, "draft").
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
-	v, err := store{db}.insertClassVersion(context.Background(), "slider", "draft", []byte(`{"a":1}`), "cding@example.com")
+	v, err := store{db}.updateClass(context.Background(), "slider", ClassRow{Version: 2, Status: "draft"}, []byte(`{"a":1}`), "cding@example.com")
 	if err != nil || v != 2 {
 		t.Fatalf("got %d, %v", v, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreUpdateClassMissing(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(updateClassQuery).WithArgs("slider", ElementSchemaVersion, `{"a":1}`, "cding@example.com", 2, "draft").
+		WillReturnRows(sqlmock.NewRows([]string{"version"}))
+	_, err := store{db}.updateClass(context.Background(), "slider", ClassRow{Version: 2, Status: "draft"}, []byte(`{"a":1}`), "cding@example.com")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected missing-row error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -104,7 +104,7 @@ export async function getElementClass(classId: string, fetchFn: typeof fetch = f
 	return body as unknown as ElementClassRow;
 }
 
-// Stores an edited element class as its next version, keeping its status: a
+// Updates an existing element class in place, keeping its version and status: a
 // draft stays a draft, an active class must still match its code. Throws
 // WpiError: 404 when the class has no draft or active row, 400 with issues
 // when the row breaks a rule.

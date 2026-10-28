@@ -4,8 +4,8 @@
      code afterwards (OpenSpec wpi-create-element-class). Each instance attribute is an object with a
      help tip and a default. Double-clicking a value, help tip or instance attribute name edits it.
      The corner grip resizes the dialog. Given a classId, the same form edits that class's latest
-     row instead (from an element node's tool bar); its class ID is fixed, and saving stores the
-     next version with the same status. -->
+     row instead (from an element node's tool bar); its class ID is fixed, and saving updates the
+     existing record with the same version and status. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import { onMount } from 'svelte';

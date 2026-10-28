@@ -235,10 +235,10 @@ func TestUpdateElementClass(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(elementClassQuery).WithArgs("slider").WillReturnRows(classRow(1, "draft"))
-		mock.ExpectQuery(insertClassVersionQuery).WithArgs("slider", ElementSchemaVersion, sliderDraft, "draft", "admin@example.com").
-			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
+		mock.ExpectQuery(updateClassQuery).WithArgs("slider", ElementSchemaVersion, sliderDraft, "admin@example.com", 1, "draft").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", sliderDraft, "classId", "slider")
-		if want := `{"descriptor_id":"slider","status":"draft","version":2}`; rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
+		if want := `{"descriptor_id":"slider","status":"draft","version":1}`; rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -250,10 +250,10 @@ func TestUpdateElementClass(t *testing.T) {
 		defer db.Close()
 		body := testClasses()[KindElement]["input"]
 		mock.ExpectQuery(elementClassQuery).WithArgs("input").WillReturnRows(classRow(2, "active"))
-		mock.ExpectQuery(insertClassVersionQuery).WithArgs("input", ElementSchemaVersion, body, "active", "admin@example.com").
-			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
+		mock.ExpectQuery(updateClassQuery).WithArgs("input", ElementSchemaVersion, body, "admin@example.com", 2, "active").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
 		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "input")
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"active"`) || !strings.Contains(rec.Body.String(), `"version":3`) {
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"active"`) || !strings.Contains(rec.Body.String(), `"version":2`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -270,10 +270,10 @@ func TestUpdateElementClass(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
 			mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(2, "active"))
-			mock.ExpectQuery(insertClassVersionQuery).WithArgs("button", ElementSchemaVersion, edit.body, "active", "admin@example.com").
-				WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
+			mock.ExpectQuery(updateClassQuery).WithArgs("button", ElementSchemaVersion, edit.body, "admin@example.com", 2, "active").
+				WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
 			rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", edit.body, "classId", "button")
-			if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"active"`) || !strings.Contains(rec.Body.String(), `"version":3`) {
+			if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"active"`) || !strings.Contains(rec.Body.String(), `"version":2`) {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
@@ -322,6 +322,20 @@ func TestUpdateElementClass(t *testing.T) {
 		mock.ExpectQuery(elementClassQuery).WithArgs("slider").WillReturnRows(sqlmock.NewRows([]string{"version", "status", "body"}))
 		if rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", sliderDraft, "classId", "slider"); rec.Code != 404 {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("class removed before update", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		mock.ExpectQuery(elementClassQuery).WithArgs("slider").WillReturnRows(classRow(1, "draft"))
+		mock.ExpectQuery(updateClassQuery).WithArgs("slider", ElementSchemaVersion, sliderDraft, "admin@example.com", 1, "draft").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}))
+		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", sliderDraft, "classId", "slider")
+		if rec.Code != 404 || !strings.Contains(rec.Body.String(), "Element class not found") {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
 	rejected := []struct {

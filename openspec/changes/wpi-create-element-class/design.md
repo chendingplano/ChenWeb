@@ -164,13 +164,15 @@ action classes too. It is optional, a text attribute, and is never merged into i
 The form lists it from the start, edits it in a multi-line editor (Enter starts a line,
 Ctrl/Cmd+Enter keeps the text), and leaves it out of the row while it is empty.
 
-**D11. Editing a class stores its next version with the same status.** The user asked
+**D11. Editing a class updates its existing row with the same version and status.** The user asked
 (2026-10-27) for an edit button on a node that opens the node's class descriptor in a form
 like Create Element. Only element nodes have a class in the editor (pages have none, and
 action nodes do not name one yet), so only they get the button. `GET
 /api/v1/wpi/classes/element/:classId` returns the class's latest draft or active row whole
-(`{version, status, class}`); `PUT` on the same path takes the edited row and stores version
-N+1 with the status of the latest row, decided on the server: a draft stays a draft and is
+(`{version, status, class}`); `PUT` on the same path takes the edited row and updates the selected version
+in place, retaining its version, status and creation audit fields. Only the body, schema
+version, updated user and updated timestamp change. A missing row, including one removed
+between reading and writing, returns 404 without an insert. The status is decided on the server: a draft stays a draft and is
 checked by the draft rules (D4). Active class edits use the same structural rules, with
 an optional description. The class-edit endpoint accepts added, removed and renamed
 attributes independently of the interpreter's current attribute list, so authors can

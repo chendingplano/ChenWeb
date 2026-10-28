@@ -202,8 +202,8 @@ func (h *Handler) GetElementClass(c echo.Context) error {
 	return c.JSON(http.StatusOK, row)
 }
 
-// UpdateElementClass stores an edited element class as its next version, with
-// the status of its latest one. Authoring validates the row's structure, allowing
+// UpdateElementClass modifies the latest draft or active element class row in
+// place, preserving its version and status. Authoring validates the row's structure, allowing
 // attributes to change independently of interpreter code. The class ID cannot
 // change (OpenSpec wpi-create-element-class).
 // Endpoint: PUT /api/v1/wpi/classes/element/:classId (admins only)
@@ -244,7 +244,11 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 	if len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
-	version, err := st.insertClassVersion(ctx, id, cur.Status, raw, actorName(user))
+	version, err := st.updateClass(ctx, id, cur, raw, actorName(user))
+	if errors.Is(err, sql.ErrNoRows) {
+		handlerLog.Warn("WPI element class missing during update", "id", id, "version", cur.Version, "user", actorName(user))
+		return errorJSON(c, http.StatusNotFound, "Element class not found")
+	}
 	if err != nil {
 		handlerLog.Error("WPI element class update failed", "id", id, "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to store element class")
