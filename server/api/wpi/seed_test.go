@@ -175,6 +175,40 @@ var (
 	fileSeedRow = regexp.MustCompile(`\('([a-z0-9-]+)', \$file\$`)
 )
 
+// The Development menu hosts the exact read-only example from interpreter-page.md
+// §5 in a single pane. Validate the stored app and page together, including the
+// load action's table columns and active element modules.
+func TestSeedCustomersDemoIsValid(t *testing.T) {
+	sqlText, err := os.ReadFile("../../../project_migrations/20261028000004_seed_wpi_customers_demo.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, _ := seedRows(t, seedMigration, elementClassesMigration)
+	toFormat04(t, all)
+	bodies := regexp.MustCompile(`(?s)\$wpi\$(.*?)\$wpi\$::jsonb`).FindAllStringSubmatch(string(sqlText), -1)
+	if len(bodies) != 2 {
+		t.Fatalf("seed has %d bodies; want page and app", len(bodies))
+	}
+	all[KindPage] = map[string]string{"customers": bodies[0][1]}
+	all[KindApp] = map[string]string{"customers-demo": bodies[1][1]}
+	demoColumns := func(_ context.Context, table string) (map[string]bool, error) {
+		if table != "kb.wpi_demo_customers" {
+			return nil, nil
+		}
+		return map[string]bool{"user_name": true, "phone_number": true, "email": true}, nil
+	}
+	res, err := BuildBundle(context.Background(), "customers-demo", fixtureLoader(t, all), demoColumns, registeredIn(seededModules(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 || len(res.Warnings) != 0 {
+		t.Fatalf("errors %+v\nwarnings %+v", res.Errors, res.Warnings)
+	}
+	if len(res.Bundle.Pages) != 1 {
+		t.Fatalf("app reaches %d pages; want only customers", len(res.Bundle.Pages))
+	}
+}
+
 func TestSeedPagesDemoIsValid(t *testing.T) {
 	demo, err := os.ReadFile(pagesSeedMigration)
 	if err != nil {

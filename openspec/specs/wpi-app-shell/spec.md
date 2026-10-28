@@ -22,6 +22,19 @@ errors instead of the app. The app's root SHALL allow text selection.
 - **WHEN** a user without a session opens `/wpi/customer-admin`
 - **THEN** the browser is redirected to `/login`
 
+### Requirement: Customers demo in Development
+The `/development` navigation SHALL include Development → Demos → Customers, with
+English and Chinese menu labels. Selecting it SHALL display `/wpi/customers-demo`
+inside the dashboard content area. This app SHALL open the `customers` page from
+`interpreter-page.md` §5 in its single `main` pane, retaining text selection.
+
+#### Scenario: Show demo customers
+- **WHEN** a user with access to Development → Demos selects Customers
+- **THEN** the WPI interpreter shows “Demo - Customers” above the customer list
+- **AND** the columns are user name, phone number and email, in that order
+- **AND** the list loads at most 200 records from `kb.wpi_demo_customers`, ordered by user name ascending
+- **AND** leaving and reopening the demo loads the records again
+
 ### Requirement: Layout templates and panes
 The app SHALL divide the viewport into panes with its layout template. `single-pane` SHALL
 provide pane `main`. `top-left-middle-right-bottom` SHALL provide `top`, `middle` and

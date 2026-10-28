@@ -223,6 +223,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
+			activeMenu?.childId !== 'dev-demos-customers' &&
 			activeMenu?.childId !== 'sysadmin-question-generator' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-metric-range-types' &&
@@ -302,7 +303,13 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 
 	<!-- Main content area -->
 	<div class="min-w-0 flex-1 {showFooter ? '' : 'min-h-0'}">
-		{#if activeMenu?.childId === 'doc-processor-dashboard'}
+		{#if activeMenu?.childId === 'dev-demos-customers'}
+			<iframe
+				src="/wpi/customers-demo"
+				title={m.nav_dev_demos_customers()}
+				class="h-full w-full border-0 select-text"
+			></iframe>
+		{:else if activeMenu?.childId === 'doc-processor-dashboard'}
 			<DocProcessorDashboardView {darkMode} />
 		{:else if activeMenu?.childId === 'llm-activities'}
 			<LLMActivitiesView {darkMode} />

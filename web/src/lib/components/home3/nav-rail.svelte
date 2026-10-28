@@ -471,6 +471,7 @@
 					id: 'dev-demos',
 					label: m.nav_dev_demos(),
 					children: [
+						{ id: 'dev-demos-customers', label: m.nav_dev_demos_customers() },
 						{ id: 'dev-demos-main-page', label: m.nav_dev_demos_main_page(), href: '/home7' },
 						{ id: 'dev-demos-jenny-main-page', label: m.nav_dev_demos_jenny_main_page(), href: '/home8' }
 					]
