@@ -206,22 +206,23 @@
                     <span style="font-size:9px; color:var(--cv-text-muted);">{m.propertiespanel_source_fields()}</span>
                     <button class="column-remove" type="button" onclick={() => (addingField = true)}>{m.propertiespanel_add_source_field()}</button>
                   </div>
+                  {#if addingField}
+                    <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 25px; gap:3px; margin-bottom:4px;">
+                      <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newField.column} />
+                      <input class="column-input" aria-label={m.propertiespanel_source_attribute()} placeholder={m.propertiespanel_source_attribute()} bind:value={newField.attribute} />
+                      <button class="column-remove" aria-label={m.wpi_json_apply()} type="button" disabled={!newField.column.trim() || !newField.attribute.trim()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, [...fields, { column: newField.column.trim(), attribute: newField.attribute.trim() }])); newField = { column: '', attribute: '' }; addingField = false; }}>+</button>
+                    </div>
+                  {/if}
                   {#each fields as field, index (index)}
                     {#if field && typeof field === 'object' && !Array.isArray(field)}
-                      <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:3px; margin-bottom:4px;">
+                      <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 25px; gap:3px; margin-bottom:4px;">
                         <input class="column-input" aria-label={m.propertiespanel_source_column()} value={String(field.column ?? '')} oninput={(e) => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.map((f, i) => i === index ? { ...field, column: (e.target as HTMLInputElement).value } : f))); }} />
                         <input class="column-input" aria-label={m.propertiespanel_source_attribute()} value={String(field.attribute ?? '')} oninput={(e) => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.map((f, i) => i === index ? { ...field, attribute: (e.target as HTMLInputElement).value } : f))); }} />
                         <button class="column-remove" type="button" aria-label={m.propertiespanel_remove_source_field()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.filter((_, i) => i !== index))); }}>×</button>
                       </div>
                     {/if}
                   {/each}
-                  {#if addingField}
-                    <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:3px;">
-                      <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newField.column} />
-                      <input class="column-input" aria-label={m.propertiespanel_source_attribute()} placeholder={m.propertiespanel_source_attribute()} bind:value={newField.attribute} />
-                    </div>
-                    <button class="column-add" type="button" disabled={!newField.column.trim() || !newField.attribute.trim()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, [...fields, { column: newField.column.trim(), attribute: newField.attribute.trim() }])); newField = { column: '', attribute: '' }; addingField = false; }}>{m.wpi_json_apply()}</button>
-                  {/if}
+
                 {/if}
               {/if}
               {#if attr.help_tip}
@@ -302,5 +303,5 @@
   .column-input { min-width: 0; width: 100%; box-sizing: border-box; background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px; font-size: 10px; color: var(--cv-text); }
   .column-remove, .column-add { background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px 7px; font-size: 10px; color: var(--cv-text); cursor: pointer; }
   .column-add { margin-top: 5px; }
-  .column-add:disabled { opacity: 0.5; cursor: default; }
+  .column-add:disabled, .column-remove:disabled { opacity: 0.5; cursor: default; }
 </style>
