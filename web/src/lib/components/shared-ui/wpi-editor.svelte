@@ -166,6 +166,7 @@
 	let undoStack = $state<PageSnapshot[]>([]);
 	let redoStack = $state<PageSnapshot[]>([]);
 	let lastSavedSnapshot = $state<PageSnapshot | null>(null);
+	let savedName = $state('');
 	// Threshold warning flags (fire once)
 	let warnedNodes = $state(false);
 	let warnedEdges = $state(false);
@@ -174,10 +175,53 @@
 
 	const isDirty = $derived(
 		lastSavedSnapshot !== null &&
-			(JSON.stringify({ nodes, edges }) !== JSON.stringify({ nodes: lastSavedSnapshot.nodes, edges: lastSavedSnapshot.edges }) ||
+			(activeFlow?.flow_name !== savedName || JSON.stringify({ nodes, edges }) !== JSON.stringify({ nodes: lastSavedSnapshot.nodes, edges: lastSavedSnapshot.edges }) ||
 			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page) ||
 			 JSON.stringify(previewSize) !== JSON.stringify(lastSavedSnapshot.previewSize))
 	);
+	type CanvasTab = {
+		id: number; flow: Flow | null; savedName: string; snapshot: PageSnapshot; saved: PageSnapshot | null;
+		undo: PageSnapshot[]; redo: PageSnapshot[]; viewport: { x: number; y: number; zoom: number };
+		selected: string | null; config: 'page' | 'layouter' | null; dirty: boolean;
+	};
+	let tabs = $state<CanvasTab[]>([]);
+	let activeTabId = $state(0);
+	let nextTabId = 1;
+	function currentSnapshot(): PageSnapshot {
+		return JSON.parse(JSON.stringify({ nodes, edges, page: loadedPage, previewSize }));
+	}
+	function captureTab() {
+		if (!activeTabId) return;
+		tabs = tabs.map((tab) => tab.id === activeTabId ? { ...tab, flow: activeFlow, savedName, snapshot: currentSnapshot(), saved: lastSavedSnapshot, undo: undoStack, redo: redoStack, viewport: { ...viewport }, selected: selectedNodeId, config: configMode, dirty: isDirty } : tab);
+	}
+	function switchTab(id: number) {
+		if (id === activeTabId) return;
+		captureTab();
+		const tab = tabs.find((item) => item.id === id);
+		if (!tab) return;
+		activeTabId = id;
+		activeFlow = tab.flow;
+		savedName = tab.savedName;
+		({ nodes, edges, page: loadedPage, previewSize } = JSON.parse(JSON.stringify(tab.snapshot)));
+		lastSavedSnapshot = tab.saved;
+		undoStack = tab.undo; redoStack = tab.redo;
+		viewport = { ...tab.viewport }; selectedNodeId = tab.selected; configMode = tab.config;
+		canvasRevision++;
+	}
+	function addTab(page?: JsonObject) {
+		captureTab();
+		const empty: PageSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...DEFAULT_PREVIEW_SIZE } };
+		const id = nextTabId++;
+		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.canvas_01_untitled_flow()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false };
+		tabs = [...tabs, tab];
+		switchTab(id);
+		if (page) loadPage(page);
+	}
+	function tabTitle(tab: CanvasTab): string {
+		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
+		return String(page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
+	}
 	const canUndo = $derived(undoStack.length > 0);
 	const canRedo = $derived(redoStack.length > 0);
 
@@ -259,6 +303,7 @@
 	// ── Load flow ───────────────────────────────────────────────────────────
 	async function loadFlow(flow: Flow) {
 		activeFlow = flow;
+		savedName = flow.flow_name;
 		configMode = null;
 		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? null;
 		previewSize = flow.flow_data?.wpi_preview_size ?? { ...DEFAULT_PREVIEW_SIZE };
@@ -303,24 +348,32 @@
 	}
 
 	// ── Save ────────────────────────────────────────────────────────────────
+	let savingTabs = new Set<number>();
 	async function save() {
-		if (!activeFlow) return;
+		if (savingTabs.has(activeTabId)) return;
+		const id = activeTabId;
+		savingTabs.add(id);
+		const snapshot = currentSnapshot();
+		const flow = activeFlow;
+		const flowName = flow?.flow_name ?? String(loadedPage?.descriptor_id || m.canvas_01_untitled_flow());
+		const flowData = { nodes: snapshot.nodes as any, edges: snapshot.edges as any, wpi_page: snapshot.page, wpi_preview_size: snapshot.previewSize };
+		const thumbnail = generateThumbnail();
 		try {
-			const res = await flowService.update(activeFlow.flow_id, {
-				flow_name: activeFlow.flow_name,
-				flow_data: { nodes: nodes as any, edges: edges as any, wpi_page: loadedPage, wpi_preview_size: previewSize },
-				thumbnail_svg: generateThumbnail()
-			});
-			activeFlow = res.flow;
-			lastSavedSnapshot = {
-				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
-			previewSize: { ...previewSize },
-				nodes: JSON.parse(JSON.stringify(nodes)),
-				edges: JSON.parse(JSON.stringify(edges))
-			};
+			const res = flow && flow.flow_id >= 0
+				? await flowService.update(flow.flow_id, { flow_name: flowName, flow_data: flowData, thumbnail_svg: thumbnail })
+				: await flowService.create({ flow_name: flowName, flow_data: flowData, is_shared: false, thumbnail_svg: thumbnail });
+			if (id === activeTabId) {
+				activeFlow = { ...res.flow, flow_name: activeFlow?.flow_name ?? flowName };
+				lastSavedSnapshot = snapshot;
+				savedName = flowName;
+			} else {
+				tabs = tabs.map((tab) => tab.id === id ? { ...tab, flow: { ...res.flow, flow_name: tab.flow?.flow_name ?? flowName }, savedName: flowName, saved: snapshot, dirty: tab.flow?.flow_name !== flowName || JSON.stringify(tab.snapshot) !== JSON.stringify(snapshot) } : tab);
+			}
 			toast(m.canvas_01_saved());
 		} catch {
 			toast(m.canvas_01_failed_to_save_your_changes());
+		} finally {
+			savingTabs.delete(id);
 		}
 	}
 
@@ -482,7 +535,7 @@
 
 	// ── Close with guard ────────────────────────────────────────────────────
 	function requestClose() {
-		if (isDirty) {
+		if (isDirty || tabs.some((tab) => tab.id !== activeTabId && tab.dirty)) {
 			if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
 		}
 		onClose();
@@ -512,6 +565,7 @@
 				thumbnail_svg: null
 			});
 			activeFlow = res.flow;
+		savedName = res.flow.flow_name;
 			lastSavedSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...previewSize } };
 		} catch {
 			toast(m.canvas_01_could_not_create_flow_on());
@@ -577,6 +631,7 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(async () => {
+		addTab();
 		loadElementClasses();
 		const res = await flowService.getNodeTypes();
 		nodeTypes = res.nodeTypes ?? [];
@@ -631,6 +686,14 @@
 			onSave={save}
 			onSaveAsTemplate={saveCurrentAsTemplate}
 		/>
+		<div class="canvas-tabs" role="tablist" aria-label={m.wpi_canvas_tabs()}>
+			{#each tabs as tab (tab.id)}
+				<button type="button" role="tab" aria-selected={tab.id === activeTabId} class:active={tab.id === activeTabId} onclick={() => switchTab(tab.id)}>
+					{tabTitle(tab)}{#if tab.id === activeTabId ? isDirty : tab.dirty}<span aria-label={m.wpi_tab_unsaved()}> *</span>{/if}
+				</button>
+			{/each}
+			<button type="button" class="add-tab" aria-label={m.wpi_add_canvas_tab()} title={m.wpi_add_canvas_tab()} onclick={() => addTab()}>+</button>
+		</div>
 		<div
 			class="min-h-0 flex-1 overflow-hidden"
 			bind:clientWidth={canvasWidth}
@@ -906,9 +969,14 @@
 	<LoadPageDialog
 		{darkMode}
 		onClose={() => (showLoadPage = false)}
-		onLoad={(page) => {
-			if (nodes.length && !confirm(m.wpi_load_replace())) return;
-			loadPage(page);
-		}}
+		onLoad={(page) => addTab(page)}
 	/>
 {/if}
+
+<style>
+	.canvas-tabs { display: flex; align-items: stretch; flex-shrink: 0; overflow-x: auto; background: var(--cv-raised); border-bottom: 1px solid var(--cv-divider); }
+	.canvas-tabs button { flex-shrink: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 14px; border: 0; border-right: 1px solid var(--cv-divider); border-bottom: 2px solid transparent; background: transparent; color: var(--cv-text-muted); font-size: 11px; cursor: pointer; }
+	.canvas-tabs button.active { color: var(--cv-text); background: var(--cv-canvas); border-bottom-color: var(--cv-accent); }
+	.canvas-tabs button:hover { background: var(--cv-hover); }
+	.canvas-tabs .add-tab { font-size: 16px; padding: 3px 12px; }
+</style>

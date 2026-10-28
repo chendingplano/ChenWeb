@@ -7779,5 +7779,8 @@
 	"propertiespanel_column_field": "Field",
 	"propertiespanel_column_width": "Width",
 	"propertiespanel_remove_column": "Remove column",
-	"propertiespanel_add_column": "Add column"
+	"propertiespanel_add_column": "Add column",
+	"wpi_canvas_tabs": "Canvas tabs",
+	"wpi_tab_unsaved": "Unsaved changes",
+	"wpi_add_canvas_tab": "Add empty canvas tab"
 }
