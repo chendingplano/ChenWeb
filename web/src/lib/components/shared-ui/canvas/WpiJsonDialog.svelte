@@ -77,9 +77,9 @@
       <button use:focus onclick={onClose} class="select-none" style="color:var(--cv-text-muted); font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_view_json_close()}>✕</button>
     </div>
     <div style="padding:10px 20px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--cv-divider);">
-      <button onclick={() => { editing = true; status = ''; }} disabled={editing}>{m.wpi_json_edit()}</button>
-      <button onclick={check}>{m.wpi_json_check()}</button>
-      {#if editing}<button onclick={apply}>{m.wpi_json_apply()}</button>{/if}
+      <button class="json-action" onclick={() => { editing = true; status = ''; }} disabled={editing}>{m.wpi_json_edit()}</button>
+      <button class="json-action" onclick={check}>{m.wpi_json_check()}</button>
+      {#if editing}<button class="json-action" onclick={apply}>{m.wpi_json_apply()}</button>{/if}
       <span role="status" style="font-size:12px; color:{valid ? 'var(--cv-text)' : '#ef7777'};">{status}</span>
     </div>
     {#if editing}
@@ -90,3 +90,16 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .json-action {
+    background: var(--cv-surface);
+    color: var(--cv-text);
+    border: 1px solid var(--cv-border);
+    border-radius: 5px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .json-action:hover:not(:disabled) { background: var(--cv-surface-hover); }
+  .json-action:disabled { opacity: 0.6; cursor: default; }
+</style>
