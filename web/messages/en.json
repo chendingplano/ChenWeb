@@ -7774,5 +7774,10 @@
 	"wpi_layouter_title": "Layouter",
 	"wpi_page_config_title": "Page configuration",
 	"wpi_layouter_type": "Layouter type",
-	"wpi_resize_preview": "Resize page preview (arrow keys also resize)"
+	"wpi_resize_preview": "Resize page preview (arrow keys also resize)",
+	"propertiespanel_column_label": "Column label",
+	"propertiespanel_column_field": "Field",
+	"propertiespanel_column_width": "Width",
+	"propertiespanel_remove_column": "Remove column",
+	"propertiespanel_add_column": "Add column"
 }

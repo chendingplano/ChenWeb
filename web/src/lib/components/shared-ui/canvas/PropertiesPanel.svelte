@@ -63,6 +63,24 @@
   // The attribute field being typed in. Its text stays as typed until the field
   // is left, so reading it as JSON does not rewrite it under the cursor.
   let typing = $state<{ nodeId: string; name: string; text: string } | null>(null);
+  let newColumn = $state({ label: '', field: '', width: '' });
+
+  function columnsOf(n: FlowNode, attr: ElementAttribute): { label: string; field: string; width?: string }[] {
+    const value = attrsOf(n).columns ?? attr.default_value;
+    return Array.isArray(value) ? value as { label: string; field: string; width?: string }[] : [];
+  }
+
+  $effect(() => {
+    node?.id;
+    newColumn = { label: '', field: '', width: '' };
+  });
+
+  function addColumn(attr: ElementAttribute) {
+    if (!node || !newColumn.label.trim() || !newColumn.field.trim()) return;
+    const columns = columnsOf(node, attr);
+    update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify([...columns, { label: newColumn.label.trim(), field: newColumn.field.trim(), ...(newColumn.width.trim() ? { width: newColumn.width.trim() } : {}) }])));
+    newColumn = { label: '', field: '', width: '' };
+  }
 
   function attrText(n: FlowNode, name: string): string {
     if (typing && typing.nodeId === n.id && typing.name === name) return typing.text;
@@ -149,6 +167,22 @@
                   style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); resize:none; field-sizing:content; box-sizing:border-box;"
                 ></textarea>
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.propertiespanel_fixed()}</div>
+              {:else if name === 'columns' && node.data.element === 'list'}
+            {@const columns = columnsOf(node, attr)}
+            {#each columns as column, index (index)}
+              <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr) auto; gap:3px; margin-bottom:4px;">
+                <input class="column-input" aria-label={m.propertiespanel_column_label()} value={column.label} oninput={(e) => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.map((c, i) => i === index ? { ...c, label: (e.target as HTMLInputElement).value } : c))))} />
+                <input class="column-input" aria-label={m.propertiespanel_column_field()} value={column.field} oninput={(e) => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.map((c, i) => i === index ? { ...c, field: (e.target as HTMLInputElement).value } : c))))} />
+                <input class="column-input" aria-label={m.propertiespanel_column_width()} placeholder={m.propertiespanel_column_width()} value={column.width ?? ''} oninput={(e) => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.map((c, i) => i === index ? { ...c, width: (e.target as HTMLInputElement).value } : c))))} />
+                <button class="column-remove" type="button" aria-label={m.propertiespanel_remove_column()} onclick={() => update('attrs', withAttribute(attrsOf(node), 'columns', JSON.stringify(columns.filter((_, i) => i !== index))))}>×</button>
+              </div>
+            {/each}
+            <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,0.8fr); gap:3px;">
+              <input class="column-input" aria-label={m.propertiespanel_column_label()} placeholder={m.propertiespanel_column_label()} bind:value={newColumn.label} />
+              <input class="column-input" aria-label={m.propertiespanel_column_field()} placeholder={m.propertiespanel_column_field()} bind:value={newColumn.field} />
+              <input class="column-input" aria-label={m.propertiespanel_column_width()} placeholder={m.propertiespanel_column_width()} bind:value={newColumn.width} />
+            </div>
+            <button class="column-add" type="button" disabled={!newColumn.label.trim() || !newColumn.field.trim()} onclick={() => addColumn(attr)}>{m.propertiespanel_add_column()}</button>
               {:else}
                 <textarea
                   id={`prop-attr-${name}`}
@@ -233,3 +267,10 @@
     </div>
   {/if}
 </aside>
+
+<style>
+  .column-input { min-width: 0; width: 100%; box-sizing: border-box; background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px; font-size: 10px; color: var(--cv-text); }
+  .column-remove, .column-add { background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px 7px; font-size: 10px; color: var(--cv-text); cursor: pointer; }
+  .column-add { margin-top: 5px; }
+  .column-add:disabled { opacity: 0.5; cursor: default; }
+</style>
