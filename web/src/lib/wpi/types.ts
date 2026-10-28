@@ -56,7 +56,9 @@ export type SizeAttrs = { width?: string; height?: string; min_width?: string; m
 
 // An element instance as written in a page, named by its element class
 // (devdoc §3.5). Merged with its class row it is complete.
-export type ElementInstance = SizeAttrs & {
+export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
+	width?: string | number;
+	height?: string | number;
 	element: string;
 	text?: string;
 	label?: Text;
@@ -68,6 +70,7 @@ export type ElementInstance = SizeAttrs & {
 	source?: ActionInstance;
 	presentation?: string;
 	columns?: ListColumn[];
+	pagination?: 'yes' | 'no';
 	on_row_click?: ActionInstance;
 	items?: MenuItem[];
 	initial_item?: string;

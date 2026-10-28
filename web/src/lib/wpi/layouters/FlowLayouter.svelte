@@ -20,7 +20,7 @@
 		{:else}
 			<div
 				class="min-w-0"
-				class:stretch={page.layouter_config?.vertical_alignment === 'stretch' && (!entry.desc.height || entry.desc.height === 'auto' || entry.desc.height === 'elastic')}
+				class:stretch={page.layouter_config?.vertical_alignment === 'stretch' && (entry.desc.height === undefined || entry.desc.height === 'auto' || entry.desc.height === 'elastic')}
 				style={flowItemStyle(entry.desc)}
 				data-flow-item
 			>

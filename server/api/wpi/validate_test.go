@@ -18,6 +18,24 @@ func decode(t *testing.T, s string) map[string]any {
 	return m
 }
 
+func TestListPaginationAndPixelSizes(t *testing.T) {
+	for _, tc := range []struct{ attrs, want string }{
+		{`"pagination": "yes", "width": 600, "height": 300`, ""},
+		{`"pagination": "no", "width": "elastic", "height": "auto"`, ""},
+		{`"width": 0, "height": 0`, ""},
+		{`"pagination": true`, "/pagination"},
+		{`"pagination": "yet"`, "/pagination"},
+		{`"width": -1`, "/width"},
+		{`"height": 2.5`, "/height"},
+	} {
+		t.Run(tc.attrs, func(t *testing.T) {
+			v := &validator{kind: KindElement, id: "list"}
+			v.element("list", decode(t, `{`+tc.attrs+`}`), "")
+			expectIssue(t, v.issues, tc.want)
+		})
+	}
+}
+
 // expectIssue fails unless exactly one issue mentions want (or none when want is "").
 func expectIssue(t *testing.T, issues []Issue, want string) {
 	t.Helper()

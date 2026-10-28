@@ -35,6 +35,28 @@ state when there are no records, and an error box when the query fails.
 - **WHEN** the user clicks the row of customer 7 and `on_row_click` passes `{"id": "$record.id"}`
 - **THEN** the triggered action receives argument `id` 7
 
+### Requirement: List pagination and integer pixel sizes
+A list SHALL accept optional `pagination` of `"yes"` or `"no"`, defaulting to `"yes"`.
+Enabled pagination SHALL show at most 20 returned records per page with localized
+previous/next controls and page and record counts. Boundary controls SHALL be disabled.
+Pagination SHALL operate on the source result without making additional requests and
+SHALL reset to page 1 after a successful source reload. Disabled pagination SHALL show
+all returned records and no pagination controls.
+
+List `width` and `height` SHALL additionally accept non-negative integer pixel values,
+while preserving existing size strings. A fixed-height list SHALL scroll its records
+and keep pagination controls visible. Paging a clickable list SHALL preserve the
+clicked row's record as `$record`.
+
+#### Scenario: Navigate a list
+- **WHEN** the source returns 45 records and pagination is omitted
+- **THEN** page 1 shows records 1–20, page 2 shows 21–40, and page 3 shows 41–45
+- **AND** moving between pages does not rerun the source
+
+#### Scenario: Disable pagination
+- **WHEN** the source returns 45 records and `pagination` is `"no"`
+- **THEN** all 45 records are shown without pagination controls
+
 ### Requirement: Flow layouter and sizes
 The `flow-layouter` SHALL place a page's elements left to right and wrap to a new row when
 the next element does not fit. A fixed width SHALL be used as given; `elastic` widths SHALL

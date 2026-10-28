@@ -1,7 +1,7 @@
 // Size attributes → CSS (design D9). The flow layouter is a wrapping flex
 // container: a fixed size is used as given, "elastic" grows into the space
 // left in its row within min/max, and "auto" (or nothing) sizes to content.
-import type { PageDescriptor, PaneSpec, SizeAttrs } from './types';
+import type { ElementInstance, PageDescriptor, PaneSpec } from './types';
 
 function isFixed(size: string | undefined): size is string {
 	return !!size && size !== 'auto' && size !== 'elastic';
@@ -24,18 +24,20 @@ export function flowStyle(page: Pick<PageDescriptor, 'height' | 'layouter_config
 	return css.join('; ');
 }
 
-export function flowItemStyle(el: SizeAttrs): string {
+export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'min_width' | 'max_width'>): string {
 	const css: string[] = [];
-	if (el.width === 'elastic') {
+	const width = typeof el.width === 'number' ? `${el.width}px` : el.width;
+	const height = typeof el.height === 'number' ? `${el.height}px` : el.height;
+	if (width === 'elastic') {
 		css.push(`flex: 1 1 ${el.min_width ?? '0px'}`);
-	} else if (isFixed(el.width)) {
-		css.push(`flex: 0 0 ${el.width}`, `width: ${el.width}`);
+	} else if (isFixed(width)) {
+		css.push(`flex: 0 0 ${width}`, `width: ${width}`);
 	} else {
 		css.push('flex: 0 0 auto');
 	}
 	if (el.min_width) css.push(`min-width: ${el.min_width}`);
 	if (el.max_width) css.push(`max-width: ${el.max_width}`);
-	if (isFixed(el.height)) css.push(`height: ${el.height}`);
+	if (isFixed(height)) css.push(`height: ${height}`);
 	return css.join('; ');
 }
 

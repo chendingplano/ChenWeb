@@ -30,6 +30,8 @@ test('flow configuration maps both alignment axes and propagates definite height
 });
 
 test('flow item sizes', () => {
+	assert.equal(flowItemStyle({ width: 600, height: 300 }), 'flex: 0 0 600px; width: 600px; height: 300px');
+	assert.equal(flowItemStyle({ width: 0, height: 0 }), 'flex: 0 0 0px; width: 0px; height: 0px');
 	assert.equal(flowItemStyle({ width: '160px' }), 'flex: 0 0 160px; width: 160px');
 	assert.equal(flowItemStyle({ width: 'elastic', min_width: '200px', max_width: '400px' }), 'flex: 1 1 200px; min-width: 200px; max-width: 400px');
 	assert.equal(flowItemStyle({ width: 'elastic' }), 'flex: 1 1 0px');

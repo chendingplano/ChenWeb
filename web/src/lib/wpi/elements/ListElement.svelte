@@ -19,12 +19,19 @@
 	let records = $state<JsonObject[]>([]);
 	let status = $state<'loading' | 'ready' | 'error'>('loading');
 	let failure = $state('');
+	const pageSize = 20;
+	let page = $state(1);
+	const paginated = $derived(d.pagination !== 'no');
+	const pageCount = $derived(Math.max(1, Math.ceil(records.length / pageSize)));
+	const currentPage = $derived(Math.min(page, pageCount));
+	const visibleRecords = $derived(paginated ? records.slice((currentPage - 1) * pageSize, currentPage * pageSize) : records);
 
 	async function query() {
 		if (!d.source) return;
 		status = 'loading';
 		try {
 			records = await rt.queryList(panelId, actionRef(element, 'source'), d.source.args);
+			page = 1;
 			status = 'ready';
 		} catch (err) {
 			failure = err instanceof Error ? err.message : String(err);
@@ -54,7 +61,8 @@
 	}
 </script>
 
-<div class="w-full text-sm">
+<div class="flex h-full min-h-0 w-full select-text flex-col text-sm">
+	<div class="min-h-0 flex-1 overflow-auto">
 	<div class="text-muted-foreground grid gap-x-3 border-b px-2 py-1.5 font-medium" style="grid-template-columns: {grid}">
 		{#each columns as c (c.field)}<span class="truncate">{c.label}</span>{/each}
 	</div>
@@ -65,7 +73,7 @@
 	{:else if records.length === 0}
 		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_empty()}</p>
 	{:else}
-		{#each records as record, i (i)}
+		{#each visibleRecords as record, i (i)}
 			{#if d.on_row_click}
 				<button type="button" class="hover:bg-muted grid w-full gap-x-3 border-b px-2 py-1.5 text-left" style="grid-template-columns: {grid}" onclick={() => open(record)}>
 					{#each columns as c (c.field)}<span class="truncate">{display(record[c.field])}</span>{/each}
@@ -76,5 +84,13 @@
 				</div>
 			{/if}
 		{/each}
+	{/if}
+	</div>
+	{#if paginated && status === 'ready' && records.length > 0}
+		<nav class="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t px-2 py-2" aria-label={m.wpi_list_pagination()}>
+			<button type="button" class="rounded border px-2 py-1 disabled:opacity-50" disabled={currentPage === 1} onclick={() => page = currentPage - 1}>{m.wpi_list_previous()}</button>
+			<span aria-live="polite">{m.wpi_list_page({ page: currentPage, pages: pageCount, count: records.length })}</span>
+			<button type="button" class="rounded border px-2 py-1 disabled:opacity-50" disabled={currentPage === pageCount} onclick={() => page = currentPage + 1}>{m.wpi_list_next()}</button>
+		</nav>
 	{/if}
 </div>

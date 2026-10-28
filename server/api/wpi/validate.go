@@ -44,7 +44,7 @@ var codeModules = map[string]codeAttrs{
 	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type"}},
 	"select": {[]string{"label", "data_binding", "binding_mode", "options"}, nil},
 	"button": {[]string{"label", "on_click"}, nil},
-	"list":   {[]string{"source", "presentation", "columns"}, []string{"on_row_click"}},
+	"list":   {[]string{"source", "presentation", "columns"}, []string{"on_row_click", "pagination"}},
 	"menu":   {[]string{"items"}, []string{"initial_item"}},
 }
 
@@ -209,6 +209,21 @@ func (v *validator) boolean(obj map[string]any, key, path string) {
 
 func (v *validator) size(obj map[string]any, key, path string) {
 	v.matching(obj, key, path, sizePattern)
+}
+
+// List width and height also accept non-negative integer pixel values.
+func (v *validator) listSize(obj map[string]any, key, path string) {
+	val, present := obj[key]
+	if !present {
+		return
+	}
+	if _, ok := val.(string); ok {
+		v.size(obj, key, path)
+		return
+	}
+	if n, ok := asInt(val); !ok || n < 0 {
+		v.errf(path+"/"+key, "must be a size string or a non-negative integer in pixels")
+	}
 }
 
 func (v *validator) positiveInt(obj map[string]any, key, path string) {
@@ -527,7 +542,12 @@ func validateElementClass(body map[string]any, draft bool) []Issue {
 // label, data_binding and binding_mode.
 func (v *validator) sharedAttrs(e map[string]any, path string) {
 	for _, k := range elementSizeAttrs {
-		v.size(e, k, path)
+		if k == "width" || k == "height" {
+			// The module check rejects integer sizes for modules other than list.
+			v.listSize(e, k, path)
+		} else {
+			v.size(e, k, path)
+		}
 	}
 	v.text(e, "label", path)
 	v.binding(e, path)
@@ -583,7 +603,11 @@ func (v *validator) element(module string, all map[string]any, path string) {
 		}
 	}
 	for _, k := range elementSizeAttrs {
-		v.size(e, k, path)
+		if module == "list" && (k == "width" || k == "height") {
+			v.listSize(e, k, path)
+		} else {
+			v.size(e, k, path)
+		}
 	}
 	switch module {
 	case "text":
@@ -606,6 +630,7 @@ func (v *validator) element(module string, all map[string]any, path string) {
 	case "list":
 		v.listColumns(e, path)
 		v.oneOf(e, "presentation", path, []string{"rows"})
+		v.oneOf(e, "pagination", path, []string{"yes", "no"})
 	case "menu":
 		if items, ok := e["items"]; ok {
 			v.menuItems(items, path+"/items", map[string]bool{})
