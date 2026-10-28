@@ -56,6 +56,16 @@ func expectClasses(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(latestAllQuery).WithArgs("action").WillReturnRows(descriptorRows())
 }
 
+// expectModules expects the check of code modules against kb.code_modules,
+// which finds the active element modules given.
+func expectModules(mock sqlmock.Sqlmock, active ...string) {
+	rows := sqlmock.NewRows([]string{"code_module_id"})
+	for _, m := range active {
+		rows.AddRow(m)
+	}
+	mock.ExpectQuery(activeModulesQuery).WillReturnRows(rows)
+}
+
 func TestGetApp(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
@@ -63,6 +73,7 @@ func TestGetApp(t *testing.T) {
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
 		expectClasses(mock)
 		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", greetingPage}))
+		expectModules(mock, "text")
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 200 {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -114,6 +125,7 @@ func TestPutDescriptor(t *testing.T) {
 	t.Run("stored", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
+		expectClasses(mock)
 		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, greetingPage, "admin@example.com").
 			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", greetingPage, "kind", "page", "descriptorId", "greeting")
@@ -124,13 +136,55 @@ func TestPutDescriptor(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("page instances checked against their classes", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectClasses(mock)
+		page := strings.Replace(greetingPage, `"text": "Hello"`, `"text": "Hello", "data_binding": "$input_doc.x"`, 1)
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", page, "kind", "page", "descriptorId", "greeting")
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "exactly one of") {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal("nothing may be stored: ", err)
+		}
+	})
+	t.Run("element class with an unsupported attribute", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		body := `{"descriptor_id": "fancy-button", "schema_version": "0.4", "code_module_id": "button", "label": {"default_value": "Go!", "instance_modifiable": false}, "on_click": {"default_value": null}, "glow": {}}`
+		expectModules(mock, "button")
+		mock.ExpectQuery(`INSERT INTO kb\.wpi_descriptors`).WithArgs("element", "fancy-button", ElementSchemaVersion, body, "admin@example.com").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", body, "kind", "element", "descriptorId", "fancy-button")
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `code module \"button\" does not support attribute \"glow\"`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("element class whose code module is suspended or missing", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectModules(mock)
+		body := `{"descriptor_id": "fancy-button", "schema_version": "0.4", "code_module_id": "button", "label": {"default_value": null}, "on_click": {"default_value": null}}`
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", body, "kind", "element", "descriptorId", "fancy-button")
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), `code module \"button\" is not an active element module in kb.code_modules`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal("nothing may be stored: ", err)
+		}
+	})
 	rejected := []struct {
 		name, kind, id, body string
 		user                 *ApiTypes.UserInfo
 		status               int
 		want                 string
 	}{
-		{"element class without code", "element", "slider", `{"descriptor_id": "slider", "schema_version": "0.3"}`, adminUser, 400, `element class \"slider\" has no code in this interpreter`},
+		{"element class without code", "element", "slider", `{"descriptor_id": "slider", "schema_version": "0.4", "code_module_id": "slider"}`, adminUser, 400, `code module \"slider\" has no code in this interpreter`},
+		{"element class without code module", "element", "button", `{"descriptor_id": "button", "schema_version": "0.4", "label": {"default_value": null}, "on_click": {"default_value": null}}`, adminUser, 400, `missing attribute \"code_module_id\"`},
 		{"ID mismatch", "page", "other", greetingPage, adminUser, 400, `does not match`},
 		{"unknown kind", "widget", "greeting", greetingPage, adminUser, 400, "Unknown descriptor kind"},
 		{"not JSON", "page", "greeting", `[1, 2]`, adminUser, 400, "JSON object"},
@@ -152,7 +206,7 @@ func TestPutDescriptor(t *testing.T) {
 	}
 }
 
-const sliderDraft = `{"descriptor_id": "slider", "schema_version": "0.3", "description": {"en": "A slider"}, "implement_notes": "A range input", "label": {"help_tip": "Caption", "default_value": null}, "min": {"default_value": 0}}`
+const sliderDraft = `{"descriptor_id": "slider", "schema_version": "0.4", "description": {"en": "A slider"}, "implement_notes": "A range input", "label": {"help_tip": "Caption", "default_value": null}, "min": {"default_value": 0}}`
 
 func TestCreateElementClass(t *testing.T) {
 	t.Run("stored as a draft", func(t *testing.T) {
@@ -160,11 +214,46 @@ func TestCreateElementClass(t *testing.T) {
 		defer db.Close()
 		mock.ExpectExec(insertDraftQuery).WithArgs("slider", ElementSchemaVersion, sliderDraft, "admin@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
 		rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", sliderDraft)
-		if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"status":"draft"`) || !strings.Contains(rec.Body.String(), `"version":1`) {
+		if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"status":"draft"`) || !strings.Contains(rec.Body.String(), `"version":1`) ||
+			!strings.Contains(rec.Body.String(), `"warnings":[]`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatal(err)
+		}
+	})
+	t.Run("draft of an existing code module", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		body := `{"descriptor_id": "fancy-button", "schema_version": "0.4", "code_module_id": "button", "description": "A fancy button", "glow": {}}`
+		expectModules(mock, "button")
+		mock.ExpectExec(insertDraftQuery).WithArgs("fancy-button", ElementSchemaVersion, body, "admin@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
+		rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", body)
+		if rec.Code != 201 || !strings.Contains(rec.Body.String(), `code module \"button\" does not support attribute \"glow\"`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("draft naming a module whose code is not written", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		body := `{"descriptor_id": "dial", "schema_version": "0.4", "code_module_id": "slider", "description": "A dial"}`
+		expectModules(mock, "slider")
+		mock.ExpectExec(insertDraftQuery).WithArgs("dial", ElementSchemaVersion, body, "admin@example.com").WillReturnResult(sqlmock.NewResult(1, 1))
+		if rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", body); rec.Code != 201 || !strings.Contains(rec.Body.String(), `"warnings":[]`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("draft naming a module not in kb.code_modules", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectModules(mock)
+		body := `{"descriptor_id": "dial", "schema_version": "0.4", "code_module_id": "slider", "description": "A dial"}`
+		rec := call(t, testHandler(db, adminUser).CreateElementClass, "POST", body)
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), `code module \"slider\" is not an active element module`) {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal("nothing may be stored: ", err)
 		}
 	})
 	t.Run("already exists", func(t *testing.T) {
@@ -182,8 +271,8 @@ func TestCreateElementClass(t *testing.T) {
 		status     int
 		want       string
 	}{
-		{"no description", `{"descriptor_id": "slider", "schema_version": "0.3"}`, adminUser, 400, `a draft class needs a description`},
-		{"action default", `{"descriptor_id": "slider", "schema_version": "0.3", "description": "x", "on_click": {"default_value": {"action": "close-page"}}}`, adminUser, 400, `holds actions`},
+		{"no description", `{"descriptor_id": "slider", "schema_version": "0.4"}`, adminUser, 400, `a draft class needs a description`},
+		{"action default", `{"descriptor_id": "slider", "schema_version": "0.4", "description": "x", "on_click": {"default_value": {"action": "close-page"}}}`, adminUser, 400, `holds actions`},
 		{"not JSON", `[1]`, adminUser, 400, "JSON object"},
 		{"not an admin", sliderDraft, plainUser, 403, "Admin access required"},
 		{"not logged in", sliderDraft, nil, 401, "Authentication required"},
@@ -238,7 +327,7 @@ func TestUpdateElementClass(t *testing.T) {
 		mock.ExpectQuery(updateClassQuery).WithArgs("slider", ElementSchemaVersion, sliderDraft, "admin@example.com", 1, "draft").
 			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", sliderDraft, "classId", "slider")
-		if want := `{"descriptor_id":"slider","status":"draft","version":1}`; rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
+		if want := `{"descriptor_id":"slider","status":"draft","version":1,"warnings":[]}`; rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -250,6 +339,7 @@ func TestUpdateElementClass(t *testing.T) {
 		defer db.Close()
 		body := testClasses()[KindElement]["input"]
 		mock.ExpectQuery(elementClassQuery).WithArgs("input").WillReturnRows(classRow(2, "active"))
+		expectModules(mock, "input")
 		mock.ExpectQuery(updateClassQuery).WithArgs("input", ElementSchemaVersion, body, "admin@example.com", 2, "active").
 			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
 		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "input")
@@ -260,16 +350,50 @@ func TestUpdateElementClass(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("attributes the code module lacks are warnings", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		body := `{"descriptor_id":"button","schema_version":"0.4","code_module_id":"button","label":{"default_value":null},"on_click":{"default_value":null},"label_hori_align":{"default_value":"center"}}`
+		mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(3, "active"))
+		expectModules(mock, "button")
+		mock.ExpectQuery(updateClassQuery).WithArgs("button", ElementSchemaVersion, body, "admin@example.com", 3, "active").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
+		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "button")
+		var res struct{ Warnings []Issue }
+		_ = json.Unmarshal(rec.Body.Bytes(), &res)
+		if rec.Code != 200 || len(res.Warnings) != 1 || res.Warnings[0].Path != "/label_hori_align" {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	})
+	for _, bad := range []struct{ name, module, want string }{
+		{"active class without a code module", ``, `/code_module_id`},
+		{"active class with an unregistered code module", `,"code_module_id":"slider"`, `code module \"slider\" has no code`},
+	} {
+		t.Run(bad.name, func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(3, "active"))
+			body := `{"descriptor_id":"button","schema_version":"0.4"` + bad.module + `,"label":{"default_value":null}}`
+			rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "button")
+			if rec.Code != 400 || !strings.Contains(rec.Body.String(), bad.want) {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal("nothing may be stored: ", err)
+			}
+		})
+	}
 	for _, edit := range []struct{ name, body string }{
-		{"add alignment attributes", `{"descriptor_id":"button","schema_version":"0.3","label":{"default_value":null},"on_click":{"default_value":null},"label_horizontal_align":{"default_value":"center","help_tip":{"en":"Horizontal alignment"}},"label_vertical_align":{"default_value":"center"}}`},
-		{"delete code-required attributes", `{"descriptor_id":"button","schema_version":"0.3"}`},
-		{"rename an attribute", `{"descriptor_id":"button","schema_version":"0.3","caption":{"default_value":"Go"},"on_click":{"default_value":null}}`},
-		{"modify defaults and help tips", `{"descriptor_id":"button","schema_version":"0.3","label":{"default_value":{"en":"Run","zh-cn":"运行"},"help_tip":{"en":"Button caption","zh-cn":"按钮标题"}},"on_click":{},"width":{"default_value":"300px"}}`},
+		{"add alignment attributes", `{"descriptor_id":"button","schema_version":"0.4","code_module_id":"button","label":{"default_value":null},"on_click":{"default_value":null},"label_horizontal_align":{"default_value":"center","help_tip":{"en":"Horizontal alignment"}},"label_vertical_align":{"default_value":"center"}}`},
+		{"delete code-required attributes", `{"descriptor_id":"button","schema_version":"0.4","code_module_id":"button"}`},
+		{"rename an attribute", `{"descriptor_id":"button","schema_version":"0.4","code_module_id":"button","caption":{"default_value":"Go"},"on_click":{"default_value":null}}`},
+		{"modify defaults and help tips", `{"descriptor_id":"button","schema_version":"0.4","code_module_id":"button","label":{"default_value":{"en":"Run","zh-cn":"运行"},"help_tip":{"en":"Button caption","zh-cn":"按钮标题"}},"on_click":{},"width":{"default_value":"300px"}}`},
 	} {
 		t.Run(edit.name, func(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
 			mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(2, "active"))
+			expectModules(mock, "button")
 			mock.ExpectQuery(updateClassQuery).WithArgs("button", ElementSchemaVersion, edit.body, "admin@example.com", 2, "active").
 				WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
 			rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", edit.body, "classId", "button")
@@ -293,7 +417,7 @@ func TestUpdateElementClass(t *testing.T) {
 		t.Run("reject malformed edit "+invalid.attr, func(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
-			body := `{"descriptor_id":"button","schema_version":"0.3",` + invalid.attr + `}`
+			body := `{"descriptor_id":"button","schema_version":"0.4","code_module_id":"button",` + invalid.attr + `}`
 			mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(2, "active"))
 			rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "button")
 			if rec.Code != 400 || !strings.Contains(rec.Body.String(), invalid.want) {
@@ -308,7 +432,7 @@ func TestUpdateElementClass(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(elementClassQuery).WithArgs("slider").WillReturnRows(classRow(1, "draft"))
-		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", `{"descriptor_id": "slider", "schema_version": "0.3"}`, "classId", "slider")
+		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", `{"descriptor_id": "slider", "schema_version": "0.4"}`, "classId", "slider")
 		if rec.Code != 400 || !strings.Contains(rec.Body.String(), `a draft class needs a description`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
 		}
@@ -377,5 +501,23 @@ func TestListElementClasses(t *testing.T) {
 	}
 	if rec := call(t, testHandler(db, nil).ListElementClasses, "GET", ""); rec.Code != 401 {
 		t.Fatalf("not logged in: status %d", rec.Code)
+	}
+}
+
+func TestListCodeModules(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(listCodeModulesQuery).WillReturnRows(sqlmock.NewRows([]string{"code_module_id", "module_name", "description", "module_type", "module_doc", "notes", "status"}).
+		AddRow("button", "Button", "A button", "element", "button.md", "", "active"))
+	rec := call(t, testHandler(db, plainUser).ListCodeModules, "GET", "")
+	want := `{"code_modules":[{"code_module_id":"button","module_name":"Button","description":"A button","module_type":"element","module_doc":"button.md","notes":"","status":"active"}]}`
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != want {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, testHandler(db, nil).ListCodeModules, "GET", ""); rec.Code != 401 {
+		t.Fatalf("not logged in: status %d", rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

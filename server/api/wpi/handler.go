@@ -114,13 +114,37 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 	if issues := ValidateDescriptor(Kind(kind), id, body); len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
-	version, err := store{h.DB}.insertVersion(c.Request().Context(), Kind(kind), id, raw, actorName(user))
+	st := store{h.DB}
+	ctx := c.Request().Context()
+	if Kind(kind) == KindElement {
+		if refused, err := checkModule(c, st, id, body, user); refused {
+			return err
+		}
+	}
+	// A page's instances are checked against the active class rows, since
+	// which attributes an element instance may set depends on its class
+	// (OpenSpec wpi-code-modules, design D5).
+	if Kind(kind) == KindPage {
+		classes, err := loadClasses(ctx, st.latest)
+		if err != nil {
+			handlerLog.Error("WPI class load failed", "kind", kind, "id", id, "user", actorName(user), "error", err)
+			return errorJSON(c, http.StatusInternalServerError, "Unable to check descriptor")
+		}
+		if issues := ValidatePageInstances(id, body, classes); len(issues) > 0 {
+			return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+		}
+	}
+	version, err := st.insertVersion(ctx, Kind(kind), id, raw, actorName(user))
 	if err != nil {
 		handlerLog.Error("WPI descriptor insert failed", "kind", kind, "id", id, "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to store descriptor")
 	}
-	handlerLog.Info("WPI descriptor stored", "kind", kind, "id", id, "version", version, "user", actorName(user))
-	return c.JSON(http.StatusOK, map[string]any{"kind": kind, "descriptor_id": id, "version": version})
+	var warnings []Issue
+	if Kind(kind) == KindElement {
+		warnings = classWarnings(id, body)
+	}
+	handlerLog.Info("WPI descriptor stored", "kind", kind, "id", id, "version", version, "user", actorName(user), "warnings", len(warnings))
+	return c.JSON(http.StatusOK, map[string]any{"kind": kind, "descriptor_id": id, "version": version, "warnings": nonNil(warnings)})
 }
 
 // CreateElementClass stores a new element class as a draft: version 1, before
@@ -148,7 +172,11 @@ func (h *Handler) CreateElementClass(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
 	id := body["descriptor_id"].(string)
-	err = store{h.DB}.insertDraftClass(c.Request().Context(), id, raw, actorName(user))
+	st := store{h.DB}
+	if refused, err := checkModule(c, st, id, body, user); refused {
+		return err
+	}
+	err = st.insertDraftClass(c.Request().Context(), id, raw, actorName(user))
 	if errors.Is(err, errClassExists) {
 		handlerLog.Info("WPI element class already exists", "id", id, "user", actorName(user))
 		return errorJSON(c, http.StatusConflict, fmt.Sprintf("element class %q already exists", id))
@@ -157,8 +185,9 @@ func (h *Handler) CreateElementClass(c echo.Context) error {
 		handlerLog.Error("WPI element class insert failed", "id", id, "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to store element class")
 	}
-	handlerLog.Info("WPI element class drafted", "id", id, "user", actorName(user))
-	return c.JSON(http.StatusCreated, map[string]any{"descriptor_id": id, "version": 1, "status": "draft"})
+	warnings := classWarnings(id, body)
+	handlerLog.Info("WPI element class drafted", "id", id, "user", actorName(user), "warnings", len(warnings))
+	return c.JSON(http.StatusCreated, map[string]any{"descriptor_id": id, "version": 1, "status": "draft", "warnings": nonNil(warnings)})
 }
 
 // ListElementClasses returns the latest draft or active version of every
@@ -203,9 +232,11 @@ func (h *Handler) GetElementClass(c echo.Context) error {
 }
 
 // UpdateElementClass modifies the latest draft or active element class row in
-// place, preserving its version and status. Authoring validates the row's structure, allowing
-// attributes to change independently of interpreter code. The class ID cannot
-// change (OpenSpec wpi-create-element-class).
+// place, preserving its version and status. Authoring validates its structure, allowing
+// attributes to change independently of interpreter code; an active class must
+// still name a registered code module, and attributes that module does not
+// support are returned as warnings. The class ID cannot change (OpenSpec
+// wpi-create-element-class, wpi-code-modules).
 // Endpoint: PUT /api/v1/wpi/classes/element/:classId (admins only)
 func (h *Handler) UpdateElementClass(c echo.Context) error {
 	user := h.User(c)
@@ -244,6 +275,9 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 	if len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
+	if refused, err := checkModule(c, st, id, body, user); refused {
+		return err
+	}
 	version, err := st.updateClass(ctx, id, cur, raw, actorName(user))
 	if errors.Is(err, sql.ErrNoRows) {
 		handlerLog.Warn("WPI element class missing during update", "id", id, "version", cur.Version, "user", actorName(user))
@@ -253,8 +287,41 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 		handlerLog.Error("WPI element class update failed", "id", id, "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to store element class")
 	}
-	handlerLog.Info("WPI element class updated", "id", id, "version", version, "status", cur.Status, "user", actorName(user))
-	return c.JSON(http.StatusOK, map[string]any{"descriptor_id": id, "version": version, "status": cur.Status})
+	warnings := classWarnings(id, body)
+	handlerLog.Info("WPI element class updated", "id", id, "version", version, "status", cur.Status, "user", actorName(user), "warnings", len(warnings))
+	return c.JSON(http.StatusOK, map[string]any{"descriptor_id": id, "version": version, "status": cur.Status, "warnings": nonNil(warnings)})
+}
+
+// checkModule refuses an element class row whose code_module_id does not name
+// an active element module in kb.code_modules (OpenSpec wpi-code-modules, design
+// D9). When refused is true, the response has been written and err is its error.
+func checkModule(c echo.Context, st store, id string, body map[string]any, user *ApiTypes.UserInfo) (refused bool, err error) {
+	issues, err := moduleErrors(c.Request().Context(), st.registered, map[string]map[string]any{id: body})
+	if err != nil {
+		handlerLog.Error("WPI code module check failed", "id", id, "user", actorName(user), "error", err)
+		return true, errorJSON(c, http.StatusInternalServerError, "Unable to check code module")
+	}
+	if len(issues) > 0 {
+		return true, c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+	}
+	return false, nil
+}
+
+// ListCodeModules returns every code module in kb.code_modules, for the
+// editor's class form (devdoc 2026102601 §3.5.2).
+// Endpoint: GET /api/v1/wpi/code-modules
+func (h *Handler) ListCodeModules(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	modules, err := store{h.DB}.listCodeModules(c.Request().Context())
+	if err != nil {
+		handlerLog.Error("WPI code module list failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to list code modules")
+	}
+	handlerLog.Info("WPI code modules listed", "user", actorName(user), "found", len(modules))
+	return c.JSON(http.StatusOK, map[string]any{"code_modules": modules})
 }
 
 // Limits of a page search (design D10).

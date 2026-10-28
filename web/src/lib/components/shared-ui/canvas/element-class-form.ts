@@ -1,31 +1,36 @@
-// The Create Element form's logic: an element class draft (format 0.3) built
+// The Create Element form's logic: an element class row (format 0.4) built
 // from the attributes the author lists (OpenSpec wpi-create-element-class,
-// design D7, D9). The server's rules are the ones that count; these checks give
-// quick feedback.
+// design D7, D9; wpi-code-modules, design D8). The server's rules are the ones
+// that count; these checks give quick feedback.
 import type { Json, JsonObject } from '$lib/wpi/types';
 
 export const CLASS_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 export const ATTRIBUTE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-// Every class row may have these (devdoc 2026102601 §3.5.1); the form lists them from the start.
-const CLASS_ATTRIBUTES = ['descriptor_id', 'schema_version', 'description', 'implement_notes'];
+// Every class row may have these (devdoc 2026102601 §3.5.1–§3.5.2); the form lists them from the start.
+const CLASS_ATTRIBUTES = ['descriptor_id', 'schema_version', 'code_module_id', 'description', 'implement_notes'];
 // Values that are always text, never read as JSON.
-const TEXT_ONLY = ['descriptor_id', 'schema_version', 'implement_notes'];
+const TEXT_ONLY = ['descriptor_id', 'schema_version', 'code_module_id', 'implement_notes'];
+// Class attributes left out of the stored row when empty: a draft need not name its code module.
+const OPTIONAL_TEXT = ['code_module_id', 'implement_notes'];
 // The key with which an instance names its class.
 const RESERVED_NAMES = [...CLASS_ATTRIBUTES, 'element'];
 
 // One attribute of the class row. A class attribute's value is the value itself;
-// an instance attribute's value is an object with an optional help_tip and an
-// optional default_value, null meaning every instance must set it.
+// an instance attribute's value is an object with an optional help_tip, an
+// optional default_value, null meaning every instance must set it, and an
+// optional instance_modifiable, false meaning the class fixes default_value for
+// every instance.
 export type DraftAttribute = { name: string; value: Json };
 export type EditField = 'name' | 'value' | 'help_tip';
 
-export type AttributeProblem = 'name' | 'reserved' | 'duplicate' | 'help_tip_en';
+export type AttributeProblem = 'name' | 'reserved' | 'duplicate' | 'help_tip_en' | 'fixed_default';
 export type RowProblem = 'class_id' | 'description';
 
 export function initialAttributes(): DraftAttribute[] {
 	return [
 		{ name: 'descriptor_id', value: '' },
-		{ name: 'schema_version', value: '0.3' },
+		{ name: 'schema_version', value: '0.4' },
+		{ name: 'code_module_id', value: '' },
 		{ name: 'description', value: { en: '', 'zh-cn': '' } },
 		{ name: 'implement_notes', value: '' }
 	];
@@ -72,11 +77,18 @@ export function helpTip(attr: DraftAttribute): Json | undefined {
 	return attrObject(attr).help_tip;
 }
 
-// help_tip first, then default_value, each only when there is one.
-function withParts(tip: Json | undefined, dv: Json | undefined, keepDefault: boolean): JsonObject {
+// Whether the class fixes the attribute for all its instances.
+export function isFixed(attr: DraftAttribute): boolean {
+	return !isClassAttribute(attr.name) && attrObject(attr).instance_modifiable === false;
+}
+
+// help_tip first, then default_value, each only when there is one, then
+// instance_modifiable false for a fixed attribute.
+function withParts(tip: Json | undefined, dv: Json | undefined, keepDefault: boolean, fixed = false): JsonObject {
 	const out: JsonObject = {};
 	if (tip !== undefined) out.help_tip = tip;
 	if (keepDefault) out.default_value = dv ?? null;
+	if (fixed) out.instance_modifiable = false;
 	return out;
 }
 
@@ -106,15 +118,27 @@ function nameProblem(name: string, others: DraftAttribute[]): AttributeProblem |
 	return null;
 }
 
-export function attributeProblem(name: string, tipEn: string, tipZh: string, added: DraftAttribute[]): AttributeProblem | null {
-	return nameProblem(name, added) ?? (tipZh.trim() !== '' && tipEn.trim() === '' ? 'help_tip_en' : null);
+// A fixed attribute needs a default: it is every instance's value.
+export function attributeProblem(
+	name: string,
+	tipEn: string,
+	tipZh: string,
+	added: DraftAttribute[],
+	fixed = false,
+	defaultText = ''
+): AttributeProblem | null {
+	return (
+		nameProblem(name, added) ??
+		(tipZh.trim() !== '' && tipEn.trim() === '' ? 'help_tip_en' : null) ??
+		(fixed && (defaultText.trim() === '' || parseDefault(defaultText) === null) ? 'fixed_default' : null)
+	);
 }
 
 // A new instance attribute: required gives default_value null; an empty default
-// leaves it out (optional, no default).
-export function newAttribute(name: string, required: boolean, defaultText: string, tipEn: string, tipZh: string): DraftAttribute {
+// leaves it out (optional, no default); fixed adds instance_modifiable false.
+export function newAttribute(name: string, required: boolean, defaultText: string, tipEn: string, tipZh: string, fixed = false): DraftAttribute {
 	const empty = defaultText.trim() === '';
-	return { name, value: withParts(tipFrom(tipEn, tipZh), required ? null : empty ? undefined : parseDefault(defaultText), required || !empty) };
+	return { name, value: withParts(tipFrom(tipEn, tipZh), required ? null : empty ? undefined : parseDefault(defaultText), required || !empty, fixed && !required) };
 }
 
 // Renaming an instance attribute; class attribute names cannot change.
@@ -140,9 +164,9 @@ export function applyEdit(attr: DraftAttribute, field: 'value' | 'help_tip', tex
 	}
 	const empty = text.trim() === '';
 	if (field === 'help_tip') {
-		return { name: attr.name, value: withParts(empty ? undefined : parseDefault(text), defaultValue(attr), hasDefault(attr)) };
+		return { name: attr.name, value: withParts(empty ? undefined : parseDefault(text), defaultValue(attr), hasDefault(attr), isFixed(attr)) };
 	}
-	return { name: attr.name, value: withParts(helpTip(attr), empty ? undefined : parseDefault(text), !empty) };
+	return { name: attr.name, value: withParts(helpTip(attr), empty ? undefined : parseDefault(text), !empty, isFixed(attr)) };
 }
 
 // Texts by language with the empty ones left out, so that an unfilled
@@ -152,12 +176,13 @@ function withoutEmptyTexts(value: Json): Json {
 	return Object.fromEntries(Object.entries(value).filter(([, t]) => t !== ''));
 }
 
-// The class row the create and update endpoints store. Empty implement_notes
-// and an empty description are left out (an active class may have none).
+// The class row the create and update endpoints store. An empty code_module_id
+// or implement_notes and an empty description are left out (a draft need not
+// name its code module; an active class may have no description).
 export function buildClassRow(attributes: DraftAttribute[]): JsonObject {
 	const row: JsonObject = {};
 	for (const a of attributes) {
-		if (a.name === 'implement_notes' && a.value === '') continue;
+		if (OPTIONAL_TEXT.includes(a.name) && a.value === '') continue;
 		const value = a.name === 'description' ? withoutEmptyTexts(a.value) : a.value;
 		if (a.name === 'description' && (value === '' || (typeof value === 'object' && value !== null && Object.keys(value).length === 0))) continue;
 		row[a.name] = value;
@@ -175,7 +200,7 @@ export function rowProblem(row: JsonObject): RowProblem | null {
 
 // The add form's fields for an instance attribute, so that the form can edit it (the inverse of
 // newAttribute). A default shows as JSON, as in the list; a help tip by language fills both fields.
-export type AttributeFields = { name: string; defaultText: string; tipEn: string; tipZh: string; required: boolean };
+export type AttributeFields = { name: string; defaultText: string; tipEn: string; tipZh: string; required: boolean; fixed: boolean };
 
 export function attributeFields(attr: DraftAttribute): AttributeFields {
 	// A class attribute uses the same fields: a description by language fills the two help tip
@@ -188,7 +213,8 @@ export function attributeFields(attr: DraftAttribute): AttributeFields {
 			defaultText: attr.name === 'description' ? '' : String(attr.value),
 			tipEn: texts ? String(texts.en ?? '') : '',
 			tipZh: texts ? String(texts['zh-cn'] ?? '') : '',
-			required: false
+			required: false,
+			fixed: false
 		};
 	}
 	const dv = defaultValue(attr);
@@ -199,14 +225,15 @@ export function attributeFields(attr: DraftAttribute): AttributeFields {
 		defaultText: hasDefault(attr) && dv !== null ? JSON.stringify(dv) : '',
 		tipEn: typeof tip === 'string' ? tip : byLanguage ? String(tip.en ?? '') : '',
 		tipZh: byLanguage ? String(tip['zh-cn'] ?? '') : '',
-		required: hasDefault(attr) && dv === null
+		required: hasDefault(attr) && dv === null,
+		fixed: isFixed(attr)
 	};
 }
 
 // The attribute the fields describe (the inverse of attributeFields): a class attribute keeps its
 // name and takes its text from the fields, an instance attribute is built as newAttribute does.
 export function attributeFromFields(f: AttributeFields): DraftAttribute {
-	if (!isClassAttribute(f.name)) return newAttribute(f.name, f.required, f.defaultText, f.tipEn, f.tipZh);
+	if (!isClassAttribute(f.name)) return newAttribute(f.name, f.required, f.defaultText, f.tipEn, f.tipZh, f.fixed);
 	if (f.name === 'description') return { name: f.name, value: { en: f.tipEn.trim(), 'zh-cn': f.tipZh.trim() } };
 	return { name: f.name, value: f.defaultText.trim() };
 }

@@ -14,6 +14,7 @@ import {
 	helpTip,
 	initialAttributes,
 	isClassAttribute,
+	isFixed,
 	newAttribute,
 	parseDefault,
 	renameProblem,
@@ -23,11 +24,13 @@ import {
 test('the form starts with the class attributes', () => {
 	assert.deepEqual(initialAttributes(), [
 		{ name: 'descriptor_id', value: '' },
-		{ name: 'schema_version', value: '0.3' },
+		{ name: 'schema_version', value: '0.4' },
+		{ name: 'code_module_id', value: '' },
 		{ name: 'description', value: { en: '', 'zh-cn': '' } },
 		{ name: 'implement_notes', value: '' }
 	]);
 	assert.ok(isClassAttribute('implement_notes'));
+	assert.ok(isClassAttribute('code_module_id'));
 	assert.ok(!isClassAttribute('label'));
 });
 
@@ -70,10 +73,11 @@ test('renaming an instance attribute', () => {
 	assert.equal(renameProblem('max', 'max-value', attrs), 'name');
 });
 
-test('editing class attributes: ID, version and notes are text, the description JSON or text', () => {
-	const [id, version, description, notes] = initialAttributes();
+test('editing class attributes: ID, version, code module and notes are text, the description JSON or text', () => {
+	const [id, version, module, description, notes] = initialAttributes();
 	assert.deepEqual(applyEdit(id, 'value', ' 123 '), { name: 'descriptor_id', value: '123' });
-	assert.deepEqual(applyEdit(version, 'value', '0.3'), { name: 'schema_version', value: '0.3' });
+	assert.deepEqual(applyEdit(version, 'value', '0.4'), { name: 'schema_version', value: '0.4' });
+	assert.deepEqual(applyEdit(module, 'value', ' button '), { name: 'code_module_id', value: 'button' });
 	assert.deepEqual(applyEdit(notes, 'value', 'Render {a range}\n'), { name: 'implement_notes', value: 'Render {a range}' });
 	assert.deepEqual(applyEdit(description, 'value', '{"en": "A", "zh-cn": "甲"}').value, { en: 'A', 'zh-cn': '甲' });
 	assert.equal(applyEdit(description, 'value', "The element for 'input'").value, "The element for 'input'");
@@ -112,19 +116,21 @@ test('class IDs', () => {
 test('the class row keeps the attributes in order, drops empty description texts and empty notes', () => {
 	const attrs = initialAttributes();
 	attrs[0].value = 'slider';
-	attrs[2].value = { en: 'A slider', 'zh-cn': '' };
+	attrs[3].value = { en: 'A slider', 'zh-cn': '' };
 	attrs.push(newAttribute('label', true, '', 'Caption', ''), newAttribute('max', false, '100', '', ''));
 	const row = buildClassRow(attrs);
 	assert.deepEqual(row, {
 		descriptor_id: 'slider',
-		schema_version: '0.3',
+		schema_version: '0.4',
 		description: { en: 'A slider' },
 		label: { help_tip: { en: 'Caption' }, default_value: null },
 		max: { default_value: 100 }
 	});
-	assert.deepEqual(Object.keys(row), ['descriptor_id', 'schema_version', 'description', 'label', 'max']);
-	attrs[3].value = 'Render a range input.';
+	assert.deepEqual(Object.keys(row), ['descriptor_id', 'schema_version', 'description', 'label', 'max'], 'a draft need not name its code module');
+	attrs[4].value = 'Render a range input.';
 	assert.equal(buildClassRow(attrs).implement_notes, 'Render a range input.');
+	attrs[2].value = 'input';
+	assert.deepEqual(Object.keys(buildClassRow(attrs)).slice(0, 3), ['descriptor_id', 'schema_version', 'code_module_id']);
 });
 
 test('row problems', () => {
@@ -142,13 +148,15 @@ test('a stored row becomes the form attributes, class attributes first', () => {
 		label: { help_tip: { en: 'Caption' }, default_value: null },
 		description: { en: 'A field' },
 		descriptor_id: 'input',
-		schema_version: '0.3',
+		schema_version: '0.4',
+		code_module_id: 'input',
 		width: { default_value: 'elastic' }
 	};
 	const attrs = attributesFromRow(row);
 	assert.deepEqual(attrs, [
 		{ name: 'descriptor_id', value: 'input' },
-		{ name: 'schema_version', value: '0.3' },
+		{ name: 'schema_version', value: '0.4' },
+		{ name: 'code_module_id', value: 'input' },
 		{ name: 'description', value: { en: 'A field', 'zh-cn': '' } },
 		{ name: 'implement_notes', value: '' },
 		{ name: 'label', value: { help_tip: { en: 'Caption' }, default_value: null } },
@@ -157,25 +165,26 @@ test('a stored row becomes the form attributes, class attributes first', () => {
 	// Saved unchanged, it is the same row.
 	assert.deepEqual(buildClassRow(attrs), row);
 	// A description that is plain text stays text.
-	assert.equal(attributesFromRow({ description: 'A field' })[2].value, 'A field');
+	assert.equal(attributesFromRow({ description: 'A field' })[3].value, 'A field');
 });
 
 test('an empty description is left out of the row', () => {
-	const attrs = attributesFromRow({ descriptor_id: 'text', schema_version: '0.3' });
-	assert.deepEqual(buildClassRow(attrs), { descriptor_id: 'text', schema_version: '0.3' });
+	const attrs = attributesFromRow({ descriptor_id: 'text', schema_version: '0.4' });
+	assert.deepEqual(buildClassRow(attrs), { descriptor_id: 'text', schema_version: '0.4' });
 });
 
 test('attributeFields is the inverse of newAttribute', () => {
-	for (const [name, required, def, en, zh] of [
-		['width', false, '200', 'Width', '宽度'],
-		['label', true, '', 'Label', ''],
-		['mode', false, '"read-write"', '', ''],
-		['plain', false, '', '', '']
+	for (const [name, required, def, en, zh, fixed] of [
+		['width', false, '200', 'Width', '宽度', false],
+		['label', true, '', 'Label', '', false],
+		['mode', false, '"read-write"', '', '', false],
+		['plain', false, '', '', '', false],
+		['style', false, '"fancy"', 'Style', '', true]
 	] as const) {
-		const attr = newAttribute(name, required, def, en, zh);
+		const attr = newAttribute(name, required, def, en, zh, fixed);
 		const fields = attributeFields(attr);
-		assert.deepEqual(fields, { name, defaultText: def, tipEn: en, tipZh: zh, required });
-		assert.deepEqual(newAttribute(fields.name, fields.required, fields.defaultText, fields.tipEn, fields.tipZh), attr);
+		assert.deepEqual(fields, { name, defaultText: def, tipEn: en, tipZh: zh, required, fixed });
+		assert.deepEqual(attributeFromFields(fields), attr);
 	}
 });
 
@@ -183,9 +192,25 @@ test('class attributes go through the same fields', () => {
 	for (const attr of [
 		{ name: 'description', value: { en: 'A button', 'zh-cn': '按钮' } },
 		{ name: 'implement_notes', value: 'line 1\nline 2' },
-		{ name: 'schema_version', value: '0.3' }
+		{ name: 'schema_version', value: '0.4' },
+		{ name: 'code_module_id', value: 'button' }
 	]) {
 		assert.deepEqual(attributeFromFields(attributeFields(attr)), attr);
 	}
 	assert.deepEqual(attributeFields({ name: 'description', value: { en: 'A', 'zh-cn': '甲' } }).tipZh, '甲');
+});
+
+test('a fixed attribute carries instance_modifiable false and needs a default', () => {
+	const style = newAttribute('style', false, 'fancy', 'Style', '', true);
+	assert.deepEqual(style, { name: 'style', value: { help_tip: { en: 'Style' }, default_value: 'fancy', instance_modifiable: false } });
+	assert.ok(isFixed(style));
+	assert.ok(!isFixed(newAttribute('style', false, 'fancy', '', '')));
+	assert.ok(!isFixed(newAttribute('label', true, '', '', '', true)), 'every instance must set it: it cannot be fixed');
+	assert.deepEqual(applyEdit(style, 'value', '"plain"').value, { help_tip: { en: 'Style' }, default_value: 'plain', instance_modifiable: false });
+	assert.deepEqual(applyEdit(style, 'help_tip', '').value, { default_value: 'fancy', instance_modifiable: false });
+	assert.deepEqual(buildClassRow([...initialAttributes(), style]).style, { help_tip: { en: 'Style' }, default_value: 'fancy', instance_modifiable: false });
+	assert.equal(attributeProblem('style', '', '', initialAttributes(), true, ''), 'fixed_default');
+	assert.equal(attributeProblem('style', '', '', initialAttributes(), true, 'null'), 'fixed_default');
+	assert.equal(attributeProblem('style', '', '', initialAttributes(), true, 'fancy'), null);
+	assert.equal(attributeProblem('code_module_id', '', '', initialAttributes()), 'reserved');
 });

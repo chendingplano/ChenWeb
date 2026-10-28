@@ -177,3 +177,30 @@ func TestStoreInsertVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// activeModulesQuery finds which code modules element classes may name: active
+// element modules in kb.code_modules (OpenSpec wpi-code-modules).
+const activeModulesQuery = `SELECT code_module_id FROM kb\.code_modules WHERE module_type = 'element' AND status = 'active' AND code_module_id = ANY\(\$1\)`
+
+const listCodeModulesQuery = `SELECT code_module_id, module_name, description, module_type, module_doc, notes, status\s+FROM kb\.code_modules ORDER BY module_type, code_module_id`
+
+func TestStoreCodeModules(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	ctx := context.Background()
+	mock.ExpectQuery(activeModulesQuery).WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"code_module_id"}).AddRow("button"))
+	found, err := store{db}.registered(ctx, storedModule, []string{"button", "slider"})
+	if err != nil || !found["button"] || found["slider"] {
+		t.Fatalf("found %v, %v", found, err)
+	}
+	mock.ExpectQuery(listCodeModulesQuery).WillReturnRows(sqlmock.NewRows([]string{"code_module_id", "module_name", "description", "module_type", "module_doc", "notes", "status"}).
+		AddRow("button", "Button", "A button", "element", "button.md", "", "active"))
+	modules, err := store{db}.listCodeModules(ctx)
+	if err != nil || len(modules) != 1 || modules[0] != (CodeModule{"button", "Button", "A button", "element", "button.md", "", "active"}) {
+		t.Fatalf("modules %+v, %v", modules, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -426,6 +426,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/wpi/classes/element", wpiHandler.CreateElementClass)
 	apiGroup.GET("/wpi/classes/element/:classId", wpiHandler.GetElementClass)
 	apiGroup.PUT("/wpi/classes/element/:classId", wpiHandler.UpdateElementClass)
+	apiGroup.GET("/wpi/code-modules", wpiHandler.ListCodeModules)
 
 	// Holiday calendar admin (System Admin > System > Calendar). Admin-only:
 	// year-independent holiday definitions plus year-specific date bindings

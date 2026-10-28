@@ -1,15 +1,18 @@
 <!-- web/src/lib/components/shared-ui/canvas/CreateElementDialog.svelte -->
-<!-- The WPI editor's Create Element form: defines a new element class (format 0.3) as a list of
+<!-- The WPI editor's Create Element form: defines a new element class (format 0.4) as a list of
      attributes, starting with its class attributes, and stores it as a draft, to be implemented in
-     code afterwards (OpenSpec wpi-create-element-class). Each instance attribute is an object with a
-     help tip and a default. Double-clicking a value, help tip or instance attribute name edits it.
-     The corner grip resizes the dialog. Given a classId, the same form edits that class's latest
-     row instead (from an element node's tool bar); its class ID is fixed, and saving updates the
-     existing record with the same version and status. -->
+     code afterwards (OpenSpec wpi-create-element-class). The class names the code module that
+     draws it; several classes may share one (OpenSpec wpi-code-modules). Each instance attribute is
+     an object with a help tip, a default and, when the class fixes it, instance_modifiable false.
+     Double-clicking an attribute loads it into the fields. The corner grip resizes the dialog.
+     Given a classId, the same form edits that class's latest row instead (from an element node's
+     tool bar); its class ID is fixed, and saving updates the existing record with the same version and status. A
+     save that returns warnings (attributes the code module does not support) shows them before the
+     form closes. -->
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import { onMount } from 'svelte';
-  import { createElementClass, getElementClass, updateElementClass, WpiError } from '$lib/wpi/api';
+  import { createElementClass, getElementClass, listCodeModules, updateElementClass, WpiError } from '$lib/wpi/api';
   import type { Issue } from '$lib/wpi/types';
   import {
     attributeFields,
@@ -22,6 +25,7 @@
     helpTip,
     initialAttributes,
     isClassAttribute,
+    isFixed,
     newAttribute,
     rowProblem,
     type AttributeProblem,
@@ -73,13 +77,28 @@
   let attrTipEn    = $state('');
   let attrTipZh    = $state('');
   let attrRequired = $state(false);
+  let attrFixed    = $state(false);
   let attrError    = $state('');
   // The attribute loaded into those fields to be modified, and the fields as loaded (to tell
   // whether they have changed). Unapplied changes are asked about before they would be lost.
   let attrEditing  = $state<string | null>(null);
   let attrBase     = $state('');
   let pendingGuard = $state<(() => void) | null>(null);
-  const formKey    = () => JSON.stringify([attrName, attrDefault, attrTipEn, attrTipZh, attrRequired]);
+  const formKey    = () => JSON.stringify([attrName, attrDefault, attrTipEn, attrTipZh, attrRequired, attrFixed]);
+  // The active element modules of kb.code_modules, offered while code_module_id is edited; none
+  // are offered if they cannot be loaded, and the server still checks the one named.
+  let moduleIds    = $state('');
+  onMount(async () => {
+    try {
+      const modules = await listCodeModules();
+      moduleIds = modules
+        .filter((cm) => cm.module_type === 'element' && cm.status === 'active')
+        .map((cm) => cm.code_module_id)
+        .join(', ');
+    } catch {
+      moduleIds = '';
+    }
+  });
   // A class attribute's name is fixed; a description is entered in the help tip fields, any other
   // class text in the default value field.
   const classEdit   = $derived(attrEditing !== null && isClassAttribute(attrEditing));
@@ -96,6 +115,8 @@
   let formError = $state('');
   let issues    = $state<Issue[]>([]);
   let saving    = $state(false);
+  // A save that returned warnings: the class is stored, and the form closes once the author has read them.
+  let saved     = $state<{ id: string; warnings: Issue[] } | null>(null);
 
   // A changed attribute may have fixed what the last create reported.
   function clearFormError() {
@@ -109,6 +130,7 @@
       case 'reserved':    return m.wpi_create_element_err_reserved({ name });
       case 'duplicate':   return m.wpi_create_element_err_duplicate({ name });
       case 'help_tip_en': return m.wpi_create_element_err_help_tip_en();
+      case 'fixed_default': return m.wpi_create_element_err_fixed_default();
     }
   }
 
@@ -118,18 +140,19 @@
     attrTipEn = '';
     attrTipZh = '';
     attrRequired = false;
+    attrFixed = false;
     attrError = '';
     attrEditing = null;
   }
 
   function addAttribute() {
     const name = attrName.trim();
-    const p = attributeProblem(name, attrTipEn, attrTipZh, attributes);
+    const p = attributeProblem(name, attrTipEn, attrTipZh, attributes, attrFixed, attrDefault);
     if (p) {
       attrError = problemText(p, name);
       return;
     }
-    attributes = [...attributes, newAttribute(name, attrRequired, attrDefault, attrTipEn, attrTipZh)];
+    attributes = [...attributes, newAttribute(name, attrRequired, attrDefault, attrTipEn, attrTipZh, attrFixed)];
     clearFormError();
     resetAttrForm();
   }
@@ -139,12 +162,12 @@
     const old = attrEditing;
     if (old === null) return false;
     const name = attrName.trim();
-    const p = isClassAttribute(old) ? null : attributeProblem(name, attrTipEn, attrTipZh, attributes.filter((a) => a.name !== old));
+    const p = isClassAttribute(old) ? null : attributeProblem(name, attrTipEn, attrTipZh, attributes.filter((a) => a.name !== old), attrFixed, attrDefault);
     if (p) {
       attrError = problemText(p, name);
       return false;
     }
-    const next = attributeFromFields({ name, defaultText: attrDefault, tipEn: attrTipEn, tipZh: attrTipZh, required: attrRequired });
+    const next = attributeFromFields({ name, defaultText: attrDefault, tipEn: attrTipEn, tipZh: attrTipZh, required: attrRequired, fixed: attrFixed });
     attributes = attributes.map((a) => (a.name === old ? next : a));
     clearFormError();
     resetAttrForm();
@@ -190,14 +213,17 @@
       attrTipEn = f.tipEn;
       attrTipZh = f.tipZh;
       attrRequired = f.required;
+      attrFixed = f.fixed;
       attrError = '';
       attrEditing = attr.name;
       attrBase = formKey();
     });
   }
 
+  // Once the class is saved, closing in any way is the same as OK.
   function requestClose() {
-    guard(onClose);
+    if (saved) onSaved(saved.id);
+    else guard(onClose);
   }
 
   function removeAttribute(name: string) {
@@ -206,7 +232,7 @@
     clearFormError();
   }
 
-  const isOptionalText = (name: string) => name === 'description' || name === 'implement_notes';
+  const isOptionalText = (name: string) => name === 'description' || name === 'code_module_id' || name === 'implement_notes';
 
   // These class attributes are always listed, so removing one empties it; an empty one is left
   // out of the stored row.
@@ -267,10 +293,10 @@
     const id = row.descriptor_id as string;
     saving = true;
     try {
-      if (classId !== undefined) await updateElementClass(classId, row);
-      else await createElementClass(row);
+      const warnings = classId !== undefined ? (await updateElementClass(classId, row)).warnings : await createElementClass(row);
       savedDescriptor = classRowKey(attributes);
-      onSaved(id);
+      if (warnings.length > 0) saved = { id, warnings };
+      else onSaved(id);
     } catch (e) {
       if (e instanceof WpiError && e.status === 409) formError = m.wpi_create_element_err_exists({ id });
       else if (e instanceof WpiError && e.status === 404) formError = m.wpi_edit_element_err_not_found({ id });
@@ -358,6 +384,9 @@
         </label>
       </div>
       <small class="hint">{m.wpi_create_element_default_hint()}</small>
+      {#if attrEditing === 'code_module_id' && moduleIds !== ''}
+        <small class="hint">{m.wpi_create_element_code_modules({ modules: moduleIds })}</small>
+      {/if}
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
         <label class="field" style="flex:1 1 200px; margin:0;">
           <span>{m.wpi_create_element_help_tip_en()}</span>
@@ -369,10 +398,16 @@
         </label>
       </div>
       <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px;">
-        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--cv-text-2);">
-          <input type="checkbox" bind:checked={attrRequired} disabled={classEdit} style="accent-color:var(--cv-accent);" />
-          {m.wpi_create_element_required()}
-        </label>
+        <span style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--cv-text-2);">
+            <input type="checkbox" bind:checked={attrRequired} disabled={classEdit || attrFixed} style="accent-color:var(--cv-accent);" />
+            {m.wpi_create_element_required()}
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--cv-text-2);">
+            <input type="checkbox" bind:checked={attrFixed} disabled={classEdit || attrRequired} style="accent-color:var(--cv-accent);" />
+            {m.wpi_create_element_fixed()}
+          </label>
+        </span>
         {#if attrEditing !== null}
           <span style="display:flex; gap:8px;">
             <button type="button" class="btn" onclick={resetAttrForm}>{m.wpi_create_element_cancel()}</button>
@@ -406,7 +441,8 @@
                 ondblclick={() => editAttribute(attr)}>
                 <td style="padding:6px 12px; font-family:monospace; word-break:break-all;">{attr.name}</td>
                 <td style="padding:0 6px;">
-                  {#if isClassAttribute(attr.name)}<span class="tag">{m.wpi_create_element_class_attribute()}</span>{/if}
+                  {#if isClassAttribute(attr.name)}<span class="tag">{m.wpi_create_element_class_attribute()}</span>
+                  {:else if isFixed(attr)}<span class="tag" title={m.wpi_create_element_fixed()}>{m.wpi_create_element_fixed_tag()}</span>{/if}
                 </td>
                 <td style="padding:6px 12px; font-family:monospace; word-break:break-all;">
                   {#if attr.name === 'descriptor_id' && attr.value === ''}
@@ -415,7 +451,9 @@
                     <span class="muted">{m.wpi_create_element_double_click_to_write_notes()}</span>
                   {:else if attr.name === 'implement_notes'}
                     <span class="notes">{attr.value}</span>
-                  {:else if attr.name === 'descriptor_id' || attr.name === 'schema_version'}
+                  {:else if attr.name === 'code_module_id' && attr.value === ''}
+                    <span class="muted">{m.wpi_create_element_no_code_module()}</span>
+                  {:else if attr.name === 'descriptor_id' || attr.name === 'schema_version' || attr.name === 'code_module_id'}
                     {attr.value}
                   {:else if isClassAttribute(attr.name)}
                     {JSON.stringify(attr.value)}
@@ -493,6 +531,25 @@
             <button type="button" class="btn" onclick={() => (pendingGuard = null)}>{m.wpi_create_element_unsaved_keep()}</button>
             <button type="button" class="btn" onclick={discardPending}>{m.wpi_create_element_unsaved_discard()}</button>
             <button type="button" class="btn primary" onclick={applyPending} use:focusButton>{m.wpi_create_element_unsaved_apply()}</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Saved, with attributes the class's code module does not support -->
+    {#if saved}
+      {@const done = saved}
+      <div class="confirm-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="saved-title" tabindex="-1">
+        <div class="confirm">
+          <div id="saved-title" style="font-size:13px; font-weight:600; color:var(--cv-text);">{m.wpi_create_element_saved_title({ id: done.id })}</div>
+          <div style="font-size:11px; color:var(--cv-text-muted); margin-top:4px;">{m.wpi_create_element_saved_body()}</div>
+          <ul style="margin:8px 0 0 16px; list-style:disc; font-size:11px; color:var(--cv-text);">
+            {#each done.warnings as warning}
+              <li><code>{warning.path}</code> {warning.message}</li>
+            {/each}
+          </ul>
+          <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+            <button type="button" class="btn primary" onclick={() => onSaved(done.id)} use:focusButton>{m.wpi_create_element_saved_ok()}</button>
           </div>
         </div>
       </div>

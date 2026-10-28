@@ -1,5 +1,5 @@
 // Descriptor shapes for WPI schema_version "0.2" (apps, pages, action classes)
-// and "0.3" (element classes), and the API responses.
+// and "0.4" (element classes), and the API responses.
 // The Go validator (server/api/wpi) is the authority on what is valid; these
 // types describe what the interpreter receives in a validated bundle.
 
@@ -75,9 +75,18 @@ export type ElementInstance = SizeAttrs & {
 
 // A class row: class attributes, and for each instance attribute either its
 // default or null, meaning every instance must set it (action classes, format
-// 0.2), or an object {help_tip, default_value} with the same meaning of
-// default_value (element classes, format 0.3).
-export type ClassRow = { descriptor_id: string; schema_version: string; description?: Text; implement_notes?: Text; [attr: string]: unknown };
+// 0.2), or an object {help_tip, default_value, instance_modifiable} with the same
+// meaning of default_value, where instance_modifiable false fixes the value for
+// every instance (element classes, format 0.4). An element class names the code
+// module that draws it in code_module_id.
+export type ClassRow = {
+	descriptor_id: string;
+	schema_version: string;
+	description?: Text;
+	implement_notes?: Text;
+	code_module_id?: string;
+	[attr: string]: unknown;
+};
 
 // A page (devdoc §3.2.1). Its sizes place it inside its pane; binding_mode is
 // the default of its elements that show data.

@@ -2,6 +2,7 @@ package wpi
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"regexp"
 	"testing"
@@ -16,6 +17,73 @@ const seedMigration = "../../../project_migrations/20261027000002_seed_wpi_class
 // elementClassesMigration stores the element classes in format 0.3 as version
 // 2, replacing those of seedMigration.
 const elementClassesMigration = "../../../project_migrations/20261027000006_wpi_element_classes_0_3.sql"
+
+// formatMigration moves every element class to format 0.4 by transforming its
+// latest row; it has no bodies of its own (OpenSpec wpi-code-modules, design D7).
+const formatMigration = "../../../project_migrations/20261028000001_wpi_element_classes_0_4.sql"
+
+// codeModulesMigration creates kb.code_modules with a row for each element code module.
+const codeModulesMigration = "../../../project_migrations/20261028000002_create_kb_code_modules.sql"
+
+var moduleSeedRow = regexp.MustCompile(`\('([a-z0-9-]+)',\s*'[^']+',\s*'[^']*',\s*'(element|action|page|layouter)',\s*'([^']*)'`)
+
+// seededModules returns the element modules codeModulesMigration stores, all active.
+func seededModules(t *testing.T) map[string][]string {
+	t.Helper()
+	sqlText, err := os.ReadFile(codeModulesMigration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(string(sqlText), -1) {
+		if m[2] == "element" {
+			ids = append(ids, m[1])
+		}
+	}
+	return map[string][]string{storedModule: ids}
+}
+
+// Every element code module with code has its row in kb.code_modules, naming its
+// document, and every seeded element module has code.
+func TestSeedCodeModules(t *testing.T) {
+	sqlText, err := os.ReadFile(codeModulesMigration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded := map[string]string{}
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(string(sqlText), -1) {
+		if m[2] == "element" {
+			seeded[m[1]] = m[3]
+		}
+	}
+	if len(seeded) != len(codeModules) {
+		t.Fatalf("seeded element modules %v; code modules with code %d", seeded, len(codeModules))
+	}
+	for id := range codeModules {
+		if seeded[id] != id+".md" {
+			t.Fatalf("code module %q: seeded document %q, want %q", id, seeded[id], id+".md")
+		}
+	}
+}
+
+// toFormat04 applies formatMigration's transform to the seeded element classes,
+// all active: schema_version 0.4 and code_module_id equal to the class ID.
+func toFormat04(t *testing.T, rows map[Kind]map[string]string) {
+	t.Helper()
+	if _, err := os.Stat(formatMigration); err != nil {
+		t.Fatal(err)
+	}
+	for id, body := range rows[KindElement] {
+		m := decode(t, body)
+		m["schema_version"] = "0.4"
+		m["code_module_id"] = id
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows[KindElement][id] = string(b)
+	}
+}
 
 var seedRow = regexp.MustCompile(`(?s)\('(app|page|element|action)', '([a-z0-9-]+)', [0-9]+, '0\.[23]', \$wpi\$(.*?)\$wpi\$::jsonb`)
 
@@ -49,6 +117,7 @@ func TestSeedCustomerAdminIsValid(t *testing.T) {
 			len(first[KindElement]), len(first[KindAction]), len(first[KindPage]), count)
 	}
 	all, _ := seedRows(t, seedMigration, elementClassesMigration)
+	toFormat04(t, all)
 	if classes, n := seedRows(t, elementClassesMigration); n != 6 || len(classes[KindElement]) != 6 {
 		t.Fatalf("%s has %d rows; want the 6 element classes", elementClassesMigration, n)
 	}
@@ -63,7 +132,7 @@ func TestSeedCustomerAdminIsValid(t *testing.T) {
 		}
 		return map[string]bool{"id": true, "user_name": true, "phone_number": true, "email": true, "created_at": true, "updated_at": true}, nil
 	}
-	res, err := BuildBundle(context.Background(), "customer-admin", fixtureLoader(t, all), demoColumns, registeredIn(nil))
+	res, err := BuildBundle(context.Background(), "customer-admin", fixtureLoader(t, all), demoColumns, registeredIn(seededModules(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +160,7 @@ func TestSeedPagesDemoIsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	all, _ := seedRows(t, seedMigration, pagesSeedMigration, elementClassesMigration)
+	toFormat04(t, all)
 	// The pages of seedMigration are replaced by those of the demo, in kb.frontend_pages.
 	all[KindPage] = map[string]string{}
 	for _, m := range pageSeedRow.FindAllStringSubmatch(string(demo), -1) {
@@ -99,7 +169,7 @@ func TestSeedPagesDemoIsValid(t *testing.T) {
 	for _, cls := range []string{"query", "load-file"} {
 		expectIssue(t, ValidateDescriptor(KindAction, cls, decode(t, all[KindAction][cls])), "")
 	}
-	registered := map[string][]string{}
+	registered := seededModules(t)
 	for _, m := range stmtSeedRow.FindAllStringSubmatch(string(demo), -1) {
 		registered[storedStatement] = append(registered[storedStatement], m[1])
 	}

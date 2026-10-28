@@ -15,7 +15,8 @@ const bundle = {
 	elements: {
 		input: {
 			descriptor_id: 'input',
-			schema_version: '0.3',
+			schema_version: '0.4',
+			code_module_id: 'input',
 			description: 'A field',
 			implement_notes: 'A one-line field',
 			label: { help_tip: 'Caption', default_value: null },
@@ -24,7 +25,17 @@ const bundle = {
 			input_type: { help_tip: 'text, number or email' },
 			width: { default_value: 'elastic' }
 		},
-		text: { descriptor_id: 'text', schema_version: '0.3' }
+		text: { descriptor_id: 'text', schema_version: '0.4', code_module_id: 'text' },
+		// Drawn by the input code module; fixes its binding mode and input type.
+		'email-input': {
+			descriptor_id: 'email-input',
+			schema_version: '0.4',
+			code_module_id: 'input',
+			label: { default_value: null },
+			data_binding: { default_value: null },
+			binding_mode: { default_value: 'read-write', instance_modifiable: false },
+			input_type: { default_value: 'email', instance_modifiable: false }
+		}
 	}
 } as unknown as Bundle;
 
@@ -36,8 +47,10 @@ test('an instance takes its class defaults and overrides them', () => {
 	assert.equal(r.desc.width, 'elastic');
 	assert.equal(r.desc.label, 'Email');
 	assert.equal(r.pointer, '/elements/2');
+	assert.equal(r.module, 'input');
 	assert.equal('description' in r.desc, false, 'class attributes are not merged');
 	assert.equal('implement_notes' in r.desc, false, 'class attributes are not merged');
+	assert.equal('code_module_id' in r.desc, false, 'class attributes are not merged');
 	const bare = mergeElement(bundle.elements.input, {});
 	assert.equal('data_binding' in bare, false, 'null means no default');
 	assert.equal('input_type' in bare, false, 'no default_value means no default');
@@ -69,6 +82,17 @@ test('binding mode: instance, then page, then class', () => {
 	assert.equal(mode(viewer, { element: 'input', binding_mode: 'read-write' }), 'read-write');
 	assert.equal(mode(page('editor'), { element: 'input' }), 'read-write');
 	assert.equal(mode(viewer, { element: 'text' }), undefined, 'only classes with a binding mode take the page\'s');
+	assert.equal(mode(viewer, { element: 'email-input' }), 'read-write', 'a fixed binding mode is not the page\'s to change');
+});
+
+test('a class drawn by a shared code module, with fixed values', () => {
+	const r = resolveEntry(bundle, page('p'), { element: 'email-input', label: 'Email', data_binding: '$input_doc.email' }, 0);
+	assert.ok(!('error' in r));
+	assert.equal(r.module, 'input');
+	assert.equal(r.desc.element, 'email-input');
+	assert.equal(r.desc.input_type, 'email');
+	// The server refuses an instance that sets a fixed attribute; the merge lets the class win anyway.
+	assert.equal(mergeElement(bundle.elements['email-input'], { input_type: 'number' }).input_type, 'email');
 });
 
 test('static data versus action instances as input', () => {

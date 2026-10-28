@@ -53,9 +53,10 @@ export async function runAction(
 	return body as Record<string, Json>;
 }
 
-// An instance attribute of an element class row (format 0.3). default_value
+// An instance attribute of an element class row (format 0.4). default_value
 // null: every instance must set it; left out: optional, no default.
-export type ElementAttribute = { help_tip?: Text; default_value?: Json };
+// instance_modifiable false: the class fixes default_value for every instance.
+export type ElementAttribute = { help_tip?: Text; default_value?: Json; instance_modifiable?: boolean };
 
 // The latest draft or active version of an element class, for the editor's
 // palette and properties panel. A draft is defined but has no code yet.
@@ -76,19 +77,43 @@ export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise
 	return (body.classes as ElementClassSummary[]) ?? [];
 }
 
-// Stores a new element class as a draft. Throws WpiError: 409 when the class
-// ID already exists, 400 with issues when the draft breaks a rule.
-export async function createElementClass(classRow: JsonObject, fetchFn: typeof fetch = fetch): Promise<void> {
+// A row of kb.code_modules: the code that draws elements, performs actions or
+// lays out pages. An element class may name only an active element module.
+export type CodeModule = {
+	code_module_id: string;
+	module_name: string;
+	description: string;
+	module_type: 'element' | 'action' | 'page' | 'layouter';
+	module_doc: string;
+	notes: string;
+	status: 'active' | 'suspended';
+};
+
+export async function listCodeModules(fetchFn: typeof fetch = fetch): Promise<CodeModule[]> {
+	const res = await fetchFn('/api/v1/wpi/code-modules', { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) {
+		throw new WpiError(String(body.error ?? res.statusText), res.status);
+	}
+	return (body.code_modules as CodeModule[]) ?? [];
+}
+
+// Stores a new element class as a draft and returns its warnings: attributes
+// its code module, when it names a registered one, does not support. Throws
+// WpiError: 409 when the class ID already exists, 400 with issues when the
+// draft breaks a rule.
+export async function createElementClass(classRow: JsonObject, fetchFn: typeof fetch = fetch): Promise<Issue[]> {
 	const res = await fetchFn('/api/v1/wpi/classes/element', {
 		method: 'POST',
 		credentials: 'same-origin',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(classRow)
 	});
+	const body = await parse(res);
 	if (!res.ok) {
-		const body = await parse(res);
 		throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
 	}
+	return (body.warnings as Issue[] | undefined) ?? [];
 }
 
 // The latest draft or active version of an element class, whole, for the
@@ -105,14 +130,15 @@ export async function getElementClass(classId: string, fetchFn: typeof fetch = f
 }
 
 // Updates an existing element class in place, keeping its version and status: a
-// draft stays a draft, an active class must still match its code. Throws
+// draft stays a draft, an active class must still name a registered code
+// module. The warnings are attributes that module does not support. Throws
 // WpiError: 404 when the class has no draft or active row, 400 with issues
 // when the row breaks a rule.
 export async function updateElementClass(
 	classId: string,
 	classRow: JsonObject,
 	fetchFn: typeof fetch = fetch
-): Promise<{ version: number; status: 'draft' | 'active' }> {
+): Promise<{ version: number; status: 'draft' | 'active'; warnings: Issue[] }> {
 	const res = await fetchFn(`/api/v1/wpi/classes/element/${encodeURIComponent(classId)}`, {
 		method: 'PUT',
 		credentials: 'same-origin',
@@ -123,5 +149,6 @@ export async function updateElementClass(
 	if (!res.ok) {
 		throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
 	}
-	return body as { version: number; status: 'draft' | 'active' };
+	const saved = body as { version: number; status: 'draft' | 'active'; warnings?: Issue[] };
+	return { version: saved.version, status: saved.status, warnings: saved.warnings ?? [] };
 }

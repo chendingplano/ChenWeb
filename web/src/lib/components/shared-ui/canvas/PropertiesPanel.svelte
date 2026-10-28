@@ -139,15 +139,27 @@
               <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">
                 {name}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
               </label>
-              <textarea
-                id={`prop-attr-${name}`}
-                rows="1"
-                value={attrText(node, name)}
-                placeholder={attrPlaceholder(attr)}
-                oninput={(e) => typeAttr(name, (e.target as HTMLTextAreaElement).value)}
-                onblur={() => (typing = null)}
-                style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); resize:vertical; field-sizing:content; box-sizing:border-box;"
-              ></textarea>
+              {#if attr.instance_modifiable === false}
+                <!-- The class fixes it: every instance has the class's value, so the node cannot set it. -->
+                <textarea
+                  id={`prop-attr-${name}`}
+                  rows="1"
+                  readonly
+                  value={valueText(attr.default_value)}
+                  style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); resize:none; field-sizing:content; box-sizing:border-box;"
+                ></textarea>
+                <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.propertiespanel_fixed()}</div>
+              {:else}
+                <textarea
+                  id={`prop-attr-${name}`}
+                  rows="1"
+                  value={attrText(node, name)}
+                  placeholder={attrPlaceholder(attr)}
+                  oninput={(e) => typeAttr(name, (e.target as HTMLTextAreaElement).value)}
+                  onblur={() => (typing = null)}
+                  style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); resize:vertical; field-sizing:content; box-sizing:border-box;"
+                ></textarea>
+              {/if}
               {#if attr.help_tip}
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>
               {/if}

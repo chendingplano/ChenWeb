@@ -57,13 +57,9 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 	if !ok {
 		return nil, ErrNotFound
 	}
-	// Classes are few by design, so all of them are loaded, one query per
-	// kind, and every instance can be merged as soon as its page arrives.
-	classes := map[Kind]map[string]Descriptor{}
-	for _, kind := range []Kind{KindElement, KindAction} {
-		if classes[kind], err = load(ctx, kind, nil); err != nil {
-			return nil, err
-		}
+	classes, err := loadClasses(ctx, load)
+	if err != nil {
+		return nil, err
 	}
 	pages, refs, err := loadPages(ctx, app, classes[KindAction], load)
 	if err != nil {
@@ -98,12 +94,23 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 		res.Warnings = append(res.Warnings, unboundSaveWarnings(id, els, acts)...)
 	}
 	// Only the classes the app uses are checked, so a broken class row that no
-	// page uses does not break every app.
+	// page uses does not break every app. Attributes an element class names that
+	// its code module does not support are warnings.
+	usedElements := map[string]map[string]any{}
 	for _, kind := range []Kind{KindElement, KindAction} {
 		for _, cls := range slices.Sorted(maps.Keys(used[kind])) {
 			res.Errors = append(res.Errors, ValidateDescriptor(kind, cls, classes[kind][cls].Body)...)
+			if kind == KindElement {
+				res.Warnings = append(res.Warnings, classWarnings(cls, classes[kind][cls].Body)...)
+				usedElements[cls] = classes[kind][cls].Body
+			}
 		}
 	}
+	moduleErrs, err := moduleErrors(ctx, registered, usedElements)
+	if err != nil {
+		return nil, err
+	}
+	res.Errors = append(res.Errors, moduleErrs...)
 	res.Errors = append(res.Errors, paneErrors(appID, str(app.Body["layout_template"]), actions)...)
 	tableErrs, err := tableErrors(ctx, columns, actions)
 	if err != nil {
@@ -127,6 +134,30 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 		Warnings: nonNil(res.Warnings),
 	}
 	return res, nil
+}
+
+// loadClasses loads every active element and action class. Classes are few by
+// design, so all of them are loaded, one query per kind, and every instance can
+// be merged as soon as its page arrives.
+func loadClasses(ctx context.Context, load Loader) (map[Kind]map[string]Descriptor, error) {
+	classes := map[Kind]map[string]Descriptor{}
+	for _, kind := range []Kind{KindElement, KindAction} {
+		var err error
+		if classes[kind], err = load(ctx, kind, nil); err != nil {
+			return nil, err
+		}
+	}
+	return classes, nil
+}
+
+// ValidatePageInstances checks a page's instances against the active class
+// rows, as a bundle does: classes exist, element instances set only what their
+// class names and nothing it fixes, required attributes are set, and the merged
+// instances are complete. Call it on a page that passes ValidateDescriptor.
+func ValidatePageInstances(id string, page map[string]any, classes map[Kind]map[string]Descriptor) []Issue {
+	v := &validator{kind: KindPage, id: id, classes: classes}
+	v.pageInstances(page)
+	return v.issues
 }
 
 // rawMap returns the descriptors' JSON by ID, only those in keep unless it is nil.
@@ -254,6 +285,32 @@ func tableErrors(ctx context.Context, columns Columns, actions []mergedAction) (
 			if c.name != "" && !cols[c.name] {
 				out = append(out, Issue{KindPage, a.page, a.path + c.path, fmt.Sprintf("column %q does not exist in table %q", c.name, table)})
 			}
+		}
+	}
+	return out, nil
+}
+
+// moduleErrors reports element class rows whose code_module_id does not name an
+// active element module in kb.code_modules (OpenSpec wpi-code-modules, design
+// D9). A missing or malformed code_module_id is left to the class checks.
+func moduleErrors(ctx context.Context, registered Registered, rows map[string]map[string]any) ([]Issue, error) {
+	var names []string
+	for _, id := range slices.Sorted(maps.Keys(rows)) {
+		if m := str(rows[id]["code_module_id"]); idPattern.MatchString(m) {
+			names = append(names, m)
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	found, err := registered(ctx, storedModule, names)
+	if err != nil {
+		return nil, err
+	}
+	var out []Issue
+	for _, id := range slices.Sorted(maps.Keys(rows)) {
+		if m := str(rows[id]["code_module_id"]); idPattern.MatchString(m) && !found[m] {
+			out = append(out, Issue{KindElement, id, "/code_module_id", fmt.Sprintf("code module %q is not an active element module in kb.code_modules", m)})
 		}
 	}
 	return out, nil

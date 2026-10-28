@@ -3,6 +3,7 @@ package wpi
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -61,17 +62,40 @@ func build(t *testing.T, fx map[Kind]map[string]string, tables map[string][]stri
 	return BuildBundle(context.Background(), "demo", fixtureLoader(t, fx), columns, registeredIn(nil))
 }
 
-// registeredIn fakes the stored statements and files, by kind.
+// registeredIn fakes the stored statements and files, by kind, and the active
+// element modules of kb.code_modules: every module with code, unless rows names
+// them.
 func registeredIn(rows map[string][]string) Registered {
 	return func(_ context.Context, kind string, names []string) (map[string]bool, error) {
+		known, given := rows[kind]
+		if kind == storedModule && !given {
+			known = slices.Collect(maps.Keys(codeModules))
+		}
 		out := map[string]bool{}
 		for _, n := range names {
-			if slices.Contains(rows[kind], n) {
+			if slices.Contains(known, n) {
 				out[n] = true
 			}
 		}
 		return out, nil
 	}
+}
+
+// A class whose code module is suspended, or has no row in kb.code_modules,
+// stops the apps that use it (OpenSpec wpi-code-modules, design D9).
+func TestBuildBundleNeedsActiveCodeModules(t *testing.T) {
+	columns := func(_ context.Context, table string) (map[string]bool, error) {
+		return map[string]bool{"id": true, "name": true}, nil
+	}
+	res, err := BuildBundle(context.Background(), "demo", fixtureLoader(t, fixture()), columns,
+		registeredIn(map[string][]string{storedModule: {"input", "list"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Bundle != nil {
+		t.Fatal("a bundle with a suspended module must not be built")
+	}
+	expectIssue(t, res.Errors, `/code_module_id code module "button" is not an active element module in kb.code_modules`)
 }
 
 var peopleTable = map[string][]string{"people": {"id", "name"}}
@@ -226,4 +250,21 @@ func TestBuildBundleWarnsAboutUnboundSaveAttribute(t *testing.T) {
 		t.Fatalf("errors %+v, %v", res, err)
 	}
 	expectIssue(t, res.Warnings, `writes attribute "name", but no read-write element on this page binds`)
+}
+
+// A class that names an attribute its code module does not support still
+// works: the attribute has no effect and the bundle carries a warning
+// (OpenSpec wpi-code-modules, design D3).
+func TestBuildBundleWarnsAboutUnsupportedAttribute(t *testing.T) {
+	fx := fixture()
+	fx[KindElement]["button"] = strings.Replace(fx[KindElement]["button"], `"on_click"`, `"label_hori_align": {"default_value": "center"}, "on_click"`, 1)
+	fx[KindPage]["form-page"] = strings.Replace(fx[KindPage]["form-page"], `"label": "Save",`, `"label": "Save", "label_hori_align": "left",`, 1)
+	res, err := build(t, fx, peopleTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 || res.Bundle == nil {
+		t.Fatalf("errors %+v", res.Errors)
+	}
+	expectIssue(t, res.Warnings, `/label_hori_align code module "button" does not support attribute "label_hori_align"`)
 }

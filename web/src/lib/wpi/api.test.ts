@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createElementClass, fetchApp, getElementClass, listElementClasses, runAction, updateElementClass, WpiError } from './api';
+import { createElementClass, fetchApp, getElementClass, listCodeModules, listElementClasses, runAction, updateElementClass, WpiError } from './api';
 
 function fakeFetch(status: number, body: unknown, seen: { url?: string; init?: RequestInit } = {}): typeof fetch {
 	return (async (url: string, init?: RequestInit) => {
@@ -49,12 +49,15 @@ test('listElementClasses returns the classes', async () => {
 	assert.equal(classes[0].status, 'draft');
 });
 
-test('createElementClass posts the class row', async () => {
+test('createElementClass posts the class row and returns its warnings', async () => {
 	const seen: { url?: string; init?: RequestInit } = {};
-	await createElementClass({ descriptor_id: 'slider', schema_version: '0.2' }, fakeFetch(201, { status: 'draft' }, seen));
+	const none = await createElementClass({ descriptor_id: 'slider', schema_version: '0.4' }, fakeFetch(201, { status: 'draft' }, seen));
 	assert.equal(seen.url, '/api/v1/wpi/classes/element');
 	assert.equal(seen.init?.method, 'POST');
-	assert.deepEqual(JSON.parse(String(seen.init?.body)), { descriptor_id: 'slider', schema_version: '0.2' });
+	assert.deepEqual(JSON.parse(String(seen.init?.body)), { descriptor_id: 'slider', schema_version: '0.4' });
+	assert.deepEqual(none, []);
+	const warning = { kind: 'element', descriptor_id: 'fancy-button', path: '/glow', message: 'code module "button" does not support attribute "glow", so it has no effect' };
+	assert.deepEqual(await createElementClass({}, fakeFetch(201, { status: 'draft', warnings: [warning] })), [warning]);
 });
 
 test('createElementClass carries the status and issues', async () => {
@@ -91,10 +94,22 @@ test('updateElementClass puts the class row and carries the issues', async () =>
 	assert.equal(seen.init?.method, 'PUT');
 	assert.deepEqual(JSON.parse(String(seen.init?.body)), { descriptor_id: 'slider' });
 	assert.equal(res.version, 3);
+	assert.deepEqual(res.warnings, []);
+	const warning = { kind: 'element', descriptor_id: 'button', path: '/glow', message: 'code module "button" does not support attribute "glow", so it has no effect' };
+	const warned = await updateElementClass('button', {}, fakeFetch(200, { descriptor_id: 'button', version: 4, status: 'active', warnings: [warning] }));
+	assert.deepEqual(warned.warnings, [warning]);
 	const issues = [{ kind: 'element', descriptor_id: 'input', path: '/slider_min', message: 'unknown attribute "slider_min"' }];
 	await assert.rejects(updateElementClass('input', {}, fakeFetch(400, { errors: issues })), (err: unknown) => {
 		assert.ok(err instanceof WpiError);
 		assert.deepEqual(err.issues, issues);
 		return true;
 	});
+});
+
+test('listCodeModules returns the rows of kb.code_modules', async () => {
+	const seen: { url?: string; init?: RequestInit } = {};
+	const button = { code_module_id: 'button', module_name: 'Button', description: 'A button', module_type: 'element', module_doc: 'button.md', notes: '', status: 'active' };
+	assert.deepEqual(await listCodeModules(fakeFetch(200, { code_modules: [button] }, seen)), [button]);
+	assert.equal(seen.url, '/api/v1/wpi/code-modules');
+	await assert.rejects(listCodeModules(fakeFetch(401, { error: 'Authentication required' })), (err: unknown) => err instanceof WpiError && err.status === 401);
 });

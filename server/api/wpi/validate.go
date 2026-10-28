@@ -32,10 +32,13 @@ func (a codeAttrs) defines(attr string) bool {
 	return slices.Contains(a.required, attr) || slices.Contains(a.optional, attr)
 }
 
-// elementAttrs is keyed by element class ID, which is also the name of the
-// frontend code that draws the class (devdoc 2026102601 §3.5.1). Every element
-// class also defines the size attributes.
-var elementAttrs = map[string]codeAttrs{
+// codeModules lists the instance attributes each element code module defines,
+// keyed by code module ID: the name under which the frontend registers the code
+// that draws it. An element class names its module in code_module_id, and
+// several classes may share one (devdoc 2026102601 §3.5.2; each module is
+// documented in KnowledgeStore doc-repo/code_modules). Every module also defines
+// the size attributes.
+var codeModules = map[string]codeAttrs{
 	"text":   {nil, []string{"text", "data_binding"}},
 	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type"}},
 	"select": {[]string{"label", "data_binding", "binding_mode", "options"}, nil},
@@ -57,7 +60,8 @@ var actionAttrs = map[string]codeAttrs{
 }
 
 // classAttrs are shared by every instance of a class and set only in its row.
-var classAttrs = []string{"descriptor_id", "schema_version", "description", "implement_notes"}
+// code_module_id is set only in element class rows.
+var classAttrs = []string{"descriptor_id", "schema_version", "description", "implement_notes", "code_module_id"}
 
 // actionHolding attributes hold action instances. A class row cannot give them
 // defaults, so every action instance is written in a page (design D5).
@@ -70,13 +74,9 @@ var (
 	saveClass      = []string{"save"}
 )
 
-// classCode returns the instance attributes the code of a class defines.
-func classCode(kind Kind, cls string) (codeAttrs, bool) {
-	if kind == KindAction {
-		a, ok := actionAttrs[cls]
-		return a, ok
-	}
-	a, ok := elementAttrs[cls]
+// elementCode returns the instance attributes an element code module defines.
+func elementCode(module string) (codeAttrs, bool) {
+	a, ok := codeModules[module]
 	a.optional = append(slices.Clone(a.optional), elementSizeAttrs...)
 	return a, ok
 }
@@ -309,32 +309,28 @@ func (v *validator) page(b map[string]any) {
 	}
 }
 
-// classRow checks an element or action class row (design D2): besides the
-// class attributes, it holds instance attributes its code defines, each with a
-// default or null. Every attribute the code requires must be there, and
-// attributes that hold actions cannot have defaults. An element class row
-// (format 0.3) holds each instance attribute as an object (elementClassAttrs).
+// classRow checks an active element or action class row (design D2). An action
+// class row holds instance attributes its code defines, each with a default or
+// null; every attribute the code requires must be there, and attributes that
+// hold actions cannot have defaults. An element class row is checked by
+// elementClassRow.
 func (v *validator) classRow(b map[string]any) {
-	code, known := classCode(v.kind, v.id)
-	if !known {
-		v.errf("", "%s class %q has no code in this interpreter", v.kind, v.id)
-		return
-	}
 	v.text(b, "description", "")
 	v.text(b, "implement_notes", "")
 	if v.kind == KindElement {
-		defaults, given := v.elementClassAttrs(b, code.defines)
-		for _, k := range code.required {
-			if !given[k] {
-				v.errf("", "the class must give %q a default_value or null, because its code requires it", k)
-			}
-		}
-		v.element(v.id, defaults, "")
+		v.elementClassRow(b)
+		return
+	}
+	code, known := actionAttrs[v.id]
+	if !known {
+		v.errf("", "%s class %q has no code in this interpreter", v.kind, v.id)
 		return
 	}
 	defaults := map[string]any{}
 	for _, k := range slices.Sorted(maps.Keys(b)) {
 		switch {
+		case k == "code_module_id":
+			v.errf("/"+k, "an action class's ID names its code, so it has no %q", k)
 		case slices.Contains(classAttrs, k):
 		case !code.defines(k):
 			v.errf("/"+k, "unknown attribute %q", k)
@@ -353,35 +349,105 @@ func (v *validator) classRow(b map[string]any) {
 	v.action(v.id, defaults, "")
 }
 
+// elementClassRow checks an active element class row (format 0.4): it names a
+// registered code module, gives every attribute the module requires a default
+// or null, and the defaults of attributes the module defines are valid. It may
+// name attributes the module does not define; classWarnings reports them
+// (devdoc 2026102601 §3.5.2).
+func (v *validator) elementClassRow(b map[string]any) {
+	module, code, registered := v.codeModule(b, true)
+	defaults, given, _ := v.elementClassAttrs(b)
+	if !registered {
+		return
+	}
+	for _, k := range code.required {
+		if !given[k] {
+			v.errf("", "the class must give %q a default_value or null, because its code module %q requires it", k, module)
+		}
+	}
+	v.element(module, defaults, "")
+}
+
+// codeModule checks an element class row's code_module_id: an active class
+// must name a registered code module; a draft may leave it out or name one whose
+// code is not written yet, so only its form is checked. It returns the module
+// and, when it is registered, the attributes it defines.
+func (v *validator) codeModule(b map[string]any, active bool) (module string, code codeAttrs, registered bool) {
+	val, present := b["code_module_id"]
+	if !present {
+		if active {
+			v.errf("/code_module_id", "missing attribute %q: an active element class names its code module", "code_module_id")
+		}
+		return "", codeAttrs{}, false
+	}
+	module, _ = val.(string)
+	if !idPattern.MatchString(module) {
+		v.errf("/code_module_id", "must be a code module ID matching %s", idPattern)
+		return "", codeAttrs{}, false
+	}
+	code, registered = elementCode(module)
+	if active && !registered {
+		v.errf("/code_module_id", "code module %q has no code in this interpreter", module)
+	}
+	return module, code, registered
+}
+
+// classWarnings reports the instance attributes an element class row names that
+// its code module does not define: they are stored, but have no effect until
+// the module is changed (devdoc 2026102601 §3.5.2). A row whose module is not
+// registered has none.
+func classWarnings(id string, body map[string]any) []Issue {
+	module := str(body["code_module_id"])
+	code, registered := elementCode(module)
+	if !registered {
+		return nil
+	}
+	var out []Issue
+	for _, k := range slices.Sorted(maps.Keys(body)) {
+		if !slices.Contains(classAttrs, k) && !code.defines(k) {
+			out = append(out, Issue{KindElement, id, "/" + k, fmt.Sprintf("code module %q does not support attribute %q, so it has no effect", module, k)})
+		}
+	}
+	return out
+}
+
 // elementClassAttrs checks the instance attributes of an element class row
-// (format 0.3): each is an object with an optional help_tip (text for authors)
-// and an optional default_value, where null means every instance must set it
-// and leaving it out means the attribute is optional with no default. known
-// says which names the class's code defines; nil, for a draft whose code does
-// not exist yet, accepts any well-formed name. It returns the non-null defaults
-// and the names that have a default_value, null included.
-func (v *validator) elementClassAttrs(b map[string]any, known func(string) bool) (defaults map[string]any, given map[string]bool) {
-	defaults, given = map[string]any{}, map[string]bool{}
+// (format 0.4): each has a well-formed name and is an object with an optional
+// help_tip (text for authors), an optional default_value, where null means
+// every instance must set it and leaving it out means the attribute is optional
+// with no default, and an optional instance_modifiable. false makes the
+// attribute fixed: its default_value, which may not be null, is the value of
+// every instance. It returns the non-null defaults, the names that have a
+// default_value (null included) and the fixed ones.
+func (v *validator) elementClassAttrs(b map[string]any) (defaults map[string]any, given, fixed map[string]bool) {
+	defaults, given, fixed = map[string]any{}, map[string]bool{}, map[string]bool{}
 	for _, k := range slices.Sorted(maps.Keys(b)) {
 		p := "/" + k
 		switch {
 		case slices.Contains(classAttrs, k):
 			continue
-		case known != nil && !known(k):
-			v.errf(p, "unknown attribute %q", k)
-			continue
-		case known == nil && (k == "element" || !segmentPattern.MatchString(k)):
+		case k == "element" || !segmentPattern.MatchString(k):
 			v.errf(p, "%q cannot be an attribute name", k)
 			continue
 		}
 		attr, ok := b[k].(map[string]any)
 		if !ok {
-			v.errf(p, "must be an object with an optional %q and an optional %q", "help_tip", "default_value")
+			v.errf(p, "must be an object with an optional %q, %q and %q", "help_tip", "default_value", "instance_modifiable")
 			continue
 		}
-		v.keys(attr, p, nil, "help_tip", "default_value")
+		v.keys(attr, p, nil, "help_tip", "default_value", "instance_modifiable")
 		v.text(attr, "help_tip", p)
+		v.boolean(attr, "instance_modifiable", p)
 		dv, has := attr["default_value"]
+		if isFixed(b, k) {
+			fixed[k] = true
+			switch {
+			case slices.Contains(actionHolding, k):
+				v.errf(p, "attribute %q holds actions, so it cannot be fixed", k)
+			case dv == nil:
+				v.errf(p, "a fixed attribute needs a default_value other than null: it is the value of every instance")
+			}
+		}
 		if !has {
 			continue
 		}
@@ -394,59 +460,82 @@ func (v *validator) elementClassAttrs(b map[string]any, known func(string) bool)
 			defaults[k] = dv
 		}
 	}
-	return defaults, given
+	return defaults, given, fixed
+}
+
+// isFixed reports whether an element class row fixes attribute k for all its
+// instances ("instance_modifiable": false).
+func isFixed(row map[string]any, k string) bool {
+	attr, _ := row[k].(map[string]any)
+	return attr["instance_modifiable"] == false
+}
+
+// fixedValues returns the attributes an element class row fixes, with their values.
+func fixedValues(row map[string]any) map[string]any {
+	out := map[string]any{}
+	for k := range row {
+		if isFixed(row, k) {
+			attr, _ := row[k].(map[string]any)
+			out[k] = attr["default_value"]
+		}
+	}
+	return out
 }
 
 // ValidateDraftClass checks an element class row created as a draft, before its
-// code exists (OpenSpec wpi-create-element-class, design D4). Without code it
-// cannot know which attributes the class has, so it checks their names, that
-// attributes holding actions have no default, and the defaults of attributes
-// every class shares.
+// code may exist (OpenSpec wpi-create-element-class, design D4).
 func ValidateDraftClass(body map[string]any) []Issue {
 	return validateElementClass(body, true)
 }
 
-// validateElementClass checks the authoring format without coupling attribute
-// changes to the interpreter's current code. Existing active rows may omit a
-// description; drafts still need one to describe what should be implemented.
-func validateElementClass(body map[string]any, requireDescription bool) []Issue {
+// validateElementClass checks an element class row in the authoring format,
+// independently of which attributes its code module defines: names, attribute
+// objects, help tips, fixed attributes, action defaults and the defaults of
+// attributes every class shares. A draft needs a description and may leave out
+// its code module; an active row may omit a description but must name a
+// registered code module (OpenSpec wpi-code-modules).
+func validateElementClass(body map[string]any, draft bool) []Issue {
 	id, _ := body["descriptor_id"].(string)
 	v := &validator{kind: KindElement, id: id}
 	if !idPattern.MatchString(id) {
 		v.errf("/descriptor_id", "descriptor ID %q must match %s", id, idPattern)
 	}
 	v.schemaVersion(body)
-	if _, ok := body["description"]; requireDescription && !ok {
+	if _, ok := body["description"]; draft && !ok {
 		v.errf("/description", "a draft class needs a description")
 	}
 	v.text(body, "description", "")
 	v.text(body, "implement_notes", "")
-	defaults, _ := v.elementClassAttrs(body, nil)
-	for _, k := range elementSizeAttrs {
-		v.size(defaults, k, "")
-	}
-	v.text(defaults, "label", "")
-	v.binding(defaults, "")
-	v.oneOf(defaults, "binding_mode", "", bindingModes)
+	v.codeModule(body, !draft)
+	defaults, _, _ := v.elementClassAttrs(body)
+	v.sharedAttrs(defaults, "")
 	return v.issues
 }
 
+// sharedAttrs checks the attributes many element code modules share: sizes,
+// label, data_binding and binding_mode.
+func (v *validator) sharedAttrs(e map[string]any, path string) {
+	for _, k := range elementSizeAttrs {
+		v.size(e, k, path)
+	}
+	v.text(e, "label", path)
+	v.binding(e, path)
+	v.oneOf(e, "binding_mode", path, bindingModes)
+}
+
 // elementInstance checks a page entry {"element": class, ...} as far as it can
-// without the class row; pageInstances checks it against the row.
+// without the class row: it names a class, sets no class attribute, and the
+// attributes many classes share are valid. pageInstances checks it against its
+// class row and code module.
 func (v *validator) elementInstance(m map[string]any, path string) {
-	cls, ok := v.str(m, "element", path)
-	if !ok {
+	if _, ok := v.matching(m, "element", path, idPattern); !ok {
 		if _, present := m["element"]; !present {
 			v.errf(path, "missing attribute %q", "element")
 		}
 		return
 	}
-	if _, known := elementAttrs[cls]; !known {
-		v.errf(path+"/element", "element class %q has no code in this interpreter", cls)
-		return
-	}
 	v.noClassAttrs(m, path)
-	v.element(cls, instanceAttrs(m, "element"), path)
+	v.sharedAttrs(instanceAttrs(m, "element"), path)
 }
 
 func (v *validator) noClassAttrs(m map[string]any, path string) {
@@ -469,17 +558,23 @@ func instanceAttrs(m map[string]any, classKey string) map[string]any {
 	return out
 }
 
-// element checks the attributes an element instance or class row sets: each is
-// defined by the class's code and has a valid value. Whether required ones are
-// there is checked on the merged instance (elementComplete). Action instances
-// inside are checked through actionPositions.
-func (v *validator) element(cls string, e map[string]any, path string) {
-	code, _ := classCode(KindElement, cls)
-	v.keys(e, path, nil, append(slices.Clone(code.required), code.optional...)...)
+// element checks the values of the attributes an element instance or class row
+// sets that its code module defines; the others have no effect, so they are not
+// checked here. Which attributes an instance may set, and whether required ones
+// are there, is checked against its class (elementAgainstClass,
+// elementComplete). Action instances inside are checked through actionPositions.
+func (v *validator) element(module string, all map[string]any, path string) {
+	code, _ := elementCode(module)
+	e := map[string]any{}
+	for k, val := range all {
+		if code.defines(k) {
+			e[k] = val
+		}
+	}
 	for _, k := range elementSizeAttrs {
 		v.size(e, k, path)
 	}
-	switch cls {
+	switch module {
 	case "text":
 		if t, ok := e["text"]; ok {
 			if _, ok := t.(string); !ok {
@@ -509,11 +604,11 @@ func (v *validator) element(cls string, e map[string]any, path string) {
 }
 
 // elementComplete checks a merged element instance: every attribute its code
-// requires is there, and the rules that span attributes hold.
-func (v *validator) elementComplete(cls string, merged map[string]any, path string) {
-	code, _ := classCode(KindElement, cls)
+// module requires is there, and the rules that span attributes hold.
+func (v *validator) elementComplete(module string, merged map[string]any, path string) {
+	code, _ := elementCode(module)
 	v.required(merged, path, code.required)
-	switch cls {
+	switch module {
 	case "text":
 		_, hasText := merged["text"]
 		_, hasBinding := merged["data_binding"]
@@ -684,8 +779,10 @@ func (pos actionPos) isStatic() bool {
 }
 
 // actionPositions lists every place in a page that holds an action instance
-// (design D5), including open-page inputs nested in them. It accepts pages
-// that fail validation, so callers can use it on any stored page.
+// (design D5), including open-page inputs nested in them. The names of the
+// element attributes that hold actions are reserved (actionHolding), so it needs
+// neither class rows nor code modules (OpenSpec wpi-code-modules, design D5). It
+// accepts pages that fail validation, so callers can use it on any stored page.
 func actionPositions(page map[string]any) []actionPos {
 	var out []actionPos
 	if in, ok := page["input"]; ok {
@@ -697,19 +794,16 @@ func actionPositions(page map[string]any) []actionPos {
 	els, _ := page["elements"].([]any)
 	for i, e := range els {
 		m, _ := e.(map[string]any)
-		code := elementAttrs[str(m["element"])]
 		path := "/elements/" + strconv.Itoa(i)
 		add := func(attr string, allowed, roots []string) {
-			if val, ok := m[attr]; ok && code.defines(attr) {
+			if val, ok := m[attr]; ok {
 				out = append(out, actionPos{val, path + "/" + attr, allowed, roots, false})
 			}
 		}
 		add("on_click", triggerClasses, []string{RootInputDoc})
 		add("source", sourceClasses, []string{RootInputDoc})
 		add("on_row_click", triggerClasses, []string{RootInputDoc, RootRecord})
-		if code.defines("items") {
-			out = append(out, itemPositions(m["items"], path+"/items")...)
-		}
+		out = append(out, itemPositions(m["items"], path+"/items")...)
 	}
 	for i := 0; i < len(out); i++ {
 		m, _ := out[i].val.(map[string]any)
@@ -811,8 +905,8 @@ func (v *validator) action(cls string, a map[string]any, path string, extra ...s
 
 // classDefaults returns a class row's non-null defaults and the attributes
 // whose default is null, which every instance must set. An element class row
-// (format 0.3) holds each instance attribute as {help_tip, default_value}; an
-// action class row holds the default itself.
+// (format 0.4) holds each instance attribute as {help_tip, default_value,
+// instance_modifiable}; an action class row holds the default itself.
 func classDefaults(kind Kind, row map[string]any) (defaults map[string]any, required []string) {
 	defaults = map[string]any{}
 	for _, k := range slices.Sorted(maps.Keys(row)) {
@@ -838,17 +932,23 @@ func classDefaults(kind Kind, row map[string]any) (defaults map[string]any, requ
 }
 
 // mergeInstance overlays an instance's own attributes on its class row's
-// non-null defaults (devdoc 2026102601 §3.5.1).
+// non-null defaults (devdoc 2026102601 §3.5.1), then, for an element, the
+// values the class fixes, which an instance cannot change.
 func mergeInstance(kind Kind, row, own map[string]any) map[string]any {
 	out, _ := classDefaults(kind, row)
 	maps.Copy(out, own)
+	if kind == KindElement {
+		maps.Copy(out, fixedValues(row))
+	}
 	return out
 }
 
-// againstClass checks an instance's own attributes against its class row and
-// returns the merged instance. Every attribute whose default is null must be
-// set by the instance.
-func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path string) (map[string]any, bool) {
+// againstClass checks an instance's own attributes against its active class
+// row and returns the merged instance and the row. Every attribute whose
+// default is null must be set by the instance. An element instance may set only
+// the attributes its class names, plus the size attributes every element has,
+// and none that its class fixes (OpenSpec wpi-code-modules, design D4, D5).
+func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path string) (map[string]any, map[string]any, bool) {
 	row, ok := v.classes[kind][cls]
 	if !ok {
 		key := "element"
@@ -856,7 +956,18 @@ func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path
 			key = "action"
 		}
 		v.errf(path+"/"+key, "%s class %q does not exist", kind, cls)
-		return nil, false
+		return nil, nil, false
+	}
+	if kind == KindElement {
+		for _, k := range slices.Sorted(maps.Keys(own)) {
+			_, named := row.Body[k]
+			switch {
+			case isFixed(row.Body, k):
+				v.errf(path+"/"+k, "attribute %q is fixed by element class %q; an instance cannot set it", k, cls)
+			case !named && !slices.Contains(elementSizeAttrs, k):
+				v.errf(path+"/"+k, "element class %q has no attribute %q", cls, k)
+			}
+		}
 	}
 	_, required := classDefaults(kind, row.Body)
 	for _, k := range required {
@@ -864,7 +975,7 @@ func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path
 			v.errf(path, "attribute %q has no default in %s class %q, so this instance must set it", k, kind, cls)
 		}
 	}
-	return mergeInstance(kind, row.Body, own), true
+	return mergeInstance(kind, row.Body, own), row.Body, true
 }
 
 // actionComplete checks an action instance against its class row and returns
@@ -876,7 +987,7 @@ func (v *validator) actionComplete(pos actionPos) map[string]any {
 	if _, known := actionAttrs[cls]; !known || !slices.Contains(pos.allowed, cls) {
 		return nil
 	}
-	merged, ok := v.againstClass(KindAction, cls, instanceAttrs(m, "action"), pos.path)
+	merged, _, ok := v.againstClass(KindAction, cls, instanceAttrs(m, "action"), pos.path)
 	if !ok {
 		return nil
 	}
@@ -885,11 +996,14 @@ func (v *validator) actionComplete(pos actionPos) map[string]any {
 }
 
 // withPageDefaults gives an element instance that does not set binding_mode
-// the page's, when its class defines one, so the order is instance, page,
-// class (devdoc 2026102601 §3.2.1, design D4).
-func withPageDefaults(page map[string]any, cls string, own map[string]any) map[string]any {
+// the page's, when its class row names binding_mode and does not fix it, so the
+// order is instance, page, class (devdoc 2026102601 §3.2.1, design D4; OpenSpec
+// wpi-code-modules, design D6). Same rule as resolveEntry in web/src/lib/wpi.
+func withPageDefaults(page, row, own map[string]any) map[string]any {
 	mode, set := page["binding_mode"]
-	if _, ownMode := own["binding_mode"]; set && !ownMode && elementAttrs[cls].defines("binding_mode") {
+	_, ownMode := own["binding_mode"]
+	_, named := row["binding_mode"]
+	if set && !ownMode && named && !isFixed(row, "binding_mode") {
 		own["binding_mode"] = mode
 	}
 	return own
@@ -908,15 +1022,19 @@ type mergedAction struct {
 }
 
 // pageInstances checks a page's instances against their class rows (design
-// D3, second stage) and returns them merged with their classes.
+// D3, second stage) and the code modules those rows name, and returns them
+// merged with their classes.
 func (v *validator) pageInstances(page map[string]any) ([]mergedElement, []mergedAction) {
 	var els []mergedElement
 	list, _ := page["elements"].([]any)
 	for i, e := range list {
 		m, _ := e.(map[string]any)
 		cls, path := str(m["element"]), "/elements/"+strconv.Itoa(i)
-		if merged, ok := v.againstClass(KindElement, cls, withPageDefaults(page, cls, instanceAttrs(m, "element")), path); ok {
-			v.elementComplete(cls, merged, path)
+		own := withPageDefaults(page, v.classes[KindElement][cls].Body, instanceAttrs(m, "element"))
+		if merged, row, ok := v.againstClass(KindElement, cls, own, path); ok {
+			module := str(row["code_module_id"])
+			v.element(module, own, path)
+			v.elementComplete(module, merged, path)
 			els = append(els, mergedElement{cls, path, merged})
 		}
 	}

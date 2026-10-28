@@ -251,13 +251,20 @@ func (s store) updateClass(ctx context.Context, id string, current ClassRow, raw
 	return version, err
 }
 
-// Kinds of stored rows that query and load-file name (design D8).
+// Kinds of stored rows that query and load-file name (design D8), and the code
+// modules element classes name: only active element modules count (OpenSpec
+// wpi-code-modules, design D9).
 const (
 	storedStatement = "statement"
 	storedFile      = "file"
+	storedModule    = "code_module"
 )
 
 var storedSQL = map[string]struct{ exist, row string }{
+	storedModule: {
+		`SELECT code_module_id FROM kb.code_modules WHERE module_type = 'element' AND status = 'active' AND code_module_id = ANY($1)`,
+		``,
+	},
 	storedStatement: {
 		`SELECT stmt_name FROM kb.stored_stmts WHERE stmt_name = ANY($1)`,
 		`SELECT sql_stmt, access_controls FROM kb.stored_stmts WHERE stmt_name = $1`,
@@ -266,6 +273,36 @@ var storedSQL = map[string]struct{ exist, row string }{
 		`SELECT file_name FROM kb.stored_files WHERE file_name = ANY($1)`,
 		`SELECT file_content::text, access_controls FROM kb.stored_files WHERE file_name = $1`,
 	},
+}
+
+// CodeModule is a row of kb.code_modules (devdoc 2026102601 §3.5.2).
+type CodeModule struct {
+	ID          string `json:"code_module_id"`
+	Name        string `json:"module_name"`
+	Description string `json:"description"`
+	Type        string `json:"module_type"`
+	Doc         string `json:"module_doc"`
+	Notes       string `json:"notes"`
+	Status      string `json:"status"`
+}
+
+// listCodeModules returns every code module, by type and ID.
+func (s store) listCodeModules(ctx context.Context) ([]CodeModule, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT code_module_id, module_name, description, module_type, module_doc, notes, status
+		FROM kb.code_modules ORDER BY module_type, code_module_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CodeModule{}
+	for rows.Next() {
+		var m CodeModule
+		if err := rows.Scan(&m.ID, &m.Name, &m.Description, &m.Type, &m.Doc, &m.Notes, &m.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // registered returns which of names exist as stored rows of kind.

@@ -39,12 +39,12 @@ func expectIssue(t *testing.T, issues []Issue, want string) {
 func testClasses() map[Kind]map[string]string {
 	return map[Kind]map[string]string{
 		KindElement: {
-			"text":   `{"descriptor_id": "text", "schema_version": "0.3", "text": {"help_tip": "The text to show"}}`,
-			"input":  `{"descriptor_id": "input", "schema_version": "0.3", "description": {"en": "A field", "zh-cn": "输入框"}, "implement_notes": "A one-line field", "label": {"help_tip": {"en": "Caption", "zh-cn": "标题"}, "default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "width": {"default_value": "elastic"}}`,
-			"select": `{"descriptor_id": "select", "schema_version": "0.3", "label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "options": {"default_value": null}}`,
-			"button": `{"descriptor_id": "button", "schema_version": "0.3", "label": {"default_value": null}, "on_click": {"default_value": null}}`,
-			"list":   `{"descriptor_id": "list", "schema_version": "0.3", "source": {"default_value": null}, "presentation": {"default_value": "rows"}, "columns": {"default_value": null}, "on_row_click": {"help_tip": "Runs when a row is clicked"}}`,
-			"menu":   `{"descriptor_id": "menu", "schema_version": "0.3", "items": {"default_value": null}}`,
+			"text":   `{"descriptor_id": "text", "schema_version": "0.4", "code_module_id": "text", "text": {"help_tip": "The text to show"}, "data_binding": {}}`,
+			"input":  `{"descriptor_id": "input", "schema_version": "0.4", "code_module_id": "input", "description": {"en": "A field", "zh-cn": "输入框"}, "implement_notes": "A one-line field", "label": {"help_tip": {"en": "Caption", "zh-cn": "标题"}, "default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "input_type": {"default_value": "text"}, "width": {"default_value": "elastic"}}`,
+			"select": `{"descriptor_id": "select", "schema_version": "0.4", "code_module_id": "select", "label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "options": {"default_value": null}}`,
+			"button": `{"descriptor_id": "button", "schema_version": "0.4", "code_module_id": "button", "label": {"default_value": null}, "on_click": {"default_value": null}}`,
+			"list":   `{"descriptor_id": "list", "schema_version": "0.4", "code_module_id": "list", "source": {"default_value": null}, "presentation": {"default_value": "rows"}, "columns": {"default_value": null}, "on_row_click": {"help_tip": "Runs when a row is clicked"}}`,
+			"menu":   `{"descriptor_id": "menu", "schema_version": "0.4", "code_module_id": "menu", "items": {"default_value": null}, "initial_item": {}}`,
 		},
 		KindAction: {
 			"load":       `{"descriptor_id": "load", "schema_version": "0.2", "table": null, "result": null, "fields": null}`,
@@ -128,10 +128,10 @@ func TestValidatePage(t *testing.T) {
 		{`{"action": "close-page"}`, `{"action": "navigate"}`, `action class "navigate" has no code`},
 		{`{"action": "close-page"}`, `{"page": "x"}`, `missing attribute "action"`},
 		{`{"action": "close-page"}`, `{"action": "close-page", "page": "x"}`, `unknown attribute "page"`},
-		{`"element": "input"`, `"element": "slider"`, `element class "slider" has no code`},
+		{`"element": "input"`, `"element": "Input"`, `/elements/0/element "Input" must match`},
 		{`"element": "input"`, `"description": "x", "element": "input"`, `"description" is a class attribute`},
+		{`"element": "input"`, `"code_module_id": "button", "element": "input"`, `"code_module_id" is a class attribute`},
 		{`{"element": "button", "label": "Save"`, `{"label": "Save"`, `missing attribute "element"`},
-		{`"binding_mode": "read-only"`, `"binding_mode": "read-only", "on_click": {"action": "close-page"}`, `unknown attribute "on_click"`},
 		{`"input": {}`, `"input": {}, "page_name": {"en": "Customer", "zh-cn": "客户"}, "description": "One customer",
 		  "page_alignment": "center", "width": "100%", "max_width": "640px", "height": "auto", "binding_mode": "read-only"`, ""},
 		{`"input": {}`, `"input": {"title": "Customer admin", "nested": {"tags": [1, 2]}}`, ""},
@@ -152,6 +152,18 @@ func TestValidatePage(t *testing.T) {
 	}
 	pilotForm := strings.Replace(validFormPage, `"save_action": {"action": "save"`, `"save_action": "save-customer", "x": {"action": "save"`, 1)
 	expectIssue(t, ValidateDescriptor(KindPage, "customer-form", decode(t, pilotForm)), "/save_action must be an object")
+}
+
+// writePage runs the checks of a page write: the page's own structure, then, if
+// it passes, its instances against the class rows.
+func writePage(t *testing.T, classes map[Kind]map[string]string, page string) []Issue {
+	t.Helper()
+	body := decode(t, page)
+	id := str(body["descriptor_id"])
+	if issues := ValidateDescriptor(KindPage, id, body); len(issues) > 0 {
+		return issues
+	}
+	return ValidatePageInstances(id, body, classDescriptors(t, classes))
 }
 
 // TestValidateElementInstances covers the checks made when a page is written.
@@ -181,9 +193,11 @@ func TestValidateElementInstances(t *testing.T) {
 		{`{"element": "menu", "items": [{"item_id": "a", "label": "A", "on_click": {"action": "load"}}]}`, "a load action is not allowed here"},
 		{`{"element": "menu", "items": [{"item_id": "a", "label": "A"}]}`, "exactly one of"},
 		{`{"element": "menu", "items": [{"item_id": "a", "label": "A", "on_click": {"action": "close-page"}}, {"item_id": "a", "label": "B", "on_click": {"action": "close-page"}}]}`, `menu item ID "a" is used twice`},
+		{`{"element": "slider", "label": "x"}`, `/elements/0/element element class "slider" does not exist`},
+		{`{"element": "input", "label": "x", "data_binding": "$input_doc.x", "on_click": {"action": "close-page"}}`, `/elements/0/on_click element class "input" has no attribute "on_click"`},
 	}
 	for _, c := range cases {
-		expectIssue(t, ValidateDescriptor(KindPage, "p", decode(t, pageWith(c.body))), c.want)
+		expectIssue(t, writePage(t, testClasses(), pageWith(c.body)), c.want)
 	}
 }
 
@@ -242,9 +256,17 @@ func TestValidateClassRows(t *testing.T) {
 		id, body string
 		want     string
 	}{
-		{KindElement, "slider", `{}`, `element class "slider" has no code in this interpreter`},
+		{KindElement, "slider", `{"code_module_id": "slider"}`, `/code_module_id code module "slider" has no code in this interpreter`},
+		{KindElement, "slider", `{"code_module_id": "Slider"}`, `/code_module_id must be a code module ID`},
 		{KindAction, "navigate", `{}`, `action class "navigate" has no code in this interpreter`},
-		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "on_row_click": {}}`, `unknown attribute "on_row_click"`},
+		{KindAction, "save-page", `{"code_module_id": "save-page"}`, `/code_module_id an action class's ID names its code`},
+		// Attributes the module does not define are warnings (classWarnings), not errors.
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "on_row_click": {}, "glow": {"default_value": 1}}`, ""},
+		{KindElement, "fancy-button", `{"code_module_id": "button", "label": {"default_value": "Go", "instance_modifiable": false}, "on_click": {"default_value": null}}`, ""},
+		{KindElement, "button", `{"label": {"instance_modifiable": false}, "on_click": {"default_value": null}}`, `/label a fixed attribute needs a default_value other than null`},
+		{KindElement, "button", `{"label": {"default_value": null, "instance_modifiable": false}, "on_click": {"default_value": null}}`, `/label a fixed attribute needs a default_value other than null`},
+		{KindElement, "button", `{"label": {"default_value": null}, "on_click": {"default_value": null, "instance_modifiable": false}}`, `/on_click attribute "on_click" holds actions, so it cannot be fixed`},
+		{KindElement, "button", `{"label": {"default_value": "Go", "instance_modifiable": "no"}, "on_click": {"default_value": null}}`, `/label/instance_modifiable must be true or false`},
 		{KindElement, "input", `{"label": {"default_value": null}, "binding_mode": {"default_value": "read-write"}}`, `must give "data_binding" a default_value or null`},
 		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"help_tip": "Bound attribute"}, "binding_mode": {"default_value": "read-write"}}`, `must give "data_binding" a default_value or null`},
 		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "write"}}`, `"write" is not supported`},
@@ -255,7 +277,7 @@ func TestValidateClassRows(t *testing.T) {
 		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "implement_notes": ""}`, `/implement_notes must be a non-empty string`},
 		{KindElement, "button", `{"label": {"default_value": "Go"}, "on_click": {"default_value": {"action": "close-page"}}}`, `/on_click/default_value attribute "on_click" holds actions`},
 		{KindElement, "list", `{"source": {"default_value": null}, "columns": {"default_value": null}, "presentation": {"default_value": "rows"}, "on_row_click": {"default_value": {"action": "close-page"}}}`, `attribute "on_row_click" holds actions`},
-		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "schema_version": "0.2"}`, `schema_version "0.2" is not supported by this interpreter for element descriptors (supports "0.3")`},
+		{KindElement, "input", `{"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write"}, "schema_version": "0.3"}`, `schema_version "0.3" is not supported by this interpreter for element descriptors (supports "0.4")`},
 		{KindAction, "open-page", `{"page": null, "pane": null, "input": {}}`, `attribute "input" holds actions`},
 		{KindAction, "save", `{"table": null, "mode": "merge", "key": "id", "fields": null}`, `"merge" is not supported`},
 		{KindAction, "save-page", `{"args": {}}`, `unknown attribute "args"`},
@@ -266,19 +288,50 @@ func TestValidateClassRows(t *testing.T) {
 		if _, ok := body["schema_version"]; !ok {
 			body["schema_version"] = schemaVersionOf(c.kind)
 		}
+		if _, ok := body["code_module_id"]; !ok && c.kind == KindElement {
+			body["code_module_id"] = c.id
+		}
 		expectIssue(t, ValidateDescriptor(c.kind, c.id, body), c.want)
 	}
+	// An active element class must name its code module.
+	expectIssue(t, ValidateDescriptor(KindElement, "button", decode(t, `{"descriptor_id": "button", "schema_version": "0.4", "label": {"default_value": null}, "on_click": {"default_value": null}}`)),
+		`/code_module_id missing attribute "code_module_id"`)
+}
+
+func TestClassWarnings(t *testing.T) {
+	row := decode(t, `{"descriptor_id": "fancy-button", "schema_version": "0.4", "code_module_id": "button", "description": "x",
+		"label": {"default_value": null}, "on_click": {"default_value": null}, "width": {"default_value": "120px"},
+		"glow": {"default_value": 1}, "label_hori_align": {"default_value": "center"}}`)
+	var got []string
+	for _, w := range classWarnings("fancy-button", row) {
+		got = append(got, w.Path+" "+w.Message)
+	}
+	want := `/glow code module "button" does not support attribute "glow", so it has no effect|` +
+		`/label_hori_align code module "button" does not support attribute "label_hori_align", so it has no effect`
+	if strings.Join(got, "|") != want {
+		t.Fatalf("warnings %q", got)
+	}
+	// A draft whose module is missing or has no code yet has none.
+	delete(row, "code_module_id")
+	expectIssue(t, classWarnings("fancy-button", row), "")
+	row["code_module_id"] = "slider"
+	expectIssue(t, classWarnings("fancy-button", row), "")
 }
 
 func TestValidateDraftClass(t *testing.T) {
-	valid := `{"descriptor_id": "slider", "schema_version": "0.3", "description": {"en": "A slider", "zh-cn": "滑块"},
+	valid := `{"descriptor_id": "slider", "schema_version": "0.4", "description": {"en": "A slider", "zh-cn": "滑块"},
 		"implement_notes": "Render a range input bound to data_binding.",
 		"label": {"help_tip": {"en": "Caption", "zh-cn": "标题"}, "default_value": null}, "min": {"default_value": 0}, "step": {"default_value": 5},
 		"on_change": {"help_tip": "Runs when the value changes"}, "width": {"default_value": "240px"}, "binding_mode": {"default_value": "read-write"}}`
 	expectIssue(t, ValidateDraftClass(decode(t, valid)), "")
 	// A class that has code may be drafted too; its code is checked when it is made active.
-	expectIssue(t, ValidateDraftClass(decode(t, `{"descriptor_id": "input", "schema_version": "0.3", "description": "x"}`)), "")
+	expectIssue(t, ValidateDraftClass(decode(t, `{"descriptor_id": "input", "schema_version": "0.4", "description": "x"}`)), "")
+	// A draft may name a code module whose code is not written yet.
+	expectIssue(t, ValidateDraftClass(decode(t, `{"descriptor_id": "dial", "schema_version": "0.4", "description": "x", "code_module_id": "slider"}`)), "")
 	cases := []struct{ body, want string }{
+		{`{"descriptor_id": "slider", "description": "x", "code_module_id": "Slider_1"}`, `/code_module_id must be a code module ID`},
+		{`{"descriptor_id": "slider", "description": "x", "style": {"instance_modifiable": false}}`, `/style a fixed attribute needs a default_value`},
+		{`{"descriptor_id": "slider", "description": "x", "style": {"default_value": "fancy", "instance_modifiable": false}}`, ""},
 		{`{"descriptor_id": "Slider", "description": "x"}`, `/descriptor_id descriptor ID "Slider"`},
 		{`{"descriptor_id": "slider", "schema_version": "0.2", "description": "x"}`, `schema_version "0.2" is not supported`},
 		{`{"descriptor_id": "slider"}`, `/description a draft class needs a description`},
@@ -341,8 +394,20 @@ func TestPageInstances(t *testing.T) {
 			func(c map[Kind]map[string]string) { delete(c[KindElement], "text") }},
 		{"code-required attribute missing after merge", `{"element": "list", "source": {"action": "load", "table": "c", "result": "list", "fields": [{"column": "a", "attribute": "a"}]}}`,
 			`missing attribute "columns"`, func(c map[Kind]map[string]string) {
-				c[KindElement]["list"] = `{"descriptor_id": "list", "schema_version": "0.2", "source": null, "presentation": "rows"}`
+				c[KindElement]["list"] = `{"descriptor_id": "list", "schema_version": "0.4", "code_module_id": "list", "source": {"default_value": null}, "presentation": {"default_value": "rows"}}`
 			}},
+		{"attribute the class does not name", `{"element": "button", "label": "Go", "on_click": {"action": "close-page"}, "input_type": "email"}`,
+			`/elements/0/input_type element class "button" has no attribute "input_type"`, nil},
+		{"fixed attribute set", `{"element": "fancy-button", "label": "Go", "on_click": {"action": "close-page"}}`,
+			`/elements/0/label attribute "label" is fixed by element class "fancy-button"; an instance cannot set it`, addFancyButton},
+		{"shared module checks its required attributes", `{"element": "fancy-button"}`,
+			`attribute "on_click" has no default in element class "fancy-button", so this instance must set it`, addFancyButton},
+		{"shared module checks values", `{"element": "big-list", "source": {"action": "query", "sql_stmt_id": "x", "result": "list"}, "columns": [{"field": "a", "label": "A"}], "presentation": "cards"}`,
+			`/elements/0/presentation "cards" is not supported`, func(c map[Kind]map[string]string) {
+				c[KindElement]["big-list"] = `{"descriptor_id": "big-list", "schema_version": "0.4", "code_module_id": "list",
+					"source": {"default_value": null}, "presentation": {"default_value": "rows"}, "columns": {"default_value": null}}`
+			}},
+		{"unsupported attribute set", `{"element": "fancy-button", "on_click": {"action": "close-page"}, "glow": [1, 2]}`, "", addFancyButton},
 		{"action null attribute not set", `{"element": "button", "label": "Go", "on_click": {"action": "open-page", "page": "x"}}`,
 			`attribute "pane" has no default in action class "open-page"`, nil},
 		{"action class row missing", `{"element": "button", "label": "Go", "on_click": {"action": "save-page"}}`,
@@ -360,6 +425,22 @@ func TestPageInstances(t *testing.T) {
 			expectIssue(t, issues, c.want)
 		})
 	}
+	t.Run("fixed value merged", func(t *testing.T) {
+		classes := testClasses()
+		addFancyButton(classes)
+		els, _, issues := check(t, classes, pageWith(`{"element": "fancy-button", "on_click": {"action": "close-page"}}`))
+		expectIssue(t, issues, "")
+		if len(els) != 1 || str(els[0].body["label"]) != "Go!" || els[0].body["glow"] != nil {
+			t.Fatalf("elements %+v", els)
+		}
+	})
+}
+
+// addFancyButton adds a class drawn by the button code module that fixes its
+// label and names an attribute the module does not support.
+func addFancyButton(c map[Kind]map[string]string) {
+	c[KindElement]["fancy-button"] = `{"descriptor_id": "fancy-button", "schema_version": "0.4", "code_module_id": "button",
+		"label": {"default_value": "Go!", "instance_modifiable": false}, "on_click": {"default_value": null}, "glow": {}}`
 }
 
 func TestPageWideBindingMode(t *testing.T) {
@@ -367,10 +448,14 @@ func TestPageWideBindingMode(t *testing.T) {
 	  {"element": "input", "label": "A", "data_binding": "$input_doc.a"},
 	  {"element": "input", "label": "B", "data_binding": "$input_doc.b", "binding_mode": "read-write"},
 	  {"element": "select", "label": "C", "data_binding": "$input_doc.c", "options": [{"value": 1, "label": "One"}]},
-	  {"element": "text", "text": "x"}]}`
+	  {"element": "text", "text": "x"},
+	  {"element": "editable-input", "label": "D", "data_binding": "$input_doc.d"}]}`
 	classes := testClasses()
 	// A class that leaves binding_mode to every instance is satisfied by the page.
 	classes[KindElement]["select"] = strings.Replace(classes[KindElement]["select"], `"binding_mode": "read-write"`, `"binding_mode": null`, 1)
+	// A class that fixes binding_mode keeps it: the page's does not fill it in.
+	classes[KindElement]["editable-input"] = `{"descriptor_id": "editable-input", "schema_version": "0.4", "code_module_id": "input",
+		"label": {"default_value": null}, "data_binding": {"default_value": null}, "binding_mode": {"default_value": "read-write", "instance_modifiable": false}}`
 	v := &validator{kind: KindPage, id: "p", classes: classDescriptors(t, classes)}
 	els, _ := v.pageInstances(decode(t, page))
 	expectIssue(t, v.issues, "")
@@ -378,8 +463,8 @@ func TestPageWideBindingMode(t *testing.T) {
 	for _, e := range els {
 		got = append(got, str(e.body["binding_mode"]))
 	}
-	if strings.Join(got, ",") != "read-only,read-write,read-only," {
-		t.Fatalf("binding modes %q; want instance, then page, then class, and none for text", got)
+	if strings.Join(got, ",") != "read-only,read-write,read-only,,read-write" {
+		t.Fatalf("binding modes %q; want instance, then page, then class, none for text, and the fixed one", got)
 	}
 }
 
@@ -411,7 +496,10 @@ func TestActionPositions(t *testing.T) {
 	for _, p := range actionPositions(page) {
 		got = append(got, p.path)
 	}
-	want := "/input /save_action /elements/0/source /elements/0/on_row_click /elements/1/items/0/children/0/on_click /elements/0/on_row_click/input"
+	// The attribute names are reserved for actions, whatever the element's class:
+	// the input's on_click is a position too (its class row decides whether the
+	// instance may set it).
+	want := "/input /save_action /elements/0/source /elements/0/on_row_click /elements/1/items/0/children/0/on_click /elements/2/on_click /elements/0/on_row_click/input"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("got  %s\nwant %s", strings.Join(got, " "), want)
 	}

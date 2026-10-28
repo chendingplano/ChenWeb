@@ -2,18 +2,21 @@
 // and validation, the app bundle endpoint, page search, and the actions that
 // run on the server (load, save, query, load-file).
 // Design: KnowledgeStore devdoc 2026102601 and the OpenSpec changes wpi-pilot,
-// wpi-classes-and-instances and wpi-pages.
+// wpi-classes-and-instances, wpi-pages, wpi-create-element-class and
+// wpi-code-modules.
 package wpi
 
 import "encoding/json"
 
 // SchemaVersion is the descriptor format of apps, pages and action classes.
 // Element class rows are written in ElementSchemaVersion, where each instance
-// attribute is an object with a help tip and a default (OpenSpec
-// wpi-create-element-class). These are the only formats this interpreter accepts.
+// attribute is an object with a help tip, a default and whether instances may
+// change it (OpenSpec wpi-create-element-class), and the class names its code
+// module in code_module_id (OpenSpec wpi-code-modules). These are the only
+// formats this interpreter accepts.
 const (
 	SchemaVersion        = "0.2"
-	ElementSchemaVersion = "0.3"
+	ElementSchemaVersion = "0.4"
 )
 
 // schemaVersionOf returns the descriptor format of a kind.
