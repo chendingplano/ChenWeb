@@ -629,7 +629,9 @@
 				fitViewOptions={{ maxZoom: 1 }}
 				snapGrid={snapToGrid ? [gridResolution, gridResolution] : undefined}
 				onselectionchange={(params: { nodes: Node[] }) => {
-					selectedNodeId = params.nodes.length === 1 ? params.nodes[0].id : null;
+					if (!loadedPage || params.nodes.length > 0) {
+						selectedNodeId = params.nodes.length === 1 ? params.nodes[0].id : null;
+					}
 				}}
 				onnodedragstop={(e) => {
 					takeSnapshot();
