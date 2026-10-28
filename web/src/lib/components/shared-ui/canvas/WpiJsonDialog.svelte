@@ -26,6 +26,7 @@
   let text = $state(JSON.stringify(json, null, 2));
   let status = $state('');
   let valid = $state(false);
+  let backdropPressed = false;
 
   function check() {
     try {
@@ -57,7 +58,8 @@
 <!-- Backdrop. It renders outside the editor's root, so it sets the --cv-* colors itself. -->
 <div class="fixed inset-0 z-50 flex items-center justify-center select-text"
   style="{canvasThemeVars(darkMode)} background: var(--cv-backdrop);"
-  onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+  onpointerdown={(e) => { backdropPressed = e.target === e.currentTarget; }}
+  onclick={(e) => { if (backdropPressed && e.target === e.currentTarget) onClose(); backdropPressed = false; }}
   onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
   role="dialog" aria-modal="true" aria-labelledby="wpi-json-title"
   tabindex="-1"
@@ -72,7 +74,7 @@
           <div style="font-size:11px; color:var(--cv-text-muted); margin-top:2px;">{note}</div>
         {/if}
       </div>
-      <button use:focus onclick={onClose} style="color:var(--cv-text-muted); font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_view_json_close()}>✕</button>
+      <button use:focus onclick={onClose} class="select-none" style="color:var(--cv-text-muted); font-size:16px; background:none; border:none; cursor:pointer;" aria-label={m.wpi_view_json_close()}>✕</button>
     </div>
     <div style="padding:10px 20px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--cv-divider);">
       <button onclick={() => { editing = true; status = ''; }} disabled={editing}>{m.wpi_json_edit()}</button>
