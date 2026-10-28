@@ -4900,30 +4900,7 @@ sudo security add-trusted-cert \
 
 # GPT Pricing
 
-Standard:
-| Model | Input | Cached input | Cache writes | Output |
-|---|---:|---:|---:|---:|
-	
-| GPT-6 Astra Short Context | $10.00 | $1.00 | $12.50 | $50.00 |
-| GPT-6 Astra Long Context | $20.00 | $2.00 | $25.00 | $75.00 |
-| GPT-6 Sol Short Context | $2.00 | $0.20 | $2.50 | $10.00 |
-| GPT-6 Sol Long Context | $4.00 | $0.40 | $5.00 | $15.00 |
-| GPT-6 Sol Short Context | $0.10 | $0.01 | $0.125 | $0.50 |
-| GPT-6 Sol Long Context | $0.20 | $0.02 | $0.25 | $0.75 |
-| GPT‑5.6 Sol | $5.00 | $0.50 | $6.25 | $30.00 |
-| GPT‑5.6 Terra | $2.00 | $0.20 | $2.50 | $12.00 |
-| GPT‑5.6 Luna | $0.20 | $0.02 | $0.25 | $1.20 |
-| GPT‑5.5 | $5.00 | $0.50 | — | $30.00 |
-| GPT‑5.4 | $2.50 | $0.25 | — | $15.00 |
-
-Long-context pricing:
-| Model | Input | Cached input | Cache writes | Output |
-|---|---:|---:|---:|---:|
-| GPT‑5.6 Sol | $10.00 | $1.00 | $12.50 | $45.00 |
-| GPT‑5.6 Terra | $5.00 | $0.50 | $6.25 | $22.50 |
-| GPT‑5.6 Luna | $2.00 | $0.20 | $2.50 | $9.00 |
-| GPT‑5.5 | $10.00 | $1.00 | — | $45.00 |
-| GPT‑5.4 | $5.00 | $0.50 | — | $22.50 |
+![ChatGPT Pricing](../KnowledgeStore/Images/image_2026102801.png)
 
 # Codex Prompt
 ```text
