@@ -203,9 +203,9 @@ func (h *Handler) GetElementClass(c echo.Context) error {
 }
 
 // UpdateElementClass stores an edited element class as its next version, with
-// the status of its latest one: a draft stays a draft and is checked as one; an
-// active class is checked against its code, as PutDescriptor does. The class
-// ID cannot change (OpenSpec wpi-create-element-class).
+// the status of its latest one. Authoring validates the row's structure, allowing
+// attributes to change independently of interpreter code. The class ID cannot
+// change (OpenSpec wpi-create-element-class).
 // Endpoint: PUT /api/v1/wpi/classes/element/:classId (admins only)
 func (h *Handler) UpdateElementClass(c echo.Context) error {
 	user := h.User(c)
@@ -240,12 +240,7 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 	if !found {
 		return errorJSON(c, http.StatusNotFound, "Element class not found")
 	}
-	var issues []Issue
-	if cur.Status == "draft" {
-		issues = ValidateDraftClass(body)
-	} else {
-		issues = ValidateDescriptor(KindElement, id, body)
-	}
+	issues := validateElementClass(body, cur.Status == "draft")
 	if len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}

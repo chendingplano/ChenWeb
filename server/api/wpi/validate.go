@@ -403,15 +403,20 @@ func (v *validator) elementClassAttrs(b map[string]any, known func(string) bool)
 // attributes holding actions have no default, and the defaults of attributes
 // every class shares.
 func ValidateDraftClass(body map[string]any) []Issue {
+	return validateElementClass(body, true)
+}
+
+// validateElementClass checks the authoring format without coupling attribute
+// changes to the interpreter's current code. Existing active rows may omit a
+// description; drafts still need one to describe what should be implemented.
+func validateElementClass(body map[string]any, requireDescription bool) []Issue {
 	id, _ := body["descriptor_id"].(string)
 	v := &validator{kind: KindElement, id: id}
 	if !idPattern.MatchString(id) {
 		v.errf("/descriptor_id", "descriptor ID %q must match %s", id, idPattern)
 	}
 	v.schemaVersion(body)
-	// A draft has no code, so its description and implement_notes are what say
-	// what to build; the description is required.
-	if _, ok := body["description"]; !ok {
+	if _, ok := body["description"]; requireDescription && !ok {
 		v.errf("/description", "a draft class needs a description")
 	}
 	v.text(body, "description", "")

@@ -1478,7 +1478,7 @@
 	"wpi_create_element_creating": "正在创建…",
 	"wpi_edit_element_title": "编辑元素类：{id}",
 	"wpi_edit_element_subtitle_draft": "该类是草稿。保存时会存储它的下一个草稿版本。",
-	"wpi_edit_element_subtitle_active": "该类已实现。保存时会存储它的下一个版本，该版本必须与类的代码一致。",
+	"wpi_edit_element_subtitle_active": "该类已实现。保存时会存储它的下一个版本。您可以添加、删除或修改属性；行为变化可能还需要更新代码。",
 	"wpi_edit_element_loading": "正在加载该类…",
 	"wpi_edit_element_class_id_fixed": "类 ID 不能更改",
 	"wpi_edit_element_err_not_found": "未找到元素类 {id}。",

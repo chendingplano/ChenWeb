@@ -253,9 +253,13 @@ page's properties panel SHALL have no tabs.
 is `draft` or `active` as `version`, `status` and `class` (the whole row), or 404 when it
 has none; it SHALL require a logged-in user. `PUT` on the same path SHALL take an edited
 class row and store it as the class's next version with the status of its latest draft or
-active row: a draft SHALL be checked by the draft rules, an active class as the descriptor
-PUT checks it, against its code. The response SHALL be 200 with `descriptor_id`, `version`
-and `status`. A body whose `descriptor_id` differs from the path SHALL be refused with 400,
+active row. Both SHALL be checked for valid class structure, attribute names, help tips,
+action-default restrictions and shared defaults, independently of the current interpreter's
+attribute list. Admins SHALL be able to add, remove and rename instance attributes and edit
+their defaults and help tips, including attributes required or unknown by the current code.
+Drafts SHALL still require a description; active rows MAY omit one. Interpreter validation
+SHALL continue to check descriptors against code when publishing or loading a bundle.
+The response SHALL be 200 with `descriptor_id`, `version` and `status`. A body whose `descriptor_id` differs from the path SHALL be refused with 400,
 a class with no draft or active row with 404, and a row that breaks a rule with 400 listing
 the issues; nothing SHALL be stored then. Only admins SHALL be allowed.
 
@@ -267,9 +271,17 @@ the issues; nothing SHALL be stored then. Only admins SHALL be allowed.
 - **WHEN** `input` is active at version 2 and an admin PUTs it with a changed help tip
 - **THEN** version 3 is stored with status `active`
 
-#### Scenario: Attribute the code lacks
-- **WHEN** an admin PUTs `input` with an attribute `slider_min`
-- **THEN** the response is 400 with the issue `unknown attribute "slider_min"` and nothing is stored
+#### Scenario: Attributes the code lacks
+- **WHEN** an admin adds `label_horizontal_align` and `label_vertical_align` to active `button`, both with default `center`, and saves
+- **THEN** the next active version stores both attributes without an unknown-attribute error
+
+#### Scenario: Attributes removed or renamed
+- **WHEN** an admin removes `on_click` or renames `label` to `caption` in active `button` and saves
+- **THEN** the next active version stores the edited row without requiring those code-defined attributes
+
+#### Scenario: Malformed attribute
+- **WHEN** an admin saves a class with an invalid attribute name or a scalar instead of an attribute object
+- **THEN** the response is 400 listing the structural issue and nothing is stored
 
 #### Scenario: Class ID changed
 - **WHEN** an admin PUTs a body with `descriptor_id` `slider` to `/classes/element/dial`

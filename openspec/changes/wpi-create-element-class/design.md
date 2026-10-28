@@ -171,10 +171,14 @@ action nodes do not name one yet), so only they get the button. `GET
 /api/v1/wpi/classes/element/:classId` returns the class's latest draft or active row whole
 (`{version, status, class}`); `PUT` on the same path takes the edited row and stores version
 N+1 with the status of the latest row, decided on the server: a draft stays a draft and is
-checked by the draft rules (D4); an active class is checked by `ValidateDescriptor`, as the
-descriptor PUT does, so an attribute its code does not define is refused and nothing is
-stored. The class ID cannot change (a 400 if the body's `descriptor_id` differs; the form
-shows it read-only). Admins only; last save wins, as for every descriptor.
+checked by the draft rules (D4). Active class edits use the same structural rules, with
+an optional description. The class-edit endpoint accepts added, removed and renamed
+attributes independently of the interpreter's current attribute list, so authors can
+revise a class before updating its implementation. It still checks attribute names,
+attribute objects, help tips, action-default restrictions and shared defaults. The
+separate descriptor PUT and bundle validation retain their checks against code; saving
+an edited class does not implement new attribute behavior. The class ID cannot change
+(a 400 if the body's `descriptor_id` differs; the form shows it read-only). Admins only; last save wins, as for every descriptor.
 *Alternatives:* save every edit as a draft version on top of an active class (the editor
 and the running interpreter would then disagree about the class); edit drafts only
 (implemented classes could not get help tips or new defaults from the editor). Both

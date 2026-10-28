@@ -46,7 +46,7 @@
 
   let attributes = $state<DraftAttribute[]>(initialAttributes());
 
-  // Editing: the class row is loaded first, and its status decides how the server checks it.
+  // Editing: the class row is loaded first; its status is preserved when saved.
   const editMode = $derived(classId !== undefined);
   let loaded    = $state(false);
   let loadError = $state('');

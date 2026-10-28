@@ -260,19 +260,50 @@ func TestUpdateElementClass(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("an active class must match its code", func(t *testing.T) {
-		db, mock, _ := sqlmock.New()
-		defer db.Close()
-		body := strings.Replace(testClasses()[KindElement]["input"], `"width"`, `"slider_min"`, 1)
-		mock.ExpectQuery(elementClassQuery).WithArgs("input").WillReturnRows(classRow(2, "active"))
-		rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "input")
-		if rec.Code != 400 || !strings.Contains(rec.Body.String(), `unknown attribute \"slider_min\"`) {
-			t.Fatalf("status %d: %s", rec.Code, rec.Body)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatal("nothing may be stored: ", err)
-		}
-	})
+	for _, edit := range []struct{ name, body string }{
+		{"add alignment attributes", `{"descriptor_id":"button","schema_version":"0.3","label":{"default_value":null},"on_click":{"default_value":null},"label_horizontal_align":{"default_value":"center","help_tip":{"en":"Horizontal alignment"}},"label_vertical_align":{"default_value":"center"}}`},
+		{"delete code-required attributes", `{"descriptor_id":"button","schema_version":"0.3"}`},
+		{"rename an attribute", `{"descriptor_id":"button","schema_version":"0.3","caption":{"default_value":"Go"},"on_click":{"default_value":null}}`},
+		{"modify defaults and help tips", `{"descriptor_id":"button","schema_version":"0.3","label":{"default_value":{"en":"Run","zh-cn":"运行"},"help_tip":{"en":"Button caption","zh-cn":"按钮标题"}},"on_click":{},"width":{"default_value":"300px"}}`},
+	} {
+		t.Run(edit.name, func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(2, "active"))
+			mock.ExpectQuery(insertClassVersionQuery).WithArgs("button", ElementSchemaVersion, edit.body, "active", "admin@example.com").
+				WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
+			rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", edit.body, "classId", "button")
+			if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"active"`) || !strings.Contains(rec.Body.String(), `"version":3`) {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, invalid := range []struct{ attr, want string }{
+		{`"bad-name":{}`, `cannot be an attribute name`},
+		{`"element":{}`, `cannot be an attribute name`},
+		{`"custom":42`, `must be an object`},
+		{`"custom":{"value":42}`, `unknown attribute`},
+		{`"custom":{"help_tip":{"zh-cn":"提示"}}`, `need an`},
+		{`"on_click":{"default_value":{"action":"close-page"}}`, `holds actions`},
+		{`"width":{"default_value":"wide"}`, `must match`},
+	} {
+		t.Run("reject malformed edit "+invalid.attr, func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			body := `{"descriptor_id":"button","schema_version":"0.3",` + invalid.attr + `}`
+			mock.ExpectQuery(elementClassQuery).WithArgs("button").WillReturnRows(classRow(2, "active"))
+			rec := call(t, testHandler(db, adminUser).UpdateElementClass, "PUT", body, "classId", "button")
+			if rec.Code != 400 || !strings.Contains(rec.Body.String(), invalid.want) {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal("nothing may be stored: ", err)
+			}
+		})
+	}
 	t.Run("a draft is checked as a draft", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
