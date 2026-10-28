@@ -7767,5 +7767,11 @@
 	"wpi_load_page_failed": "无法加载此页面，请重试。",
 	"wpi_load_replace": "要用此页面替换画布吗？此更改可以撤销。",
 	"wpi_load_description_label": "描述",
-	"wpi_preview_select": "选择元素 {name}"
+	"wpi_preview_select": "选择元素 {name}",
+	"wpi_page_controls": "页面控件",
+	"wpi_move_page_controls": "移动页面控件（也可使用方向键）",
+	"wpi_view_page_config": "查看页面配置",
+	"wpi_layouter_title": "布局器",
+	"wpi_page_config_title": "页面配置",
+	"wpi_layouter_type": "布局器类型"
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
- import { onMount } from 'svelte';
+ import { onMount, untrack } from 'svelte';
  import type { Node } from '@xyflow/svelte';
  import { m } from '$lib/paraglide/messages.js';
  import { getElementClass } from '$lib/wpi/api';
@@ -12,8 +12,9 @@
  import { isElementNode, nodeJson } from './wpi-json';
 
  let { descriptor, nodes, selectedId, onSelect }: { descriptor: JsonObject; nodes: Node[]; selectedId: string | null; onSelect: (id: string) => void } = $props();
- const initial = descriptor as unknown as PageDescriptor;
- const bundle: Bundle = { app: { descriptor_id: 'editor-preview', schema_version: '0.2', layout_template: 'single-pane', panes: { preview: { page: initial.descriptor_id } } }, pages: { [initial.descriptor_id]: initial }, elements: {}, actions: {}, warnings: [] };
+ const initial = $derived(descriptor as unknown as PageDescriptor);
+ const setupPage = untrack(() => descriptor as unknown as PageDescriptor);
+ const bundle: Bundle = { app: { descriptor_id: 'editor-preview', schema_version: '0.2', layout_template: 'single-pane', panes: { preview: { page: setupPage.descriptor_id } } }, pages: { [setupPage.descriptor_id]: setupPage }, elements: {}, actions: {}, warnings: [] };
  const rt = new AppRuntime(bundle);
  setRuntime(rt);
  let classes = $state<Record<string, ClassRow>>({});

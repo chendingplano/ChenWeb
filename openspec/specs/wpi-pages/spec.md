@@ -142,3 +142,10 @@ node and opens its properties without triggering its page action. The preview SH
 use the page's stored data sources and preserve element instance attributes when
 properties change. When flow storage supports persistence, the flow data carries the
 loaded page alongside its editable elements.
+
+### Requirement: Page and layouter controls
+When a page is loaded, the editor SHALL show a movable control frame at the upper
+right of the canvas. Its page configuration and layouter buttons SHALL display the
+corresponding descriptor properties in the Properties panel. Selecting an element
+SHALL return the panel to that element. Edits SHALL update the in-memory descriptor,
+refresh the preview and be undoable. The frame SHALL be movable by pointer and keyboard.

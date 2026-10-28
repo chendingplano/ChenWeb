@@ -28,6 +28,8 @@
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import PagePreview from './canvas/PagePreview.svelte';
+	import PageControl from './canvas/PageControl.svelte';
+	import PageConfigPanel from './canvas/PageConfigPanel.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
 	import type { JsonObject } from '$lib/wpi/types';
 	import { isElementNode, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
@@ -137,6 +139,7 @@
 	let showJson = $state(false);
 	let showLoadPage = $state(false);
 	let loadedPage = $state<JsonObject | null>(null);
+	let configMode = $state<'page' | 'layouter' | null>(null);
 	let canvasRevision = $state(0);
 	// Size of the canvas area, for placing created nodes in the middle of the view.
 	let canvasWidth = $state(0);
@@ -243,6 +246,7 @@
 	// ── Load flow ───────────────────────────────────────────────────────────
 	async function loadFlow(flow: Flow) {
 		activeFlow = flow;
+		configMode = null;
 		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? null;
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
 		edges = (flow.flow_data?.edges ?? []) as Edge[];
@@ -273,6 +277,7 @@
 		nodes = next.map((node) => ({ ...node, hidden: true }));
 		edges = [];
 		loadedPage = page;
+		configMode = null;
 		viewport = { x: 40, y: 40, zoom: 1 };
 		selectedNodeId = null;
 		canvasRevision++;
@@ -473,6 +478,7 @@
 	// ── New empty flow ───────────────────────────────────────────────────────
 	async function createNewEmpty() {
 		loadedPage = null;
+		configMode = null;
 		const emptySnap: PageSnapshot = { nodes: [], edges: [], page: null };
 		lastSavedSnapshot = emptySnap;
 		nodes = [];
@@ -631,6 +637,7 @@
 				onselectionchange={(params: { nodes: Node[] }) => {
 					if (!loadedPage || params.nodes.length > 0) {
 						selectedNodeId = params.nodes.length === 1 ? params.nodes[0].id : null;
+						if (params.nodes.length > 0) configMode = null;
 					}
 				}}
 				onnodedragstop={(e) => {
@@ -682,7 +689,7 @@
 				{#if loadedPage}
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} onSelect={(id) => { selectedNodeId = id; }} />
+							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} onSelect={(id) => { configMode = null; selectedNodeId = id; }} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -693,6 +700,11 @@
 					bgColor="var(--cv-canvas)"
 					patternColor="var(--cv-grid)"
 				/>
+				{#if loadedPage}
+					<Panel position="top-right" style="margin: 46px 8px 0 0;">
+						<PageControl mode={configMode} onChoose={(mode) => { configMode = mode; selectedNodeId = null; }} />
+					</Panel>
+				{/if}
 				<Controls />
 				<MiniMap style="background:var(--cv-raised);" />
 
@@ -790,6 +802,9 @@
 		></div>
 
 		<!-- Properties Panel -->
+		{#if loadedPage && configMode}
+			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} onUpdate={(page) => { takeSnapshot(); loadedPage = page; }} />
+		{:else}
 		<PropertiesPanel
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
@@ -799,6 +814,7 @@
 			{darkMode}
 			onUpdate={updateNodeData}
 		/>
+		{/if}
 	</div>
 
 	<!-- Toast -->

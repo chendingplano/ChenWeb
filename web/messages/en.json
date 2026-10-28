@@ -7767,5 +7767,11 @@
 	"wpi_load_page_failed": "Unable to load this page. Please try again.",
 	"wpi_load_replace": "Replace the canvas with this page? You can undo this change.",
 	"wpi_load_description_label": "Description",
-	"wpi_preview_select": "Select element {name}"
+	"wpi_preview_select": "Select element {name}",
+	"wpi_page_controls": "Page controls",
+	"wpi_move_page_controls": "Move page controls (arrow keys also move)",
+	"wpi_view_page_config": "View page config",
+	"wpi_layouter_title": "Layouter",
+	"wpi_page_config_title": "Page configuration",
+	"wpi_layouter_type": "Layouter type"
 }
