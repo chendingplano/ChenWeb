@@ -179,7 +179,7 @@ var (
 // §5 in a single pane. Validate the stored app and page together, including the
 // load action's table columns and active element modules.
 func TestSeedCustomersDemoIsValid(t *testing.T) {
-	sqlText, err := os.ReadFile("../../../project_migrations/20261028000004_seed_wpi_customers_demo.sql")
+	sqlText, err := os.ReadFile("../../../project_migrations/20261028000005_isolate_wpi_customers_demo.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,13 +189,18 @@ func TestSeedCustomersDemoIsValid(t *testing.T) {
 	if len(bodies) != 2 {
 		t.Fatalf("seed has %d bodies; want page and app", len(bodies))
 	}
-	all[KindPage] = map[string]string{"customers": bodies[0][1]}
+	pageID := decode(t, bodies[0][1])["descriptor_id"].(string)
+	all[KindPage][pageID] = bodies[0][1]
+	// A separately versioned customer-admin page can still target its right
+	// pane. The standalone demo must never resolve this shared page ID.
+	legacy, _ := seedRows(t, seedMigration)
+	all[KindPage]["customers"] = legacy[KindPage]["customers"]
 	all[KindApp] = map[string]string{"customers-demo": bodies[1][1]}
 	demoColumns := func(_ context.Context, table string) (map[string]bool, error) {
 		if table != "kb.wpi_demo_customers" {
 			return nil, nil
 		}
-		return map[string]bool{"user_name": true, "phone_number": true, "email": true}, nil
+		return map[string]bool{"id": true, "user_name": true, "phone_number": true, "email": true}, nil
 	}
 	res, err := BuildBundle(context.Background(), "customers-demo", fixtureLoader(t, all), demoColumns, registeredIn(seededModules(t)))
 	if err != nil {
@@ -205,7 +210,7 @@ func TestSeedCustomersDemoIsValid(t *testing.T) {
 		t.Fatalf("errors %+v\nwarnings %+v", res.Errors, res.Warnings)
 	}
 	if len(res.Bundle.Pages) != 1 {
-		t.Fatalf("app reaches %d pages; want only customers", len(res.Bundle.Pages))
+		t.Fatalf("app reaches %d pages; want only demo-customers", len(res.Bundle.Pages))
 	}
 }
 

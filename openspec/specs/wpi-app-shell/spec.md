@@ -25,8 +25,10 @@ errors instead of the app. The app's root SHALL allow text selection.
 ### Requirement: Customers demo in Development
 The `/development` navigation SHALL include Development → Demos → Customers, with
 English and Chinese menu labels. Selecting it SHALL display `/wpi/customers-demo`
-inside the dashboard content area. This app SHALL open the `customers` page from
-`interpreter-page.md` §5 in its single `main` pane, retaining text selection.
+inside the dashboard content area. This app SHALL open a copy of the page from
+`interpreter-page.md` §5 under the independent ID `demo-customers` in its single
+`main` pane, retaining text selection. It SHALL NOT depend on the `customers` page
+used by customer-admin, whose actions target that app's other panes.
 
 #### Scenario: Show demo customers
 - **WHEN** a user with access to Development → Demos selects Customers
