@@ -20,3 +20,10 @@ export function withAttribute(attrs: JsonObject, name: string, text: string): Js
 	else next[name] = parseDefault(text);
 	return next;
 }
+
+// Replace only the nested field mappings, retaining all other source settings.
+export function withSourceFields(attrs: JsonObject, fallback: Json | undefined, fields: Json[]): JsonObject {
+	const source = attrs.source ?? fallback;
+	if (!source || typeof source !== 'object' || Array.isArray(source)) return attrs;
+	return { ...attrs, source: { ...source, fields } };
+}

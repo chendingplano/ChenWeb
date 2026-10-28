@@ -33,3 +33,14 @@ test('every value reads back from the text it is shown as', () => {
 		assert.deepEqual(withAttribute({}, 'x', valueText(v)).x, v);
 	}
 });
+
+test('source field edits preserve the source and other attributes, including defaults', async () => {
+	const { withSourceFields } = await import('./element-attributes');
+	const defaults = { action: 'load', table: 'customers', fields: [{ column: 'id', attribute: 'id' }] };
+	assert.deepEqual(withSourceFields({ width: '100%' }, defaults, [{ column: 'name', attribute: 'title' }]), {
+		width: '100%', source: { action: 'load', table: 'customers', fields: [{ column: 'name', attribute: 'title' }] }
+	});
+	assert.deepEqual(withSourceFields({ source: { action: 'query', limit: 20 } }, defaults, []), {
+		source: { action: 'query', limit: 20, fields: [] }
+	});
+});

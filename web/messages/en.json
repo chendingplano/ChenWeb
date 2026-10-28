@@ -7793,5 +7793,10 @@
 	"wpi_close_canvas_tab": "Close {name}",
 	"wpi_save_requires_page": "Load a page before saving. Empty canvases cannot be saved yet.",
 	"wpi_save_page_elements_only": "Only page elements can be saved. Remove other nodes and connections first.",
-	"wpi_save_failed_detail": "Could not save page: {detail}"
+	"wpi_save_failed_detail": "Could not save page: {detail}",
+	"propertiespanel_source_fields": "Fields",
+	"propertiespanel_source_column": "Column",
+	"propertiespanel_source_attribute": "Attribute",
+	"propertiespanel_remove_source_field": "Remove field",
+	"propertiespanel_add_source_field": "Add field"
 }

@@ -5,7 +5,7 @@
   import type { ElementAttribute, ElementClassSummary } from '$lib/wpi/api';
   import type { JsonObject } from '$lib/wpi/types';
   import { localized } from '$lib/wpi/text';
-  import { valueText, withAttribute } from './element-attributes';
+  import { valueText, withAttribute, withSourceFields } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
 
   let {
@@ -64,6 +64,7 @@
   // is left, so reading it as JSON does not rewrite it under the cursor.
   let typing = $state<{ nodeId: string; name: string; text: string } | null>(null);
   let newColumn = $state({ label: '', field: '', width: '' });
+  let newField = $state({ column: '', attribute: '' });
 
   function columnsOf(n: FlowNode, attr: ElementAttribute): { label: string; field: string; width?: string }[] {
     const value = attrsOf(n).columns ?? attr.default_value;
@@ -73,6 +74,7 @@
   $effect(() => {
     node?.id;
     newColumn = { label: '', field: '', width: '' };
+    newField = { column: '', attribute: '' };
   });
 
   function addColumn(attr: ElementAttribute) {
@@ -193,6 +195,27 @@
                   onblur={() => (typing = null)}
                   style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); resize:vertical; field-sizing:content; box-sizing:border-box;"
                 ></textarea>
+              {/if}
+              {#if name === 'source' && attr.instance_modifiable !== false}
+                {@const source = attrsOf(node).source ?? attr.default_value}
+                {#if source && typeof source === 'object' && !Array.isArray(source)}
+                  {@const fields = Array.isArray(source.fields) ? source.fields : []}
+                  <div style="font-size:9px; color:var(--cv-text-muted); margin:6px 0 3px;">{m.propertiespanel_source_fields()}</div>
+                  {#each fields as field, index (index)}
+                    {#if field && typeof field === 'object' && !Array.isArray(field)}
+                      <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:3px; margin-bottom:4px;">
+                        <input class="column-input" aria-label={m.propertiespanel_source_column()} value={String(field.column ?? '')} oninput={(e) => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.map((f, i) => i === index ? { ...field, column: (e.target as HTMLInputElement).value } : f))); }} />
+                        <input class="column-input" aria-label={m.propertiespanel_source_attribute()} value={String(field.attribute ?? '')} oninput={(e) => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.map((f, i) => i === index ? { ...field, attribute: (e.target as HTMLInputElement).value } : f))); }} />
+                        <button class="column-remove" type="button" aria-label={m.propertiespanel_remove_source_field()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.filter((_, i) => i !== index))); }}>×</button>
+                      </div>
+                    {/if}
+                  {/each}
+                  <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:3px;">
+                    <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newField.column} />
+                    <input class="column-input" aria-label={m.propertiespanel_source_attribute()} placeholder={m.propertiespanel_source_attribute()} bind:value={newField.attribute} />
+                  </div>
+                  <button class="column-add" type="button" disabled={!newField.column.trim() || !newField.attribute.trim()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, [...fields, { column: newField.column.trim(), attribute: newField.attribute.trim() }])); newField = { column: '', attribute: '' }; }}>{m.propertiespanel_add_source_field()}</button>
+                {/if}
               {/if}
               {#if attr.help_tip}
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>
