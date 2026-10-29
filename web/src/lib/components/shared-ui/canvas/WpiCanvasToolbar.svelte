@@ -1,5 +1,5 @@
 <!-- web/src/lib/components/shared-ui/canvas/WpiCanvasToolbar.svelte -->
-<!-- The WPI editor's tool bar, above the canvas: flow name and picker, create nodes, load a page,
+<!-- The WPI editor's tool bar, above the canvas: create nodes, load a page,
      view JSON, undo/redo, align and distribute the selection, save. -->
 <script lang="ts" module>
   export type WpiNodeKind = 'page' | 'element' | 'action';
@@ -8,7 +8,6 @@
 <script lang="ts">
   import { m } from '$lib/paraglide/messages.js';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
-  import type { Flow } from '$lib/types/flow';
   import type { AlignMode, DistributeAxis } from './align-nodes';
   import PlusIcon                 from '@lucide/svelte/icons/plus';
   import ChevronDownIcon          from '@lucide/svelte/icons/chevron-down';
@@ -30,16 +29,11 @@
   import SaveIcon                 from '@lucide/svelte/icons/save';
   import BookmarkPlusIcon         from '@lucide/svelte/icons/bookmark-plus';
 
-  function focus(node: HTMLElement) { node.focus(); }
-
   let {
-    activeFlow,
     isDirty,
     canUndo,
     canRedo,
     selectedCount,
-    onPickerOpen,
-    onRename,
     onCreate,
     onLoadPage,
     onViewJson,
@@ -50,13 +44,10 @@
     onSave,
     onSaveAsTemplate,
   }: {
-    activeFlow:       Flow | null;
     isDirty:          boolean;
     canUndo:          boolean;
     canRedo:          boolean;
     selectedCount:    number;
-    onPickerOpen:     () => void;
-    onRename:         (name: string) => void;
     onCreate:         (kind: WpiNodeKind) => void;
     onLoadPage:       () => void;
     onViewJson:       () => void;
@@ -67,19 +58,6 @@
     onSave:           () => void;
     onSaveAsTemplate: () => void;
   } = $props();
-
-  let editingName = $state(false);
-  let nameInput   = $state('');
-
-  function startRename() {
-    nameInput   = activeFlow?.flow_name ?? '';
-    editingName = true;
-  }
-  function commitRename() {
-    const trimmed = nameInput.trim().slice(0, 255);
-    if (trimmed && trimmed !== activeFlow?.flow_name) onRename(trimmed);
-    editingName = false;
-  }
 
   const alignTools = $derived([
     { mode: 'left'   as AlignMode, label: m.wpi_toolbar_align_left(),   Icon: AlignStartVerticalIcon },
@@ -101,42 +79,6 @@
 <div class="flex items-center gap-1 px-2 flex-shrink-0 overflow-x-auto"
   style="height:40px; background:var(--cv-raised); border-bottom:1px solid var(--cv-divider);"
   role="toolbar" aria-label={m.wpi_toolbar_label()}>
-
-  <!-- Flow name + picker toggle -->
-  <div class="flex items-center gap-1 flex-shrink-0">
-    <div class="w-5 h-5 rounded flex-shrink-0" style="background:var(--cv-accent);"></div>
-    {#if editingName}
-      <input
-        bind:value={nameInput}
-        onblur={commitRename}
-        onkeydown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') editingName=false; }}
-        class="rounded px-2 py-1"
-        style="background:var(--cv-field); border:1px solid var(--cv-accent); color:var(--cv-text); font-size:12px; max-width:200px;"
-        use:focus
-        maxlength="255"
-      />
-    {:else}
-      <button
-        onclick={startRename}
-        class="rounded px-2 py-1 flex items-center gap-1 hover:bg-(--cv-hover) transition-colors"
-        style="background:var(--cv-surface); color:var(--cv-text); font-size:12px; border:none; cursor:pointer; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-        title={m.flowtoolbar_click_to_rename()}
-      >
-        {activeFlow?.flow_name ?? m.flowtoolbar_untitled_flow()}
-        {#if isDirty}<span style="color:var(--cv-warn); font-size:10px;">•</span>{/if}
-      </button>
-    {/if}
-    <button
-      onclick={onPickerOpen}
-      title={m.flowtoolbar_open_flow_picker()}
-      aria-label={m.flowtoolbar_open_flow_picker()}
-      style="background:var(--cv-surface); border:none; border-radius:4px; padding:3px 5px; cursor:pointer; color:var(--cv-text-muted); display:flex; align-items:center;"
-    >
-      <ChevronDownIcon class="w-3 h-3" />
-    </button>
-  </div>
-
-  <div style="width:1px; height:20px; background:var(--cv-border); margin:0 4px;"></div>
 
   <!-- Create nodes -->
   <DropdownMenu.Root>
@@ -163,9 +105,8 @@
   </DropdownMenu.Root>
 
   <!-- Load page -->
-  <button onclick={onLoadPage} class="toolbar-btn" style="gap:4px;">
+  <button onclick={onLoadPage} class="toolbar-btn" title={m.wpi_toolbar_load_page()} aria-label={m.wpi_toolbar_load_page()}>
     <FolderOpenIcon class="w-4 h-4" />
-    <span style="font-size:11px;">{m.wpi_toolbar_load_page()}</span>
   </button>
 
   <!-- View JSON: the selected node's, else the page's -->

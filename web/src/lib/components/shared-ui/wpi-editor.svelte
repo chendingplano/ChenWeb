@@ -766,22 +766,10 @@
 		<!-- Canvas column: tool bar + canvas -->
 		<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
 		<WpiCanvasToolbar
-			{activeFlow}
 			{isDirty}
 			{canUndo}
 			{canRedo}
 			selectedCount={selectedTotal}
-			onPickerOpen={() => {
-				if (isDirty) {
-					if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
-				}
-				showPicker = true;
-			}}
-			onRename={(name) => {
-				if (activeFlow) {
-					activeFlow = { ...activeFlow, flow_name: name };
-				}
-			}}
 			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
 			onLoadPage={() => (showLoadPage = true)}
 			onViewJson={() => (showJson = true)}
