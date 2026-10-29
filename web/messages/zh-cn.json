@@ -7815,5 +7815,8 @@
 	"propertiespanel_action_query": "查询",
 	"propertiespanel_result_list": "列表",
 	"propertiespanel_direction_asc": "升序",
-	"propertiespanel_direction_desc": "降序"
+	"propertiespanel_direction_desc": "降序",
+  "wpi_editor_detach_panel": "分离面板",
+  "wpi_editor_dock_panel": "停靠面板",
+  "wpi_editor_move_panel": "移动面板（方向键）"
 }

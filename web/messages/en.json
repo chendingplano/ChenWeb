@@ -7815,5 +7815,8 @@
 	"propertiespanel_action_query": "Query",
 	"propertiespanel_result_list": "List",
 	"propertiespanel_direction_asc": "Ascending",
-	"propertiespanel_direction_desc": "Descending"
+	"propertiespanel_direction_desc": "Descending",
+  "wpi_editor_detach_panel": "Detach panel",
+  "wpi_editor_dock_panel": "Dock panel",
+  "wpi_editor_move_panel": "Move panel (arrow keys)"
 }
