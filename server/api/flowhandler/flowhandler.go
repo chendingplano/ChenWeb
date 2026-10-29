@@ -14,7 +14,7 @@ import (
 var stubFlow = map[string]any{
 	"flow_id":           1,
 	"user_id":           1,
-	"flow_name":         "My First Flow",
+	"flow_name":         "Unnamed",
 	"flow_desc":         "",
 	"is_default":        false,
 	"is_shared":         false,

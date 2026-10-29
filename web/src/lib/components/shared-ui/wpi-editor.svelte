@@ -36,6 +36,7 @@
 	import { isElementNode, nodeData, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
+	import { pageMinimapBounds } from './canvas/page-minimap';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
 	import {
 		alignNodes,
@@ -323,6 +324,14 @@
 	function tabTitle(tab: CanvasTab): string {
 		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
 		return String(page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
+	}
+	const pageOverview = $derived(pageMinimapBounds(previewSize, { width: canvasWidth, height: canvasHeight }, viewport));
+	function movePageOverview(event: PointerEvent) {
+		const svg = event.currentTarget as SVGSVGElement;
+		const matrix = svg.getScreenCTM();
+		if (!matrix) return;
+		const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+		viewport = { ...viewport, x: canvasWidth / 2 - point.x * viewport.zoom, y: canvasHeight / 2 - point.y * viewport.zoom };
 	}
 	const canUndo = $derived(undoStack.length > 0);
 	const canRedo = $derived(redoStack.length > 0);
@@ -881,7 +890,19 @@
 					patternColor="var(--cv-grid)"
 				/>
 				<Controls />
-				<MiniMap style="background:var(--cv-raised);" />
+				{#if loadedPage}
+					<Panel position="bottom-right" class="svelte-flow__minimap" style="background:var(--cv-raised);">
+						<svg width="200" height="150" viewBox={`${pageOverview.bounds.x - 40} ${pageOverview.bounds.y - 40} ${pageOverview.bounds.width + 80} ${pageOverview.bounds.height + 80}`} role="application" tabindex="0" aria-label={m.mesh_minimap()}
+							onpointerdown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); movePageOverview(event); }}
+							onpointermove={(event) => { if (event.buttons === 1) movePageOverview(event); }}
+							onkeydown={(event) => { const step = 50; if (event.key === 'ArrowLeft') viewport = { ...viewport, x: viewport.x + step }; else if (event.key === 'ArrowRight') viewport = { ...viewport, x: viewport.x - step }; else if (event.key === 'ArrowUp') viewport = { ...viewport, y: viewport.y + step }; else if (event.key === 'ArrowDown') viewport = { ...viewport, y: viewport.y - step }; else return; event.preventDefault(); }}>
+							<rect x="0" y="0" width={previewSize.width} height={previewSize.height} fill="var(--cv-canvas)" stroke="var(--cv-border)" stroke-width="2" vector-effect="non-scaling-stroke" />
+							<rect x={pageOverview.viewport.x} y={pageOverview.viewport.y} width={pageOverview.viewport.width} height={pageOverview.viewport.height} fill="none" stroke="#818cf8" stroke-width="2" vector-effect="non-scaling-stroke" />
+						</svg>
+					</Panel>
+				{:else}
+					<MiniMap style="background:var(--cv-raised);" />
+				{/if}
 
 				<!-- Canvas config panel -->
 				<Panel
