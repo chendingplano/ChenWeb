@@ -7,8 +7,7 @@
   import { localized } from '$lib/wpi/text';
   import { valueText, withAttribute, withSourceFields, withSourceProperty } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
-  import { catalogSchemas, catalogTables, type CatalogTable } from './table-catalog';
-  import { requestWithTimeout, RequestTimeoutError } from '$lib/wpi/list-request';
+  import TablePicker from './TablePicker.svelte';
 
   let {
     node,
@@ -71,31 +70,6 @@
   let addingField = $state(false);
   let addingOrder = $state(false);
   let newOrder = $state({ column: '', direction: 'asc' });
-  let tables = $state<CatalogTable[]>([]);
-  let database = $state('');
-  let tableError = $state<'error' | 'timeout' | null>(null);
-  let tablesRequested = false;
-  async function loadTables() {
-    tableError = null;
-    try {
-      const body = await requestWithTimeout(async (signal) => {
-        const response = await fetch('/api/v1/data-sync/schema/tables', { credentials: 'same-origin', signal });
-        if (!response.ok) throw new Error('table catalog');
-        return response.json();
-      });
-      if (typeof body.database !== 'string' || !body.database) throw new Error('missing database');
-      database = body.database;
-      tables = body.tables ?? [];
-    } catch (err) {
-      tableError = err instanceof RequestTimeoutError ? 'timeout' : 'error';
-    }
-  }
-  $effect(() => {
-    if (elementClass?.attributes.source && !tablesRequested) {
-      tablesRequested = true;
-      void loadTables();
-    }
-  });
 
   function columnsOf(n: FlowNode, attr: ElementAttribute): { label: string; field: string; width?: string }[] {
     const value = attrsOf(n).columns ?? attr.default_value;
@@ -218,21 +192,12 @@
               {:else if name === 'source' && node.data.element === 'list'}
                 {@const sourceValue = attrsOf(node).source ?? attr.default_value}
                 {@const source = sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue) ? sourceValue : {}}
-                  {@const tableValue = String(source.table ?? '')}
-                {@const schemas = catalogSchemas(tables)}
+                {@const tableValue = String(source.table ?? '')}
                 <div class="source-properties">
                   <label for="source-limit">{m.propertiespanel_source_limit()}</label>
                   <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
-                  <label for="source-table">{m.propertiespanel_source_table()}</label>
-                  <select id="source-table" class="column-input" value={tableValue} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', (e.target as HTMLSelectElement).value || undefined))}>
-                    <option value="">{m.propertiespanel_select_table()}</option>
-                    {#if tableValue && !tables.some((item) => `${item.schema}.${item.table}` === tableValue)}<option value={tableValue}>{tableValue}</option>{/if}
-                    {#each schemas as schema}
-                      <optgroup label={`${database} / ${schema}`}>
-                        {#each catalogTables(tables, schema) as name}<option value={`${schema}.${name}`}>{name}</option>{/each}
-                      </optgroup>
-                    {/each}
-                  </select>
+                  <span>{m.propertiespanel_source_table()}</span>
+                  <TablePicker value={tableValue} onSelect={(value) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', value))} />
                   <label for="source-action">{m.propertiespanel_source_action()}</label>
                   <select id="source-action" class="column-input" value={String(source.action ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'action', (e.target as HTMLSelectElement).value))}>
                     <option value="">{m.propertiespanel_select_action()}</option><option value="load">{m.propertiespanel_action_load()}</option><option value="query">{m.propertiespanel_action_query()}</option>
@@ -242,7 +207,6 @@
                     <option value="">{m.propertiespanel_select_result()}</option><option value="list">{m.propertiespanel_result_list()}</option>
                   </select>
                 </div>
-                {#if tableError}<div role="alert" style="font-size:9px; color:var(--cv-text-faint);">{tableError === 'timeout' ? m.propertiespanel_tables_timeout() : m.propertiespanel_tables_unavailable()} <button type="button" class="column-remove" onclick={loadTables}>{m.propertiespanel_tables_retry()}</button></div>{/if}
               {:else if name === 'columns' && node.data.element === 'list'}
             {@const columns = columnsOf(node, attr)}
             {#if addingColumn}

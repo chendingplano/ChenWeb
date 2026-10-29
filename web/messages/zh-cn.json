@@ -7830,5 +7830,6 @@
 	"wpi_list_table_unconfigured": "尚未配置数据表。",
 	"wpi_list_timeout": "获取记录超过 20 秒，已超时。",
 	"propertiespanel_tables_timeout": "加载数据表目录超过 20 秒，已超时。",
-	"propertiespanel_tables_retry": "重试"
+	"propertiespanel_tables_retry": "重试",
+	"wpi_no_databases": "尚未配置数据库。"
 }

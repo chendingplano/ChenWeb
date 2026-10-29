@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/chendingplano/shared/go/api/databaseutil"
 
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
@@ -417,6 +420,27 @@ func RegisterRoutes(e *echo.Echo) error {
 	// writes, actions that run on the server, page search for authors, and
 	// element classes for the WPI editor (created as drafts, then edited).
 	wpiHandler := wpi.New(ApiTypes.ProjectDBHandle)
+	wpiHandler.DatabaseNames = appconfig.AppConfig.WPI.DatabasesToShow
+	pg := ApiTypes.CommonConfig.PGConf
+	wpiHandler.Databases = make(map[string]*sql.DB)
+	for _, name := range wpiHandler.DatabaseNames {
+		switch name {
+		case pg.ProjectDBName:
+			wpiHandler.Databases[name] = ApiTypes.ProjectDBHandle
+		case pg.SharedDBName:
+			wpiHandler.Databases[name] = ApiTypes.SharedDBHandle
+		case pg.AutotesterDBName:
+			wpiHandler.Databases[name] = ApiTypes.AutotesterDBHandle
+		default:
+			pool, err := databaseutil.NamedPostgresPool(pg, name)
+			if err != nil {
+				logger.Error("WPI database pool unavailable", "database", name, "error", err)
+			} else {
+				wpiHandler.Databases[name] = pool
+			}
+		}
+	}
+	apiGroup.GET("/wpi/table-catalog", wpiHandler.TableCatalog)
 	apiGroup.GET("/wpi/apps/:appId", wpiHandler.GetApp)
 	apiGroup.PUT("/wpi/descriptors/:kind/:descriptorId", wpiHandler.PutDescriptor)
 	apiGroup.POST("/wpi/actions/run", wpiHandler.RunAction)

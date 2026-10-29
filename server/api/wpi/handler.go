@@ -25,8 +25,10 @@ const maxBodyBytes = 1 << 20
 
 // Handler serves the WPI endpoints. User returns the logged-in user, or nil.
 type Handler struct {
-	DB   *sql.DB
-	User func(c echo.Context) *ApiTypes.UserInfo
+	DB            *sql.DB
+	Databases     map[string]*sql.DB
+	DatabaseNames []string
+	User          func(c echo.Context) *ApiTypes.UserInfo
 }
 
 // New returns a Handler that reads the user from the request session.
@@ -68,7 +70,7 @@ func (h *Handler) GetApp(c echo.Context) error {
 		return errorJSON(c, http.StatusNotFound, "App not found")
 	}
 	st := store{h.DB}
-	res, err := BuildBundle(c.Request().Context(), appID, st.latest, catalogColumns(h.DB), st.registered)
+	res, err := BuildBundle(c.Request().Context(), appID, st.latest, h.columns, st.registered)
 	if errors.Is(err, ErrNotFound) {
 		return errorJSON(c, http.StatusNotFound, "App not found")
 	}

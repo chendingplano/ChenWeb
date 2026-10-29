@@ -7830,5 +7830,6 @@
 	"wpi_list_table_unconfigured": "Table not configured yet.",
 	"wpi_list_timeout": "Retrieving records timed out after 20 seconds.",
 	"propertiespanel_tables_timeout": "Loading the table catalog timed out after 20 seconds.",
-	"propertiespanel_tables_retry": "Retry"
+	"propertiespanel_tables_retry": "Retry",
+	"wpi_no_databases": "No databases configured."
 }

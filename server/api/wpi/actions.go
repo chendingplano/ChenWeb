@@ -175,7 +175,11 @@ func (h *Handler) run(ctx context.Context, act Action, node map[string]any, req 
 	case "load-file":
 		return h.loadFile(ctx, act, user)
 	}
-	cols, err := catalogColumns(h.DB)(ctx, act.Table)
+	db, table, err := h.tableDatabase(act.Table)
+	if err != nil {
+		return nil, 0, badRequest("%v", err)
+	}
+	cols, err := catalogColumns(db)(ctx, table)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -187,10 +191,13 @@ func (h *Handler) run(ctx context.Context, act Action, node map[string]any, req 
 			return nil, 0, badRequest("column %q does not exist in table %q", col.name, act.Table)
 		}
 	}
+	act.Table = table
+	target := *h
+	target.DB = db
 	if act.Class == "load" {
-		return h.load(ctx, act, req.Args)
+		return target.load(ctx, act, req.Args)
 	}
-	return h.save(ctx, act, req.InputDoc)
+	return target.save(ctx, act, req.InputDoc)
 }
 
 func (h *Handler) load(ctx context.Context, act Action, args map[string]any) (any, int, error) {

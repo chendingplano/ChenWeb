@@ -63,9 +63,20 @@ arguments, or, if it has `args` of its own, those resolved with `$args` meaning 
 - **THEN** the nested `load` runs with argument `id` 7
 
 ### Requirement: Any existing table, checked and quoted
-`load` and `save` SHALL be allowed on any table, written `name` or `schema.name`. Before
-running, the system SHALL confirm that the table and every named column exist in the
-database catalog, and SHALL quote them as identifiers.
+`load` and `save` SHALL support `name` or `schema.name` in the project database, and
+`database.schema.name` in a database listed in `[wpi].databases_to_show`. Before running,
+the system SHALL confirm that the table and every named column exist in the selected
+database's catalog, and SHALL quote schema, table and column identifiers. A database
+outside the configured list SHALL be rejected. The editor SHALL display the configured
+databases, then their schemas, then their tables in a cascading picker.
+
+#### Scenario: Select a configured database table
+- **WHEN** an author chooses table `people` in schema `public` of configured database `shared`
+- **THEN** the picker stores `shared.public.people` and the action runs against `shared`
+
+#### Scenario: Unconfigured database
+- **WHEN** an action names a database outside `[wpi].databases_to_show`
+- **THEN** the action is rejected and no query runs
 
 #### Scenario: Table dropped after validation
 - **WHEN** a stored action names a table that no longer exists

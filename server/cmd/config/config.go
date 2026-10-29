@@ -213,6 +213,9 @@ type SystemConfigSection struct {
 }
 
 type AppConfigDef struct {
+	WPI struct {
+		DatabasesToShow []string `mapstructure:"databases_to_show"`
+	} `mapstructure:"wpi"`
 	AppTableNames struct {
 		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
 		TableName_Schedules       string `mapstructure:"table_name_schedules"`

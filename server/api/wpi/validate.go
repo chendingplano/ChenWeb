@@ -13,7 +13,7 @@ import (
 var (
 	idPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 	columnPattern = segmentPattern
-	tablePattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
+	tablePattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$`)
 	sizePattern   = regexp.MustCompile(`^(auto|elastic|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
 	// A page's size is set, not computed by a layouter, so it cannot be elastic.
 	pageSizePattern = regexp.MustCompile(`^(auto|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
