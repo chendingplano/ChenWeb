@@ -81,25 +81,6 @@ page, receive it in an app bundle, or run an action written in it.
 - **WHEN** a page sets `"access_controls": ["admin"]` and a user without that role loads an app that opens it
 - **THEN** the app bundle omits the page and reading or running it is refused with 403
 
-### Requirement: Page box
-The interpreter SHALL draw a page in a frame whose padding is the page's margins (each
-`30px` by default). The page box SHALL use `width`, `height`, `min_width` and `min_height`
-(each `50px` by default), `max_width` and `max_height`. Percentages SHALL resolve against the
-pane's content area excluding the margins. Without `width` the page SHALL fill the frame's
-width; without `height` it SHALL be as tall as its content. When `max_width` or `max_height`
-is set and the content is larger, the page SHALL scroll. When the page is narrower than the
-frame, `hori_align` (default `center`) SHALL place it; when it is shorter, `vert_align`
-(default `top`) SHALL. `bkgd_color` and `frgd_color` set to `auto` SHALL inherit the
-application theme, so the page follows light and dark mode.
-
-#### Scenario: Centred form
-- **WHEN** a page sets `"max_width": "640px"` in a pane 1200px wide with default margins
-- **THEN** the page is 640px wide, centred in the space between the margins
-
-#### Scenario: Long content under a maximum height
-- **WHEN** a page sets `"max_height": "300px"` and its content is 500px tall
-- **THEN** the page is 300px tall with a vertical scroll bar
-
 ### Requirement: Page-wide binding mode
 A page's `binding_mode` SHALL be the default for every element on it whose class defines
 `binding_mode`. An element instance's own `binding_mode` SHALL come first, then the page's,
