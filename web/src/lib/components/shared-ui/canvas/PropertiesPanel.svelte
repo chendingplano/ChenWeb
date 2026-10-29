@@ -7,6 +7,7 @@
   import { localized } from '$lib/wpi/text';
   import { valueText, withAttribute, withSourceFields, withSourceProperty } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
+  import { catalogSchemas, catalogTables, schemaForTable, type CatalogTable } from './table-catalog';
 
   let {
     node,
@@ -69,7 +70,10 @@
   let addingField = $state(false);
   let addingOrder = $state(false);
   let newOrder = $state({ column: '', direction: 'asc' });
-  let tables = $state<string[]>([]);
+  let tables = $state<CatalogTable[]>([]);
+  let database = $state('');
+  let selectedDatabase = $state<string | null>(null);
+  let selectedSchema = $state<string | null>(null);
   let tableError = $state(false);
   let tablesRequested = false;
   $effect(() => {
@@ -77,7 +81,7 @@
       tablesRequested = true;
       fetch('/api/v1/data-sync/schema/tables', { credentials: 'same-origin' })
         .then((response) => { if (!response.ok) throw new Error('table catalog'); return response.json(); })
-        .then((body) => { tables = (body.tables ?? []).map((t: { schema: string; table: string }) => `${t.schema}.${t.table}`); })
+        .then((body) => { database = body.database ?? ''; tables = body.tables ?? []; })
         .catch(() => { tableError = true; });
     }
   });
@@ -89,6 +93,8 @@
 
   $effect(() => {
     node?.id;
+    selectedDatabase = null;
+    selectedSchema = null;
     newColumn = { label: '', field: '', width: '' };
     addingColumn = false;
     newField = { column: '', attribute: '' };
@@ -206,11 +212,27 @@
                 <div class="source-properties">
                   <label for="source-limit">{m.propertiespanel_source_limit()}</label>
                   <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
+                  {@const tableValue = String(source.table ?? '')}
+                  {@const activeDatabase = selectedDatabase ?? (tableValue ? database : '')}
+                  {@const activeSchema = selectedSchema ?? schemaForTable(tableValue, tables)}
+                  {@const schemas = catalogSchemas(tables)}
+                  {@const names = catalogTables(tables, activeSchema)}
+                  <label for="source-database">{m.propertiespanel_source_database()}</label>
+                  <select id="source-database" class="column-input" value={activeDatabase} onchange={(e) => { selectedDatabase = (e.target as HTMLSelectElement).value; selectedSchema = ''; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', undefined)); }}>
+                    <option value="">{m.propertiespanel_select_database()}</option>
+                    {#if database}<option value={database}>{database}</option>{/if}
+                  </select>
+                  <label for="source-schema">{m.propertiespanel_source_schema()}</label>
+                  <select id="source-schema" class="column-input" value={activeSchema} disabled={!activeDatabase} onchange={(e) => { selectedSchema = (e.target as HTMLSelectElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', undefined)); }}>
+                    <option value="">{m.propertiespanel_select_schema()}</option>
+                    {#if activeSchema && !schemas.includes(activeSchema)}<option value={activeSchema}>{activeSchema}</option>{/if}
+                    {#each schemas as schema}<option value={schema}>{schema}</option>{/each}
+                  </select>
                   <label for="source-table">{m.propertiespanel_source_table()}</label>
-                  <select id="source-table" class="column-input" value={String(source.table ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', (e.target as HTMLSelectElement).value))}>
+                  <select id="source-table" class="column-input" value={tableValue} disabled={!activeDatabase || !activeSchema} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', (e.target as HTMLSelectElement).value || undefined))}>
                     <option value="">{m.propertiespanel_select_table()}</option>
-                    {#if source.table && !tables.includes(String(source.table))}<option value={String(source.table)}>{String(source.table)}</option>{/if}
-                    {#each tables as table}<option value={table}>{table}</option>{/each}
+                    {#if tableValue && !names.some((name) => `${activeSchema}.${name}` === tableValue)}<option value={tableValue}>{tableValue}</option>{/if}
+                    {#each names as name}<option value={`${activeSchema}.${name}`}>{name}</option>{/each}
                   </select>
                   <label for="source-action">{m.propertiespanel_source_action()}</label>
                   <select id="source-action" class="column-input" value={String(source.action ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'action', (e.target as HTMLSelectElement).value))}>

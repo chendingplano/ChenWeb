@@ -7822,5 +7822,9 @@
   "wpi_editor_move_panel": "移动面板（方向键）",
 	"wpi_unnamed": "未命名",
 	"wpi_drop_element_inside_page": "请将元素放在页面内。",
-	"wpi_restore_viewport": "恢复"
+	"wpi_restore_viewport": "恢复",
+	"propertiespanel_source_database": "数据库",
+	"propertiespanel_select_database": "选择数据库",
+	"propertiespanel_source_schema": "模式",
+	"propertiespanel_select_schema": "选择模式"
 }

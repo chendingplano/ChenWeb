@@ -7822,5 +7822,9 @@
   "wpi_editor_move_panel": "Move panel (arrow keys)",
 	"wpi_unnamed": "Unnamed",
 	"wpi_drop_element_inside_page": "Drop elements inside the page.",
-	"wpi_restore_viewport": "Restore"
+	"wpi_restore_viewport": "Restore",
+	"propertiespanel_source_database": "Database",
+	"propertiespanel_select_database": "Select database",
+	"propertiespanel_source_schema": "Schema",
+	"propertiespanel_select_schema": "Select schema"
 }

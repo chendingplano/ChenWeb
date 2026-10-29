@@ -53,12 +53,17 @@ func HandleListSyncableTables(c echo.Context) error {
 	if ApiTypes.ProjectDBHandle == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
 	}
+	var database string
+	if err := ApiTypes.ProjectDBHandle.QueryRowContext(c.Request().Context(), "SELECT current_database()").Scan(&database); err != nil {
+		adminLogger.Error("failed to identify database for table picker", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to identify database"})
+	}
 	tables, err := listSyncableTables(c.Request().Context(), ApiTypes.ProjectDBHandle)
 	if err != nil {
 		adminLogger.Error("failed to list tables for sync-item schema picker", "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list tables"})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"ok": true, "tables": tables})
+	return c.JSON(http.StatusOK, map[string]any{"ok": true, "database": database, "tables": tables})
 }
 
 // HandleGetTableSchema serves GET /api/v1/data-sync/schema/tables/:schema/:table
