@@ -8,6 +8,7 @@
   import { valueText, withAttribute, withSourceFields, withSourceProperty } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
   import { catalogSchemas, catalogTables, schemaForTable, type CatalogTable } from './table-catalog';
+  import { requestWithTimeout, RequestTimeoutError } from '$lib/wpi/list-request';
 
   let {
     node,
@@ -74,15 +75,27 @@
   let database = $state('');
   let selectedDatabase = $state<string | null>(null);
   let selectedSchema = $state<string | null>(null);
-  let tableError = $state(false);
+  let tableError = $state<'error' | 'timeout' | null>(null);
   let tablesRequested = false;
+  async function loadTables() {
+    tableError = null;
+    try {
+      const body = await requestWithTimeout(async (signal) => {
+        const response = await fetch('/api/v1/data-sync/schema/tables', { credentials: 'same-origin', signal });
+        if (!response.ok) throw new Error('table catalog');
+        return response.json();
+      });
+      if (typeof body.database !== 'string' || !body.database) throw new Error('missing database');
+      database = body.database;
+      tables = body.tables ?? [];
+    } catch (err) {
+      tableError = err instanceof RequestTimeoutError ? 'timeout' : 'error';
+    }
+  }
   $effect(() => {
     if (elementClass?.attributes.source && !tablesRequested) {
       tablesRequested = true;
-      fetch('/api/v1/data-sync/schema/tables', { credentials: 'same-origin' })
-        .then((response) => { if (!response.ok) throw new Error('table catalog'); return response.json(); })
-        .then((body) => { database = body.database ?? ''; tables = body.tables ?? []; })
-        .catch(() => { tableError = true; });
+      void loadTables();
     }
   });
 
@@ -212,7 +225,7 @@
                 {@const sourceValue = attrsOf(node).source ?? attr.default_value}
                 {@const source = sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue) ? sourceValue : {}}
                   {@const tableValue = String(source.table ?? '')}
-                  {@const activeDatabase = selectedDatabase ?? (tableValue ? database : '')}
+                  {@const activeDatabase = selectedDatabase ?? database}
                   {@const activeSchema = selectedSchema ?? schemaForTable(tableValue, tables)}
                   {@const schemas = catalogSchemas(tables)}
                   {@const names = catalogTables(tables, activeSchema)}
@@ -245,7 +258,7 @@
                     <option value="">{m.propertiespanel_select_result()}</option><option value="list">{m.propertiespanel_result_list()}</option>
                   </select>
                 </div>
-                {#if tableError}<div style="font-size:9px; color:var(--cv-text-faint);">{m.propertiespanel_tables_unavailable()}</div>{/if}
+                {#if tableError}<div role="alert" style="font-size:9px; color:var(--cv-text-faint);">{tableError === 'timeout' ? m.propertiespanel_tables_timeout() : m.propertiespanel_tables_unavailable()} <button type="button" class="column-remove" onclick={loadTables}>{m.propertiespanel_tables_retry()}</button></div>{/if}
               {:else if name === 'columns' && node.data.element === 'list'}
             {@const columns = columnsOf(node, attr)}
             {#if addingColumn}

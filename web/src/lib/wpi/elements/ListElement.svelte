@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { actionRef } from '../entries';
+	import { hasListSource, requestWithTimeout, RequestTimeoutError } from '../list-request';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { getRuntime } from '../runtime.svelte';
 	import type { Json, JsonObject } from '../types';
@@ -17,7 +18,7 @@
 	);
 
 	let records = $state<JsonObject[]>([]);
-	let status = $state<'loading' | 'ready' | 'error'>('loading');
+	let status = $state<'unconfigured' | 'loading' | 'ready' | 'error' | 'timeout'>('unconfigured');
 	let failure = $state('');
 	const pageSize = 20;
 	let page = $state(1);
@@ -26,30 +27,36 @@
 	const currentPage = $derived(Math.min(page, pageCount));
 	const visibleRecords = $derived(paginated ? records.slice((currentPage - 1) * pageSize, currentPage * pageSize) : records);
 
-	async function query() {
-		if (!d.source) return;
+	async function query(signal: AbortSignal) {
+		if (!hasListSource(d.source)) {
+			records = [];
+			status = 'unconfigured';
+			return;
+		}
 		status = 'loading';
 		try {
-			records = await rt.queryList(panelId, actionRef(element, 'source'), d.source.args);
+			const result = await requestWithTimeout((requestSignal) => rt.queryList(panelId, actionRef(element, 'source'), d.source?.args, requestSignal), 20_000, signal);
+			if (signal.aborted) return;
+			records = result;
 			page = 1;
 			status = 'ready';
 		} catch (err) {
-			failure = err instanceof Error ? err.message : String(err);
-			status = 'error';
+			if (signal.aborted) return;
+			if (err instanceof RequestTimeoutError) status = 'timeout';
+			else { failure = err instanceof Error ? err.message : String(err); status = 'error'; }
 		}
 	}
 
-	// Query when first drawn, and again each time the panel is shown if its
-	// page refreshes on show.
-	let lastShown: number | null = null;
+	// Refresh for a changed source and when a page configured to refresh is shown again.
 	$effect(() => {
 		const panel = rt.panels[panelId];
 		const shown = panel?.shown ?? 0;
 		const onShow = panel ? !!rt.bundle.pages[panel.pageId].refresh?.on_show : false;
-		const first = lastShown === null;
-		const reshown = !first && shown !== lastShown && onShow;
-		lastShown = shown;
-		if (first || reshown) untrack(query);
+		JSON.stringify(d.source);
+		if (onShow) shown;
+		const controller = new AbortController();
+		untrack(() => { void query(controller.signal); });
+		return () => controller.abort();
 	});
 
 	function display(v: Json | undefined): string {
@@ -66,7 +73,11 @@
 	<div class="text-muted-foreground grid gap-x-3 border-b px-2 py-1.5 font-medium" style="grid-template-columns: {grid}">
 		{#each columns as c (c.field)}<span class="truncate">{c.label}</span>{/each}
 	</div>
-	{#if status === 'loading' && records.length === 0}
+	{#if status === 'unconfigured'}
+		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_table_unconfigured()}</p>
+	{:else if status === 'timeout'}
+		<p class="text-muted-foreground px-2 py-2" role="alert">{m.wpi_list_timeout()}</p>
+	{:else if status === 'loading' && records.length === 0}
 		<p class="text-muted-foreground px-2 py-2">{m.wpi_panel_loading()}</p>
 	{:else if status === 'error'}
 		<div class="py-2"><ErrorBox title={m.wpi_list_failed({ message: failure })} /></div>

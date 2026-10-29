@@ -33,6 +33,7 @@ export type Text = string | Record<string, string>;
 // read only by the server.
 export type ActionInstance = {
 	action: string;
+	table?: string;
 	args?: JsonObject;
 	page?: string;
 	pane?: string;

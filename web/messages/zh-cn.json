@@ -7826,5 +7826,9 @@
 	"propertiespanel_source_database": "数据库",
 	"propertiespanel_select_database": "选择数据库",
 	"propertiespanel_source_schema": "模式",
-	"propertiespanel_select_schema": "选择模式"
+	"propertiespanel_select_schema": "选择模式",
+	"wpi_list_table_unconfigured": "尚未配置数据表。",
+	"wpi_list_timeout": "获取记录超过 20 秒，已超时。",
+	"propertiespanel_tables_timeout": "加载数据表目录超过 20 秒，已超时。",
+	"propertiespanel_tables_retry": "重试"
 }

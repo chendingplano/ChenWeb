@@ -7826,5 +7826,9 @@
 	"propertiespanel_source_database": "Database",
 	"propertiespanel_select_database": "Select database",
 	"propertiespanel_source_schema": "Schema",
-	"propertiespanel_select_schema": "Select schema"
+	"propertiespanel_select_schema": "Select schema",
+	"wpi_list_table_unconfigured": "Table not configured yet.",
+	"wpi_list_timeout": "Retrieving records timed out after 20 seconds.",
+	"propertiespanel_tables_timeout": "Loading the table catalog timed out after 20 seconds.",
+	"propertiespanel_tables_retry": "Retry"
 }

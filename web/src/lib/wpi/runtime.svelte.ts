@@ -234,8 +234,8 @@ export class AppRuntime {
 	}
 
 	// Runs a list's source load instance in the context of its panel.
-	async queryList(panelId: string, ref: ActionRef, args?: JsonObject): Promise<JsonObject[]> {
-		const res = await runAction(ref, resolveArgs(args, { input_doc: this.panels[panelId]?.doc }));
+	async queryList(panelId: string, ref: ActionRef, args?: JsonObject, signal?: AbortSignal): Promise<JsonObject[]> {
+		const res = await runAction(ref, resolveArgs(args, { input_doc: this.panels[panelId]?.doc }), undefined, fetch, signal);
 		return (res.result ?? []) as JsonObject[];
 	}
 

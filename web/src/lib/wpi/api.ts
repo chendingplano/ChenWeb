@@ -37,11 +37,13 @@ export async function runAction(
 	ref: ActionRef,
 	args: JsonObject = {},
 	inputDoc?: JsonObject,
-	fetchFn: typeof fetch = fetch
+	fetchFn: typeof fetch = fetch,
+	signal?: AbortSignal
 ): Promise<Record<string, Json>> {
 	const res = await fetchFn('/api/v1/wpi/actions/run', {
 		method: 'POST',
 		credentials: 'same-origin',
+		signal,
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ref, args, input_doc: inputDoc })
 	});
