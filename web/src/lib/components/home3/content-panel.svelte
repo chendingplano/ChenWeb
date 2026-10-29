@@ -196,6 +196,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		ontology: m.content_panel_browse_and_manage_ontology_artifacts()
 	};
 
+	let wpiEditorVisited = $state(false);
+	$effect(() => { if (activeMenu?.childId === 'wpi-editor') wpiEditorVisited = true; });
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 	let isDashboard = $derived(sectionId === 'dashboard' || !activeMenu);
 	let metricsHeaderVisible = $state(true);
@@ -301,6 +303,13 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		</div>
 	{/if}
 
+	<!-- Keep the editor mounted so navigation preserves its working state. -->
+	{#if wpiEditorVisited}
+		<div style:visibility={activeMenu?.childId === 'wpi-editor' ? 'visible' : 'hidden'} inert={activeMenu?.childId !== 'wpi-editor'} aria-hidden={activeMenu?.childId !== 'wpi-editor'}>
+			<WpiEditor {darkMode} {railOffset} active={activeMenu?.childId === 'wpi-editor'} onClose={() => {}} />
+		</div>
+	{/if}
+
 	<!-- Main content area -->
 	<div class="min-w-0 flex-1 {showFooter ? '' : 'min-h-0'}">
 		{#if activeMenu?.childId === 'dev-demos-customers'}
@@ -326,13 +335,6 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 				}}
 			/>
 		{:else if activeMenu?.childId === 'wpi-editor'}
-			<WpiEditor
-				{darkMode}
-				{railOffset}
-				onClose={() => {
-					/* no-op — handled by parent navigation */
-				}}
-			/>
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}

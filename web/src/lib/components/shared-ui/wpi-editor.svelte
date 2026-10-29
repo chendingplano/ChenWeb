@@ -79,10 +79,12 @@
 	let {
 		darkMode = true,
 		railOffset = 56,
+		active = true,
 		onClose,
 	}: {
 		darkMode?: boolean;
 		railOffset?: number;
+		active?: boolean;
 		onClose: () => void;
 	} = $props();
 
@@ -239,7 +241,7 @@
 	});
 
 	function keepPanelVisible() {
-		if (!detached) return;
+		if (!active || !detached) return;
 		movePanel(panelPosition.x, panelPosition.y);
 		resizeFloating(propsWidth, panelHeight);
 	}
@@ -700,6 +702,7 @@
 
 	// ── Keyboard shortcuts ───────────────────────────────────────────────────
 	function onKeydown(e: KeyboardEvent) {
+		if (!active) return;
 		// The element class forms have their own fields, and View JSON covers the canvas; undo
 		// and save belong to the canvas.
 		if (showCreateElement || editClassId !== null || showJson || showLoadPage) return;
