@@ -210,6 +210,40 @@
 		if (floatingResize?.id === event.pointerId) resizeFloating(floatingResize.width + event.clientX - floatingResize.x, floatingResize.height + event.clientY - floatingResize.y);
 	}
 
+	const PANEL_STORAGE_KEY = 'wpi-editor-properties-panel';
+	let panelRestored = $state(false);
+
+	function restorePanel() {
+		try {
+			const saved = JSON.parse(localStorage.getItem(PANEL_STORAGE_KEY) ?? 'null');
+			if (saved && typeof saved.detached === 'boolean' &&
+				[saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) {
+				propsWidth = Math.max(PROPS_MIN_WIDTH, Math.min(PROPS_MAX_WIDTH, saved.width));
+				panelHeight = Math.max(100, saved.height);
+				detached = saved.detached;
+				if (detached) {
+					movePanel(saved.x, saved.y);
+					resizeFloating(propsWidth, panelHeight);
+				}
+			}
+		} catch {
+			// Storage can be unavailable or contain invalid data; use the default layout.
+		}
+		panelRestored = true;
+	}
+
+	$effect(() => {
+		if (!panelRestored) return;
+		const layout = { detached, x: panelPosition.x, y: panelPosition.y, width: propsWidth, height: panelHeight };
+		try { localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(layout)); } catch { /* Storage is optional. */ }
+	});
+
+	function keepPanelVisible() {
+		if (!detached) return;
+		movePanel(panelPosition.x, panelPosition.y);
+		resizeFloating(propsWidth, panelHeight);
+	}
+
 	// Undo / redo
 	type PageSnapshot = Snapshot & { page: JsonObject | null; previewSize: { width: number; height: number } };
 	let undoStack = $state<PageSnapshot[]>([]);
@@ -686,6 +720,7 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(async () => {
+		restorePanel();
 		addTab();
 		loadElementClasses();
 		const res = await flowService.getNodeTypes();
@@ -698,7 +733,7 @@
 	});
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onresize={keepPanelVisible} />
 
 <!-- Starts below the sticky site header (routes/semos/components/SiteHeader.svelte: h-[4.25rem] + 1px border, z-50), which would otherwise cover the top of the editor. -->
 <div class="fixed bottom-0 right-0 flex flex-col select-text" style="{canvasThemeVars(darkMode)} background:var(--cv-canvas); z-index:40; left:{railOffset}px; top:calc(4.25rem + 1px);">
