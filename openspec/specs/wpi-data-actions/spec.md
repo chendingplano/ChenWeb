@@ -79,6 +79,10 @@ SHALL be preserved until the user changes them.
 - **WHEN** an author chooses table `people` in schema `public` of configured database `shared`
 - **THEN** the picker stores `shared.public.people` and the action runs against `shared`
 
+#### Scenario: List preview on a page without an ID
+- **WHEN** a configured list is previewed on a page without a valid stored page ID
+- **THEN** the editor prompts the user to load a saved page and does not send an action request
+
 #### Scenario: Unconfigured database
 - **WHEN** an action names a database outside `[wpi].databases_to_show`
 - **THEN** the action is rejected and no query runs

@@ -7841,5 +7841,6 @@
 	"propertiespanel_fields_unavailable": "无法加载字段。",
 	"propertiespanel_column_for_field": "{column} 的列名",
 	"propertiespanel_resize_fields": "调整字段对话框大小",
-	"propertiespanel_move_fields": "移动字段对话框（方向键）"
+	"propertiespanel_move_fields": "移动字段对话框（方向键）",
+	"wpi_list_requires_saved_page": "请加载已保存的页面以预览记录。"
 }

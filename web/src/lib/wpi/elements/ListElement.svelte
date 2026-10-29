@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { actionRef } from '../entries';
-	import { hasListSource, requestWithTimeout, RequestTimeoutError } from '../list-request';
+	import { listQueryAvailability, requestWithTimeout, RequestTimeoutError } from '../list-request';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { getRuntime } from '../runtime.svelte';
 	import type { Json, JsonObject } from '../types';
@@ -18,7 +18,7 @@
 	);
 
 	let records = $state<JsonObject[]>([]);
-	let status = $state<'unconfigured' | 'loading' | 'ready' | 'error' | 'timeout'>('unconfigured');
+	let status = $state<'unconfigured' | 'unsaved' | 'loading' | 'ready' | 'error' | 'timeout'>('unconfigured');
 	let failure = $state('');
 	const pageSize = 20;
 	let page = $state(1);
@@ -28,9 +28,10 @@
 	const visibleRecords = $derived(paginated ? records.slice((currentPage - 1) * pageSize, currentPage * pageSize) : records);
 
 	async function query(signal: AbortSignal) {
-		if (!hasListSource(d.source)) {
+		const availability = listQueryAvailability(d.source, element.pageId);
+		if (availability !== 'ready') {
 			records = [];
-			status = 'unconfigured';
+			status = availability;
 			return;
 		}
 		status = 'loading';
@@ -53,6 +54,7 @@
 		const shown = panel?.shown ?? 0;
 		const onShow = panel ? !!rt.bundle.pages[panel.pageId].refresh?.on_show : false;
 		JSON.stringify(d.source);
+		element.pageId;
 		if (onShow) shown;
 		const controller = new AbortController();
 		untrack(() => { void query(controller.signal); });
@@ -75,6 +77,8 @@
 	</div>
 	{#if status === 'unconfigured'}
 		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_table_unconfigured()}</p>
+	{:else if status === 'unsaved'}
+		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_requires_saved_page()}</p>
 	{:else if status === 'timeout'}
 		<p class="text-muted-foreground px-2 py-2" role="alert">{m.wpi_list_timeout()}</p>
 	{:else if status === 'loading' && records.length === 0}

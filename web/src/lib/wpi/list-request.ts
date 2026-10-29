@@ -6,6 +6,11 @@ export function hasListSource(source: { action?: string; table?: unknown } | und
  return typeof source.table === 'string' && source.table.trim().length > 0;
 }
 
+export function listQueryAvailability(source: { action?: string; table?: unknown } | undefined, pageId: string): 'unconfigured' | 'unsaved' | 'ready' {
+ if (!hasListSource(source)) return 'unconfigured';
+ return /^[a-z0-9][a-z0-9-]{0,127}$/.test(pageId) ? 'ready' : 'unsaved';
+}
+
 export async function requestWithTimeout<T>(request: (signal: AbortSignal) => Promise<T>, timeoutMs = 20_000, parent?: AbortSignal): Promise<T> {
  const controller = new AbortController();
  const cancel = () => controller.abort();
