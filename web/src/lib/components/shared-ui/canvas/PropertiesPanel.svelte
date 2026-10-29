@@ -5,7 +5,7 @@
   import type { ElementAttribute, ElementClassSummary } from '$lib/wpi/api';
   import type { JsonObject } from '$lib/wpi/types';
   import { localized } from '$lib/wpi/text';
-  import { valueText, withAttribute, withSourceFields, withSourceProperty, withListSourceDefaults } from './element-attributes';
+  import { valueText, withAttribute, withSourceFields, withSourceProperty, withListSourceDefaults, withSelectedTable } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
   import TablePicker from '../database-picker/TablePicker.svelte';
   import FieldPicker from '../database-picker/FieldPicker.svelte';
@@ -194,7 +194,7 @@
                   <label for="source-limit">{m.propertiespanel_source_limit()}</label>
                   <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
                   <span>{m.propertiespanel_source_table()}</span>
-                  <TablePicker value={tableValue} onSelect={(value) => update('attrs', withListSourceDefaults(withSourceProperty(attrsOf(node), attr.default_value, 'table', value), attr.default_value))} />
+                  <TablePicker value={tableValue} onSelect={(value) => update('attrs', withSelectedTable(attrsOf(node), attr.default_value, value))} />
                   <span>{m.propertiespanel_source_fields()}</span>
                   <FieldPicker table={tableValue} fields={Array.isArray(source.fields) ? source.fields : []} onChange={(fields) => update('attrs', withListSourceDefaults(withSourceFields(attrsOf(node), attr.default_value, fields), attr.default_value))} />
                   <label for="source-action">{m.propertiespanel_source_action()}</label>

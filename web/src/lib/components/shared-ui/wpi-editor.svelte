@@ -1033,7 +1033,7 @@
 			{#if detached}
 				<button type="button" class="floating-resize" aria-label={m.wpi_editor_resize_floating()} title={m.wpi_editor_resize_floating()}
 					onpointerdown={startFloatingResize} onpointermove={resizeFloatingDrag} onpointerup={() => floatingResize = null} onpointercancel={() => floatingResize = null}
-					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') resizeFloating(propsWidth - d, panelHeight); else if (event.key === 'ArrowRight') resizeFloating(propsWidth + d, panelHeight); else if (event.key === 'ArrowUp') resizeFloating(propsWidth, panelHeight - d); else if (event.key === 'ArrowDown') resizeFloating(propsWidth, panelHeight + d); else return; event.preventDefault(); }}>◢</button>
+					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') resizeFloating(propsWidth - d, panelHeight); else if (event.key === 'ArrowRight') resizeFloating(propsWidth + d, panelHeight); else if (event.key === 'ArrowUp') resizeFloating(propsWidth, panelHeight - d); else if (event.key === 'ArrowDown') resizeFloating(propsWidth, panelHeight + d); else return; event.preventDefault(); }}></button>
 			{/if}
 		</div>
 	</div>
@@ -1157,5 +1157,6 @@
 	.panel-toggle { cursor: pointer; }
 	.panel-toggle:hover, .panel-handle:hover { color: var(--cv-text); background: var(--cv-raised); }
 	.properties-content { flex: 1; min-height: 0; overflow: hidden; }
-	.floating-resize { position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; border: 0; background: var(--cv-panel); color: var(--cv-text-2); cursor: nwse-resize; touch-action: none; padding: 0; }
+	.floating-resize { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; border: 0; background: linear-gradient(135deg, transparent 45%, var(--cv-accent) 46%, var(--cv-accent) 52%, transparent 53%, transparent 64%, var(--cv-accent) 65%, var(--cv-accent) 71%, transparent 72%); cursor: nwse-resize; touch-action: none; padding: 0; }
+	.floating-resize:focus-visible { outline: 2px solid var(--cv-accent); }
 </style>

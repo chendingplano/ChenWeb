@@ -73,7 +73,8 @@ picker, the editor SHALL offer a field picker that lists the selected table's co
 catalog order. Selecting a column SHALL add a mapping with the column name as its default
 attribute; users SHALL be able to deselect columns and edit column and attribute names.
 The field dialog SHALL be movable and resizable using a pointer and keyboard. Existing mappings
-SHALL be preserved until the user changes them.
+SHALL be preserved until the user changes them; selecting a table clears all previously
+selected field mappings.
 
 #### Scenario: Select a configured database table
 - **WHEN** an author chooses table `people` in schema `public` of configured database `shared`

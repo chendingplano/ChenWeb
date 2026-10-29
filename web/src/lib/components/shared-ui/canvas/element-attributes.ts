@@ -42,3 +42,9 @@ export function withListSourceDefaults(attrs: JsonObject, fallback: Json | undef
  if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.table !== 'string' || !current.table) return attrs;
  return { ...attrs, source: { ...current, action: current.action || 'load', result: current.result || 'list' } };
 }
+
+// Every table selection starts a fresh set of field mappings.
+export function withSelectedTable(attrs: JsonObject, fallback: Json | undefined, table: string): JsonObject {
+ const updated = withSourceProperty(attrs, fallback, 'table', table);
+ return withListSourceDefaults(withSourceFields(updated, fallback, []), fallback);
+}

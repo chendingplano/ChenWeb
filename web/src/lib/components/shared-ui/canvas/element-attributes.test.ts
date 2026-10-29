@@ -57,3 +57,11 @@ test('list source defaults are persisted without replacing explicit choices', as
  assert.deepEqual(withListSourceDefaults({ source: { table: 'kb.people' } }, null), { source: { table: 'kb.people', action: 'load', result: 'list' } });
  assert.deepEqual(withListSourceDefaults({ source: { table: 'kb.people', action: 'query', result: 'list' } }, null), { source: { table: 'kb.people', action: 'query', result: 'list' } });
 });
+
+test('selecting a table clears old field mappings and keeps other source settings', async () => {
+ const { withSelectedTable } = await import('./element-attributes');
+ const attrs = { width: '100%', source: { table: 'old.items', fields: [{ column: 'id', attribute: 'id' }], limit: 25, action: 'load' } };
+ assert.deepEqual(withSelectedTable(attrs, undefined, 'new.items'), { width: '100%', source: { table: 'new.items', fields: [], limit: 25, action: 'load', result: 'list' } });
+ assert.deepEqual(withSelectedTable(attrs, undefined, 'old.items').source, { table: 'old.items', fields: [], limit: 25, action: 'load', result: 'list' });
+ assert.deepEqual(attrs.source.fields, [{ column: 'id', attribute: 'id' }]);
+});
