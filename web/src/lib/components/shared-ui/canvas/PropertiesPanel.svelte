@@ -91,8 +91,10 @@
     return Array.isArray(value) ? value as { label: string; field: string; width?: string }[] : [];
   }
 
+  // Attribute edits replace the node object; only a different node should reset the picker.
+  const selectedNodeId = $derived(node?.id);
   $effect(() => {
-    node?.id;
+    selectedNodeId;
     selectedDatabase = null;
     selectedSchema = null;
     newColumn = { label: '', field: '', width: '' };
