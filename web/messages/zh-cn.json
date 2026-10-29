@@ -7831,5 +7831,12 @@
 	"wpi_list_timeout": "获取记录超过 20 秒，已超时。",
 	"propertiespanel_tables_timeout": "加载数据表目录超过 20 秒，已超时。",
 	"propertiespanel_tables_retry": "重试",
-	"wpi_no_databases": "尚未配置数据库。"
+	"wpi_no_databases": "尚未配置数据库。",
+	"propertiespanel_pick_fields": "字段",
+	"propertiespanel_select_field": "选择",
+	"propertiespanel_select_column": "选择 {column}",
+	"propertiespanel_attribute_for_column": "{column} 的属性",
+	"propertiespanel_field_missing": "不在表中",
+	"propertiespanel_fields_timeout": "加载字段超过 20 秒，已超时。",
+	"propertiespanel_fields_unavailable": "无法加载字段。"
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v4"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -86,6 +87,49 @@ func TestCatalogOnlyExposesConfiguredDatabase(t *testing.T) {
 	c = e.NewContext(httptest.NewRequest("GET", "/?database=other", nil), rec)
 	if err := h.TableCatalog(c); err != nil || rec.Code != 503 {
 		t.Fatalf("%v %s", err, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTableColumnsUsesSelectedDatabaseAndColumnOrder(t *testing.T) {
+	project, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer project.Close()
+	shared, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shared.Close()
+	h := testHandler(project, plainUser)
+	h.Databases = map[string]*sql.DB{"shared": shared}
+	mock.ExpectQuery("SELECT column_name FROM information_schema.columns").WithArgs("kb", "people").WillReturnRows(sqlmock.NewRows([]string{"column_name"}).AddRow("id").AddRow("name"))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest("GET", "/?table=shared.kb.people", nil), rec)
+	if err := h.TableColumns(c); err != nil || rec.Code != 200 || !strings.Contains(rec.Body.String(), `"columns":["id","name"]`) {
+		t.Fatalf("%v %s", err, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTableColumnsRejectsUnconfiguredOrInvalidReference(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	h := testHandler(db, plainUser)
+	for _, table := range []string{"other.kb.people", "kb.people;DROP"} {
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(httptest.NewRequest("GET", "/?table="+url.QueryEscape(table), nil), rec)
+		if err := h.TableColumns(c); err != nil || rec.Code != 400 {
+			t.Fatalf("table %q: %v %s", table, err, rec.Body.String())
+		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

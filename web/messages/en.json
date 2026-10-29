@@ -7831,5 +7831,12 @@
 	"wpi_list_timeout": "Retrieving records timed out after 20 seconds.",
 	"propertiespanel_tables_timeout": "Loading the table catalog timed out after 20 seconds.",
 	"propertiespanel_tables_retry": "Retry",
-	"wpi_no_databases": "No databases configured."
+	"wpi_no_databases": "No databases configured.",
+	"propertiespanel_pick_fields": "Fields",
+	"propertiespanel_select_field": "Select",
+	"propertiespanel_select_column": "Select {column}",
+	"propertiespanel_attribute_for_column": "Attribute for {column}",
+	"propertiespanel_field_missing": "not in table",
+	"propertiespanel_fields_timeout": "Loading fields timed out after 20 seconds.",
+	"propertiespanel_fields_unavailable": "Could not load fields."
 }

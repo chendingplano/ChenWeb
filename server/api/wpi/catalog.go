@@ -111,3 +111,40 @@ func (h *Handler) TableCatalog(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]any{"tables": tables})
 }
+
+// TableColumns returns visible columns of a selected WPI table in database order.
+func (h *Handler) TableColumns(c echo.Context) error {
+	if h.User(c) == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	ref := c.QueryParam("table")
+	if !tablePattern.MatchString(ref) {
+		return errorJSON(c, http.StatusBadRequest, "Invalid table reference")
+	}
+	db, table, err := h.tableDatabase(ref)
+	if err != nil || db == nil {
+		return errorJSON(c, http.StatusBadRequest, "Database is not available")
+	}
+	schema, name := splitTable(table)
+	rows, err := db.QueryContext(c.Request().Context(), `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`, schema, name)
+	if err != nil {
+		handlerLog.Error("WPI table columns failed", "table", ref, "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to load table columns")
+	}
+	defer rows.Close()
+	columns := []string{}
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			return errorJSON(c, http.StatusInternalServerError, "Unable to load table columns")
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		return errorJSON(c, http.StatusInternalServerError, "Unable to load table columns")
+	}
+	if len(columns) == 0 {
+		return errorJSON(c, http.StatusNotFound, "Table not found")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"columns": columns})
+}

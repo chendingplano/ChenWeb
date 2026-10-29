@@ -441,6 +441,7 @@ func RegisterRoutes(e *echo.Echo) error {
 		}
 	}
 	apiGroup.GET("/wpi/table-catalog", wpiHandler.TableCatalog)
+	apiGroup.GET("/wpi/table-columns", wpiHandler.TableColumns)
 	apiGroup.GET("/wpi/apps/:appId", wpiHandler.GetApp)
 	apiGroup.PUT("/wpi/descriptors/:kind/:descriptorId", wpiHandler.PutDescriptor)
 	apiGroup.POST("/wpi/actions/run", wpiHandler.RunAction)

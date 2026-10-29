@@ -7,7 +7,8 @@
   import { localized } from '$lib/wpi/text';
   import { valueText, withAttribute, withSourceFields, withSourceProperty } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
-  import TablePicker from './TablePicker.svelte';
+  import TablePicker from '../database-picker/TablePicker.svelte';
+  import FieldPicker from '../database-picker/FieldPicker.svelte';
 
   let {
     node,
@@ -66,8 +67,6 @@
   let typing = $state<{ nodeId: string; name: string; text: string } | null>(null);
   let newColumn = $state({ label: '', field: '', width: '' });
   let addingColumn = $state(false);
-  let newField = $state({ column: '', attribute: '' });
-  let addingField = $state(false);
   let addingOrder = $state(false);
   let newOrder = $state({ column: '', direction: 'asc' });
 
@@ -80,8 +79,6 @@
     node?.id;
     newColumn = { label: '', field: '', width: '' };
     addingColumn = false;
-    newField = { column: '', attribute: '' };
-    addingField = false;
     addingOrder = false;
     newOrder = { column: '', direction: 'asc' };
   });
@@ -198,6 +195,8 @@
                   <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
                   <span>{m.propertiespanel_source_table()}</span>
                   <TablePicker value={tableValue} onSelect={(value) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', value))} />
+                  <span>{m.propertiespanel_source_fields()}</span>
+                  <FieldPicker table={tableValue} fields={Array.isArray(source.fields) ? source.fields : []} onChange={(fields) => update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields))} />
                   <label for="source-action">{m.propertiespanel_source_action()}</label>
                   <select id="source-action" class="column-input" value={String(source.action ?? '')} onchange={(e) => update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'action', (e.target as HTMLSelectElement).value))}>
                     <option value="">{m.propertiespanel_select_action()}</option><option value="load">{m.propertiespanel_action_load()}</option><option value="query">{m.propertiespanel_action_query()}</option>
@@ -240,33 +239,6 @@
               {#if name === 'source' && node.data.element === 'list' && attr.instance_modifiable !== false}
                 {@const source = attrsOf(node).source ?? attr.default_value}
                 {#if source && typeof source === 'object' && !Array.isArray(source)}
-                  {@const fields = Array.isArray(source.fields) ? source.fields : []}
-                  <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;">
-                    <span style="font-size:9px; color:var(--cv-text-muted);">{m.propertiespanel_source_fields()}</span>
-                    <div style="display:flex; gap:3px;">
-                      <button class="column-remove" type="button" onclick={() => (addingField = true)}>{m.propertiespanel_add_source_field()}</button>
-                      {#if addingField}
-                        <button class="column-remove" type="button" onclick={() => { addingField = false; newField = { column: '', attribute: '' }; }}>{m.wpi_create_element_cancel()}</button>
-                      {/if}
-                    </div>
-                  </div>
-                  {#if addingField}
-                    <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 25px; gap:3px; margin-bottom:4px;">
-                      <input class="column-input" aria-label={m.propertiespanel_source_column()} placeholder={m.propertiespanel_source_column()} bind:value={newField.column} />
-                      <input class="column-input" aria-label={m.propertiespanel_source_attribute()} placeholder={m.propertiespanel_source_attribute()} bind:value={newField.attribute} />
-                      <button class="column-remove" aria-label={m.wpi_json_apply()} type="button" disabled={!newField.column.trim() || !newField.attribute.trim()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, [...fields, { column: newField.column.trim(), attribute: newField.attribute.trim() }])); newField = { column: '', attribute: '' }; addingField = false; }}>+</button>
-                    </div>
-                  {/if}
-                  {#each fields as field, index (index)}
-                    {#if field && typeof field === 'object' && !Array.isArray(field)}
-                      <div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 25px; gap:3px; margin-bottom:4px;">
-                        <input class="column-input" aria-label={m.propertiespanel_source_column()} value={String(field.column ?? '')} oninput={(e) => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.map((f, i) => i === index ? { ...field, column: (e.target as HTMLInputElement).value } : f))); }} />
-                        <input class="column-input" aria-label={m.propertiespanel_source_attribute()} value={String(field.attribute ?? '')} oninput={(e) => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.map((f, i) => i === index ? { ...field, attribute: (e.target as HTMLInputElement).value } : f))); }} />
-                        <button class="column-remove" type="button" aria-label={m.propertiespanel_remove_source_field()} onclick={() => { typing = null; update('attrs', withSourceFields(attrsOf(node), attr.default_value, fields.filter((_, i) => i !== index))); }}>×</button>
-                      </div>
-                    {/if}
-                  {/each}
-
                   {@const order = Array.isArray(source.order_by) ? source.order_by : []}
                   <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;">
                     <span style="font-size:9px; color:var(--cv-text-muted);">{m.propertiespanel_order_by()}</span>

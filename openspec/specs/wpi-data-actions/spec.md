@@ -68,7 +68,11 @@ arguments, or, if it has `args` of its own, those resolved with `$args` meaning 
 the system SHALL confirm that the table and every named column exist in the selected
 database's catalog, and SHALL quote schema, table and column identifiers. A database
 outside the configured list SHALL be rejected. The editor SHALL display the configured
-databases, then their schemas, then their tables in a cascading picker.
+databases, then their schemas, then their tables in a cascading picker. Under the table
+picker, the editor SHALL offer a field picker that lists the selected table's columns in
+catalog order. Selecting a column SHALL add a mapping with the column name as its default
+attribute; users SHALL be able to deselect columns and edit attributes. Existing mappings
+SHALL be preserved until the user changes them.
 
 #### Scenario: Select a configured database table
 - **WHEN** an author chooses table `people` in schema `public` of configured database `shared`
