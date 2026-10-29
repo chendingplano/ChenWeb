@@ -163,9 +163,16 @@
 	let resizing: number | null = null;
 	let detached = $state(false);
 	let panelPosition = $state({ x: 0, y: 0 });
-	let dragging: { id: number; dx: number; dy: number } | null = null;
+	let panelHeight = $state(500);
+	let panelElement: HTMLElement;
+	let dragging: { id: number; dx: number; dy: number; startX: number; startY: number } | null = null;
+	let floatingResize: { id: number; x: number; y: number; width: number; height: number } | null = null;
 	function togglePanel() {
-		if (!detached) { const b = body.getBoundingClientRect(); panelPosition = { x: Math.max(b.left, b.right - propsWidth - 16), y: b.top + 16 }; }
+		if (!detached) {
+			const b = body.getBoundingClientRect();
+			panelPosition = { x: Math.max(b.left, b.right - propsWidth - 16), y: b.top + 16 };
+			panelHeight = Math.min(700, b.height - 32);
+		}
 		detached = !detached;
 	}
 	function movePanel(x: number, y: number) {
@@ -173,12 +180,35 @@
 		panelPosition = { x: Math.max(b.left, Math.min(x, Math.max(b.left, b.right - propsWidth))), y: Math.max(b.top, Math.min(y, b.bottom - 40)) };
 	}
 	function startPanelDrag(event: PointerEvent) {
-		if (!detached || event.button !== 0) return;
-		dragging = { id: event.pointerId, dx: event.clientX - panelPosition.x, dy: event.clientY - panelPosition.y };
+		if (event.button !== 0) return;
+		const rect = panelElement.getBoundingClientRect();
+		dragging = { id: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top, startX: event.clientX, startY: event.clientY };
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 		event.preventDefault();
 	}
-	function dragPanel(event: PointerEvent) { if (dragging?.id === event.pointerId) movePanel(event.clientX - dragging.dx, event.clientY - dragging.dy); }
+	function dragPanel(event: PointerEvent) {
+		if (dragging?.id !== event.pointerId) return;
+		if (!detached) {
+			if (Math.hypot(event.clientX - dragging.startX, event.clientY - dragging.startY) < 5) return;
+			panelHeight = Math.min(700, body.getBoundingClientRect().height - 32);
+			detached = true;
+		}
+		movePanel(event.clientX - dragging.dx, event.clientY - dragging.dy);
+	}
+	function resizeFloating(width: number, height: number) {
+		const b = body.getBoundingClientRect();
+		propsWidth = Math.round(Math.max(PROPS_MIN_WIDTH, Math.min(PROPS_MAX_WIDTH, b.right - panelPosition.x, width)));
+		panelHeight = Math.round(Math.max(100, Math.min(b.bottom - panelPosition.y, height)));
+	}
+	function startFloatingResize(event: PointerEvent) {
+		if (event.button !== 0) return;
+		floatingResize = { id: event.pointerId, x: event.clientX, y: event.clientY, width: propsWidth, height: panelHeight };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+	function resizeFloatingDrag(event: PointerEvent) {
+		if (floatingResize?.id === event.pointerId) resizeFloating(floatingResize.width + event.clientX - floatingResize.x, floatingResize.height + event.clientY - floatingResize.y);
+	}
 
 	// Undo / redo
 	type PageSnapshot = Snapshot & { page: JsonObject | null; previewSize: { width: number; height: number } };
@@ -914,11 +944,11 @@
 		{/if}
 
 		<!-- Properties Panel -->
-		<div class="properties-container" class:detached style:width="{propsWidth}px" style:left={detached ? `${panelPosition.x}px` : undefined} style:top={detached ? `${panelPosition.y}px` : undefined}>
+		<div bind:this={panelElement} class="properties-container" class:detached style:width="{propsWidth}px" style:height={detached ? `${panelHeight}px` : undefined} style:left={detached ? `${panelPosition.x}px` : undefined} style:top={detached ? `${panelPosition.y}px` : undefined}>
 			<div class="properties-controls">
-				<button type="button" class="panel-handle" disabled={!detached} aria-label={m.wpi_editor_move_panel()} title={m.wpi_editor_move_panel()}
+				<button type="button" class="panel-handle" aria-label={m.wpi_editor_move_panel()} title={m.wpi_editor_move_panel()}
 					onpointerdown={startPanelDrag} onpointermove={dragPanel} onpointerup={() => dragging = null} onpointercancel={() => dragging = null}
-					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') movePanel(panelPosition.x - d, panelPosition.y); else if (event.key === 'ArrowRight') movePanel(panelPosition.x + d, panelPosition.y); else if (event.key === 'ArrowUp') movePanel(panelPosition.x, panelPosition.y - d); else if (event.key === 'ArrowDown') movePanel(panelPosition.x, panelPosition.y + d); else return; event.preventDefault(); }}>⋮⋮</button>
+					onkeydown={(event) => { if (!detached) return; const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') movePanel(panelPosition.x - d, panelPosition.y); else if (event.key === 'ArrowRight') movePanel(panelPosition.x + d, panelPosition.y); else if (event.key === 'ArrowUp') movePanel(panelPosition.x, panelPosition.y - d); else if (event.key === 'ArrowDown') movePanel(panelPosition.x, panelPosition.y + d); else return; event.preventDefault(); }}>⋮⋮</button>
 				<button type="button" class="panel-toggle" onclick={togglePanel} aria-label={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{detached ? '↪' : '↗'}</button>
 			</div>
 			<div class="properties-content">
@@ -936,6 +966,11 @@
 		/>
 		{/if}
 			</div>
+			{#if detached}
+				<button type="button" class="floating-resize" aria-label={m.wpi_editor_resize_floating()} title={m.wpi_editor_resize_floating()}
+					onpointerdown={startFloatingResize} onpointermove={resizeFloatingDrag} onpointerup={() => floatingResize = null} onpointercancel={() => floatingResize = null}
+					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') resizeFloating(propsWidth - d, panelHeight); else if (event.key === 'ArrowRight') resizeFloating(propsWidth + d, panelHeight); else if (event.key === 'ArrowUp') resizeFloating(propsWidth, panelHeight - d); else if (event.key === 'ArrowDown') resizeFloating(propsWidth, panelHeight + d); else return; event.preventDefault(); }}>◢</button>
+			{/if}
 		</div>
 	</div>
 
@@ -1051,12 +1086,12 @@
 	.canvas-tabs .add-tab { font-size: 16px; padding: 3px 12px; }
 
 	.properties-container { flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; background: var(--cv-panel); }
-	.properties-container.detached { position: fixed; z-index: 45; height: min(70vh, 700px); max-height: calc(100vh - 6rem); border: 1px solid var(--cv-border); box-shadow: 0 8px 24px var(--cv-shadow); }
+	.properties-container.detached { position: fixed; z-index: 45; border: 1px solid var(--cv-border); box-shadow: 0 8px 24px var(--cv-shadow); }
 	.properties-controls { display: flex; align-items: center; justify-content: space-between; height: 30px; flex-shrink: 0; border-bottom: 1px solid var(--cv-divider); }
 	.panel-handle, .panel-toggle { border: 0; background: transparent; color: var(--cv-text-2); height: 100%; padding: 0 10px; }
 	.panel-handle { flex: 1; text-align: left; cursor: grab; touch-action: none; }
-	.panel-handle:disabled { cursor: default; opacity: .45; }
 	.panel-toggle { cursor: pointer; }
-	.panel-toggle:hover, .panel-handle:not(:disabled):hover { color: var(--cv-text); background: var(--cv-raised); }
+	.panel-toggle:hover, .panel-handle:hover { color: var(--cv-text); background: var(--cv-raised); }
 	.properties-content { flex: 1; min-height: 0; overflow: hidden; }
+	.floating-resize { position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; border: 0; background: var(--cv-panel); color: var(--cv-text-2); cursor: nwse-resize; touch-action: none; padding: 0; }
 </style>

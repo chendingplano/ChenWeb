@@ -7818,5 +7818,6 @@
 	"propertiespanel_direction_desc": "降序",
   "wpi_editor_detach_panel": "分离面板",
   "wpi_editor_dock_panel": "停靠面板",
+  "wpi_editor_resize_floating": "调整浮动面板大小（方向键）",
   "wpi_editor_move_panel": "移动面板（方向键）"
 }

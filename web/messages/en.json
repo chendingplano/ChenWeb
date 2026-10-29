@@ -7818,5 +7818,6 @@
 	"propertiespanel_direction_desc": "Descending",
   "wpi_editor_detach_panel": "Detach panel",
   "wpi_editor_dock_panel": "Dock panel",
+  "wpi_editor_resize_floating": "Resize floating panel (arrow keys)",
   "wpi_editor_move_panel": "Move panel (arrow keys)"
 }
