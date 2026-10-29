@@ -12,12 +12,35 @@
  let left = $state(0), top = $state(0), requestId = 0;
  let width = $state(410), height = $state(320);
  let drag: { id: number; x: number; y: number; width: number; height: number } | null = null;
+ let move: { id: number; x: number; y: number; left: number; top: number } | null = null;
  let drafts = $state<Record<string, string>>({});
  const selected = $derived(fields.filter((field): field is JsonObject => !!field && typeof field === 'object' && !Array.isArray(field) && typeof field.column === 'string'));
  const allColumns = $derived([...columns, ...selected.map(field => String(field.column)).filter(column => !columns.some(original => (drafts[original] ?? original) === column))]);
  function resizeTo(w: number, h: number) {
   width = Math.min(Math.max(280, w), Math.max(280, window.innerWidth - left - 4));
   height = Math.min(Math.max(160, h), Math.max(160, window.innerHeight - top - 4));
+ }
+ function moveTo(x: number, y: number) {
+  left = Math.max(0, Math.min(x, Math.max(0, window.innerWidth - width)));
+  top = Math.max(0, Math.min(y, Math.max(0, window.innerHeight - height)));
+ }
+ function startMove(event: PointerEvent) {
+  if (event.button !== 0) return;
+  move = { id: event.pointerId, x: event.clientX, y: event.clientY, left, top };
+  event.currentTarget instanceof HTMLElement && event.currentTarget.setPointerCapture(event.pointerId);
+  event.preventDefault();
+ }
+ function moveDialog(event: PointerEvent) {
+  if (move?.id === event.pointerId) moveTo(move.left + event.clientX - move.x, move.top + event.clientY - move.y);
+ }
+ function moveKey(event: KeyboardEvent) {
+  const step = event.shiftKey ? 50 : 10;
+  if (event.key === 'ArrowRight') moveTo(left + step, top);
+  else if (event.key === 'ArrowLeft') moveTo(left - step, top);
+  else if (event.key === 'ArrowDown') moveTo(left, top + step);
+  else if (event.key === 'ArrowUp') moveTo(left, top - step);
+  else return;
+  event.preventDefault();
  }
  function startResize(event: PointerEvent) {
   if (event.button !== 0) return;
@@ -85,6 +108,7 @@
 <button type="button" class="picker" bind:this={trigger} disabled={!table} aria-haspopup="dialog" aria-expanded={open} onclick={toggle}>{m.propertiespanel_pick_fields()}</button>
 {#if open}
  <div use:portal bind:this={popup} class="popup" role="dialog" aria-label={m.propertiespanel_pick_fields()} style:left="{left}px" style:top="{top}px" style:width="{width}px" style:height="{height}px">
+  <button type="button" class="move-handle" aria-label={m.propertiespanel_move_fields()} title={m.propertiespanel_move_fields()} onpointerdown={startMove} onpointermove={moveDialog} onpointerup={(event) => { if (move?.id === event.pointerId) move = null; }} onpointercancel={() => move = null} onkeydown={moveKey}><span aria-hidden="true">⋮⋮</span><span>{m.propertiespanel_pick_fields()}</span></button>
   {#if loading}<div class="message" role="status">{m.wpi_panel_loading()}</div>
   {:else if error}<div class="message" role="alert">{error} <button type="button" onclick={load}>{m.propertiespanel_tables_retry()}</button></div>
   {:else}
@@ -108,6 +132,8 @@
  .picker { width:100%; text-align:left; padding:5px 8px; border:1px solid var(--cv-border); border-radius:4px; color:var(--cv-text); background:var(--cv-surface); cursor:pointer; }
  .picker:disabled { opacity:.5; cursor:not-allowed; }
  .popup { position:fixed; display:flex; flex-direction:column; box-sizing:border-box; max-width:calc(100vw - 8px); z-index:10000; color:var(--cv-text); background:var(--cv-panel); border:1px solid var(--cv-border); border-radius:5px; box-shadow:0 8px 24px var(--cv-shadow); font-size:12px; }
+ .move-handle { display:flex; align-items:center; gap:8px; width:100%; padding:7px 10px; border:0; border-bottom:1px solid var(--cv-divider); color:inherit; background:transparent; text-align:left; cursor:move; touch-action:none; }
+ .move-handle:focus-visible { outline:2px solid var(--cv-accent); outline-offset:-2px; }
  .grid { display:grid; grid-template-columns:55px minmax(0,1fr) minmax(0,1fr); gap:8px; align-items:center; padding:6px 10px; }
  .heading { border-bottom:1px solid var(--cv-divider); font-weight:600; }
  .rows { flex:1; min-height:0; overflow:auto; padding-bottom:14px; }

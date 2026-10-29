@@ -72,7 +72,7 @@ databases, then their schemas, then their tables in a cascading picker. Under th
 picker, the editor SHALL offer a field picker that lists the selected table's columns in
 catalog order. Selecting a column SHALL add a mapping with the column name as its default
 attribute; users SHALL be able to deselect columns and edit column and attribute names.
-The field dialog SHALL be resizable using a pointer and keyboard. Existing mappings
+The field dialog SHALL be movable and resizable using a pointer and keyboard. Existing mappings
 SHALL be preserved until the user changes them.
 
 #### Scenario: Select a configured database table
