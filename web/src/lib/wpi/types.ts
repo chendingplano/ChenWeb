@@ -34,6 +34,7 @@ export type Text = string | Record<string, string>;
 export type ActionInstance = {
 	action: string;
 	table?: string;
+	result?: string;
 	fields?: { column: string; attribute: string }[];
 	args?: JsonObject;
 	page?: string;

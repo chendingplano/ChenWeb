@@ -84,6 +84,11 @@ SHALL be preserved until the user changes them.
 - **THEN** the editor sends its current source to the read-only preview endpoint and displays the returned records
 - **AND** if display columns are absent, the editor displays the selected field attributes as columns
 
+#### Scenario: Table and fields without an action
+- **WHEN** an editor configures a list with a table and fields but leaves action and result unset
+- **THEN** the editor defaults them to `load` and `list` and previews the records
+- **AND** an explicitly chosen action is preserved
+
 #### Scenario: Preview restrictions
 - **WHEN** a non-administrator or an action other than a list load requests a live preview
 - **THEN** the request is rejected and no data action runs

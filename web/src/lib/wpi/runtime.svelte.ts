@@ -3,6 +3,7 @@
 // from panels.ts; this class keeps the state in $state and talks to the API.
 import { getContext, setContext } from 'svelte';
 import { previewList, runAction, WpiError } from './api';
+import { previewLoadSource } from './list-request';
 import { canonical } from './dirty';
 import { isAction, mergeInstance, staticInput } from './entries';
 import { planOpen, removePanel, sharingKey, showPanel, type Bindings, type PaneModel, type PanelModel } from './panels';
@@ -236,7 +237,8 @@ export class AppRuntime {
 	// Runs a list's source load instance in the context of its panel.
 	async queryList(panelId: string, ref: ActionRef, args?: JsonObject, signal?: AbortSignal, source?: ActionInstance): Promise<JsonObject[]> {
 		const resolved = resolveArgs(args, { input_doc: this.panels[panelId]?.doc });
-		if (this.editorPreview && source?.action === 'load') return previewList(source, resolved, signal);
+		const previewSource = this.editorPreview ? previewLoadSource(source) : null;
+		if (previewSource) return previewList(previewSource, resolved, signal);
 		const res = await runAction(ref, resolved, undefined, fetch, signal);
 		return (res.result ?? []) as JsonObject[];
 	}

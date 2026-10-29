@@ -4,6 +4,7 @@
 // §3.2.1, §3.5).
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
+import { withListSourceDefaults } from './element-attributes';
 
 // Pages are format 0.2, and flow-layouter is the only layouter.
 const PAGE_SCHEMA_VERSION = '0.2';
@@ -17,7 +18,9 @@ export function isElementNode(node: Node): boolean {
 // Other nodes have no WPI form yet, so their data is shown as it is.
 export function nodeJson(node: Node): JsonObject {
 	if (!isElementNode(node)) return node.data as JsonObject;
-	return { element: String(node.data.element ?? ''), ...((node.data.attrs as JsonObject | undefined) ?? {}) };
+	const element = String(node.data.element ?? '');
+	const attrs = (node.data.attrs as JsonObject | undefined) ?? {};
+	return { element, ...(element === 'list' ? withListSourceDefaults(attrs, undefined) : attrs) };
 }
 
 // The node's data after its JSON was edited, the inverse of nodeJson. An element

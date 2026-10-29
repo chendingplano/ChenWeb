@@ -6,12 +6,17 @@ export function hasListSource(source: { action?: string; table?: unknown } | und
  return typeof source.table === 'string' && source.table.trim().length > 0;
 }
 
-type ListSource = { action?: string; table?: unknown; fields?: { column?: string; attribute?: string }[] };
+type ListSource = { action?: string; result?: string; table?: unknown; fields?: { column?: string; attribute?: string }[] };
 type PreviewColumn = { field: string; label: string; width?: string };
+
+export function previewLoadSource<T extends ListSource>(source: T | undefined): (T & { action: 'load'; result: string }) | null {
+ if (!source || (source.action && source.action !== 'load')) return null;
+ return { ...source, action: 'load', result: source.result || 'list' };
+}
 
 export function listQueryAvailability(source: ListSource | undefined, pageId: string, preview = false): 'unconfigured' | 'unsaved' | 'fields' | 'ready' {
  if (!hasListSource(source)) return 'unconfigured';
- if (preview && source?.action === 'load') return source.fields?.length ? 'ready' : 'fields';
+ if (preview && previewLoadSource(source)) return source?.fields?.length ? 'ready' : 'fields';
  return /^[a-z0-9][a-z0-9-]{0,127}$/.test(pageId) ? 'ready' : 'unsaved';
 }
 

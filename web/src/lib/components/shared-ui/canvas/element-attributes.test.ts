@@ -51,3 +51,9 @@ test('source property edits retain other settings and can initialize a source', 
 	assert.deepEqual(withSourceProperty({}, null, 'action', 'load'), { source: { action: 'load' } });
 	assert.deepEqual(withSourceProperty({ source: { limit: 25, action: 'load' } }, undefined, 'limit', undefined), { source: { action: 'load' } });
 });
+
+test('list source defaults are persisted without replacing explicit choices', async () => {
+ const { withListSourceDefaults } = await import('./element-attributes');
+ assert.deepEqual(withListSourceDefaults({ source: { table: 'kb.people' } }, null), { source: { table: 'kb.people', action: 'load', result: 'list' } });
+ assert.deepEqual(withListSourceDefaults({ source: { table: 'kb.people', action: 'query', result: 'list' } }, null), { source: { table: 'kb.people', action: 'query', result: 'list' } });
+});

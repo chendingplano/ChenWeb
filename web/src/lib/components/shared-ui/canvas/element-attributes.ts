@@ -35,3 +35,10 @@ export function withSourceProperty(attrs: JsonObject, fallback: Json | undefined
 	else source[key] = value;
 	return { ...attrs, source };
 }
+
+// A list bound to a table loads a list by default; explicit settings win.
+export function withListSourceDefaults(attrs: JsonObject, fallback: Json | undefined): JsonObject {
+ const current = attrs.source ?? fallback;
+ if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.table !== 'string' || !current.table) return attrs;
+ return { ...attrs, source: { ...current, action: current.action || 'load', result: current.result || 'list' } };
+}

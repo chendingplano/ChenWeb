@@ -74,3 +74,8 @@ test('JSON editing accepts objects and reports invalid syntax or non-objects', a
 	assert.throws(() => parseJsonObject('[]'));
 	assert.throws(() => parseJsonObject('null'));
 });
+
+test('a table-backed list serializes its default load and list settings', () => {
+ const node = element('list', 'list', 0, 0, { source: { table: 'kb.people', fields: [{ column: 'id', attribute: 'id' }] } });
+ assert.deepEqual(nodeJson(node), { element: 'list', source: { table: 'kb.people', fields: [{ column: 'id', attribute: 'id' }], action: 'load', result: 'list' } });
+});

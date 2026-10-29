@@ -34,3 +34,11 @@ test('editor preview uses selected fields for columns and can load an unnamed pa
  expect(previewColumns([], source)).toEqual([{ field: 'user_name', label: 'User name' }, { field: 'email', label: 'Email' }]);
  expect(previewColumns([{field:'email',label:'Contact'}], source)).toEqual([{field:'email',label:'Contact'}]);
 });
+
+test('a table and fields are enough to preview a list when action and result are unset', async () => {
+ const { listQueryAvailability, previewLoadSource } = await import('./list-request');
+ const source = { table: 'miner.kb.people', fields: [{ column: 'id', attribute: 'id' }] };
+ expect(listQueryAvailability(source, '', true)).toBe('ready');
+ expect(previewLoadSource(source)).toEqual({ ...source, action: 'load', result: 'list' });
+ expect(previewLoadSource({ ...source, action: 'query' })).toBeNull();
+});
