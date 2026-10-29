@@ -37,6 +37,7 @@
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
+	import { blankPage, centeredPageViewport, isInsidePage } from './canvas/page-placement';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
 	import {
 		alignNodes,
@@ -149,8 +150,7 @@
 	const DEFAULT_PREVIEW_SIZE = { width: 1000, height: 650 };
 	let previewSize = $state({ ...DEFAULT_PREVIEW_SIZE });
 	function centerPreview() {
-		const zoom = Math.max(0.1, Math.min(1, (canvasWidth - 80) / previewSize.width, (canvasHeight - 80) / previewSize.height));
-		viewport = { x: (canvasWidth - previewSize.width * zoom) / 2, y: (canvasHeight - previewSize.height * zoom) / 2, zoom };
+		viewport = centeredPageViewport(previewSize, { width: canvasWidth, height: canvasHeight });
 	}
 	// Size of the canvas area, for placing created nodes in the middle of the view.
 	let canvasWidth = $state(0);
@@ -296,9 +296,9 @@
 	}
 	function addTab(page?: JsonObject) {
 		captureTab();
-		const empty: PageSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...DEFAULT_PREVIEW_SIZE } };
+		const empty: PageSnapshot = { nodes: [], edges: [], page: blankPage(), previewSize: { ...DEFAULT_PREVIEW_SIZE } };
 		const id = nextTabId++;
-		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.canvas_01_untitled_flow()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.wpi_unnamed()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
 		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false };
 		tabs = [...tabs, tab];
 		switchTab(id);
@@ -416,7 +416,7 @@
 		activeFlow = flow;
 		savedName = flow.flow_name;
 		configMode = null;
-		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? null;
+		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? blankPage();
 		previewSize = flow.flow_data?.wpi_preview_size ?? { ...DEFAULT_PREVIEW_SIZE };
 		if (loadedPage) centerPreview();
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
@@ -511,13 +511,15 @@
 
 		// The node's top-left corner goes where it was dropped: screen → flow coordinates.
 		const zoom = viewport.zoom || 1;
-		const position = {
-			x: snapToGridValue((event.clientX - bounds.left - viewport.x) / zoom),
-			y: snapToGridValue((event.clientY - bounds.top - viewport.y) / zoom)
-		};
+		const point = { x: (event.clientX - bounds.left - viewport.x) / zoom, y: (event.clientY - bounds.top - viewport.y) / zoom };
+		const position = { x: snapToGridValue(point.x), y: snapToGridValue(point.y) };
 
 		const cls = nodeType.id.startsWith(ELEMENT_CLASS_PREFIX) ? nodeType.id.slice(ELEMENT_CLASS_PREFIX.length) : null;
 		const type = cls ? 'wpi-element' : nodeType.id;
+		if (type === 'wpi-element' && (!loadedPage || !isInsidePage(point, previewSize))) {
+			toast(m.wpi_drop_element_inside_page());
+			return;
+		}
 		const id = `${type}-${Date.now()}`;
 		takeSnapshot();
 		// The new node becomes the selection, so its resize grips show without a click.
@@ -648,10 +650,12 @@
 
 	// ── New empty flow ───────────────────────────────────────────────────────
 	async function createNewEmpty() {
-		loadedPage = null;
+		loadedPage = blankPage();
 		configMode = null;
 		previewSize = { ...DEFAULT_PREVIEW_SIZE };
-		const emptySnap: PageSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...previewSize } };
+		centerPreview();
+		canvasRevision++;
+		const emptySnap: PageSnapshot = { nodes: [], edges: [], page: loadedPage, previewSize: { ...previewSize } };
 		lastSavedSnapshot = emptySnap;
 		nodes = [];
 		edges = [];
@@ -666,7 +670,7 @@
 			});
 			activeFlow = res.flow;
 		savedName = res.flow.flow_name;
-			lastSavedSnapshot = { nodes: [], edges: [], page: null, previewSize: { ...previewSize } };
+			lastSavedSnapshot = { nodes: [], edges: [], page: loadedPage, previewSize: { ...previewSize } };
 		} catch {
 			toast(m.canvas_01_could_not_create_flow_on());
 			activeFlow = {
@@ -899,6 +903,7 @@
 							<rect x="0" y="0" width={previewSize.width} height={previewSize.height} fill="var(--cv-canvas)" stroke="var(--cv-border)" stroke-width="2" vector-effect="non-scaling-stroke" />
 							<rect x={pageOverview.viewport.x} y={pageOverview.viewport.y} width={pageOverview.viewport.width} height={pageOverview.viewport.height} fill="none" stroke="#818cf8" stroke-width="2" vector-effect="non-scaling-stroke" />
 						</svg>
+						<button type="button" class="nodrag nopan" style="display:block; width:100%; padding:4px; color:var(--cv-text); background:var(--cv-surface); border:0; cursor:pointer;" onclick={centerPreview}>{m.wpi_restore_viewport()}</button>
 					</Panel>
 				{:else}
 					<MiniMap style="background:var(--cv-raised);" />
