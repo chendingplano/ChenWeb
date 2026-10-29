@@ -209,14 +209,14 @@
               {:else if name === 'source' && node.data.element === 'list'}
                 {@const sourceValue = attrsOf(node).source ?? attr.default_value}
                 {@const source = sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue) ? sourceValue : {}}
-                <div class="source-properties">
-                  <label for="source-limit">{m.propertiespanel_source_limit()}</label>
-                  <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
                   {@const tableValue = String(source.table ?? '')}
                   {@const activeDatabase = selectedDatabase ?? (tableValue ? database : '')}
                   {@const activeSchema = selectedSchema ?? schemaForTable(tableValue, tables)}
                   {@const schemas = catalogSchemas(tables)}
                   {@const names = catalogTables(tables, activeSchema)}
+                <div class="source-properties">
+                  <label for="source-limit">{m.propertiespanel_source_limit()}</label>
+                  <input id="source-limit" class="column-input" type="number" min="1" step="1" value={source.limit ?? ''} oninput={(e) => { const value = (e.target as HTMLInputElement).value; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'limit', value === '' ? undefined : Number(value))); }} />
                   <label for="source-database">{m.propertiespanel_source_database()}</label>
                   <select id="source-database" class="column-input" value={activeDatabase} onchange={(e) => { selectedDatabase = (e.target as HTMLSelectElement).value; selectedSchema = ''; update('attrs', withSourceProperty(attrsOf(node), attr.default_value, 'table', undefined)); }}>
                     <option value="">{m.propertiespanel_select_database()}</option>
