@@ -445,6 +445,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/wpi/apps/:appId", wpiHandler.GetApp)
 	apiGroup.PUT("/wpi/descriptors/:kind/:descriptorId", wpiHandler.PutDescriptor)
 	apiGroup.POST("/wpi/actions/run", wpiHandler.RunAction)
+	apiGroup.POST("/wpi/actions/preview-list", wpiHandler.PreviewList)
 	apiGroup.GET("/wpi/pages", wpiHandler.SearchPages)
 	apiGroup.GET("/wpi/pages/:pageId", wpiHandler.GetPage)
 	apiGroup.GET("/wpi/classes/element", wpiHandler.ListElementClasses)

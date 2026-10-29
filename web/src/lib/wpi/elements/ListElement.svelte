@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { actionRef } from '../entries';
-	import { listQueryAvailability, requestWithTimeout, RequestTimeoutError } from '../list-request';
+	import { listQueryAvailability, previewColumns, requestWithTimeout, RequestTimeoutError } from '../list-request';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { getRuntime } from '../runtime.svelte';
 	import type { Json, JsonObject } from '../types';
@@ -12,13 +12,13 @@
 
 	const rt = getRuntime();
 	const d = $derived(element.desc);
-	const columns = $derived(d.columns ?? []);
+	const columns = $derived(rt.editorPreview ? previewColumns(d.columns ?? [], d.source) : (d.columns ?? []));
 	const grid = $derived(
 		columns.map((c) => (c.width === 'elastic' || !c.width ? 'minmax(0, 1fr)' : c.width === 'auto' ? 'auto' : c.width)).join(' ')
 	);
 
 	let records = $state<JsonObject[]>([]);
-	let status = $state<'unconfigured' | 'unsaved' | 'loading' | 'ready' | 'error' | 'timeout'>('unconfigured');
+	let status = $state<'unconfigured' | 'unsaved' | 'fields' | 'loading' | 'ready' | 'error' | 'timeout'>('unconfigured');
 	let failure = $state('');
 	const pageSize = 20;
 	let page = $state(1);
@@ -28,7 +28,7 @@
 	const visibleRecords = $derived(paginated ? records.slice((currentPage - 1) * pageSize, currentPage * pageSize) : records);
 
 	async function query(signal: AbortSignal) {
-		const availability = listQueryAvailability(d.source, element.pageId);
+		const availability = listQueryAvailability(d.source, element.pageId, rt.editorPreview);
 		if (availability !== 'ready') {
 			records = [];
 			status = availability;
@@ -36,7 +36,7 @@
 		}
 		status = 'loading';
 		try {
-			const result = await requestWithTimeout((requestSignal) => rt.queryList(panelId, actionRef(element, 'source'), d.source?.args, requestSignal), 20_000, signal);
+			const result = await requestWithTimeout((requestSignal) => rt.queryList(panelId, actionRef(element, 'source'), d.source?.args, requestSignal, d.source), 20_000, signal);
 			if (signal.aborted) return;
 			records = result;
 			page = 1;
@@ -77,6 +77,8 @@
 	</div>
 	{#if status === 'unconfigured'}
 		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_table_unconfigured()}</p>
+	{:else if status === 'fields'}
+		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_select_fields()}</p>
 	{:else if status === 'unsaved'}
 		<p class="text-muted-foreground px-2 py-2">{m.wpi_list_requires_saved_page()}</p>
 	{:else if status === 'timeout'}

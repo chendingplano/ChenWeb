@@ -2,9 +2,9 @@
 
 ## Purpose
 Server-side actions for WPI apps (`load`, `save`, and the `query` and `load-file` of
-capability `wpi-stored-sources`): only action instances written in stored pages run, the
-browser supplies argument values but never table or column names, values go to the database
-as parameters, and saves are validated on the server with per-attribute errors.
+capability `wpi-stored-sources`): normal execution runs action instances written in stored
+pages; an administrator may preview a validated, read-only list load while editing. Values
+go to the database as parameters, and saves are validated on the server with per-attribute errors.
 ## Requirements
 ### Requirement: Only stored actions run
 `POST /api/v1/wpi/actions/run` SHALL run only `load`, `save`, `query` and `load-file` action
@@ -80,8 +80,13 @@ SHALL be preserved until the user changes them.
 - **THEN** the picker stores `shared.public.people` and the action runs against `shared`
 
 #### Scenario: List preview on a page without an ID
-- **WHEN** a configured list is previewed on a page without a valid stored page ID
-- **THEN** the editor prompts the user to load a saved page and does not send an action request
+- **WHEN** an administrator previews a configured list load with selected fields on an unnamed page
+- **THEN** the editor sends its current source to the read-only preview endpoint and displays the returned records
+- **AND** if display columns are absent, the editor displays the selected field attributes as columns
+
+#### Scenario: Preview restrictions
+- **WHEN** a non-administrator or an action other than a list load requests a live preview
+- **THEN** the request is rejected and no data action runs
 
 #### Scenario: Unconfigured database
 - **WHEN** an action names a database outside `[wpi].databases_to_show`

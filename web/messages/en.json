@@ -7842,5 +7842,6 @@
 	"propertiespanel_column_for_field": "Column for {column}",
 	"propertiespanel_resize_fields": "Resize fields dialog",
 	"propertiespanel_move_fields": "Move fields dialog (arrow keys)",
-	"wpi_list_requires_saved_page": "Load a saved page to preview records."
+	"wpi_list_requires_saved_page": "Load a saved page to preview records.",
+	"wpi_list_select_fields": "Select at least one field to preview records."
 }

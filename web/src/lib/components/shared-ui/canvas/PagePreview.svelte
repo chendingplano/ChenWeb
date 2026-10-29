@@ -37,7 +37,7 @@
  const initial = $derived(descriptor as unknown as PageDescriptor);
  const setupPage = untrack(() => descriptor as unknown as PageDescriptor);
  const bundle: Bundle = { app: { descriptor_id: 'editor-preview', schema_version: '0.2', layout_template: 'single-pane', panes: { preview: { page: setupPage.descriptor_id } } }, pages: { [setupPage.descriptor_id]: setupPage }, elements: {}, actions: {}, warnings: [] };
- const rt = new AppRuntime(bundle);
+ const rt = new AppRuntime(bundle, true);
  setRuntime(rt);
  let classes = $state<Record<string, ClassRow>>({});
  let failures = $state<string[]>([]);

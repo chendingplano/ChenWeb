@@ -25,3 +25,12 @@ test('a configured list on a page without a valid ID cannot run a stored action'
  expect(listQueryAvailability({ action: 'load', table: 'kb.people' }, 'customers')).toBe('ready');
  expect(listQueryAvailability(undefined, '')).toBe('unconfigured');
 });
+
+test('editor preview uses selected fields for columns and can load an unnamed page', async () => {
+ const { listQueryAvailability, previewColumns } = await import('./list-request');
+ const source = { action: 'load', table: 'shared.kb.people', result: 'list', fields: [{ column: 'user_name', attribute: 'user_name' }, { column: 'email', attribute: 'email' }] };
+ expect(listQueryAvailability(source, '', true)).toBe('ready');
+ expect(listQueryAvailability({ action: 'load', table: 'kb.people' }, '', true)).toBe('fields');
+ expect(previewColumns([], source)).toEqual([{ field: 'user_name', label: 'User name' }, { field: 'email', label: 'Email' }]);
+ expect(previewColumns([{field:'email',label:'Contact'}], source)).toEqual([{field:'email',label:'Contact'}]);
+});

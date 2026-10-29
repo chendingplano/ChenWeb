@@ -1,5 +1,5 @@
 // Client for the WPI endpoints (server/api/wpi).
-import type { ActionRef, Bundle, Issue, Json, JsonObject, Text } from './types';
+import type { ActionInstance, ActionRef, Bundle, Issue, Json, JsonObject, Text } from './types';
 
 export class WpiError extends Error {
 	constructor(
@@ -53,6 +53,17 @@ export async function runAction(
 		throw new WpiError(String(body.error ?? res.statusText), res.status, [], fieldErrors);
 	}
 	return body as Record<string, Json>;
+}
+
+// The editor previews a validated, read-only list source without storing a page.
+export async function previewList(source: ActionInstance, args: JsonObject, signal?: AbortSignal): Promise<JsonObject[]> {
+ const res = await fetch('/api/v1/wpi/actions/preview-list', {
+  method: 'POST', credentials: 'same-origin', signal,
+  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source, args })
+ });
+ const body = await parse(res);
+ if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+ return (body.result ?? []) as JsonObject[];
 }
 
 // An instance attribute of an element class row (format 0.4). default_value

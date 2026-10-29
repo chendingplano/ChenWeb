@@ -1,0 +1,69 @@
+package wpi
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/labstack/echo/v4"
+)
+
+// PreviewList runs a validated, read-only load source from the editor without saving a page.
+func (h *Handler) PreviewList(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	if !isAdmin(user) {
+		return errorJSON(c, http.StatusForbidden, "Administrator access required")
+	}
+	start := time.Now()
+	raw, err := io.ReadAll(io.LimitReader(c.Request().Body, maxBodyBytes+1))
+	if err != nil || len(raw) > maxBodyBytes {
+		return errorJSON(c, http.StatusBadRequest, "Invalid request body")
+	}
+	var req struct {
+		Source map[string]any `json:"source"`
+		Args   map[string]any `json:"args"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&req); err != nil || req.Source == nil {
+		return errorJSON(c, http.StatusBadRequest, "Invalid source")
+	}
+	if str(req.Source["action"]) != "load" || str(req.Source["result"]) != "list" {
+		return errorJSON(c, http.StatusBadRequest, "Only list load sources can be previewed")
+	}
+	v := &validator{kind: KindPage}
+	pos := actionPos{val: req.Source, path: "/source", allowed: []string{"load"}, roots: []string{RootInputDoc}}
+	v.actionInstance(pos)
+	v.required(req.Source, "/source", actionAttrs["load"].required)
+	if len(v.issues) > 0 {
+		return errorJSON(c, http.StatusBadRequest, v.issues[0].Message)
+	}
+	body, err := json.Marshal(req.Source)
+	if err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Invalid source")
+	}
+	var act Action
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&act); err != nil {
+		return errorJSON(c, http.StatusBadRequest, "Invalid source")
+	}
+	act.Class = "load"
+	result, rows, err := h.run(c.Request().Context(), act, req.Source, runRequest{Args: req.Args}, user)
+	if err != nil {
+		handlerLog.Warn("WPI list preview failed", "user", actorName(user), "table", act.Table, "error", err)
+		var re *requestError
+		if errors.As(err, &re) {
+			return errorJSON(c, re.status, re.msg)
+		}
+		return errorJSON(c, http.StatusInternalServerError, "Unable to preview records")
+	}
+	handlerLog.Info("WPI list preview", "user", actorName(user), "table", act.Table, "rows", rows, "duration_ms", time.Since(start).Milliseconds())
+	return c.JSON(http.StatusOK, result)
+}

@@ -2,7 +2,7 @@
 // unsaved-changes prompt (design D8, D11). Panel bookkeeping decisions come
 // from panels.ts; this class keeps the state in $state and talks to the API.
 import { getContext, setContext } from 'svelte';
-import { runAction, WpiError } from './api';
+import { previewList, runAction, WpiError } from './api';
 import { canonical } from './dirty';
 import { isAction, mergeInstance, staticInput } from './entries';
 import { planOpen, removePanel, sharingKey, showPanel, type Bindings, type PaneModel, type PanelModel } from './panels';
@@ -56,7 +56,7 @@ export class AppRuntime {
 	prompt = $state<{ panelId: string; canSave: boolean; resolve: (c: Choice) => void } | null>(null);
 	#seq = 0;
 
-	constructor(bundle: Bundle) {
+	constructor(bundle: Bundle, readonly editorPreview = false) {
 		this.bundle = bundle;
 		for (const paneId of Object.keys(bundle.app.panes)) this.panes[paneId] = { panels: [], visible: null };
 	}
@@ -234,8 +234,10 @@ export class AppRuntime {
 	}
 
 	// Runs a list's source load instance in the context of its panel.
-	async queryList(panelId: string, ref: ActionRef, args?: JsonObject, signal?: AbortSignal): Promise<JsonObject[]> {
-		const res = await runAction(ref, resolveArgs(args, { input_doc: this.panels[panelId]?.doc }), undefined, fetch, signal);
+	async queryList(panelId: string, ref: ActionRef, args?: JsonObject, signal?: AbortSignal, source?: ActionInstance): Promise<JsonObject[]> {
+		const resolved = resolveArgs(args, { input_doc: this.panels[panelId]?.doc });
+		if (this.editorPreview && source?.action === 'load') return previewList(source, resolved, signal);
+		const res = await runAction(ref, resolved, undefined, fetch, signal);
 		return (res.result ?? []) as JsonObject[];
 	}
 
