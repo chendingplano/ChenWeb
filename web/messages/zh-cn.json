@@ -7838,5 +7838,7 @@
 	"propertiespanel_attribute_for_column": "{column} 的属性",
 	"propertiespanel_field_missing": "不在表中",
 	"propertiespanel_fields_timeout": "加载字段超过 20 秒，已超时。",
-	"propertiespanel_fields_unavailable": "无法加载字段。"
+	"propertiespanel_fields_unavailable": "无法加载字段。",
+	"propertiespanel_column_for_field": "{column} 的列名",
+	"propertiespanel_resize_fields": "调整字段对话框大小"
 }

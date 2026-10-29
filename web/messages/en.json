@@ -7838,5 +7838,7 @@
 	"propertiespanel_attribute_for_column": "Attribute for {column}",
 	"propertiespanel_field_missing": "not in table",
 	"propertiespanel_fields_timeout": "Loading fields timed out after 20 seconds.",
-	"propertiespanel_fields_unavailable": "Could not load fields."
+	"propertiespanel_fields_unavailable": "Could not load fields.",
+	"propertiespanel_column_for_field": "Column for {column}",
+	"propertiespanel_resize_fields": "Resize fields dialog"
 }
