@@ -73,7 +73,7 @@ func (h *Handler) RunAction(c echo.Context) error {
 		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
 	}
 	ctx := c.Request().Context()
-	act, node, err := h.resolveAction(ctx, req.Ref)
+	act, node, err := h.resolveAction(ctx, user, req.Ref)
 	var rows int
 	var result any
 	if err == nil {
@@ -108,7 +108,7 @@ func (f fieldErrors) Error() string { return "field rules failed" }
 
 // resolveAction finds the referenced action instance in its stored page,
 // checks it against its class row and returns it merged with the class.
-func (h *Handler) resolveAction(ctx context.Context, ref ActionRef) (Action, map[string]any, error) {
+func (h *Handler) resolveAction(ctx context.Context, user *ApiTypes.UserInfo, ref ActionRef) (Action, map[string]any, error) {
 	var act Action
 	if ref.Kind != string(KindPage) {
 		return act, nil, badRequest("ref.kind must be page")
@@ -127,6 +127,9 @@ func (h *Handler) resolveAction(ctx context.Context, ref ActionRef) (Action, map
 	d, ok := found[ref.ID]
 	if !ok {
 		return act, nil, &requestError{http.StatusNotFound, fmt.Sprintf("page %q does not exist", ref.ID)}
+	}
+	if !mayAccessPage(user, d.Body) {
+		return act, nil, &requestError{http.StatusForbidden, fmt.Sprintf("You may not use page %q", ref.ID)}
 	}
 	positions := actionPositions(d.Body)
 	i := slices.IndexFunc(positions, func(p actionPos) bool { return p.path == ref.Pointer })
@@ -347,6 +350,23 @@ func mayUse(user *ApiTypes.UserInfo, access []string) bool {
 		return true
 	}
 	return slices.ContainsFunc(user.Roles, func(r string) bool { return slices.Contains(access, r) })
+}
+
+// pageAccess returns a page body's access_controls; none means public.
+func pageAccess(body map[string]any) []string {
+	list, _ := body["access_controls"].([]any)
+	roles := make([]string, 0, len(list))
+	for _, r := range list {
+		if s, ok := r.(string); ok {
+			roles = append(roles, s)
+		}
+	}
+	return roles
+}
+
+// mayAccessPage applies a page's access_controls with the rule of mayUse.
+func mayAccessPage(user *ApiTypes.UserInfo, body map[string]any) bool {
+	return mayUse(user, pageAccess(body))
 }
 
 func (h *Handler) save(ctx context.Context, act Action, doc map[string]any) (any, int, error) {

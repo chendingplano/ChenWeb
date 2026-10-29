@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampPx, flowItemStyle, flowStyle, isResizable, pageStyle, paneStyle } from './layout';
+import { clampPx, flowItemStyle, flowStyle, isResizable, pageFrameStyle, pageStyle, paneStyle } from './layout';
 import type { PageDescriptor } from './types';
 
 test('flow defaults preserve content height and start alignment', () => {
@@ -56,10 +56,23 @@ test('only fixed-pixel panes are drag-resizable, within min/max', () => {
 	assert.equal(clampPx(250), 250);
 });
 
-test('page box: sizes and alignment in the pane', () => {
+test('page box: sizes, placement, scroll and colors', () => {
 	const page = (extra: Partial<PageDescriptor>): PageDescriptor => ({ descriptor_id: 'p', schema_version: '0.2', layouter: 'flow-layouter', elements: [], ...extra });
-	assert.equal(pageStyle(page({})), '');
-	assert.equal(pageStyle(page({ max_width: '640px', page_alignment: 'center' })), 'max-width: 640px; margin-left: auto; margin-right: auto');
-	assert.equal(pageStyle(page({ width: '50%', page_alignment: 'right' })), 'width: 50%; margin-left: auto');
-	assert.equal(pageStyle(page({ width: 'auto', height: '400px', min_width: '320px', page_alignment: 'left' })), 'height: 400px; min-width: 320px');
+	const base = 'flex: 0 0 auto; align-self: flex-start';
+	assert.equal(pageStyle(page({ hori_align: 'left' })), `${base}; width: 100%; min-width: 50px; min-height: 50px`);
+	assert.equal(pageStyle(page({})).includes('align-self: center'), true);
+	assert.equal(
+		pageStyle(page({ hori_align: 'right', width: '50 %', height: '400', min_width: '320', max_height: '600px', bkgd_color: '#fff', frgd_color: 'auto' })),
+		'flex: 0 0 auto; align-self: flex-end; width: 50%; height: 400px; min-width: 320px; min-height: 50px; max-height: 600px; overflow: auto; background-color: #fff'
+	);
+	assert.match(pageStyle(page({ max_width: '640px' })), /max-width: 640px; overflow: auto$/);
+});
+
+test('page frame: margins default to 30px and place the page vertically', () => {
+	const page = (extra: Partial<PageDescriptor>): PageDescriptor => ({ descriptor_id: 'p', schema_version: '0.2', layouter: 'flow-layouter', elements: [], ...extra });
+	assert.equal(pageFrameStyle(page({})), 'display: flex; flex-direction: column; box-sizing: border-box; justify-content: flex-start; padding: 30px 30px 30px 30px');
+	assert.equal(
+		pageFrameStyle(page({ vert_align: 'bottom', top_margin: '1.5 rem', left_margin: '8' })),
+		'display: flex; flex-direction: column; box-sizing: border-box; justify-content: flex-end; padding: 1.5rem 30px 30px 8px'
+	);
 });

@@ -173,7 +173,7 @@ INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, sta
   "descriptor_id": "customer-admin-about", "schema_version": "0.2", "layouter": "flow-layouter",
   "page_name": {"en": "About", "zh-cn": "关于"},
   "description": {"en": "About the customer admin demo, from a stored file; read-only and centred", "zh-cn": "关于客户管理演示，来自存储的文件；只读并居中"},
-  "page_alignment": "center", "max_width": "640px", "binding_mode": "read-only",
+  "hori_align": "center", "max_width": "640px", "binding_mode": "read-only",
   "input": {"action": "load-file", "file_id": "wpi-demo-about"},
   "elements": [
     {"element": "text", "data_binding": "$input_doc.title", "width": "100%"},

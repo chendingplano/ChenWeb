@@ -3,6 +3,7 @@ package wpi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,6 +87,7 @@ func (h *Handler) GetApp(c echo.Context) error {
 		handlerLog.Warn("WPI app has invalid descriptors", "app", appID, "errors", len(res.Errors))
 		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"errors": res.Errors, "warnings": nonNil(res.Warnings)})
 	}
+	dropRestrictedPages(res.Bundle, user)
 	handlerLog.Info("WPI app bundle served", "app", appID, "user", actorName(user), "pages", len(res.Bundle.Pages), "warnings", len(res.Warnings))
 	return c.JSON(http.StatusOK, res.Bundle)
 }
@@ -438,6 +440,20 @@ func (h *Handler) GetPage(c echo.Context) error {
 	if !ok {
 		return errorJSON(c, http.StatusNotFound, "Page not found")
 	}
+	if !mayAccessPage(user, d.Body) {
+		return errorJSON(c, http.StatusForbidden, "You may not read this page")
+	}
 	handlerLog.Info("WPI page read", "page", id, "version", d.Version, "user", actorName(user))
 	return c.JSON(http.StatusOK, map[string]any{"version": d.Version, "page": d.Raw})
+}
+
+// dropRestrictedPages removes the pages whose access_controls exclude the user,
+// so opening one reports a missing page.
+func dropRestrictedPages(b *Bundle, user *ApiTypes.UserInfo) {
+	for id, raw := range b.Pages {
+		var body map[string]any
+		if json.Unmarshal(raw, &body) == nil && !mayAccessPage(user, body) {
+			delete(b.Pages, id)
+		}
+	}
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import ErrorBox from './ErrorBox.svelte';
-	import { pageStyle } from './layout';
+	import { pageFrameStyle, pageStyle } from './layout';
 	import { layouters } from './layouters';
 	import { getRuntime } from './runtime.svelte';
 
@@ -14,7 +14,7 @@
 </script>
 
 {#if panel && page}
-	<div class="h-full p-3" data-panel={panelId} data-page={page.descriptor_id}>
+	<div class="h-full" style={pageFrameStyle(page)} data-panel={panelId} data-page={page.descriptor_id}>
 		<div style={pageStyle(page)} data-page-box>
 			{#if panel.error}
 				<div class="mb-3">

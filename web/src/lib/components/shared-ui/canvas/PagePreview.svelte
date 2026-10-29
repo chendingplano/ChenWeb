@@ -5,7 +5,7 @@
  import { getElementClass } from '$lib/wpi/api';
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
  import { resolveEntry } from '$lib/wpi/entries';
- import { flowItemStyle, flowStyle, pageStyle } from '$lib/wpi/layout';
+ import { flowItemStyle, flowStyle, pageFrameStyle, pageStyle } from '$lib/wpi/layout';
  import ElementView from '$lib/wpi/elements/Element.svelte';
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
  import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor } from '$lib/wpi/types';
@@ -84,7 +84,7 @@
 <div class="preview select-text" style="width:{size.width}px; height:{size.height}px" data-wpi-page-preview>
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
-  <div class="h-full overflow-auto p-3" data-page={page.descriptor_id}>
+  <div class="h-full overflow-auto" style={pageFrameStyle(page)} data-page={page.descriptor_id}>
    <div style={pageStyle(page)} data-page-box>
     <div class="flex flex-wrap select-text" style={flowStyle(page)} data-flow-layout>
      {#each entries as item, i (item.node.id)}

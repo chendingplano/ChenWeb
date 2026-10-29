@@ -16,12 +16,19 @@ var (
 	tablePattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$`)
 	sizePattern   = regexp.MustCompile(`^(auto|elastic|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
 	// A page's size is set, not computed by a layouter, so it cannot be elastic.
-	pageSizePattern = regexp.MustCompile(`^(auto|[0-9]+(\.[0-9]+)?(px|rem|em|%))$`)
-	flowGapPattern  = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(px|rem)$`)
-	localePattern   = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
+	// A page length (design: interpreter-page §4): a number with an optional
+	// unit (px when omitted), spaces allowed before the unit; width and height
+	// also accept auto.
+	pageLengthPattern = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?)\s*(px|rem|em|%)?$`)
+	colorPattern      = regexp.MustCompile(`^(auto|#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(rgb|rgba|hsl|hsla)\([0-9.,%\s/-]+\)|[a-zA-Z]{3,30})$`)
+	flowGapPattern    = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(px|rem)$`)
+	localePattern     = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
 )
 
 var elementSizeAttrs = []string{"width", "height", "min_width", "max_width"}
+
+// pageSizeAttrs are the page's lengths; only width and height accept auto.
+var pageSizeAttrs = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "left_margin", "right_margin", "top_margin", "bottom_margin"}
 
 var bindingModes = []string{"read-only", "read-write"}
 
@@ -295,7 +302,10 @@ func (v *validator) app(b map[string]any) {
 
 func (v *validator) page(b map[string]any) {
 	v.keys(b, "", []string{"descriptor_id", "schema_version", "layouter", "elements"}, "input", "save_action", "refresh",
-		"page_name", "description", "page_alignment", "width", "height", "min_width", "max_width", "binding_mode", "layouter_config")
+		"page_name", "description", "binding_mode", "layouter_config", "access_controls", "keywords", "page_tags",
+		"page_policy", "page_style", "hori_align", "vert_align", "bkgd_color", "frgd_color",
+		"width", "height", "min_width", "min_height", "max_width", "max_height",
+		"left_margin", "right_margin", "top_margin", "bottom_margin")
 	v.oneOf(b, "layouter", "", layouters)
 	if config, present := b["layouter_config"]; present {
 		if m, ok := v.object(config, "/layouter_config"); ok {
@@ -308,10 +318,22 @@ func (v *validator) page(b map[string]any) {
 		}
 	}
 	v.text(b, "page_name", "")
+	v.textLength(b, "page_name", 100)
 	v.text(b, "description", "")
-	v.oneOf(b, "page_alignment", "", []string{"left", "center", "right"})
-	for _, k := range elementSizeAttrs {
-		v.matching(b, k, "", pageSizePattern)
+	v.textLength(b, "description", 1000)
+	v.stringList(b, "access_controls", 0)
+	v.stringList(b, "keywords", 200)
+	v.stringList(b, "page_tags", 200)
+	// page_policy and page_style are reserved: accepted and ignored.
+	v.str(b, "page_policy", "")
+	v.str(b, "page_style", "")
+	v.oneOf(b, "hori_align", "", []string{"left", "center", "right"})
+	v.oneOf(b, "vert_align", "", []string{"top", "center", "bottom"})
+	for _, k := range []string{"bkgd_color", "frgd_color"} {
+		v.matching(b, k, "", colorPattern)
+	}
+	for _, k := range pageSizeAttrs {
+		v.pageLength(b, k, k == "width" || k == "height")
 	}
 	v.oneOf(b, "binding_mode", "", bindingModes)
 	if r, ok := b["refresh"]; ok {
@@ -693,6 +715,63 @@ func (v *validator) text(obj map[string]any, key, path string) {
 		}
 	default:
 		v.errf(p, "must be a non-empty string or an object of texts by language")
+	}
+}
+
+// textLength limits a text, or each language of one, to max characters.
+func (v *validator) textLength(obj map[string]any, key string, max int) {
+	var texts []string
+	switch t := obj[key].(type) {
+	case string:
+		texts = []string{t}
+	case map[string]any:
+		for _, lang := range slices.Sorted(maps.Keys(t)) {
+			if s, ok := t[lang].(string); ok {
+				texts = append(texts, s)
+			}
+		}
+	}
+	for _, s := range texts {
+		if n := len([]rune(s)); n > max {
+			v.errf("/"+key, "is %d characters; the limit is %d", n, max)
+			return
+		}
+	}
+}
+
+// stringList checks an optional array of non-empty strings; max 0 means no limit.
+func (v *validator) stringList(obj map[string]any, key string, max int) {
+	if _, present := obj[key]; !present || obj[key] == nil {
+		return
+	}
+	list, ok := v.array(obj[key], "/"+key, false)
+	if !ok {
+		return
+	}
+	if max > 0 && len(list) > max {
+		v.errf("/"+key, "has %d items; the limit is %d", len(list), max)
+	}
+	for i, item := range list {
+		if s, ok := item.(string); !ok || s == "" {
+			v.errf("/"+key+"/"+strconv.Itoa(i), "must be a non-empty string")
+		}
+	}
+}
+
+// pageLength checks a page length: a non-negative number with an optional unit,
+// and for % a value within [0, 100].
+func (v *validator) pageLength(obj map[string]any, key string, allowAuto bool) {
+	s, ok := v.str(obj, key, "")
+	if !ok || (allowAuto && s == "auto") {
+		return
+	}
+	m := pageLengthPattern.FindStringSubmatch(s)
+	if m == nil {
+		v.errf("/"+key, "%q must be a non-negative number with an optional unit (px, rem, em, %%)%s", s, map[bool]string{true: " or auto"}[allowAuto])
+		return
+	}
+	if n, _ := strconv.ParseFloat(m[1], 64); m[3] == "%" && n > 100 {
+		v.errf("/"+key, "%q must be within 0%% and 100%%", s)
 	}
 }
 

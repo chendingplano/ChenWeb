@@ -105,6 +105,21 @@ export type FlowLayouterConfig = {
 };
 
 export type PageDescriptor = SizeAttrs & {
+	min_height?: string;
+	max_height?: string;
+	left_margin?: string;
+	right_margin?: string;
+	top_margin?: string;
+	bottom_margin?: string;
+	hori_align?: 'left' | 'center' | 'right';
+	vert_align?: 'top' | 'center' | 'bottom';
+	bkgd_color?: string;
+	frgd_color?: string;
+	access_controls?: string[];
+	keywords?: string[];
+	page_tags?: string[];
+	page_policy?: string;
+	page_style?: string;
 	descriptor_id: string;
 	schema_version: string;
 	layouter: string;
@@ -115,7 +130,6 @@ export type PageDescriptor = SizeAttrs & {
 	input?: Input;
 	save_action?: ActionInstance;
 	refresh?: { on_show?: boolean };
-	page_alignment?: 'left' | 'center' | 'right';
 	binding_mode?: 'read-only' | 'read-write';
 };
 

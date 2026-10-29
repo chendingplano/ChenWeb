@@ -31,12 +31,26 @@ The system SHALL store pages in `kb.frontend_pages`, one row per version, identi
 
 ### Requirement: Page attributes
 A page descriptor SHALL require `descriptor_id`, `schema_version`, `layouter` and `elements`,
-and MAY set `page_name`, `description`, `input`, `save_action`, `refresh`,
-`page_alignment`, `width`, `height`, `min_width`, `max_width` and `binding_mode`. The
-validator SHALL check: `page_name` and `description` are text attributes (a non-empty string,
-or non-empty strings keyed by language code including `en`); `page_alignment` is `left`,
-`center` or `right`; the four sizes are `auto` or a length in `px`, `rem`, `em` or `%`;
-`binding_mode` is `read-only` or `read-write`. Any other attribute SHALL be an error.
+and MAY set `page_name`, `description`, `access_controls`, `keywords`, `page_tags`,
+`page_policy`, `page_style`, `input`, `save_action`, `refresh`, `binding_mode`,
+`layouter_config`, `hori_align`, `vert_align`, `bkgd_color`, `frgd_color`, the sizes `width`,
+`height`, `min_width`, `min_height`, `max_width` and `max_height`, and the margins
+`left_margin`, `right_margin`, `top_margin` and `bottom_margin`. The validator SHALL check:
+
+- `page_name` (at most 100 characters) and `description` (at most 1000) are text attributes
+  (a non-empty string, or non-empty strings keyed by language code including `en`);
+- `access_controls`, `keywords` and `page_tags` are arrays of non-empty strings; `keywords`
+  and `page_tags` hold at most 200 items;
+- `page_policy` and `page_style` are strings and are otherwise ignored;
+- `hori_align` is `left`, `center` or `right`; `vert_align` is `top`, `center` or `bottom`;
+- a size or margin is a non-negative number with an optional unit `px`, `rem`, `em` or `%`
+  (`px` when omitted; spaces may precede the unit), a `%` value is within 0 to 100, and
+  `width` and `height` also accept `auto`;
+- `bkgd_color` and `frgd_color` are `auto` or a CSS color;
+- `binding_mode` is `read-only` or `read-write`.
+
+The page's status is the `status` column of `kb.frontend_pages`; a `status` attribute, the
+former `page_alignment` and any other attribute SHALL be an error.
 
 #### Scenario: Named and described page
 - **WHEN** an admin PUTs a page with `"page_name": {"en": "Customers", "zh-cn": "客户"}` and `"description": "All customers"`
@@ -47,19 +61,44 @@ or non-empty strings keyed by language code including `en`); `page_alignment` is
 - **THEN** writing the page fails with an error at `/width`
 
 #### Scenario: Unknown alignment
-- **WHEN** a page sets `"page_alignment": "justify"`
+- **WHEN** a page sets `"hori_align": "justify"`
+- **THEN** writing the page fails with an error at `/hori_align`
+
+#### Scenario: Former attribute name
+- **WHEN** a page sets `"page_alignment": "center"`
 - **THEN** writing the page fails with an error at `/page_alignment`
 
-### Requirement: Page size and alignment
-The interpreter SHALL draw a page inside its pane with the page's `width`, `height`,
-`min_width` and `max_width`. Without `width` the page SHALL fill the pane's width; without
-`height` it SHALL be as tall as its content. When the page is narrower than the pane,
-`page_alignment` `center` SHALL centre it and `right` SHALL align it to the right; `left` is
-the default.
+#### Scenario: Length without a unit
+- **WHEN** a page sets `"left_margin": "30"` and `"width": "50 %"`
+- **THEN** the page is stored and the margin is 30px
+
+### Requirement: Page access
+A page whose `access_controls` is absent or empty SHALL be public to every logged-in user.
+Otherwise only a user holding one of the listed roles (an admin holds `admin`) SHALL read the
+page, receive it in an app bundle, or run an action written in it.
+
+#### Scenario: Restricted page
+- **WHEN** a page sets `"access_controls": ["admin"]` and a user without that role loads an app that opens it
+- **THEN** the app bundle omits the page and reading or running it is refused with 403
+
+### Requirement: Page box
+The interpreter SHALL draw a page in a frame whose padding is the page's margins (each
+`30px` by default). The page box SHALL use `width`, `height`, `min_width` and `min_height`
+(each `50px` by default), `max_width` and `max_height`. Percentages SHALL resolve against the
+pane's content area excluding the margins. Without `width` the page SHALL fill the frame's
+width; without `height` it SHALL be as tall as its content. When `max_width` or `max_height`
+is set and the content is larger, the page SHALL scroll. When the page is narrower than the
+frame, `hori_align` (default `center`) SHALL place it; when it is shorter, `vert_align`
+(default `top`) SHALL. `bkgd_color` and `frgd_color` set to `auto` SHALL inherit the
+application theme, so the page follows light and dark mode.
 
 #### Scenario: Centred form
-- **WHEN** a page sets `"max_width": "640px"` and `"page_alignment": "center"` in a pane 1200px wide
-- **THEN** the page is 640px wide with equal space on both sides
+- **WHEN** a page sets `"max_width": "640px"` in a pane 1200px wide with default margins
+- **THEN** the page is 640px wide, centred in the space between the margins
+
+#### Scenario: Long content under a maximum height
+- **WHEN** a page sets `"max_height": "300px"` and its content is 500px tall
+- **THEN** the page is 300px tall with a vertical scroll bar
 
 ### Requirement: Page-wide binding mode
 A page's `binding_mode` SHALL be the default for every element on it whose class defines

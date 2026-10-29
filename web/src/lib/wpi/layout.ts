@@ -71,17 +71,40 @@ export function clampPx(value: number, min?: string, max?: string): number {
 	return Math.min(Math.max(value, lo), hi);
 }
 
-// The page's box inside its pane (devdoc 2026102601 §3.2.1): its sizes as
-// given, and auto margins that place it when it is narrower than the pane.
-// Without a width it fills the pane, so alignment only shows with a width or
-// max_width.
+// A page length as CSS: "30" and "30 px" are 30px (design: interpreter-page §4).
+export function cssLength(value: string | undefined): string | undefined {
+	return value?.trim().replace(/^([0-9.]+)\s*$/, '$1px').replace(/\s+/g, '');
+}
+
+const justify = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
+const alignSelf = { left: 'flex-start', center: 'center', right: 'flex-end' };
+
+// The page's frame in its pane: the pane edges to the page edges are the four
+// margins, and the page is placed vertically inside it. Percentages in the
+// page box resolve against the frame's content area, which excludes the margins.
+export function pageFrameStyle(page: PageDescriptor): string {
+	const margin = (v: string | undefined) => cssLength(v) ?? '30px';
+	return [
+		'display: flex',
+		'flex-direction: column',
+		'box-sizing: border-box',
+		`justify-content: ${justify[page.vert_align ?? 'top']}`,
+		`padding: ${margin(page.top_margin)} ${margin(page.right_margin)} ${margin(page.bottom_margin)} ${margin(page.left_margin)}`
+	].join('; ');
+}
+
+// The page's box: its sizes, horizontal placement and colors. Without a width
+// it fills the frame, so placement shows with a width or max_width. A max size
+// that the content exceeds makes the box scroll.
 export function pageStyle(page: PageDescriptor): string {
-	const css: string[] = [];
-	if (isFixed(page.width)) css.push(`width: ${page.width}`);
-	if (isFixed(page.height)) css.push(`height: ${page.height}`);
-	if (page.min_width) css.push(`min-width: ${page.min_width}`);
-	if (page.max_width) css.push(`max-width: ${page.max_width}`);
-	if (page.page_alignment === 'center') css.push('margin-left: auto', 'margin-right: auto');
-	if (page.page_alignment === 'right') css.push('margin-left: auto');
+	const css = [`flex: 0 0 auto`, `align-self: ${alignSelf[page.hori_align ?? 'center']}`];
+	css.push(isFixed(page.width) ? `width: ${cssLength(page.width)}` : 'width: 100%');
+	if (isFixed(page.height)) css.push(`height: ${cssLength(page.height)}`);
+	css.push(`min-width: ${cssLength(page.min_width) ?? '50px'}`, `min-height: ${cssLength(page.min_height) ?? '50px'}`);
+	if (page.max_width) css.push(`max-width: ${cssLength(page.max_width)}`);
+	if (page.max_height) css.push(`max-height: ${cssLength(page.max_height)}`);
+	if (page.max_width || page.max_height) css.push('overflow: auto');
+	if (page.bkgd_color && page.bkgd_color !== 'auto') css.push(`background-color: ${page.bkgd_color}`);
+	if (page.frgd_color && page.frgd_color !== 'auto') css.push(`color: ${page.frgd_color}`);
 	return css.join('; ');
 }

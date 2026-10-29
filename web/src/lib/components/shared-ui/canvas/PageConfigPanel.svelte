@@ -3,7 +3,7 @@
  import type { JsonObject } from '$lib/wpi/types';
  import { valueText, withAttribute } from './element-attributes';
  let { page, mode, width, onUpdate }: { page: JsonObject; mode: 'page' | 'layouter'; width: number; onUpdate: (page: JsonObject) => void } = $props();
- const pageFields = ['descriptor_id', 'schema_version', 'page_name', 'description', 'width', 'height', 'min_width', 'max_width', 'page_alignment', 'binding_mode', 'input', 'save_action', 'refresh'];
+ const pageFields = ['descriptor_id', 'schema_version', 'page_name', 'description', 'access_controls', 'keywords', 'page_tags', 'page_policy', 'page_style', 'width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'hori_align', 'vert_align', 'left_margin', 'right_margin', 'top_margin', 'bottom_margin', 'bkgd_color', 'frgd_color', 'binding_mode', 'input', 'save_action', 'refresh'];
  const layoutFields = ['column_gap', 'row_gap', 'horizontal_alignment', 'vertical_alignment', 'rows_alignment'];
  const config = $derived((page.layouter_config && typeof page.layouter_config === 'object' && !Array.isArray(page.layouter_config) ? page.layouter_config : {}) as JsonObject);
  const fields = $derived(mode === 'page' ? [...new Set([...pageFields, ...Object.keys(page).filter(k => !['elements', 'layouter', 'layouter_config'].includes(k))])] : [...new Set([...layoutFields, ...Object.keys(config)])]);

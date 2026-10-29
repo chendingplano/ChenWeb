@@ -291,3 +291,20 @@ func TestGetPage(t *testing.T) {
 		}
 	})
 }
+
+func TestMayAccessPage(t *testing.T) {
+	user := &ApiTypes.UserInfo{Roles: []string{"reviewer"}}
+	for _, c := range []struct {
+		body map[string]any
+		want bool
+	}{
+		{map[string]any{}, true},
+		{map[string]any{"access_controls": []any{}}, true},
+		{map[string]any{"access_controls": []any{"reviewer"}}, true},
+		{map[string]any{"access_controls": []any{"admin"}}, false},
+	} {
+		if got := mayAccessPage(user, c.body); got != c.want {
+			t.Errorf("mayAccessPage(%v) = %v", c.body, got)
+		}
+	}
+}
