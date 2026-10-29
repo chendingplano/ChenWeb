@@ -143,6 +143,14 @@ use the page's stored data sources and preserve element instance attributes when
 properties change. When flow storage supports persistence, the flow data carries the
 loaded page alongside its editable elements.
 
+### Requirement: Interactive page preview
+The editor toolbar SHALL offer Preview for the selected tab, switching the canvas to
+an interactive WPI runtime and providing an Edit control to return. Preview SHALL
+require a saved page with no unsaved editor changes, and load its latest saved
+version and referenced descriptors. It SHALL use the single-pane layout with a
+`main` pane; incompatible page references and other validation failures SHALL be
+reported to the author. Switching tabs SHALL return to editing.
+
 ### Requirement: Page and layouter controls
 When a page is loaded, the editor SHALL show a movable control frame at the upper
 right of the canvas. Its page configuration and layouter buttons SHALL display the

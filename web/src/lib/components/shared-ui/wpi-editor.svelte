@@ -17,7 +17,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, savePage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 
@@ -28,11 +28,12 @@
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import PagePreview from './canvas/PagePreview.svelte';
+	import WpiApp from '$lib/wpi/WpiApp.svelte';
 	import PageControl from './canvas/PageControl.svelte';
 	import CenterPage from './canvas/CenterPage.svelte';
 	import PageConfigPanel from './canvas/PageConfigPanel.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
-	import type { JsonObject } from '$lib/wpi/types';
+	import type { Bundle, JsonObject } from '$lib/wpi/types';
 	import { isElementNode, nodeData, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
@@ -143,6 +144,24 @@
 	let editClassId = $state<string | null>(null);
 	// View JSON shows the selected node's descriptor JSON, else the page's.
 	let showJson = $state(false);
+	let previewBundle = $state<Bundle | null>(null);
+	let previewLoading = $state(false);
+	let previewRequest = 0;
+	async function togglePreview() {
+		if (previewBundle) { previewBundle = null; return; }
+		if (previewLoading) return;
+		if (isDirty || !loadedPage?.descriptor_id) { toast(m.wpi_preview_save_first()); return; }
+		const tab = activeTabId;
+		const request = ++previewRequest;
+		previewLoading = true;
+		try {
+			const bundle = await fetchPagePreview(String(loadedPage.descriptor_id));
+			if (tab === activeTabId && request === previewRequest) previewBundle = bundle;
+		} catch (error) {
+			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : String(error);
+			toast(m.wpi_preview_failed({ detail }));
+		} finally { previewLoading = false; }
+	}
 	let showLoadPage = $state(false);
 	let loadedPage = $state<JsonObject | null>(null);
 	let configMode = $state<'page' | 'layouter' | null>(null);
@@ -282,6 +301,8 @@
 	}
 	function switchTab(id: number) {
 		if (id === activeTabId) return;
+		previewBundle = null;
+		previewRequest++;
 		captureTab();
 		const tab = tabs.find((item) => item.id === id);
 		if (!tab) return;
@@ -715,7 +736,7 @@
 
 	// ── Keyboard shortcuts ───────────────────────────────────────────────────
 	function onKeydown(e: KeyboardEvent) {
-		if (!active) return;
+		if (!active || previewBundle) return;
 		// The element class forms have their own fields, and View JSON covers the canvas; undo
 		// and save belong to the canvas.
 		if (showCreateElement || editClassId !== null || showJson || showLoadPage) return;
@@ -756,12 +777,12 @@
 	<!-- 3-panel body -->
 	<div bind:this={body} class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
-		<NodePalette
+		{#if !previewBundle}<NodePalette
 			nodeTypes={[...nodeTypes, ...elementClassTypes]}
 			extraCategories={WPI_PALETTE_CATEGORIES}
 			{darkMode}
 			onDragStart={onPaletteDragStart}
-		/>
+		/>{/if}
 
 		<!-- Canvas column: tool bar + canvas -->
 		<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -773,6 +794,8 @@
 			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
 			onLoadPage={() => (showLoadPage = true)}
 			onViewJson={() => (showJson = true)}
+			onPreview={togglePreview}
+			previewing={!!previewBundle}
 			onUndo={undo}
 			onRedo={redo}
 			onAlign={alignSelected}
@@ -791,6 +814,9 @@
 			{/each}
 			<button type="button" class="add-tab" aria-label={m.wpi_add_canvas_tab()} title={m.wpi_add_canvas_tab()} onclick={() => addTab()}>+</button>
 		</div>
+		{#if previewBundle}
+			<div class="min-h-0 flex-1 overflow-auto bg-background text-foreground"><WpiApp bundle={previewBundle} /></div>
+		{:else}
 		<div
 			class="min-h-0 flex-1 overflow-hidden"
 			bind:clientWidth={canvasWidth}
@@ -979,8 +1005,10 @@
 			</SvelteFlow>
 			{/key}
 		</div>
+		{/if}
 		</div>
 
+		{#if !previewBundle}
 		<!-- Drag to resize the properties panel; it straddles the panel's left border. -->
 		{#if !detached}
 		<div
@@ -1024,6 +1052,7 @@
 					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') resizeFloating(propsWidth - d, panelHeight); else if (event.key === 'ArrowRight') resizeFloating(propsWidth + d, panelHeight); else if (event.key === 'ArrowUp') resizeFloating(propsWidth, panelHeight - d); else if (event.key === 'ArrowDown') resizeFloating(propsWidth, panelHeight + d); else return; event.preventDefault(); }}></button>
 			{/if}
 		</div>
+		{/if}
 	</div>
 
 	<!-- Toast -->

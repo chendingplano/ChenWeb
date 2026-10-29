@@ -198,7 +198,9 @@ func TestBuildBundleStoredRows(t *testing.T) {
 		`"source": {"action": "load", "table": "people", "result": "list", "fields": [{"column": "id", "attribute": "id"}, {"column": "name", "attribute": "name"}]}`,
 		`"source": {"action": "query", "sql_stmt_id": "people-by-name", "result": "list"}`, 1)
 	fx[KindPage]["form-page"] = strings.Replace(fx[KindPage]["form-page"], `"input": {}`, `"input": {"action": "load-file", "file_id": "new-person"}`, 1)
-	columns := func(context.Context, string) (map[string]bool, error) { return map[string]bool{"id": true, "name": true}, nil }
+	columns := func(context.Context, string) (map[string]bool, error) {
+		return map[string]bool{"id": true, "name": true}, nil
+	}
 	cases := []struct {
 		name string
 		rows map[string][]string
@@ -267,4 +269,16 @@ func TestBuildBundleWarnsAboutUnsupportedAttribute(t *testing.T) {
 		t.Fatalf("errors %+v", res.Errors)
 	}
 	expectIssue(t, res.Warnings, `/label_hori_align code module "button" does not support attribute "label_hori_align"`)
+}
+
+func TestBuildPagePreviewBundle(t *testing.T) {
+	fx := fixture()
+	fx[KindPage]["simple"] = `{"descriptor_id":"simple","schema_version":"0.2","layouter":"flow-layouter","elements":[]}`
+	result, err := BuildPagePreviewBundle(context.Background(), "simple", fixtureLoader(t, fx), func(context.Context, string) (map[string]bool, error) { return nil, nil }, registeredIn(nil))
+	if err != nil || len(result.Errors) != 0 || result.Bundle == nil {
+		t.Fatalf("preview bundle: %+v, %v", result, err)
+	}
+	if _, ok := result.Bundle.Pages["simple"]; !ok {
+		t.Fatal("selected page missing")
+	}
 }

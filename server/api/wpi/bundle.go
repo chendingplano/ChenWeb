@@ -136,6 +136,29 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 	return res, nil
 }
 
+// BuildPagePreviewBundle builds a normal single-pane app around a stored page.
+func BuildPagePreviewBundle(ctx context.Context, pageID string, load Loader, columns Columns, registered Registered) (*BundleResult, error) {
+	pages, err := load(ctx, KindPage, []string{pageID})
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := pages[pageID]; !ok {
+		return nil, ErrNotFound
+	}
+	body := map[string]any{"descriptor_id": "editor-preview", "schema_version": "0.2", "layout_template": "single-pane", "panes": map[string]any{"main": map[string]any{"page": pageID}}}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	previewLoader := func(ctx context.Context, kind Kind, ids []string) (map[string]Descriptor, error) {
+		if kind == KindApp {
+			return map[string]Descriptor{"editor-preview": {Kind: KindApp, ID: "editor-preview", Raw: raw, Body: body}}, nil
+		}
+		return load(ctx, kind, ids)
+	}
+	return BuildBundle(ctx, "editor-preview", previewLoader, columns, registered)
+}
+
 // loadClasses loads every active element and action class. Classes are few by
 // design, so all of them are loaded, one query per kind, and every instance can
 // be merged as soon as its page arrives.

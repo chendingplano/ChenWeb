@@ -90,6 +90,32 @@ func (h *Handler) GetApp(c echo.Context) error {
 	return c.JSON(http.StatusOK, res.Bundle)
 }
 
+// GetPagePreview serves a runtime bundle rooted at a saved page.
+func (h *Handler) GetPagePreview(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	id := c.Param("pageId")
+	if !idPattern.MatchString(id) {
+		return errorJSON(c, http.StatusNotFound, "Page not found")
+	}
+	st := store{h.DB}
+	res, err := BuildPagePreviewBundle(c.Request().Context(), id, st.latest, h.columns, st.registered)
+	if errors.Is(err, ErrNotFound) {
+		return errorJSON(c, http.StatusNotFound, "Page not found")
+	}
+	if err != nil {
+		handlerLog.Error("WPI page preview failed", "page", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to load page preview")
+	}
+	if len(res.Errors) > 0 {
+		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"errors": res.Errors, "warnings": nonNil(res.Warnings)})
+	}
+	handlerLog.Info("WPI page preview served", "page", id, "user", actorName(user))
+	return c.JSON(http.StatusOK, res.Bundle)
+}
+
 func nonNil(issues []Issue) []Issue {
 	if issues == nil {
 		return []Issue{}

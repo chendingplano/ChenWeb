@@ -26,6 +26,7 @@
   import AlignEndHorizontalIcon   from '@lucide/svelte/icons/align-end-horizontal';
   import DistributeHorizontalIcon from '@lucide/svelte/icons/align-horizontal-distribute-center';
   import DistributeVerticalIcon   from '@lucide/svelte/icons/align-vertical-distribute-center';
+  import EyeIcon from '@lucide/svelte/icons/eye';
   import SaveIcon                 from '@lucide/svelte/icons/save';
   import BookmarkPlusIcon         from '@lucide/svelte/icons/bookmark-plus';
 
@@ -37,6 +38,8 @@
     onCreate,
     onLoadPage,
     onViewJson,
+    onPreview,
+    previewing,
     onUndo,
     onRedo,
     onAlign,
@@ -51,6 +54,8 @@
     onCreate:         (kind: WpiNodeKind) => void;
     onLoadPage:       () => void;
     onViewJson:       () => void;
+    onPreview:        () => void;
+    previewing:       boolean;
     onUndo:           () => void;
     onRedo:           () => void;
     onAlign:          (mode: AlignMode) => void;
@@ -80,6 +85,12 @@
   style="height:40px; background:var(--cv-raised); border-bottom:1px solid var(--cv-divider);"
   role="toolbar" aria-label={m.wpi_toolbar_label()}>
 
+  <button onclick={onPreview} class="toolbar-btn" aria-pressed={previewing} title={previewing ? m.wpi_preview_edit() : m.wpi_preview_action()}>
+    <EyeIcon class="w-4 h-4" />
+    <span style="font-size:11px; margin-left:4px;">{previewing ? m.wpi_preview_edit() : m.wpi_preview_action()}</span>
+  </button>
+
+  {#if !previewing}
   <!-- Create nodes -->
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
@@ -155,6 +166,7 @@
   <button onclick={onSaveAsTemplate} title={m.flowtoolbar_save_as_template()} aria-label={m.flowtoolbar_save_as_template()} class="toolbar-btn">
     <BookmarkPlusIcon class="w-4 h-4" />
   </button>
+  {/if}
 </div>
 
 <style>

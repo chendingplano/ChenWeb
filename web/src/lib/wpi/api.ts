@@ -29,6 +29,13 @@ export async function fetchApp(appId: string, fetchFn: typeof fetch = fetch): Pr
 	return body as unknown as Bundle;
 }
 
+export async function fetchPagePreview(pageId: string): Promise<Bundle> {
+ const res = await fetch(`/api/v1/wpi/pages/${encodeURIComponent(pageId)}/preview`, { credentials: 'same-origin' });
+ const body = await parse(res);
+ if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+ return body as unknown as Bundle;
+}
+
 export type SaveResult = { key_attribute: string; key_value: Json };
 
 // Runs a load or save instance named by its place in a stored page. Throws
