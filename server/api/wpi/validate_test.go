@@ -303,7 +303,7 @@ func TestValidateElementInstances(t *testing.T) {
 		{`{"element": "input", "label": {"en": "Email", "EN": "x"}, "data_binding": "$input_doc.email"}`, `"EN" is not a language code`},
 		{`{"element": "input", "label": "", "data_binding": "$input_doc.email"}`, "must be a non-empty string or an object"},
 		{`{"element": "text", "text": "Customers"}`, ""},
-		{`{"element": "text", "text": 5}`, "must be a string"},
+		{`{"element": "text", "text": 5}`, "must be a non-empty string or an object"},
 		{`{"element": "input", "label": "x", "data_binding": "$input_doc.__proto__.x"}`, "is not allowed"},
 		{`{"element": "input", "label": "x", "data_binding": "$record.x"}`, "must be a $input_doc path"},
 		{`{"element": "input", "label": "x", "data_binding": "$input_doc.x", "binding_mode": "write"}`, `"write" is not supported`},

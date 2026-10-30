@@ -1,0 +1,202 @@
+[
+  {
+    "name": "text",
+    "value": {
+      "en": "Hello",
+      "zh-cn": "你好"
+    },
+    "valid": true
+  },
+  {
+    "name": "text",
+    "value": "",
+    "valid": true
+  },
+  {
+    "name": "help_tip",
+    "value": "",
+    "valid": true
+  },
+  {
+    "name": "icon",
+    "value": "",
+    "valid": true
+  },
+  {
+    "name": "color",
+    "value": "rgba(12,34,56,0.5)",
+    "valid": true
+  },
+  {
+    "name": "font_family",
+    "value": "\"Noto Sans\", sans-serif",
+    "valid": true
+  },
+  {
+    "name": "font_weight",
+    "value": 500,
+    "valid": true
+  },
+  {
+    "name": "line_height",
+    "value": {},
+    "valid": false
+  },
+  {
+    "name": "text",
+    "value": {
+      "zh-cn": "缺少英文"
+    },
+    "valid": false
+  },
+  {
+    "name": "text",
+    "value": null,
+    "valid": false
+  },
+  {
+    "name": "help_tip",
+    "value": null,
+    "valid": false
+  },
+  {
+    "name": "icon",
+    "value": "arbitrary-svg",
+    "valid": false
+  },
+  {
+    "name": "icon",
+    "value": null,
+    "valid": false
+  },
+  {
+    "name": "label_placement",
+    "value": "side",
+    "valid": false
+  },
+  {
+    "name": "label_horizontal_align",
+    "value": "left",
+    "valid": false
+  },
+  {
+    "name": "label_vertical_align",
+    "value": "start",
+    "valid": false
+  },
+  {
+    "name": "label_max_width",
+    "value": "0px",
+    "valid": false
+  },
+  {
+    "name": "label_horizontal_gap",
+    "value": "-1px",
+    "valid": false
+  },
+  {
+    "name": "icon_size",
+    "value": "0px",
+    "valid": false
+  },
+  {
+    "name": "icon_gap",
+    "value": "1rem",
+    "valid": false
+  },
+  {
+    "name": "icon_color",
+    "value": "var(--secret)",
+    "valid": false
+  },
+  {
+    "name": "font_family",
+    "value": "sans-serif; color:red",
+    "valid": false
+  },
+  {
+    "name": "font_family",
+    "value": "url(example)",
+    "valid": false
+  },
+  {
+    "name": "font_size",
+    "value": "0px",
+    "valid": false
+  },
+  {
+    "name": "font_size",
+    "value": 14,
+    "valid": false
+  },
+  {
+    "name": "font_weight",
+    "value": "500",
+    "valid": false
+  },
+  {
+    "name": "font_weight",
+    "value": 550,
+    "valid": false
+  },
+  {
+    "name": "font_style",
+    "value": "slanted",
+    "valid": false
+  },
+  {
+    "name": "line_height",
+    "value": 0,
+    "valid": false
+  },
+  {
+    "name": "line_height",
+    "value": "1.5",
+    "valid": false
+  },
+  {
+    "name": "padding",
+    "value": "1px 2px 3px 4px 5px",
+    "valid": false
+  },
+  {
+    "name": "padding",
+    "value": "-1px",
+    "valid": false
+  },
+  {
+    "name": "text_align",
+    "value": "left",
+    "valid": false
+  },
+  {
+    "name": "white_space",
+    "value": "nowrap",
+    "valid": false
+  },
+  {
+    "name": "color",
+    "value": "notacolor",
+    "valid": false
+  },
+  {
+    "name": "color",
+    "value": "rgb(256,0,0)",
+    "valid": false
+  },
+  {
+    "name": "color",
+    "value": "rgba(0,0,0,1.1)",
+    "valid": false
+  },
+  {
+    "name": "background_color",
+    "value": "inherit",
+    "valid": false
+  },
+  {
+    "name": "color",
+    "value": "hsl(0,0%,0%)",
+    "valid": false
+  }
+]

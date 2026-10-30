@@ -67,7 +67,7 @@ func (a codeAttrs) defines(attr string) bool {
 // documented in KnowledgeStore doc-repo/code_modules). Every module also defines
 // the size attributes.
 var codeModules = map[string]codeAttrs{
-	"text":   {nil, []string{"text", "data_binding"}},
+	"text":   {nil, textAttributes},
 	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type", "placeholder", "help_text", "help_tip", "required", "max_length", "validation", "autocomplete", "label_placement", "label_horizontal_gap", "label_vertical_gap", "label_horizontal_align", "label_vertical_align", "label_max_width", "label_max_lines", "label_font_family", "label_font_size", "label_color", "label_font_weight", "label_font_style"}},
 	"select": {[]string{"label", "data_binding", "binding_mode", "options"}, nil},
 	"button": {[]string{"label", "on_click"}, nil},
@@ -894,12 +894,7 @@ func (v *validator) element(module string, all map[string]any, path string) {
 	}
 	switch module {
 	case "text":
-		if t, ok := e["text"]; ok {
-			if _, ok := t.(string); !ok {
-				v.errf(path+"/text", "must be a string")
-			}
-		}
-		v.binding(e, path)
+		v.textAttributes(e, path)
 	case "input", "select":
 		v.text(e, "label", path)
 		v.binding(e, path)

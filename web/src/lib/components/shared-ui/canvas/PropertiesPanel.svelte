@@ -8,6 +8,7 @@
   import { CHAT_AGENTS } from '$lib/wpi/chat-agents';
   import { valueText, withAttribute, withSourceFields, withSourceProperty, withListSourceDefaults, withSelectedTable } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
+  import TextProperties from './TextProperties.svelte';
   import TablePicker from '../database-picker/TablePicker.svelte';
   import FieldPicker from '../database-picker/FieldPicker.svelte';
 
@@ -363,6 +364,8 @@
             <div style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">{String(node.data.pane ?? '')}</div>
           </div>
           <div style="font-size:10px; color:var(--cv-text-faint);">{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</div>
+        {:else if module === 'text'}
+          {#key node.id}<TextProperties attributes={elementClass.attributes} attrs={attrsOf(node)} pane={String(node.data.pane ?? '')} onChange={(attrs) => update('attrs', attrs)} />{/key}
         {:else}
           {#each orderedAttributes(elementClass.attributes) as [name, attr] (name)}
             {#if name === '__pane'}
