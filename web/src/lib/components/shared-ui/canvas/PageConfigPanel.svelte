@@ -10,11 +10,11 @@
  import { findPane, isLeaf } from '$lib/wpi/layout';
  import type { JsonObject, PaneSpec } from '$lib/wpi/types';
  import { valueText, withAttribute } from './element-attributes';
- import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig } from './pane-edit';
+ import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelConfig } from './pane-edit';
 
- let { page, mode, width, selectedPane, pageLayouters, onUpdate, onSelectPane, onSplit, onAdd, onDelete, onRename }: {
+ let { page, mode, width, selectedPane, pageLayouters, onUpdate, onLayouterChange, onSelectPane, onSplit, onAdd, onDelete, onRename }: {
   page: JsonObject; pageLayouters: JsonObject[]; mode: ConfigMode; width: number; selectedPane: string | null;
-  onUpdate: (page: JsonObject) => void; onSelectPane: (pane: string) => void;
+  onUpdate: (page: JsonObject) => void; onLayouterChange: (cls: JsonObject) => void; onSelectPane: (pane: string) => void;
   onSplit: (pane: string, split: 'rows' | 'columns') => void; onAdd: (pane: string) => void;
   onDelete: (pane: string) => void; onRename: (pane: string, to: string) => void;
  } = $props();
@@ -67,7 +67,7 @@
    <label for="wpi-page-layouter-id">{m.wpi_page_layouter_type()}</label>
    <select id="wpi-page-layouter-id" value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')} onchange={(event) => {
     const cls = pageLayouters.find((item) => item.descriptor_id === event.currentTarget.value);
-    if (cls) onUpdate(setPageLayouter(page, cls));
+    if (cls) onLayouterChange(cls);
    }}>
     {#if !pageLayouters.some((item) => item.descriptor_id === (page.page_layouter as JsonObject | undefined)?.layouter)}
      <option value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')}>{String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')}</option>

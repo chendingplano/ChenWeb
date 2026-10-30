@@ -24,9 +24,22 @@ function withRoot(page: JsonObject, root: PaneSpec): JsonObject {
 	return { ...page, page_layouter: { ...pl, root: root as unknown as JsonObject } };
 }
 
-// Change the class without losing the page's existing pane tree or panels.
-export function setPageLayouter(page: JsonObject, cls: JsonObject): JsonObject {
- return { ...page, page_layouter: { layouter: cls.descriptor_id, class: cls, root: rootOf(page) as unknown as JsonObject } };
+// Apply the selected class tree, retaining matching panels and moving displaced
+// elements to its first leaf so they remain visible and can be repositioned.
+export function setPageLayouter({ page, nodes }: Edit, cls: JsonObject): Edit {
+ const next: JsonObject = { ...page, page_layouter: { layouter: cls.descriptor_id, class: cls } };
+ const leaves = leafPanes(rootOf(next));
+ const panels = panelsOf(page);
+ const kept: JsonObject = {};
+ for (const id of leaves) if (panels[id]) kept[id] = panels[id];
+ if (!kept[leaves[0]]) {
+  const displaced = Object.keys(panels).find((id) => !leaves.includes(id));
+  if (displaced) kept[leaves[0]] = panels[displaced];
+ }
+ return {
+  page: { ...next, panels: kept },
+  nodes: nodes.map((n) => isElementNode(n) && !leaves.includes(nodePane(n)) ? { ...n, data: { ...n.data, pane: leaves[0] } } : n)
+ };
 }
 
 // The tree with pane id replaced by what fn returns for it.

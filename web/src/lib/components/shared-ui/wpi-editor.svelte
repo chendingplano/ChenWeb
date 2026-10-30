@@ -36,7 +36,7 @@
 	import type { Bundle, ClassRow, JsonObject, PageDescriptor } from '$lib/wpi/types';
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 	import { isElementNode, nodeData, nodeJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
-	import { addPane, deletePane, moveNode, nodesUnder, renamePane, splitPane, type Edit } from './canvas/pane-edit';
+	import { addPane, deletePane, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
@@ -1096,6 +1096,7 @@
 		{#if loadedPage && configMode}
 			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} {selectedPane} {pageLayouters}
 				onUpdate={(page) => { takeSnapshot(); loadedPage = page; }}
+				onLayouterChange={(cls) => { paneEdit((edit) => setPageLayouter(edit, cls)); selectedPane = null; }}
 				onSelectPane={(pane) => (selectedPane = pane)}
 				onSplit={paneActions.split} onAdd={paneActions.add} onDelete={paneActions.remove} onRename={paneActions.rename} />
 		{:else}

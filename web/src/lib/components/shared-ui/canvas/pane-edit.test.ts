@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
 import { addPane, deletePane, moveNode, nodesUnder, renamePane, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
-import { pageJson } from './wpi-json';
+import { nodePane, pageJson } from './wpi-json';
 
 const node = (id: string, pane: string, y = 0): Node => ({ id, type: 'wpi-element', position: { x: 0, y }, data: { label: id, element: 'text', attrs: { text: id }, pane } });
 
@@ -67,10 +67,20 @@ test('a panel config replaces the copy\'s; an empty one clears it', () => {
 	assert.ok((setPanelConfig(single, 'other', { row_gap: '1rem' }).panels as JsonObject).other, 'a panel is created for a leaf without one');
 });
 
-test('changing the page layouter preserves the current pane tree and panels', () => {
- const cls: JsonObject = { descriptor_id: 'other', root: { pane_id: 'new' } };
- const changed = setPageLayouter(single, cls);
- assert.deepEqual(changed.page_layouter, { layouter: 'other', class: cls, root: { pane_id: 'main' } });
- assert.deepEqual(changed.panels, single.panels);
+test('changing the page layouter applies its tree and moves displaced content to the first leaf', () => {
+ const cls: JsonObject = { descriptor_id: 'other', root: { pane_id: 'page', split: 'rows', children: [{ pane_id: 'top' }, { pane_id: 'bottom' }] } };
+ const changed = setPageLayouter({ page: single, nodes: [node('a', 'main')] }, cls);
+ assert.deepEqual(rootOf(changed.page), cls.root);
+ assert.equal((changed.page.page_layouter as JsonObject).class, cls);
+ assert.deepEqual(Object.keys(changed.page.panels as JsonObject), ['top']);
+ assert.deepEqual(changed.nodes.map(nodePane), ['top']);
  assert.deepEqual(rootOf(single), { pane_id: 'main' });
+});
+
+test('changing layouter retains matching panes and moves only displaced elements', () => {
+ const page: JsonObject = { ...single, page_layouter: { layouter: 'x', root: { pane_id: 'page', split: 'rows', children: [{ pane_id: 'left' }, { pane_id: 'right' }] } }, panels: { left: { elem_layouter: { layouter: 'flow-layouter' } }, right: { elem_layouter: { layouter: 'flow-layouter' } } } };
+ const cls: JsonObject = { descriptor_id: 'other', root: { pane_id: 'page', split: 'rows', children: [{ pane_id: 'left' }, { pane_id: 'bottom' }] } };
+ const result = setPageLayouter({ page, nodes: [node('a', 'left'), node('b', 'right')] }, cls);
+ assert.deepEqual(result.nodes.map(nodePane), ['left', 'left']);
+ assert.deepEqual(Object.keys(result.page.panels as JsonObject), ['left']);
 });

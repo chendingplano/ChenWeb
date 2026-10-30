@@ -125,12 +125,13 @@ than page descriptor dimensions, and SHALL be undoable. Saving SHALL store the p
 server's class copies and adopt the stored page the server returns.
 
 Under *Panes*, the page layouter selector SHALL list the latest active page layouter classes
-from `kb.wpi_descriptors`. Choosing a class SHALL update the page's class copy while preserving
-its effective pane tree and panels; the change SHALL be undoable.
+from `kb.wpi_descriptors`. Choosing a class SHALL apply its pane tree and update the page's class copy. Panels in matching
+leaf panes remain in place; elements displaced from other panes move to the first leaf. The
+change SHALL be undoable.
 
 #### Scenario: Change a page layouter
 - **WHEN** the author selects another active page layouter
-- **THEN** the page uses that class copy and retains its existing pane tree and content
+- **THEN** the page uses that class copy and pane tree, and displaced elements move to its first leaf
 
 #### Scenario: Edit a pane's width
 - **WHEN** the author selects pane `left` under *Panes* and sets its `width` to `300px`
