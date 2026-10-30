@@ -148,9 +148,9 @@
  .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); }
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
- .group + .group { border-top:1px solid var(--cv-divider); }
- .group summary { padding:10px 0; font-size:11px; font-weight:600; color:var(--cv-text); cursor:pointer; }
- .group summary:hover { color:var(--cv-text-2); }
+ .group + .group { margin-top:6px; }
+ .group summary { padding:10px 8px; margin-bottom:8px; border:1px solid var(--cv-border); border-radius:4px; background:var(--cv-surface); font-size:11px; font-weight:600; color:var(--cv-text); cursor:pointer; }
+ .group summary:hover { background:var(--cv-hover); }
  label, .label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
  textarea, input, select { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }
