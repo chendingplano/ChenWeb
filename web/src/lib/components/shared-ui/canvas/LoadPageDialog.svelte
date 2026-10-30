@@ -267,6 +267,9 @@
 		border-radius: 4px;
 		cursor: pointer;
 	}
+	.results button {
+		white-space: nowrap;
+	}
 	button:disabled {
 		opacity: 0.45;
 		cursor: default;
