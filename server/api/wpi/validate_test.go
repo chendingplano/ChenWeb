@@ -711,3 +711,19 @@ func TestSaveIncompletePage(t *testing.T) {
 	body = withCopies(t, testClasses(), "p", decode(t, pageWith(`{"element": "list", "presentation": "cards"}`)))
 	expectIssue(t, validatePageForSave("p", body), `"cards" is not supported`)
 }
+
+func TestInputExtendedAttributes(t *testing.T) {
+	for _, tc := range []struct{ attrs, want string }{
+		{`"input_type":"password", "label_placement":"right", "required":true`, ""},
+		{`"label_placement":"diagonal"`, "/label_placement"},
+		{`"label_horizontal_gap":"-1px"`, "/label_horizontal_gap"},
+		{`"required":"yes"`, "/required"},
+		{`"max_length":-1`, "/max_length"},
+	} {
+		t.Run(tc.attrs, func(t *testing.T) {
+			v := &validator{kind: KindElement, id: "input"}
+			v.element("input", decode(t, `{`+tc.attrs+`}`), "")
+			expectIssue(t, v.issues, tc.want)
+		})
+	}
+}

@@ -17,6 +17,10 @@ export function fieldErrorText(code: string): string {
 			return m.wpi_err_required();
 		case 'max_length':
 			return m.wpi_err_max_length();
+		case 'min_length': return m.wpi_input_min_length();
+		case 'min': return m.wpi_input_min();
+		case 'max': return m.wpi_input_max();
+		case 'step': return m.wpi_input_step();
 		case 'pattern':
 			return m.wpi_err_pattern();
 		case 'format':

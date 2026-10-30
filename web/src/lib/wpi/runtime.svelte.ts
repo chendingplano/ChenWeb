@@ -67,6 +67,15 @@ export class AppRuntime {
 	root = $state<string | null>(null);
 	prompt = $state<{ instanceId: string; canSave: boolean; resolve: (c: Choice) => void } | null>(null);
 	#seq = 0;
+	#validators = new Map<string, Map<string, (focus: boolean) => boolean>>();
+
+	registerInput(instanceId: string, id: string, validate: (focus: boolean) => boolean): () => void {
+		let fields = this.#validators.get(instanceId);
+		if (!fields) this.#validators.set(instanceId, fields = new Map());
+		fields.set(id, validate);
+		return () => { fields.delete(id); if (!fields.size) this.#validators.delete(instanceId); };
+	}
+
 
 	constructor(bundle: Bundle, readonly editorPreview = false) {
 		this.bundle = bundle;
@@ -229,15 +238,20 @@ export class AppRuntime {
 		const saveAction = this.bundle.pages[inst.pageId].save_action;
 		const actionRef = ref ?? (saveAction ? ({ kind: 'page', id: inst.pageId, pointer: '/save_action' } as const) : null);
 		if (!actionRef) return false;
+		let valid = true;
+		for (const check of this.#validators.get(id)?.values() ?? []) if (!check(valid)) valid = false;
+		if (!valid) return false;
 		inst.error = null;
+		const sent = $state.snapshot<unknown>(inst.doc) as JsonObject;
+		const sentSnapshot = canonical(sent);
 		try {
-			const res = await runAction(actionRef, {}, $state.snapshot<unknown>(inst.doc) as JsonObject);
+			const res = await runAction(actionRef, {}, sent);
 			setPath(inst.doc, [String(res.key_attribute)], res.key_value);
-			inst.snapshot = canonical(inst.doc);
+			inst.snapshot = sentSnapshot === canonical(inst.doc) ? canonical(inst.doc) : canonical(sent);
 			inst.fieldErrors = {};
 			return true;
 		} catch (err) {
-			if (err instanceof WpiError && err.fieldErrors) inst.fieldErrors = err.fieldErrors;
+			if (err instanceof WpiError && err.fieldErrors) { if (canonical(inst.doc) === sentSnapshot) inst.fieldErrors = err.fieldErrors; }
 			else inst.error = message(err);
 			return false;
 		}

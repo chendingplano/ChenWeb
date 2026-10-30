@@ -73,9 +73,14 @@ func (h *Handler) RunAction(c echo.Context) error {
 		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
 	}
 	ctx := c.Request().Context()
-	act, node, err := h.resolveAction(ctx, user, req.Ref)
+	act, node, page, err := h.resolveAction(ctx, user, req.Ref)
 	var rows int
 	var result any
+	if err == nil && act.Class == "save" {
+		if errs := checkPageInputs(page, req.InputDoc); len(errs) > 0 {
+			err = errs
+		}
+	}
 	if err == nil {
 		result, rows, err = h.run(ctx, act, node, req, user)
 	}
@@ -108,58 +113,58 @@ func (f fieldErrors) Error() string { return "field rules failed" }
 
 // resolveAction finds the referenced action instance in its stored page,
 // checks it against its class copy and returns it merged with the copy.
-func (h *Handler) resolveAction(ctx context.Context, user *ApiTypes.UserInfo, ref ActionRef) (Action, map[string]any, error) {
+func (h *Handler) resolveAction(ctx context.Context, user *ApiTypes.UserInfo, ref ActionRef) (Action, map[string]any, map[string]any, error) {
 	var act Action
 	if ref.Kind != string(KindPage) {
-		return act, nil, badRequest("ref.kind must be page")
+		return act, nil, nil, badRequest("ref.kind must be page")
 	}
 	if !idPattern.MatchString(ref.ID) {
-		return act, nil, badRequest("ref.id is not a valid descriptor ID")
+		return act, nil, nil, badRequest("ref.id is not a valid descriptor ID")
 	}
 	if ref.Pointer == "" {
-		return act, nil, badRequest("ref.pointer is required")
+		return act, nil, nil, badRequest("ref.pointer is required")
 	}
 	st := store{h.DB}
 	found, err := st.latest(ctx, KindPage, []string{ref.ID})
 	if err != nil {
-		return act, nil, err
+		return act, nil, nil, err
 	}
 	d, ok := found[ref.ID]
 	if !ok {
-		return act, nil, &requestError{http.StatusNotFound, fmt.Sprintf("page %q does not exist", ref.ID)}
+		return act, nil, nil, &requestError{http.StatusNotFound, fmt.Sprintf("page %q does not exist", ref.ID)}
 	}
 	if !mayAccessPage(user, d.Body) {
-		return act, nil, &requestError{http.StatusForbidden, fmt.Sprintf("You may not use page %q", ref.ID)}
+		return act, nil, nil, &requestError{http.StatusForbidden, fmt.Sprintf("You may not use page %q", ref.ID)}
 	}
 	positions := actionPositions(d.Body)
 	i := slices.IndexFunc(positions, func(p actionPos) bool { return p.path == ref.Pointer })
 	if i < 0 {
-		return act, nil, badRequest("pointer %q does not point at an action instance", ref.Pointer)
+		return act, nil, nil, badRequest("pointer %q does not point at an action instance", ref.Pointer)
 	}
 	pos := positions[i]
 	if pos.isStatic() {
-		return act, nil, badRequest("pointer %q points at static data, not an action instance", ref.Pointer)
+		return act, nil, nil, badRequest("pointer %q points at static data, not an action instance", ref.Pointer)
 	}
 	m, _ := pos.val.(map[string]any)
 	cls := str(m["action"])
 	if !slices.Contains(serverClasses, cls) {
-		return act, nil, badRequest("only %s actions run on the server, not %q", strings.Join(serverClasses, ", "), cls)
+		return act, nil, nil, badRequest("only %s actions run on the server, not %q", strings.Join(serverClasses, ", "), cls)
 	}
 	// The instance is checked and merged against the class copy it holds, not
 	// the stored class (devdoc 2026102601 §3.5.1).
 	v := &validator{kind: KindPage, id: ref.ID}
 	merged := v.actionInstance(pos)
 	if len(v.issues) > 0 {
-		return act, nil, badRequest("the action instance is invalid: %s", v.issues[0].Message)
+		return act, nil, nil, badRequest("the action instance is invalid: %s", v.issues[0].Message)
 	}
 	b, _ := json.Marshal(merged)
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	if err := dec.Decode(&act); err != nil {
-		return act, nil, err
+		return act, nil, nil, err
 	}
 	act.Class = cls
-	return act, merged, nil
+	return act, merged, d.Body, nil
 }
 
 // serverClasses are the action classes that run on the server.

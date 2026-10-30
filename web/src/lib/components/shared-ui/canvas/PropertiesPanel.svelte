@@ -63,6 +63,36 @@
   function attributeLabel(name: string): string {
     switch (name) {
       case 'label': return m.propertiespanel_attr_label();
+      case 'data_binding': return m.wpi_input_attr_data_binding();
+      case 'binding_mode': return m.wpi_input_attr_binding_mode();
+      case 'input_type': return m.wpi_input_attr_input_type();
+      case 'label_placement': return m.wpi_input_attr_label_placement();
+      case 'label_horizontal_gap': return m.wpi_input_attr_label_horizontal_gap();
+      case 'label_vertical_gap': return m.wpi_input_attr_label_vertical_gap();
+      case 'label_horizontal_align': return m.wpi_input_attr_label_horizontal_align();
+      case 'label_vertical_align': return m.wpi_input_attr_label_vertical_align();
+      case 'label_max_width': return m.wpi_input_attr_label_max_width();
+      case 'label_max_lines': return m.wpi_input_attr_label_max_lines();
+      case 'label_font_family': return m.wpi_input_attr_label_font_family();
+      case 'label_font_size': return m.wpi_input_attr_label_font_size();
+      case 'label_color': return m.wpi_input_attr_label_color();
+      case 'label_font_weight': return m.wpi_input_attr_label_font_weight();
+      case 'label_font_style': return m.wpi_input_attr_label_font_style();
+      case 'placeholder': return m.wpi_input_attr_placeholder();
+      case 'help_text': return m.wpi_input_attr_help_text();
+      case 'help_tip': return m.wpi_input_attr_help_tip();
+      case 'autocomplete': return m.wpi_input_attr_autocomplete();
+      case 'required': return m.wpi_input_attr_required();
+      case 'max_length': return m.wpi_input_attr_max_length();
+      case 'validation': return m.wpi_input_attr_validation();
+      case 'min_length': return m.wpi_input_attr_min_length();
+      case 'pattern': return m.wpi_input_attr_pattern();
+      case 'min': return m.wpi_input_attr_min();
+      case 'max': return m.wpi_input_attr_max();
+      case 'step': return m.wpi_input_attr_step();
+      case 'min_width': return m.wpi_input_attr_min_width();
+      case 'max_width': return m.wpi_input_attr_max_width();
+
       case 'width': return m.propertiespanel_attr_width();
       case 'height': return m.propertiespanel_attr_height();
       case 'label_hori_align': return m.propertiespanel_attr_horizontal_alignment();
@@ -82,7 +112,39 @@
     }
   }
 
+  const inputGroups: [string, string[]][] = [
+    ['general', ['label','data_binding','binding_mode','input_type']],
+    ['caption_layout', ['label_placement','label_horizontal_gap','label_vertical_gap','label_horizontal_align','label_vertical_align','label_max_width','label_max_lines']],
+    ['caption_appearance', ['label_font_family','label_font_size','label_color','label_font_weight','label_font_style']],
+    ['input_help', ['placeholder','help_text','help_tip','autocomplete']],
+    ['validation', ['required','max_length','validation']],
+    ['size', ['width','height','min_width','max_width']]
+  ];
+  function groupLabel(id: string): string {
+    switch (id) {
+      case 'general': return m.wpi_input_group_general();
+      case 'caption_layout': return m.wpi_input_group_caption_layout();
+      case 'caption_appearance': return m.wpi_input_group_caption_appearance();
+      case 'input_help': return m.wpi_input_group_input_help();
+      case 'validation': return m.wpi_input_group_validation();
+      case 'size': return m.wpi_input_group_size();
+      default: return m.wpi_input_group_other();
+    }
+  }
   function orderedAttributes(attributes: Record<string, ElementAttribute>): [string, ElementAttribute | null][] {
+    if (node?.data.element === 'input') {
+      const out: [string, ElementAttribute | null][] = [['__pane', null]];
+      const used = new Set<string>();
+      for (const [group, names] of inputGroups) {
+        const present = names.filter(name => name in attributes);
+        if (!present.length) continue;
+        out.push([`__group_${group}`, null]);
+        for (const name of present) { out.push([name, attributes[name]]); used.add(name); }
+      }
+      const other = Object.keys(attributes).filter(name => !used.has(name));
+      if (other.length) { out.push(['__group_other', null]); for (const name of other) out.push([name, attributes[name]]); }
+      return out;
+    }
     const order = ['label', 'width', 'height', 'label_hori_align', 'label_vert_align', '__pane', 'on_click'];
     const entries: [string, ElementAttribute | null][] = Object.entries(attributes);
     entries.push(['__pane', null]);
@@ -90,6 +152,33 @@
       const ai = order.indexOf(a), bi = order.indexOf(b);
       return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
     });
+  }
+
+  const inputChoices: Record<string, string[]> = {
+    input_type: ['text','password','email','number','tel','url','search'],
+    binding_mode: ['read-only','read-write'], label_placement: ['left','top','right','bottom'],
+    label_horizontal_align: ['left','center','right'], label_vertical_align: ['top','center','bottom'],
+    label_font_style: ['normal','italic','oblique']
+  };
+  function inputAttrVisible(n: FlowNode, name: string): boolean {
+    if (n.data.element !== 'input' || !elementClass) return true;
+    const attrs = attrsOf(n);
+    const get = (key: string) => attrs[key] ?? elementClass?.attributes[key]?.default_value;
+    const horizontal = ['left','right'].includes(String(get('label_placement') ?? 'left'));
+    if (name === 'label_horizontal_gap' || name === 'label_vertical_align') return horizontal;
+    if (name === 'label_vertical_gap') return !horizontal;
+    if (name === 'max_length') return get('input_type') !== 'number';
+    return true;
+  }
+  function resetAttribute(n: FlowNode, name: string) {
+    const attrs = { ...attrsOf(n) }; delete attrs[name]; update('attrs', attrs);
+  }
+  function setValidation(node: FlowNode, attr: ElementAttribute, key: string, raw: string) {
+    const attrs = attrsOf(node);
+    const initial = attrs.validation ?? attr.default_value;
+    const rules: JsonObject = initial && typeof initial === 'object' && !Array.isArray(initial) ? { ...initial } : {};
+    if (!raw) delete rules[key]; else rules[key] = key === 'pattern' ? raw : Number(raw);
+    update('attrs', { ...attrs, validation: rules });
   }
 
   function update(key: string, value: unknown) {
@@ -213,12 +302,17 @@
                 <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:3px;">{m.wpi_element_pane()}</div>
                 <div style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">{String(node.data.pane ?? '')}</div>
               </div>
-            {:else if attr}
+            {:else if name.startsWith('__group_')}
+              <h3 style="font-size:10px; font-weight:700; color:var(--cv-text); margin:12px 0 6px;">{groupLabel(name.slice(8))}</h3>
+            {:else if attr && inputAttrVisible(node, name)}
             <div style="margin-bottom:10px;">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
                 <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted);">
                   {attributeLabel(name)}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
                 </label>
+                {#if node.data.element === 'input' && attr.instance_modifiable !== false && name in attrsOf(node)}
+                  <button type="button" class="column-remove" onclick={() => resetAttribute(node, name)}>{m.wpi_input_reset()}</button>
+                {/if}
                 {#if name === 'columns' && node.data.element === 'list' && attr.instance_modifiable !== false}
                   <div style="display:flex; gap:3px;">
                     <button class="column-remove" type="button" onclick={() => (addingColumn = true)}>{m.propertiespanel_add_column()}</button>
@@ -238,6 +332,19 @@
                   style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); resize:none; field-sizing:content; box-sizing:border-box;"
                 ></textarea>
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.propertiespanel_fixed()}</div>
+              {:else if node.data.element === 'input' && inputChoices[name]}
+                <select id={`prop-attr-${name}`} class="column-input" value={String(attrsOf(node)[name] ?? attr.default_value ?? '')} onchange={(e) => update('attrs', withAttribute(attrsOf(node), name, e.currentTarget.value))}>
+                  {#each inputChoices[name] as choice}<option value={choice}>{choice}</option>{/each}
+                </select>
+              {:else if node.data.element === 'input' && name === 'required'}
+                <input id={`prop-attr-${name}`} type="checkbox" checked={Boolean(attrsOf(node)[name] ?? attr.default_value)} onchange={(e) => update('attrs', { ...attrsOf(node), required: e.currentTarget.checked })} />
+              {:else if node.data.element === 'input' && name === 'validation'}
+                {@const rulesValue = attrsOf(node).validation ?? attr.default_value}
+                {@const rules = rulesValue && typeof rulesValue === 'object' && !Array.isArray(rulesValue) ? rulesValue : {}}
+                {#each (String(attrsOf(node).input_type ?? elementClass.attributes.input_type?.default_value ?? 'text') === 'number' ? ['min','max','step'] : ['min_length','pattern']) as rule}
+                  <label for={`prop-rule-${rule}`} style="font-size:9px; display:block; margin-top:4px;">{attributeLabel(rule)}</label>
+                  <input id={`prop-rule-${rule}`} class="column-input" type={rule === 'pattern' ? 'text' : 'number'} value={String(rules[rule] ?? '')} oninput={(e) => setValidation(node, attr, rule, e.currentTarget.value)} />
+                {/each}
               {:else if name === 'on_click'}
                 {@const actionValue = attrsOf(node)[name] ?? attr.default_value}
                 {@const action = actionValue && typeof actionValue === 'object' && !Array.isArray(actionValue) ? actionValue : {}}

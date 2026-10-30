@@ -68,7 +68,7 @@ func (a codeAttrs) defines(attr string) bool {
 // the size attributes.
 var codeModules = map[string]codeAttrs{
 	"text":   {nil, []string{"text", "data_binding"}},
-	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type"}},
+	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type", "placeholder", "help_text", "help_tip", "required", "max_length", "validation", "autocomplete", "label_placement", "label_horizontal_gap", "label_vertical_gap", "label_horizontal_align", "label_vertical_align", "label_max_width", "label_max_lines", "label_font_family", "label_font_size", "label_color", "label_font_weight", "label_font_style"}},
 	"select": {[]string{"label", "data_binding", "binding_mode", "options"}, nil},
 	"button": {[]string{"label", "on_click"}, nil},
 	"list":   {[]string{"source", "presentation", "columns"}, []string{"on_row_click", "pagination"}},
@@ -900,7 +900,10 @@ func (v *validator) element(module string, all map[string]any, path string) {
 		v.text(e, "label", path)
 		v.binding(e, path)
 		v.oneOf(e, "binding_mode", path, bindingModes)
-		v.oneOf(e, "input_type", path, []string{"text", "number", "email"})
+		v.oneOf(e, "input_type", path, []string{"text", "number", "email", "password", "tel", "url", "search"})
+		if module == "input" {
+			v.inputAttributes(e, path)
+		}
 		if _, ok := e["options"]; ok {
 			v.options(e, path)
 		}
@@ -915,6 +918,95 @@ func (v *validator) element(module string, all map[string]any, path string) {
 			v.menuItems(items, path+"/items", map[string]bool{})
 		}
 		v.str(e, "initial_item", path)
+	}
+}
+
+// inputAttributes validates the expanded input descriptor.
+func (v *validator) inputAttributes(e map[string]any, path string) {
+	for _, k := range []string{"placeholder", "help_text", "help_tip"} {
+		v.text(e, k, path)
+	}
+	v.boolean(e, "required", path)
+	for _, k := range []string{"label_horizontal_gap", "label_vertical_gap", "label_max_width", "label_font_size"} {
+		v.matching(e, k, path, regexp.MustCompile(`^[0-9]+(\.[0-9]+)?px$`))
+	}
+	if size, ok := e["label_font_size"].(string); ok {
+		if n, err := strconv.ParseFloat(strings.TrimSuffix(size, "px"), 64); err == nil && n <= 0 {
+			v.errf(path+"/label_font_size", "must be positive")
+		}
+	}
+	v.oneOf(e, "label_placement", path, []string{"left", "right", "top", "bottom"})
+	v.oneOf(e, "label_horizontal_align", path, []string{"left", "center", "right"})
+	v.oneOf(e, "label_vertical_align", path, []string{"top", "center", "bottom"})
+	v.oneOf(e, "label_font_style", path, []string{"normal", "italic", "oblique"})
+	v.positiveInt(e, "label_max_lines", path)
+	for _, k := range []string{"label_font_family", "autocomplete"} {
+		v.str(e, k, path)
+	}
+	if weight, ok := e["label_font_weight"]; ok {
+		switch w := weight.(type) {
+		case string:
+			if w != "normal" && w != "bold" {
+				n, err := strconv.Atoi(w)
+				if err != nil || n < 100 || n > 900 || n%100 != 0 {
+					v.errf(path+"/label_font_weight", "must be normal, bold, or a weight from 100 to 900")
+				}
+			}
+		default:
+			n, ok := asInt(w)
+			if !ok || n < 100 || n > 900 || n%100 != 0 {
+				v.errf(path+"/label_font_weight", "must be normal, bold, or a weight from 100 to 900")
+			}
+		}
+	}
+	v.matching(e, "label_color", path, colorPattern)
+	for _, k := range []string{"max_length"} {
+		if x, ok := e[k]; ok {
+			if n, ok := asInt(x); !ok || n < 0 {
+				v.errf(path+"/"+k, "must be a non-negative integer")
+			}
+		}
+	}
+	if value, ok := e["validation"]; ok {
+		rules, ok := v.object(value, path+"/validation")
+		if !ok {
+			return
+		}
+		v.keys(rules, path+"/validation", nil, "min_length", "pattern", "min", "max", "step")
+		if x, ok := rules["min_length"]; ok {
+			if n, ok := asInt(x); !ok || n < 0 {
+				v.errf(path+"/validation/min_length", "must be a non-negative integer")
+			}
+		}
+		if pattern, ok := v.str(rules, "pattern", path+"/validation"); ok {
+			if _, err := regexp.Compile(pattern); err != nil || regexp.MustCompile(`\(\?[a-zA-Z<]|\\[AzQEpP]`).MatchString(pattern) {
+				v.errf(path+"/validation/pattern", "must be a valid common regular expression")
+			}
+		}
+		for _, k := range []string{"min", "max", "step"} {
+			if x, ok := rules[k]; ok {
+				n, valid := number(x)
+				if !valid || (k == "step" && n <= 0) {
+					v.errf(path+"/validation/"+k, "must be a number (positive for step)")
+				}
+			}
+		}
+
+		if min, ok := number(rules["min"]); ok {
+			if max, ok := number(rules["max"]); ok && min > max {
+				v.errf(path+"/validation/max", "must not be less than min")
+			}
+		}
+		if min, ok := asInt(rules["min_length"]); ok {
+			if max, ok := asInt(e["max_length"]); ok && min > max {
+				v.errf(path+"/validation/min_length", "must not exceed max_length")
+			}
+		}
+	}
+	if e["input_type"] == "number" {
+		if _, ok := e["max_length"]; ok {
+			v.errf(path+"/max_length", "is not supported for number")
+		}
 	}
 }
 
