@@ -219,6 +219,7 @@ type ClassSummary struct {
 	Version      int            `json:"version"`
 	Status       string         `json:"status"`
 	Description  any            `json:"description"`
+	CodeModuleID string         `json:"code_module_id,omitempty"`
 	Attributes   map[string]any `json:"attributes"`
 }
 
@@ -243,6 +244,7 @@ func (s store) elementClasses(ctx context.Context) ([]ClassSummary, error) {
 			return nil, fmt.Errorf("element class %s version %d: %w", c.DescriptorID, c.Version, err)
 		}
 		c.Description = body["description"]
+		c.CodeModuleID = str(body["code_module_id"])
 		c.Attributes = map[string]any{}
 		for k, v := range body {
 			if !slices.Contains(classAttrs, k) {

@@ -73,6 +73,9 @@ var codeModules = map[string]codeAttrs{
 	"button": {[]string{"label", "on_click"}, nil},
 	"list":   {[]string{"source", "presentation", "columns"}, []string{"on_row_click", "pagination"}},
 	"menu":   {[]string{"items"}, []string{"initial_item"}},
+	// chat_attributes.go
+	"chat-composer": {nil, chatComposerAttributes},
+	"chat-panel":    {nil, chatPanelAttributes},
 }
 
 // actionAttrs is keyed by action class ID, which is also the name of the code
@@ -359,6 +362,7 @@ func (v *validator) page(b map[string]any) {
 	}
 	if panels, ok := b["panels"]; ok {
 		v.panels(b, panels, leaves)
+		v.oneChatComposer()
 	}
 	for _, pos := range actionPositions(b) {
 		if merged := v.actionInstance(pos); merged != nil {
@@ -918,6 +922,10 @@ func (v *validator) element(module string, all map[string]any, path string) {
 			v.menuItems(items, path+"/items", map[string]bool{})
 		}
 		v.str(e, "initial_item", path)
+	case "chat-composer":
+		v.chatComposerAttributes(e, path)
+	case "chat-panel":
+		v.chatPanelAttributes(e, path)
 	}
 }
 
@@ -1015,6 +1023,7 @@ func (v *validator) inputAttributes(e map[string]any, path string) {
 func (v *validator) elementComplete(module string, merged map[string]any, path string) {
 	code, _ := elementCode(module)
 	v.required(merged, path, code.required)
+	v.chatComplete(module, merged, path)
 	switch module {
 	case "text":
 		_, hasText := merged["text"]

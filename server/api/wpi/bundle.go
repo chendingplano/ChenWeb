@@ -86,6 +86,7 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 		modules = append(modules, pageModules(id, body, els)...)
 		res.Warnings = append(res.Warnings, unboundSaveWarnings(id, els, acts)...)
 		res.Warnings = append(res.Warnings, copyWarnings(id, els)...)
+		res.Warnings = append(res.Warnings, chatWarnings(id, els)...)
 	}
 	moduleErrs, err := moduleErrors(ctx, registered, modules)
 	if err != nil {

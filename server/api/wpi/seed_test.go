@@ -31,6 +31,10 @@ const codeModulesMigration = "../../../project_migrations/20261028000002_create_
 // statements and a stored file, and new page versions in kb.frontend_pages.
 const pagesSeedMigration = "../../../project_migrations/20261027000005_seed_wpi_pages_demo.sql"
 
+// chatElementsMigration registers the chat-composer and chat-panel modules and
+// stores their classes.
+const chatElementsMigration = "../../../project_migrations/20261030000005_wpi_chat_elements.sql"
+
 // customersDemoMigration stores the customers-demo app and its page.
 const customersDemoMigration = "../../../project_migrations/20261028000005_isolate_wpi_customers_demo.sql"
 
@@ -72,7 +76,7 @@ func TestSeedLayouterModules(t *testing.T) {
 func seededModules(t *testing.T) map[string][]string {
 	t.Helper()
 	var ids []string
-	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration), -1) {
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration)+readFile(t, chatElementsMigration), -1) {
 		if m[2] == "element" {
 			ids = append(ids, m[1])
 		}
@@ -88,7 +92,7 @@ func seededModules(t *testing.T) map[string][]string {
 // document, and every seeded element module has code.
 func TestSeedCodeModules(t *testing.T) {
 	seeded := map[string]string{}
-	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration), -1) {
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration)+readFile(t, chatElementsMigration), -1) {
 		if m[2] == "element" {
 			seeded[m[1]] = m[3]
 		}
@@ -97,7 +101,8 @@ func TestSeedCodeModules(t *testing.T) {
 		t.Fatalf("seeded element modules %v; code modules with code %d", seeded, len(codeModules))
 	}
 	for id := range codeModules {
-		if seeded[id] != id+".md" {
+		// Modules added since the first seed name their document interpreter-<id>.md.
+		if seeded[id] != id+".md" && seeded[id] != "interpreter-"+id+".md" {
 			t.Fatalf("code module %q: seeded document %q, want %q", id, seeded[id], id+".md")
 		}
 	}

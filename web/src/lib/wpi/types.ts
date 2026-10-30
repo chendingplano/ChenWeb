@@ -112,6 +112,15 @@ export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
 	on_row_click?: ActionInstance;
 	items?: MenuItem[];
 	initial_item?: string;
+	// chat-composer and chat-panel (code_modules/interpreter-chat-*.md).
+	rows?: number;
+	slash_commands?: boolean;
+	toolbar?: string[];
+	agents?: string[];
+	default_agent?: string;
+	default_model?: string;
+	tabs?: string[];
+	initial_tab?: string;
 };
 
 // A class row: class attributes, and for each instance attribute either its

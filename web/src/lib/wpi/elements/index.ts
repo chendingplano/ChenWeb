@@ -6,6 +6,8 @@
 import type { Component } from 'svelte';
 import type { ResolvedElement } from '../entries';
 import ButtonElement from './ButtonElement.svelte';
+import ChatComposerElement from './ChatComposerElement.svelte';
+import ChatPanelElement from './ChatPanelElement.svelte';
 import InputElement from './InputElement.svelte';
 import ListElement from './ListElement.svelte';
 import MenuElement from './MenuElement.svelte';
@@ -20,5 +22,7 @@ export const codeModules: Record<string, Component<ElementProps>> = {
 	select: SelectElement,
 	button: ButtonElement,
 	list: ListElement,
-	menu: MenuElement
+	menu: MenuElement,
+	'chat-composer': ChatComposerElement,
+	'chat-panel': ChatPanelElement
 };

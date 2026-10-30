@@ -85,6 +85,8 @@ export type ElementClassSummary = {
 	version: number;
 	status: 'draft' | 'active';
 	description: Text | null;
+	// The code module that draws the class; the properties panel groups by it.
+	code_module_id?: string;
 	attributes: Record<string, ElementAttribute>;
 };
 

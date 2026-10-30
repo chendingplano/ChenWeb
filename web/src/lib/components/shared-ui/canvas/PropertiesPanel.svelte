@@ -5,6 +5,7 @@
   import type { ElementAttribute, ElementClassSummary } from '$lib/wpi/api';
   import type { JsonObject } from '$lib/wpi/types';
   import { localized } from '$lib/wpi/text';
+  import { CHAT_AGENTS } from '$lib/wpi/chat-agents';
   import { valueText, withAttribute, withSourceFields, withSourceProperty, withListSourceDefaults, withSelectedTable } from './element-attributes';
   import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
   import TablePicker from '../database-picker/TablePicker.svelte';
@@ -92,6 +93,14 @@
       case 'step': return m.wpi_input_attr_step();
       case 'min_width': return m.wpi_input_attr_min_width();
       case 'max_width': return m.wpi_input_attr_max_width();
+      case 'rows': return m.wpi_chat_attr_rows();
+      case 'slash_commands': return m.wpi_chat_attr_slash_commands();
+      case 'toolbar': return m.wpi_chat_attr_toolbar();
+      case 'agents': return m.wpi_chat_attr_agents();
+      case 'default_agent': return m.wpi_chat_attr_default_agent();
+      case 'default_model': return m.wpi_chat_attr_default_model();
+      case 'tabs': return m.wpi_chat_attr_tabs();
+      case 'initial_tab': return m.wpi_chat_attr_initial_tab();
 
       case 'width': return m.propertiespanel_attr_width();
       case 'height': return m.propertiespanel_attr_height();
@@ -120,6 +129,22 @@
     ['validation', ['required','max_length','validation']],
     ['size', ['width','height','min_width','max_width']]
   ];
+  // Properties groups by code module (code_modules/interpreter-*.md); a class
+  // is grouped by the module that draws it.
+  const moduleGroups: Record<string, [string, string[]][]> = {
+    input: inputGroups,
+    'chat-composer': [
+      ['message_box', ['placeholder','rows','slash_commands']],
+      ['toolbar', ['toolbar']],
+      ['assistant', ['agents','default_agent','default_model']],
+      ['size', ['width','height','min_width','max_width']]
+    ],
+    'chat-panel': [
+      ['tabs', ['tabs','initial_tab']],
+      ['size', ['width','height','min_width','max_width']]
+    ]
+  };
+  const module = $derived(elementClass?.code_module_id ?? String(node?.data.element ?? ''));
   function groupLabel(id: string): string {
     switch (id) {
       case 'general': return m.wpi_input_group_general();
@@ -128,14 +153,57 @@
       case 'input_help': return m.wpi_input_group_input_help();
       case 'validation': return m.wpi_input_group_validation();
       case 'size': return m.wpi_input_group_size();
+      case 'message_box': return m.wpi_chat_group_message_box();
+      case 'toolbar': return m.wpi_chat_group_toolbar();
+      case 'assistant': return m.wpi_chat_group_assistant();
+      case 'tabs': return m.wpi_chat_group_tabs();
       default: return m.wpi_input_group_other();
     }
   }
+
+  // Ordered choices of the chat modules: checked entries are stored, in order.
+  // An absent attribute means all of them; agents and tabs keep at least one.
+  const chatLists: Record<string, Record<string, string[]>> = {
+    'chat-composer': { toolbar: ['agent','model','prompt','text_editor','new_session'], agents: CHAT_AGENTS },
+    'chat-panel': { tabs: ['chat','dialog'] }
+  };
+  function chatToken(name: string, token: string): string {
+    if (name === 'toolbar') {
+      switch (token) {
+        case 'agent': return m.wpi_chat_control_agent();
+        case 'model': return m.wpi_chat_control_model();
+        case 'prompt': return m.wpi_chat_control_prompt();
+        case 'text_editor': return m.wpi_chat_control_text_editor();
+        case 'new_session': return m.wpi_chat_control_new_session();
+      }
+    }
+    if (name === 'tabs') return token === 'chat' ? m.wpi_chat_tab_chat() : m.wpi_chat_tab_dialog();
+    return token;
+  }
+  function chatList(n: FlowNode, name: string, attr: ElementAttribute | undefined): string[] {
+    const value = attrsOf(n)[name] ?? attr?.default_value;
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : chatLists[module]?.[name] ?? [];
+  }
+  function setChatList(n: FlowNode, name: string, next: string[]) {
+    if (!next.length && name !== 'toolbar') return;
+    update('attrs', { ...attrsOf(n), [name]: next });
+  }
+  function moved(list: string[], at: number, by: number): string[] {
+    const out = [...list];
+    [out[at], out[at + by]] = [out[at + by], out[at]];
+    return out;
+  }
+  function setChoice(n: FlowNode, name: string, value: string) {
+    if (value) update('attrs', { ...attrsOf(n), [name]: value });
+    else resetAttribute(n, name);
+  }
+
   function orderedAttributes(attributes: Record<string, ElementAttribute>): [string, ElementAttribute | null][] {
-    if (node?.data.element === 'input') {
+    const groups = moduleGroups[module];
+    if (groups) {
       const out: [string, ElementAttribute | null][] = [['__pane', null]];
       const used = new Set<string>();
-      for (const [group, names] of inputGroups) {
+      for (const [group, names] of groups) {
         const present = names.filter(name => name in attributes);
         if (!present.length) continue;
         out.push([`__group_${group}`, null]);
@@ -310,7 +378,7 @@
                 <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted);">
                   {attributeLabel(name)}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
                 </label>
-                {#if node.data.element === 'input' && attr.instance_modifiable !== false && name in attrsOf(node)}
+                {#if moduleGroups[module] && attr.instance_modifiable !== false && name in attrsOf(node)}
                   <button type="button" class="column-remove" onclick={() => resetAttribute(node, name)}>{m.wpi_input_reset()}</button>
                 {/if}
                 {#if name === 'columns' && node.data.element === 'list' && attr.instance_modifiable !== false}
@@ -336,6 +404,34 @@
                 <select id={`prop-attr-${name}`} class="column-input" value={String(attrsOf(node)[name] ?? attr.default_value ?? '')} onchange={(e) => update('attrs', withAttribute(attrsOf(node), name, e.currentTarget.value))}>
                   {#each inputChoices[name] as choice}<option value={choice}>{choice}</option>{/each}
                 </select>
+              {:else if chatLists[module]?.[name]}
+                {@const all = chatLists[module][name]}
+                {@const chosen = chatList(node, name, attr)}
+                <ul style="list-style:none; margin:0; padding:0;">
+                  {#each [...chosen, ...all.filter((t) => !chosen.includes(t))] as token (token)}
+                    {@const at = chosen.indexOf(token)}
+                    <li style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--cv-text); margin-bottom:2px;">
+                      <input id={`prop-${name}-${token}`} type="checkbox" checked={at >= 0}
+                        onchange={(e) => setChatList(node, name, e.currentTarget.checked ? [...chosen, token] : chosen.filter((t) => t !== token))} />
+                      <label for={`prop-${name}-${token}`} style="flex:1;">{chatToken(name, token)}</label>
+                      {#if at >= 0}
+                        <button type="button" class="column-remove" aria-label={m.wpi_chat_move_up({ name: chatToken(name, token) })} disabled={at === 0} onclick={() => setChatList(node, name, moved(chosen, at, -1))}>↑</button>
+                        <button type="button" class="column-remove" aria-label={m.wpi_chat_move_down({ name: chatToken(name, token) })} disabled={at === chosen.length - 1} onclick={() => setChatList(node, name, moved(chosen, at, 1))}>↓</button>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {:else if (module === 'chat-composer' && name === 'default_agent') || (module === 'chat-panel' && name === 'initial_tab')}
+                {@const list = chatList(node, name === 'default_agent' ? 'agents' : 'tabs', elementClass.attributes[name === 'default_agent' ? 'agents' : 'tabs'])}
+                <select id={`prop-attr-${name}`} class="column-input" value={String(attrsOf(node)[name] ?? attr.default_value ?? '')} onchange={(e) => setChoice(node, name, e.currentTarget.value)}>
+                  <option value="">{m.wpi_chat_choice_first()}</option>
+                  {#each list as choice (choice)}<option value={choice}>{name === 'initial_tab' ? chatToken('tabs', choice) : choice}</option>{/each}
+                </select>
+              {:else if module === 'chat-composer' && name === 'slash_commands'}
+                <input id={`prop-attr-${name}`} type="checkbox" checked={(attrsOf(node)[name] ?? attr.default_value ?? true) !== false} onchange={(e) => update('attrs', { ...attrsOf(node), slash_commands: e.currentTarget.checked })} />
+              {:else if module === 'chat-composer' && name === 'rows'}
+                <input id={`prop-attr-${name}`} class="column-input" type="number" min="1" max="20" step="1" value={String(attrsOf(node)[name] ?? attr.default_value ?? 3)}
+                  oninput={(e) => { const n = e.currentTarget.valueAsNumber; if (Number.isInteger(n)) update('attrs', { ...attrsOf(node), rows: n }); }} />
               {:else if node.data.element === 'input' && name === 'required'}
                 <input id={`prop-attr-${name}`} type="checkbox" checked={Boolean(attrsOf(node)[name] ?? attr.default_value)} onchange={(e) => update('attrs', { ...attrsOf(node), required: e.currentTarget.checked })} />
               {:else if node.data.element === 'input' && name === 'validation'}

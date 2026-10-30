@@ -100,6 +100,16 @@ export type HarnessDecision = {
 	message?: string;
 };
 
+/** A failed request, with its HTTP status (401 and 403 mean no access). */
+export class HarnessRequestError extends Error {
+	constructor(
+		message: string,
+		readonly status: number
+	) {
+		super(message);
+	}
+}
+
 async function json<T>(res: Response): Promise<T> {
 	if (!res.ok) {
 		let message = `Request failed (${res.status})`;
@@ -109,9 +119,15 @@ async function json<T>(res: Response): Promise<T> {
 		} catch {
 			// Keep the status message when the body is not JSON.
 		}
-		throw new Error(message);
+		throw new HarnessRequestError(message, res.status);
 	}
 	return (await res.json()) as T;
+}
+
+/** The harnesses whose gateway the server has configured, by harness name. */
+export async function listHarnesses(fetchFn: typeof fetch = fetch): Promise<string[]> {
+	const res = await fetchFn(BASE, { credentials: 'same-origin', cache: 'no-store' });
+	return (await json<{ harnesses?: string[] }>(res)).harnesses ?? [];
 }
 
 const harnessPath = (harness: string, path: string) => `${BASE}/${encodeURIComponent(harness)}${path}`;
