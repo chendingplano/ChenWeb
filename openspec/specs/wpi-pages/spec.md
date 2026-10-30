@@ -177,3 +177,16 @@ right of the canvas. Its page configuration and layouter buttons SHALL display t
 corresponding descriptor properties in the Properties panel. Selecting an element
 SHALL return the panel to that element. Edits SHALL update the in-memory descriptor,
 refresh the preview and be undoable. The frame SHALL be movable by pointer and keyboard and initially aligned immediately left of the canvas settings button. The preview SHALL be resizable by pointer and keyboard; resizing changes the editor surface rather than page descriptor dimensions, and SHALL be undoable.
+
+### Requirement: First save of a new page
+
+When an unnamed page is saved in the WPI editor, the editor SHALL ask for a page name,
+description, keywords and tags. It SHALL require a non-blank name, accept comma-separated
+keywords and tags, and create a page with a new unique descriptor ID and the current canvas
+contents. Subsequent saves SHALL create versions of that page. Cancelling or a failed save
+SHALL leave the page unsaved.
+
+#### Scenario: Create a page on first save
+- **WHEN** an author saves an unnamed page and submits its information
+- **THEN** the editor stores a new page with that information and its current elements
+- **AND** subsequent saves update that page

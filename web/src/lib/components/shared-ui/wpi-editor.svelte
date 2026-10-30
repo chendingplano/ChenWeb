@@ -33,7 +33,10 @@
 	import CenterPage from './canvas/CenterPage.svelte';
 	import PageConfigPanel, { type ConfigMode } from './canvas/PageConfigPanel.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
-	import type { Bundle, ClassRow, JsonObject, PageDescriptor } from '$lib/wpi/types';
+	import CreatePageDialog from './canvas/CreatePageDialog.svelte';
+	import { newPageMetadata } from './canvas/new-page';
+	import type { Bundle, ClassRow, JsonObject, PageDescriptor, Text } from '$lib/wpi/types';
+	import { localized } from '$lib/wpi/text';
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 	import { isElementNode, nodeData, nodeJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
 	import { addPane, deletePane, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
@@ -350,7 +353,7 @@
 	}
 	function tabTitle(tab: CanvasTab): string {
 		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
-		return String(page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
+		return localized(page?.page_name as Text | undefined) || String(page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
 	}
 	const pageOverview = $derived(pageMinimapBounds(previewSize, { width: canvasWidth, height: canvasHeight }, viewport));
 	function movePageOverview(event: PointerEvent) {
@@ -492,10 +495,12 @@
 
 	// ── Save ────────────────────────────────────────────────────────────────
 	let savingTabs = new Set<number>();
-	async function save() {
+	let showCreatePage = $state(false);
+	async function save(metadata?: ReturnType<typeof newPageMetadata>) {
 		if (savingTabs.has(activeTabId)) return;
-		if (!loadedPage || typeof loadedPage.descriptor_id !== 'string' || !loadedPage.descriptor_id) {
-			toast(m.wpi_save_requires_page());
+		if (!loadedPage) return;
+		if (!metadata && (typeof loadedPage.descriptor_id !== 'string' || !loadedPage.descriptor_id)) {
+			showCreatePage = true;
 			return;
 		}
 		if (edges.length || nodes.some((node) => !isElementNode(node))) {
@@ -506,17 +511,26 @@
 		savingTabs.add(id);
 		const snapshot = currentSnapshot();
 		const name = activeFlow?.flow_name ?? '';
-		const page = pageJson(snapshot.nodes, snapshot.page as JsonObject);
+		const page = pageJson(snapshot.nodes, { ...snapshot.page, ...metadata } as JsonObject);
 		try {
 			const { page: stored } = await savePage(String(page.descriptor_id), page);
 			if (id === activeTabId) {
 				// The stored page holds the class copies the server made; the canvas
 				// adopts them, unless it changed while saving.
-				if (JSON.stringify(currentSnapshot()) === JSON.stringify(snapshot)) adoptStored(stored);
-				lastSavedSnapshot = currentSnapshot();
-				savedName = name;
+				const unchanged = JSON.stringify(currentSnapshot()) === JSON.stringify(snapshot);
+				if (unchanged) adoptStored(stored);
+				else if (metadata && loadedPage) loadedPage = { ...loadedPage, ...metadata };
+				if (metadata && activeFlow) activeFlow = { ...activeFlow, flow_name: metadata.page_name };
+				lastSavedSnapshot = unchanged ? currentSnapshot() : { ...snapshot, page: stored };
+				savedName = metadata?.page_name ?? name;
 			} else {
-				tabs = tabs.map((tab) => tab.id === id ? { ...tab, savedName: name, saved: snapshot, dirty: tab.flow?.flow_name !== name || !sameCanvasContent(tab.snapshot, snapshot) || JSON.stringify(tab.snapshot.page) !== JSON.stringify(snapshot.page) || JSON.stringify(tab.snapshot.previewSize) !== JSON.stringify(snapshot.previewSize) } : tab);
+				tabs = tabs.map((tab) => {
+					if (tab.id !== id) return tab;
+					const saved = { ...snapshot, page: stored };
+					const unchanged = JSON.stringify(tab.snapshot) === JSON.stringify(snapshot);
+					const current = unchanged ? saved : { ...tab.snapshot, page: metadata && tab.snapshot.page ? { ...tab.snapshot.page, ...metadata } : tab.snapshot.page };
+					return { ...tab, flow: metadata && tab.flow ? { ...tab.flow, flow_name: metadata.page_name } : tab.flow, snapshot: current, savedName: metadata?.page_name ?? name, saved, dirty: !unchanged };
+				});
 			}
 			toast(m.canvas_01_saved());
 		} catch (error) {
@@ -799,7 +813,7 @@
 		if (!active || previewBundle) return;
 		// The element class forms have their own fields, and View JSON covers the canvas; undo
 		// and save belong to the canvas.
-		if (showCreateElement || editClassId !== null || showJson || showLoadPage) return;
+		if (showCreateElement || editClassId !== null || showJson || showLoadPage || showCreatePage) return;
 		const mod = e.ctrlKey || e.metaKey;
 		if (mod && e.key === 'z' && !e.shiftKey) {
 			e.preventDefault();
@@ -861,7 +875,7 @@
 			onRedo={redo}
 			onAlign={alignSelected}
 			onDistribute={distributeSelected}
-			onSave={save}
+			onSave={() => save()}
 			onSaveAsTemplate={saveCurrentAsTemplate}
 		/>
 		<div class="canvas-tabs" role="tablist" aria-label={m.wpi_canvas_tabs()}>
@@ -1234,3 +1248,10 @@
 	.floating-resize { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; border: 0; background: linear-gradient(135deg, transparent 45%, var(--cv-accent) 46%, var(--cv-accent) 52%, transparent 53%, transparent 64%, var(--cv-accent) 65%, var(--cv-accent) 71%, transparent 72%); cursor: nwse-resize; touch-action: none; padding: 0; }
 	.floating-resize:focus-visible { outline: 2px solid var(--cv-accent); }
 </style>
+
+{#if showCreatePage}
+ <CreatePageDialog {darkMode} onClose={() => (showCreatePage = false)} onCreate={(name, description, keywords, tags) => {
+  showCreatePage = false;
+  void save(newPageMetadata(name, description, keywords, tags, Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')));
+ }} />
+{/if}
