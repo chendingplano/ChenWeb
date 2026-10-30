@@ -821,6 +821,9 @@
 
 	// ── Node update from properties panel ───────────────────────────────────
 	function updateNodeData(nodeId: string, data: Record<string, unknown>) {
+		const node = nodes.find((n) => n.id === nodeId);
+		if (!node || JSON.stringify(node.data) === JSON.stringify(data)) return;
+		takeSnapshot();
 		nodes = nodes.map((n) => (n.id === nodeId ? { ...n, data } : n));
 	}
 
@@ -896,15 +899,16 @@
 		// and save belong to the canvas.
 		if (showCreateElement || editClassId !== null || showJson || showLoadPage || showCreatePage) return;
 		const mod = e.ctrlKey || e.metaKey;
-		if (mod && e.key === 'z' && !e.shiftKey) {
+		const key = e.key.toLowerCase();
+		if (mod && key === 'z' && !e.shiftKey) {
 			e.preventDefault();
 			undo();
 		}
-		if (mod && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+		if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) {
 			e.preventDefault();
 			redo();
 		}
-		if (mod && e.key === 's') {
+		if (mod && key === 's') {
 			e.preventDefault();
 			save();
 		}
@@ -1025,8 +1029,8 @@
 						if (params.nodes.length > 0) configMode = null;
 					}
 				}}
+				onnodedragstart={() => { takeSnapshot(); }}
 				onnodedragstop={(e) => {
-					takeSnapshot();
 					if (snapToGrid) {
 						nodes = nodes.map((n) => {
 							if (n.id === e.targetNode?.id) {
@@ -1068,7 +1072,7 @@
 					];
 					checkLimits();
 				}}
-				ondelete={() => takeSnapshot()}
+				onbeforedelete={async () => { takeSnapshot(); return true; }}
 				style="background:var(--cv-canvas);"
 			>
 				{#if loadedPage}
@@ -1300,7 +1304,6 @@
 		onApply={(value) => {
 			if (selectedNode) {
 				if (isElementNode(selectedNode) && typeof value.element !== 'string') return false;
-				takeSnapshot();
 				updateNodeData(selectedNode.id, nodeData(selectedNode, value));
 			} else {
 				let next: Node[];
