@@ -181,9 +181,11 @@ refresh the preview and be undoable. The frame SHALL be movable by pointer and k
 ### Requirement: First save of a new page
 
 When an unnamed page is saved in the WPI editor, the editor SHALL ask for a page name,
-description, keywords and tags. It SHALL require a non-blank name, accept comma-separated
-keywords and tags, and create a page with a new unique descriptor ID and the current canvas
-contents. Subsequent saves SHALL create versions of that page. Cancelling or a failed save
+description, keywords, tags and a descriptor ID. It SHALL require a non-blank name and a valid
+descriptor ID, accept comma-separated keywords and tags, and create a page with the current
+canvas contents. If the ID already exists, it SHALL ask for confirmation before saving a new
+version under that ID. Declining SHALL keep the entered information. Subsequent saves SHALL
+create versions of that page. Cancelling or a failed save
 SHALL leave the page unsaved. Save errors SHALL remain visible until the author dismisses
 them, and their text SHALL be selectable.
 

@@ -4,7 +4,7 @@ import { newPageMetadata } from './new-page';
 
 test('builds a new page identity and normalizes metadata', () => {
  assert.deepEqual(newPageMetadata(' Customers ', ' All customers ', ' tax, , audit ', ' client, priority ', 'abc-123'), {
-  descriptor_id: 'page-abc-123', page_name: 'Customers', description: 'All customers', keywords: ['tax', 'audit'], page_tags: ['client', 'priority']
+  descriptor_id: 'abc-123', page_name: 'Customers', description: 'All customers', keywords: ['tax', 'audit'], page_tags: ['client', 'priority']
  });
 });
 

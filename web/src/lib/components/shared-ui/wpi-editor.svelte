@@ -498,16 +498,16 @@
 	// ── Save ────────────────────────────────────────────────────────────────
 	let savingTabs = new Set<number>();
 	let showCreatePage = $state(false);
-	async function save(metadata?: ReturnType<typeof newPageMetadata>) {
-		if (savingTabs.has(activeTabId)) return;
-		if (!loadedPage) return;
+	async function save(metadata?: ReturnType<typeof newPageMetadata>): Promise<boolean> {
+		if (savingTabs.has(activeTabId)) return false;
+		if (!loadedPage) return false;
 		if (!metadata && (typeof loadedPage.descriptor_id !== 'string' || !loadedPage.descriptor_id)) {
 			showCreatePage = true;
-			return;
+			return false;
 		}
 		if (edges.length || nodes.some((node) => !isElementNode(node))) {
 			saveError = m.wpi_save_page_elements_only();
-			return;
+			return true;
 		}
 		const id = activeTabId;
 		savingTabs.add(id);
@@ -515,7 +515,15 @@
 		const name = activeFlow?.flow_name ?? '';
 		const page = pageJson(snapshot.nodes, { ...snapshot.page, ...metadata } as JsonObject);
 		try {
-			const { page: stored } = await savePage(String(page.descriptor_id), page);
+			let result;
+			try {
+				result = await savePage(String(page.descriptor_id), page, fetch, !!metadata);
+			} catch (error) {
+				if (!metadata || !(error instanceof WpiError) || error.status !== 409) throw error;
+				if (!confirm(m.wpi_create_page_overwrite({ id: metadata.descriptor_id }))) return false;
+				result = await savePage(String(page.descriptor_id), page);
+			}
+			const { page: stored } = result;
 			if (id === activeTabId) {
 				// The stored page holds the class copies the server made; the canvas
 				// adopts them, unless it changed while saving.
@@ -535,9 +543,11 @@
 				});
 			}
 			toast(m.canvas_01_saved());
+			return true;
 		} catch (error) {
 			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : '';
 			saveError = detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes();
+			return true;
 		} finally {
 			savingTabs.delete(id);
 		}
@@ -1259,8 +1269,6 @@
 </style>
 
 {#if showCreatePage}
- <CreatePageDialog {darkMode} onClose={() => (showCreatePage = false)} onCreate={(name, description, keywords, tags) => {
-  showCreatePage = false;
-  void save(newPageMetadata(name, description, keywords, tags, Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')));
- }} />
+ <CreatePageDialog {darkMode} onClose={() => (showCreatePage = false)} onCreate={(id, name, description, keywords, tags) =>
+  save(newPageMetadata(name, description, keywords, tags, id))} />
 {/if}

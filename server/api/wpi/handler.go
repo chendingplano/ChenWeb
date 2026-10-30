@@ -183,7 +183,15 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 			return err
 		}
 	}
-	version, err := st.insertVersion(ctx, Kind(kind), id, raw, actorName(user))
+	var version int
+	if Kind(kind) == KindPage && c.Request().Header.Get("If-None-Match") == "*" {
+		version, err = st.insertNewPage(ctx, id, raw, actorName(user))
+		if errors.Is(err, sql.ErrNoRows) {
+			return errorJSON(c, http.StatusConflict, "Page already exists")
+		}
+	} else {
+		version, err = st.insertVersion(ctx, Kind(kind), id, raw, actorName(user))
+	}
 	if err != nil {
 		handlerLog.Error("WPI descriptor insert failed", "kind", kind, "id", id, "user", actorName(user), "error", err)
 		return errorJSON(c, http.StatusInternalServerError, "Unable to store descriptor")

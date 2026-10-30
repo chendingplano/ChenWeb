@@ -89,6 +89,17 @@ func (s store) insertVersion(ctx context.Context, kind Kind, id string, raw []by
 	return version, err
 }
 
+// insertNewPage creates version 1 only if the ID has no versions. The unique
+// (descriptor_id, version) constraint also protects concurrent creates.
+func (s store) insertNewPage(ctx context.Context, id string, raw []byte, actor string) (int, error) {
+	var version int
+	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by)
+ SELECT $1::text, 1, $2::text, $3::jsonb, 'active', $4::text, $4::text
+ WHERE NOT EXISTS (SELECT 1 FROM kb.frontend_pages WHERE descriptor_id = $1::text)
+ ON CONFLICT (descriptor_id, version) DO NOTHING RETURNING version`, id, schemaVersionOf(KindPage), string(raw), actor).Scan(&version)
+	return version, err
+}
+
 // PageSummary describes the latest active version of a page to an author
 // looking for one to reuse (devdoc 2026102601 §3.2.3).
 type PageSummary struct {

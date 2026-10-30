@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -603,5 +604,40 @@ func TestListPageLayouters(t *testing.T) {
 	}
 	if rec := call(t, testHandler(db, nil).ListPageLayouters, "GET", ""); rec.Code != 401 {
 		t.Fatalf("not logged in: %d", rec.Code)
+	}
+}
+
+func TestCreateOnlyPage(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			expectClassCopies(mock)
+			rows := sqlmock.NewRows([]string{"version"})
+			if !existing {
+				rows.AddRow(1)
+			}
+			mock.ExpectQuery(`INSERT INTO kb\.frontend_pages .*ON CONFLICT \(descriptor_id, version\) DO NOTHING RETURNING version`).
+				WithArgs("greeting", SchemaVersion, filledPage(greetingRaw), "admin@example.com").WillReturnRows(rows)
+			req := httptest.NewRequest("PUT", "/", strings.NewReader(greetingRaw))
+			req.Header.Set("If-None-Match", "*")
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+			c.SetParamNames("kind", "descriptorId")
+			c.SetParamValues("page", "greeting")
+			if err := testHandler(db, adminUser).PutDescriptor(c); err != nil {
+				t.Fatal(err)
+			}
+			want := 200
+			if existing {
+				want = 409
+			}
+			if rec.Code != want {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

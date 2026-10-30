@@ -18,3 +18,11 @@ test('returns validation errors rather than reporting a save', async () => {
 	const fetchFn = (async () => Response.json({ errors: [{ path: 'panels', message: 'Invalid' }] }, { status: 400 })) as typeof fetch;
 	await assert.rejects(() => savePage('demo', {}, fetchFn), (error: WpiError) => error.status === 400 && error.issues[0].message === 'Invalid');
 });
+
+test('requests create-only page storage when creating a page', async () => {
+ const fetchFn = (async (_url, init) => {
+  assert.equal(new Headers(init?.headers).get('If-None-Match'), '*');
+  return Response.json({ version: 1, page: {} });
+ }) as typeof fetch;
+ await savePage('example', {}, fetchFn, true);
+});

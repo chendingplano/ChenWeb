@@ -39,6 +39,11 @@ values SHALL still be checked. Runtime bundle validation SHALL continue to requi
 instances. Saving creates the latest active page version even if it is incomplete; that
 version cannot be run until it is completed.
 
+For page writes, `If-None-Match: *` SHALL atomically create version 1 only when the ID has
+no stored version. If it exists, the server SHALL return 409 without writing a version.
+The editor SHALL use this precondition for a new page and request confirmation before
+retrying an existing ID as a normal versioned write.
+
 #### Scenario: Save an incomplete list
 - **WHEN** an admin saves a page containing a list without `source` or `columns`
 - **THEN** the page is stored and can be reopened for editing

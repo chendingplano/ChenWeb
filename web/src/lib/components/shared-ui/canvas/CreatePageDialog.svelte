@@ -2,8 +2,10 @@
  import { onMount } from 'svelte';
  import { m } from '$lib/paraglide/messages.js';
  import { canvasThemeVars } from './canvas-theme';
- let { darkMode, onClose, onCreate }: { darkMode: boolean; onClose: () => void; onCreate: (name: string, description: string, keywords: string, tags: string) => void } = $props();
+ let { darkMode, onClose, onCreate }: { darkMode: boolean; onClose: () => void; onCreate: (id: string, name: string, description: string, keywords: string, tags: string) => Promise<boolean> } = $props();
  let dialog: HTMLDialogElement;
+ let id = $state('');
+ let busy = $state(false);
  let name = $state('');
  let description = $state('');
  let keywords = $state('');
@@ -11,13 +13,14 @@
  onMount(() => dialog.showModal());
 </script>
 <dialog bind:this={dialog} onclose={onClose} class="select-text" style={canvasThemeVars(darkMode)} aria-labelledby="create-page-title">
- <form onsubmit={(event) => { event.preventDefault(); if (name.trim()) onCreate(name, description, keywords, tags); }}>
+ <form onsubmit={async (event) => { event.preventDefault(); if (busy || !name.trim() || !id.trim()) return; busy = true; try { if (await onCreate(id.trim(), name, description, keywords, tags)) onClose(); } finally { busy = false; } }}>
   <h2 id="create-page-title">{m.wpi_create_page_title()}</h2>
-  <label>{m.wpi_create_page_name()}<input bind:value={name} required maxlength="100" autofocus /></label>
+  <label>{m.wpi_create_page_id()}<input bind:value={id} required maxlength="128" pattern="[a-z0-9][a-z0-9-]*" title={m.wpi_create_page_id_hint()} autofocus /></label>
+  <label>{m.wpi_create_page_name()}<input bind:value={name} required maxlength="100" /></label>
   <label>{m.wpi_create_page_description()}<textarea bind:value={description} maxlength="1000"></textarea></label>
   <label>{m.wpi_create_page_keywords()}<input bind:value={keywords} placeholder={m.wpi_create_page_comma_separated()} /></label>
   <label>{m.wpi_create_page_tags()}<input bind:value={tags} placeholder={m.wpi_create_page_comma_separated()} /></label>
-  <footer><button type="button" onclick={onClose}>{m.wpi_create_page_cancel()}</button><button type="submit" disabled={!name.trim()}>{m.wpi_create_page_submit()}</button></footer>
+  <footer><button type="button" onclick={onClose} disabled={busy}>{m.wpi_create_page_cancel()}</button><button type="submit" disabled={busy || !name.trim() || !id.trim()}>{m.wpi_create_page_submit()}</button></footer>
  </form>
 </dialog>
 <style>

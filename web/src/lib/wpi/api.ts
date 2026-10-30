@@ -216,9 +216,9 @@ export async function getPage(
 // Saves a page as a new version. The server copies the active classes into
 // instances and layouter copies that have none, and returns the stored page
 // (OpenSpec wpi-pages-own-panes, design D4).
-export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch): Promise<{ version: number; page: JsonObject }> {
+export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch, createOnly = false): Promise<{ version: number; page: JsonObject }> {
 	const res = await fetchFn(`/api/v1/wpi/descriptors/page/${encodeURIComponent(id)}`, {
-		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(page)
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(createOnly ? { 'If-None-Match': '*' } : {}) }, body: JSON.stringify(page)
 	});
 	const body = await parse(res);
 	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
