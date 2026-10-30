@@ -74,9 +74,22 @@ func (h *Handler) PageRecovery(c echo.Context) error {
 	if err != nil {
 		return errorJSON(c, 500, "Unable to save recovery")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO archive.frontend_pages (descriptor_id, version, schema_version, body, status, recovery, owner, created_by, updated_by)
+	query := `INSERT INTO archive.frontend_pages (descriptor_id, version, schema_version, body, status, recovery, owner, created_by, updated_by)
  VALUES ($1, $2, $3, $4::jsonb, 'draft', true, $5, $5, $5)
- ON CONFLICT (descriptor_id, owner) WHERE recovery DO UPDATE SET version = EXCLUDED.version, body = EXCLUDED.body, updated_at = NOW()`, id, version, schemaVersionOf(KindPage), string(req.Page), owner)
+ ON CONFLICT (descriptor_id, owner) WHERE recovery `
+	if req.Version == 0 && c.Request().Header.Get("If-None-Match") == "*" {
+		query += `DO NOTHING`
+	} else {
+		query += `DO UPDATE SET version = EXCLUDED.version, body = EXCLUDED.body, updated_at = NOW()`
+	}
+	result, err := tx.ExecContext(ctx, query, id, version, schemaVersionOf(KindPage), string(req.Page), owner)
+	if err == nil && req.Version == 0 && c.Request().Header.Get("If-None-Match") == "*" {
+		var count int64
+		count, err = result.RowsAffected()
+		if err == nil && count == 0 {
+			return errorJSON(c, http.StatusConflict, "Recovery ID already exists")
+		}
+	}
 	if err == nil {
 		err = tx.Commit()
 	}

@@ -32,7 +32,8 @@ seconds since its last save or auto-save, defaulting to 10 seconds. Recovery rec
 private to the author, SHALL NOT create a page version, and SHALL NOT mark the page clean.
 When loading a page with a recovery record the editor SHALL load that record and mark the page
 dirty. A successful ordinary save SHALL remove that author's recovery record atomically with
-the page save. Unnamed pages SHALL receive temporary recovery IDs and be restored as dirty tabs
+the page save. Unnamed pages SHALL receive temporary recovery IDs in the form
+`unnamed-yyyymmdd-hhmmss` using local time and be restored as dirty tabs
 when the editor opens. A recovery write based on an obsolete page version SHALL be rejected.
 
 #### Scenario: Recover edits

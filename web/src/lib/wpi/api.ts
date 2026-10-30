@@ -226,9 +226,9 @@ export async function getPageRecovery(id: string, signal?: AbortSignal): Promise
 	return body.page as JsonObject | null;
 }
 
-export async function savePageRecovery(id: string, version: number, page: JsonObject): Promise<void> {
+export async function savePageRecovery(id: string, version: number, page: JsonObject, createOnly = false): Promise<void> {
 	const res = await fetch(`/api/v1/wpi/pages/${encodeURIComponent(id)}/recovery`, {
-		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version, page })
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(createOnly ? { 'If-None-Match': '*' } : {}) }, body: JSON.stringify({ version, page })
 	});
 	if (!res.ok) { const body = await parse(res); throw new WpiError(String(body.error ?? res.statusText), res.status); }
 }

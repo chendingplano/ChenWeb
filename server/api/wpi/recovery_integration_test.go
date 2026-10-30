@@ -3,9 +3,12 @@ package wpi
 import (
 	"context"
 	"database/sql"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
 
 // Runs only against an explicitly prepared disposable PostgreSQL database.
@@ -53,6 +56,19 @@ func TestPageArchiveDatabase(t *testing.T) {
 	rec = call(t, h.PageRecovery, "PUT", `{"version":0,"page":{"descriptor_id":"unsaved-123","value":5}}`, "pageId", "unsaved-123")
 	if rec.Code != 200 {
 		t.Fatalf("new page recovery: %d %s", rec.Code, rec.Body)
+	}
+	req := httptest.NewRequest("PUT", "/", strings.NewReader(`{"version":0,"page":{"descriptor_id":"unsaved-123","value":9}}`))
+	req.Header.Set("If-None-Match", "*")
+	recorder := httptest.NewRecorder()
+	c := echo.New().NewContext(req, recorder)
+	c.SetParamNames("pageId")
+	c.SetParamValues("unsaved-123")
+	if err := h.PageRecovery(c); err != nil || recorder.Code != 409 {
+		t.Fatalf("duplicate recovery: %d %v", recorder.Code, err)
+	}
+	rec = call(t, h.PageRecovery, "GET", "", "pageId", "unsaved-123")
+	if !strings.Contains(rec.Body.String(), `"value":5`) {
+		t.Fatalf("duplicate overwrote recovery: %s", rec.Body)
 	}
 	if _, err := s.savePage(ctx, "new-page", []byte(`{"descriptor_id":"new-page"}`), "admin@example.com", "unsaved-123", true); err != nil {
 		t.Fatal(err)

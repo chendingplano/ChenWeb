@@ -45,6 +45,7 @@
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
 	import { blankPage, centeredPageViewport, isInsidePage } from './canvas/page-placement';
+	import { unnamedPageID } from './canvas/unnamed-page';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
 	import {
 		alignNodes,
@@ -292,6 +293,7 @@
 	const lastRecovery = new Map<number, number>();
 	const recovering = new Map<number, Promise<void>>();
 	const recoveryIDs = new Map<number, string>();
+	const claimedRecoveryIDs = new Set<string>();
 	let recoveryTimer: ReturnType<typeof setInterval>;
 	// Threshold warning flags (fire once)
 	let warnedNodes = $state(false);
@@ -340,7 +342,7 @@
 		const empty: PageSnapshot = { nodes: [], edges: [], page: blankPage(), previewSize: { ...DEFAULT_PREVIEW_SIZE } };
 		const id = nextTabId++;
 		lastRecovery.set(id, Date.now());
-		if (recoveryID) recoveryIDs.set(id, recoveryID);
+		if (recoveryID) { recoveryIDs.set(id, recoveryID); claimedRecoveryIDs.add(recoveryID); }
 		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.wpi_unnamed()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
 		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false };
 		tabs = [...tabs, tab];
@@ -372,6 +374,7 @@
 		const recoveryID = recoveryIDs.get(id);
 		if (recoveryID) void (recovering.get(id) ?? Promise.resolve()).then(() => deletePageRecovery(recoveryID)).catch(console.error);
 		recoveryIDs.delete(id);
+		if (recoveryID) claimedRecoveryIDs.delete(recoveryID);
 		pageVersions.delete(id); lastRecovery.delete(id);
 		recoveredTabs = new Set([...recoveredTabs].filter((tabId) => tabId !== id));
 	}
@@ -386,12 +389,15 @@
 			if (!tab.dirty || !page || recovering.has(tab.id) || savingTabs.has(tab.id) || Date.now() - (lastRecovery.get(tab.id) ?? 0) < interval) continue;
 			let id = String(page.descriptor_id || '');
 			if (!id) {
-				id = recoveryIDs.get(tab.id) ?? `unsaved-${crypto.randomUUID()}`;
+				id = recoveryIDs.get(tab.id) ?? unnamedPageID(new Date(), recoveryIDs.values());
 				recoveryIDs.set(tab.id, id);
 			}
 			lastRecovery.set(tab.id, Date.now());
 			const recovery = pageJson(tab.snapshot.nodes, { ...page, descriptor_id: id });
-			const pending = savePageRecovery(id, version, recovery).then(() => { lastRecovery.set(tab.id, Date.now()); }).catch((error) => { console.error('WPI auto-save failed', error); toast(m.wpi_autosave_failed()); }).finally(() => recovering.delete(tab.id));
+			const pending = savePageRecovery(id, version, recovery, version === 0 && !claimedRecoveryIDs.has(id)).then(() => { if (version === 0) claimedRecoveryIDs.add(id); lastRecovery.set(tab.id, Date.now()); }).catch((error) => {
+				if (version === 0 && !page.descriptor_id && error instanceof WpiError && error.status === 409) recoveryIDs.delete(tab.id);
+				console.error('WPI auto-save failed', error); toast(m.wpi_autosave_failed());
+			}).finally(() => recovering.delete(tab.id));
 			recovering.set(tab.id, pending);
 		}
 	}
@@ -583,6 +589,7 @@
 			}
 			const { page: stored } = result;
 			recoveryIDs.delete(id);
+			if (recoveryID) claimedRecoveryIDs.delete(recoveryID);
 			pageVersions.set(id, result.version);
 			lastRecovery.set(id, Date.now());
 			recoveredTabs = new Set([...recoveredTabs].filter((tabId) => tabId !== id));
