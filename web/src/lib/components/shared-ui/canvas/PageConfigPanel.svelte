@@ -149,8 +149,8 @@
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
  .group + .group { margin-top:6px; }
- .group summary { padding:10px 8px; margin-bottom:8px; border:1px solid var(--cv-border); border-radius:4px; background:var(--cv-accent-2); font-size:11px; font-weight:600; color:#101827; cursor:pointer; }
- .group summary:hover { background:color-mix(in srgb, var(--cv-accent-2) 85%, white); }
+ .group summary { padding:10px 8px; margin-bottom:8px; border:1px solid var(--cv-border); border-radius:4px; background:var(--cv-group-header); font-size:11px; font-weight:600; color:#101827; cursor:pointer; }
+ .group summary:hover { background:color-mix(in srgb, var(--cv-group-header) 85%, white); }
  label, .label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
  textarea, input, select { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }

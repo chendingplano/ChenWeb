@@ -19,6 +19,7 @@ const DARK = {
 	'text-faint': '#ffffff',
 	accent: '#6366f1',
 	'accent-2': '#818cf8',
+	'group-header': '#818cf8',
 	warn: '#fbbf24',
 	'error-bg': '#1f1313',
 	grid: '#374151', // background dots
@@ -43,6 +44,7 @@ const LIGHT: typeof DARK = {
 	'text-faint': '#000000',
 	accent: '#6366f1',
 	'accent-2': '#4f46e5',
+	'group-header': '#c7d2fe',
 	warn: '#d97706',
 	'error-bg': '#fef2f2',
 	grid: '#cbd5e1',
