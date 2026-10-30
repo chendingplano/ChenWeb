@@ -16,11 +16,12 @@
  import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
 
- let { descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane }: {
+ let { descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure }: {
   descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
+  onMeasure: (id: string, size: { width: number; height: number }) => void;
  } = $props();
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number } | null = null;
  function startResize(event: PointerEvent) {
@@ -65,6 +66,24 @@
   const el = page.panels?.[pane]?.elem_layouter;
   return el?.config ?? el?.class?.config ?? {};
  }
+ // Observe the rendered control, not its zoomed canvas coordinates.
+ function measure(host: HTMLElement, id: string | null) {
+  let target: HTMLElement | null = null;
+  const observer = new ResizeObserver(() => {
+   if (target && id) onMeasure(id, { width: target.offsetWidth, height: target.offsetHeight });
+  });
+  function refresh() {
+   const next = id ? host.querySelector<HTMLElement>('[data-slot="button"]') : null;
+   if (next === target) return;
+   if (target) observer.unobserve(target);
+   target = next;
+   if (target) observer.observe(target);
+  }
+  const mutations = new MutationObserver(refresh);
+  mutations.observe(host, { childList: true, subtree: true });
+  refresh();
+  return { update(next: string | null) { id = next; refresh(); }, destroy() { mutations.disconnect(); observer.disconnect(); } };
+ }
  const requested = new Set<string>();
  function fetchClasses() {
   for (const node of elements) {
@@ -95,7 +114,7 @@
    <div style={placeStyle(pane)} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>
     <div class="flex flex-wrap select-text" style="{flowStyle(panelConfig(pane.pane_id))}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}" data-flow-layout>
      {#each items as item (item.node.id)}
-      <div class="element min-w-0" style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc)} data-flow-item>
+      <div class="element min-w-0" use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc)} data-flow-item>
        {#if 'error' in item.entry}
         <ErrorBox title={m.wpi_error_title({ descriptor: page.descriptor_id })} message={item.entry.error} />
        {:else if rt.root}

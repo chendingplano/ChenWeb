@@ -23,4 +23,4 @@
 	}
 </script>
 
-<Button onclick={click} disabled={busy}>{localized(d.label) || (rt.editorPreview ? m.wpi_editor_button_placeholder() : '')}</Button>
+<Button onclick={click} disabled={busy} style={`${d.width !== undefined && d.width !== null && d.width !== 'auto' ? 'width:100%;' : ''}${d.height !== undefined && d.height !== null && d.height !== 'auto' ? 'height:100%;' : ''}`}>{localized(d.label) || (rt.editorPreview ? m.wpi_editor_button_placeholder() : '')}</Button>

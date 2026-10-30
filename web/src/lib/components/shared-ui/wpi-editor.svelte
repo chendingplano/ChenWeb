@@ -120,6 +120,7 @@
 	let nodes = $state<Node[]>([]);
 	let edges = $state<Edge[]>([]);
 	let selectedNodeId = $state<string | null>(null);
+	let measuredSizes = $state<Record<string, { width: number; height: number }>>({});
 	let showPicker = $state(false);
 	let nodeTypes = $state<NodeType[]>([]);
 	// Palette folders for WPI building blocks; no node types belong to them yet.
@@ -983,7 +984,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
+							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -1130,6 +1131,7 @@
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
 			elementClass={selectedElementClass}
+			measuredSize={selectedNodeId ? measuredSizes[selectedNodeId] : undefined}
 			panes={loadedPage && selectedNode?.type === 'wpi-element' ? leaves : undefined}
 			onMovePane={paneActions.move}
 			nodeTab

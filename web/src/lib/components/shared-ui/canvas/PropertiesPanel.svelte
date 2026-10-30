@@ -14,6 +14,7 @@
     node,
     nodeType,
     elementClass,
+    measuredSize,
     panes,
     onMovePane,
     nodeTab  = false,
@@ -27,6 +28,7 @@
     // instead of nodeType's: null when the class is not in the class list,
     // left out for other nodes.
     elementClass?: ElementClassSummary | null;
+    measuredSize?: { width: number; height: number };
     // The leaf panes of the page, for moving an element node to another one.
     panes?:    string[];
     onMovePane?: (nodeId: string, pane: string) => void;
@@ -96,9 +98,11 @@
     addingColumn = false;
   }
 
-  function attrText(n: FlowNode, name: string): string {
+  function attrText(n: FlowNode, name: string, attr: ElementAttribute): string {
     if (typing && typing.nodeId === n.id && typing.name === name) return typing.text;
-    return valueText(attrsOf(n)[name]);
+    const value = attrsOf(n)[name] ?? attr.default_value;
+    if ((name === 'width' || name === 'height') && measuredSize && (value === undefined || value === null || value === 'auto')) return `${measuredSize[name]}px`;
+    return valueText(value ?? undefined);
   }
 
   function typeAttr(name: string, text: string) {
@@ -243,7 +247,7 @@
                 <textarea
                   id={`prop-attr-${name}`}
                   rows="1"
-                  value={attrText(node, name)}
+                  value={attrText(node, name, attr)}
                   placeholder={attrPlaceholder(attr)}
                   oninput={(e) => typeAttr(name, (e.target as HTMLTextAreaElement).value)}
                   onblur={() => (typing = null)}
@@ -279,6 +283,9 @@
                   {/each}
                 {/if}
               {/if}
+              {#if measuredSize && (name === 'width' || name === 'height')}
+                <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.wpi_rendered_size({ size: `${measuredSize[name]}px` })}</div>
+              {/if}
               {#if attr.help_tip}
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>
               {/if}
@@ -288,7 +295,7 @@
       {/if}
 
       <!-- Attributes -->
-      {#each Object.entries(nodeType.defaultData) as [key]}
+      {#each Object.entries(elementClass === undefined ? nodeType.defaultData : {}) as [key]}
         <div style="margin-bottom:10px;">
           <label for={`prop-attr-${key}`} style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px; text-transform:capitalize;">
             {key.replace(/_/g, ' ')}
