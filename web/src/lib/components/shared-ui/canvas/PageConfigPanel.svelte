@@ -131,13 +131,13 @@
   {/if}
   {#if mode === 'page'}
    {#each pageGroups as group, index}
-    <section class="group" aria-label={group.title()}>
-     <h3>{group.title()}</h3>
+    <details class="group" open={index === 0}>
+     <summary>{group.title()}</summary>
      {#if index === 1}{@render pageLayouterSelector()}{/if}
      {#each index === 4 ? [...group.fields, ...extraPageFields] : group.fields as key (key)}
       {@render field(key)}
      {/each}
-    </section>
+    </details>
    {/each}
   {:else if pane && (mode === 'panes' || isLeaf(pane))}
    {#each fields as key (key)}{@render field(key)}{/each}
@@ -148,8 +148,9 @@
  .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); }
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
- .group + .group { border-top:1px solid var(--cv-divider); padding-top:10px; }
- .group h3 { margin:0 0 10px; font-size:11px; font-weight:600; color:var(--cv-text); }
+ .group + .group { border-top:1px solid var(--cv-divider); }
+ .group summary { padding:10px 0; font-size:11px; font-weight:600; color:var(--cv-text); cursor:pointer; }
+ .group summary:hover { color:var(--cv-text-2); }
  label, .label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
  textarea, input, select { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }
