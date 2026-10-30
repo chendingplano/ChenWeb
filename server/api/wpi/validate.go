@@ -115,9 +115,10 @@ func elementCode(module string) (codeAttrs, bool) {
 }
 
 type validator struct {
-	kind   Kind
-	id     string
-	issues []Issue
+	allowIncomplete bool
+	kind            Kind
+	id              string
+	issues          []Issue
 	// els and acts collect a page's instances merged with their class copies.
 	els  []mergedElement
 	acts []mergedAction
@@ -144,7 +145,11 @@ func validatePage(id string, body map[string]any) ([]Issue, []mergedElement, []m
 }
 
 func newValidator(kind Kind, id string, body map[string]any) *validator {
-	v := &validator{kind: kind, id: id}
+	return newValidatorMode(kind, id, body, false)
+}
+
+func newValidatorMode(kind Kind, id string, body map[string]any, allowIncomplete bool) *validator {
+	v := &validator{kind: kind, id: id, allowIncomplete: allowIncomplete}
 	if !idPattern.MatchString(id) {
 		v.errf("", "descriptor ID %q must match %s", id, idPattern)
 	}
@@ -922,17 +927,20 @@ func (v *validator) elementComplete(module string, merged map[string]any, path s
 	case "text":
 		_, hasText := merged["text"]
 		_, hasBinding := merged["data_binding"]
-		if hasText == hasBinding {
+		if (hasText && hasBinding) || (!hasText && !hasBinding && !v.allowIncomplete) {
 			v.errf(path, "a text element needs exactly one of %q or %q", "text", "data_binding")
 		}
 	case "menu":
-		if initial, ok := merged["initial_item"].(string); ok && !menuLeaves(merged["items"])[initial] {
+		if initial, ok := merged["initial_item"].(string); ok && (!v.allowIncomplete || merged["items"] != nil) && !menuLeaves(merged["items"])[initial] {
 			v.errf(path+"/initial_item", "initial_item %q is not a menu item that opens a page", initial)
 		}
 	}
 }
 
 func (v *validator) required(obj map[string]any, path string, keys []string) {
+	if v.allowIncomplete {
+		return
+	}
 	for _, k := range keys {
 		if _, ok := obj[k]; !ok {
 			v.errf(path, "missing attribute %q", k)
@@ -1373,6 +1381,9 @@ func (v *validator) againstCopy(kind Kind, cls string, row, own map[string]any, 
 	}
 	_, required := classDefaults(kind, row)
 	for _, k := range required {
+		if v.allowIncomplete {
+			break
+		}
 		if _, set := own[k]; !set {
 			v.errf(path, "attribute %q has no default in this instance's copy of %s class %q, so the instance must set it", k, kind, cls)
 		}
@@ -1474,4 +1485,8 @@ func (v *validator) orderBy(a map[string]any, path string) {
 		v.matching(m, "column", p, columnPattern)
 		v.oneOf(m, "direction", p, []string{"asc", "desc"})
 	}
+}
+
+func validatePageForSave(id string, body map[string]any) []Issue {
+	return newValidatorMode(KindPage, id, body, true).issues
 }

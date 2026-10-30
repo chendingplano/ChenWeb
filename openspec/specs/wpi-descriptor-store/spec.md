@@ -33,6 +33,17 @@ descriptors: each names a class that has code, sets only attributes that code de
 has valid values. References to other descriptors and checks against class rows SHALL NOT
 be made at this point. Only admins (admin flag, owner, or `admin` role) SHALL be allowed.
 
+For page writes, missing required element or action instance values SHALL be allowed so an
+incomplete page can be saved. Supplied values, class copies, page structure and conflicting
+values SHALL still be checked. Runtime bundle validation SHALL continue to require complete
+instances. Saving creates the latest active page version even if it is incomplete; that
+version cannot be run until it is completed.
+
+#### Scenario: Save an incomplete list
+- **WHEN** an admin saves a page containing a list without `source` or `columns`
+- **THEN** the page is stored and can be reopened for editing
+- **AND** runtime validation reports the missing configuration until it is supplied
+
 #### Scenario: Valid descriptor is stored
 - **WHEN** an admin PUTs a valid page descriptor `customers` that has no earlier versions
 - **THEN** the response is 200 with `version` 1 and the row is stored as `active`

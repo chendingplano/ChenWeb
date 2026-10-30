@@ -694,3 +694,20 @@ func TestFillClassCopies(t *testing.T) {
 		t.Fatal("copies must not share a map")
 	}
 }
+
+func TestSaveIncompletePage(t *testing.T) {
+	body := withCopies(t, testClasses(), "p", decode(t, pageWith(`{"element": "list"}`)))
+	if issues := validatePageForSave("p", body); len(issues) != 0 {
+		t.Fatalf("incomplete page should be saveable: %+v", issues)
+	}
+	issues, _, _ := validatePage("p", body)
+	expectIssue(t, issues, `missing attribute "columns"`)
+	body = withCopies(t, testClasses(), "p", decode(t, pageWith(`{"element": "list", "source": {"action": "load"}}`)))
+	if issues := validatePageForSave("p", body); len(issues) != 0 {
+		t.Fatalf("incomplete action should be saveable: %+v", issues)
+	}
+	issues, _, _ = validatePage("p", body)
+	expectIssue(t, issues, `missing attribute "table"`)
+	body = withCopies(t, testClasses(), "p", decode(t, pageWith(`{"element": "list", "presentation": "cards"}`)))
+	expectIssue(t, validatePageForSave("p", body), `"cards" is not supported`)
+}

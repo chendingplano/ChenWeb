@@ -168,7 +168,13 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 			return errorJSON(c, http.StatusInternalServerError, "Unable to store descriptor")
 		}
 	}
-	if issues := ValidateDescriptor(Kind(kind), id, body); len(issues) > 0 {
+	var issues []Issue
+	if Kind(kind) == KindPage {
+		issues = validatePageForSave(id, body)
+	} else {
+		issues = ValidateDescriptor(Kind(kind), id, body)
+	}
+	if len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
 	switch Kind(kind) {

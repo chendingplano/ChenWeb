@@ -191,6 +191,21 @@ func TestPutDescriptor(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("stores an incomplete page", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		expectClassCopies(mock)
+		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, sqlmock.AnyArg(), "admin@example.com").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+		page := panelPage("greeting", ``, `{"element": "list"}`)
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", page, "kind", "page", "descriptorId", "greeting")
+		if rec.Code != 200 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("page instances checked against their classes", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
