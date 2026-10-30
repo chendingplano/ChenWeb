@@ -7831,6 +7831,7 @@
 	"wpi_panel_title": "Panel",
 	"wpi_page_layouters_failed": "Unable to load page layouters",
 	"wpi_page_layouter_type": "Page layouter",
+	"wpi_pane_root": "root",
 	"wpi_pane_tree": "Pane tree",
 	"wpi_pane_select_hint": "Select a pane in the tree or in the page.",
 	"wpi_pane_split_rows": "Split into rows",

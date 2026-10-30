@@ -83,7 +83,7 @@
    <div class="label">{m.wpi_pane_tree()}</div>
    <ul class="tree" aria-label={m.wpi_pane_tree()}>
     {#each flat(root) as item (item.pane.pane_id)}
-     <li><button type="button" class:active={item.pane.pane_id === selectedPane} aria-pressed={item.pane.pane_id === selectedPane} style="padding-left:{6 + item.depth * 12}px" onclick={() => onSelectPane(item.pane.pane_id)}>{item.pane.pane_id}{#if item.pane.split}<span class="split"> · {item.pane.split}</span>{/if}</button></li>
+     <li><button type="button" class:active={item.pane.pane_id === selectedPane} aria-pressed={item.pane.pane_id === selectedPane} style="padding-left:{6 + item.depth * 12}px" onclick={() => onSelectPane(item.pane.pane_id)}>{item.depth === 0 ? m.wpi_pane_root() : item.pane.pane_id}{#if item.depth !== 0 && item.pane.split}<span class="split"> · {item.pane.split}</span>{/if}</button></li>
     {/each}
    </ul>
    {#if pane}

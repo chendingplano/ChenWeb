@@ -144,6 +144,9 @@ change SHALL be undoable.
 ## ADDED Requirements
 
 ### Requirement: Editing panes
+The tree SHALL label its top pane *root* regardless of its stored `pane_id`. The selected pane's
+`pane_id` remains visible and editable.
+
 Under *Panes*, the editor SHALL let the author select a pane in the tree or the preview, edit
 its attributes and its `pane_id`, split a leaf pane into rows or columns, add a pane to a split
 pane, and delete a pane other than the root. Splitting leaf `x` SHALL make it a split pane

@@ -7831,6 +7831,7 @@
 	"wpi_panel_title": "面板",
 	"wpi_page_layouters_failed": "无法加载页面布局器",
 	"wpi_page_layouter_type": "页面布局器",
+	"wpi_pane_root": "根窗格",
 	"wpi_pane_tree": "窗格树",
 	"wpi_pane_select_hint": "请在窗格树或页面中选择一个窗格。",
 	"wpi_pane_split_rows": "拆分为行",
