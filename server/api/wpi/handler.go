@@ -292,6 +292,28 @@ func (h *Handler) ListPageLayouters(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"classes": bodies})
 }
 
+// ListTriggerActions returns active action classes supported by click triggers.
+func (h *Handler) ListTriggerActions(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	classes, err := (store{h.DB}).latest(c.Request().Context(), KindAction, nil)
+	if err != nil {
+		handlerLog.Error("WPI trigger action list failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to list actions")
+	}
+	ids := make([]string, 0, len(classes))
+	for id := range classes {
+		if slices.Contains(triggerClasses, id) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	handlerLog.Info("WPI trigger actions listed", "user", actorName(user), "found", len(ids))
+	return c.JSON(http.StatusOK, map[string]any{"actions": ids})
+}
+
 // GetElementClass returns the latest draft or active version of an element
 // class, for the editor's edit form.
 // Endpoint: GET /api/v1/wpi/classes/element/:classId

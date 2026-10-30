@@ -97,6 +97,13 @@ export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise
 	return (body.classes as ElementClassSummary[]) ?? [];
 }
 
+export async function listTriggerActions(fetchFn: typeof fetch = fetch): Promise<string[]> {
+ const res = await fetchFn('/api/v1/wpi/classes/action', { credentials: 'same-origin' });
+ const body = await parse(res);
+ if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+ return (body.actions as string[]) ?? [];
+}
+
 export async function listPageLayouters(fetchFn: typeof fetch = fetch): Promise<JsonObject[]> {
  const res = await fetchFn('/api/v1/wpi/classes/page-layouter', { credentials: 'same-origin' });
  const body = await parse(res);

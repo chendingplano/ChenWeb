@@ -17,7 +17,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, listPageLayouters, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, listPageLayouters, listTriggerActions, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -96,6 +96,8 @@
 		active?: boolean;
 		onClose: () => void;
 	} = $props();
+
+	let triggerActions = $state<string[]>([]);
 
 	// ── Canvas config ─────────────────────────────────────────────────────
 	type EdgeStyle = 'default' | 'step' | 'smoothstep' | 'straight';
@@ -847,6 +849,7 @@
 		restorePanel();
 		addTab();
 		loadElementClasses();
+		listTriggerActions().then((actions) => triggerActions = actions).catch(() => toast(m.propertiespanel_actions_failed()));
 		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => toast(m.wpi_page_layouters_failed()));
 		const res = await flowService.getNodeTypes();
 		nodeTypes = res.nodeTypes ?? [];
@@ -1131,6 +1134,7 @@
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
 			elementClass={selectedElementClass}
+			{triggerActions}
 			measuredSize={selectedNodeId ? measuredSizes[selectedNodeId] : undefined}
 			panes={loadedPage && selectedNode?.type === 'wpi-element' ? leaves : undefined}
 			onMovePane={paneActions.move}

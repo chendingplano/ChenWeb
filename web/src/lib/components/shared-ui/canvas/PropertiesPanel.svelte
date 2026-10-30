@@ -15,6 +15,7 @@
     nodeType,
     elementClass,
     measuredSize,
+    triggerActions = [],
     panes,
     onMovePane,
     nodeTab  = false,
@@ -29,6 +30,7 @@
     // left out for other nodes.
     elementClass?: ElementClassSummary | null;
     measuredSize?: { width: number; height: number };
+    triggerActions?: string[];
     // The leaf panes of the page, for moving an element node to another one.
     panes?:    string[];
     onMovePane?: (nodeId: string, pane: string) => void;
@@ -67,6 +69,16 @@
       case 'label_vert_align': return m.propertiespanel_attr_vertical_alignment();
       case 'on_click': return m.propertiespanel_attr_on_click();
       default: return name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    }
+  }
+
+  function actionLabel(id: string): string {
+    switch (id) {
+      case 'save': return m.propertiespanel_trigger_save();
+      case 'save-page': return m.propertiespanel_trigger_save_page();
+      case 'open-page': return m.propertiespanel_trigger_open_page();
+      case 'close-page': return m.propertiespanel_trigger_close_page();
+      default: return id.replace(/-/g, ' ');
     }
   }
 
@@ -226,6 +238,19 @@
                   style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); resize:none; field-sizing:content; box-sizing:border-box;"
                 ></textarea>
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.propertiespanel_fixed()}</div>
+              {:else if name === 'on_click'}
+                {@const actionValue = attrsOf(node)[name] ?? attr.default_value}
+                {@const action = actionValue && typeof actionValue === 'object' && !Array.isArray(actionValue) ? actionValue : {}}
+                {@const actionId = typeof action.action === 'string' ? action.action : ''}
+                <select id={`prop-attr-${name}`} value={actionId} onchange={(e) => {
+                  const selected = e.currentTarget.value;
+                  if (selected === actionId) return;
+                  update('attrs', withAttribute(attrsOf(node), name, selected ? JSON.stringify({ action: selected }) : ''));
+                }} style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">
+                  <option value="">{m.propertiespanel_select_action()}</option>
+                  {#if actionId && !triggerActions.includes(actionId)}<option value={actionId}>{actionId}</option>{/if}
+                  {#each triggerActions as id (id)}<option value={id}>{actionLabel(id)}</option>{/each}
+                </select>
               {:else if name === 'source' && node.data.element === 'list'}
                 {@const sourceValue = attrsOf(node).source ?? attr.default_value}
                 {@const source = sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue) ? sourceValue : {}}
@@ -304,9 +329,6 @@
                     {/if}
                   {/each}
                 {/if}
-              {/if}
-              {#if measuredSize && (name === 'width' || name === 'height')}
-                <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.wpi_rendered_size({ size: `${measuredSize[name]}px` })}</div>
               {/if}
               {#if attr.help_tip}
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>

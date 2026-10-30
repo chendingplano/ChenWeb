@@ -641,3 +641,24 @@ func TestCreateOnlyPage(t *testing.T) {
 		})
 	}
 }
+
+func TestListTriggerActions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(latestAllQuery).WithArgs("action").WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).
+		AddRow("save-page", 1, []byte(`{"descriptor_id":"save-page"}`)).
+		AddRow("load", 1, []byte(`{"descriptor_id":"load"}`)))
+	rec := call(t, testHandler(db, plainUser).ListTriggerActions, "GET", "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "save-page") || strings.Contains(rec.Body.String(), `"load"`) {
+		t.Fatalf("unexpected response: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, testHandler(db, nil).ListTriggerActions, "GET", ""); rec.Code != 401 {
+		t.Fatalf("unauthenticated: %d", rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
