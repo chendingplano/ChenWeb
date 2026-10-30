@@ -1140,7 +1140,7 @@
 
 	{#if saveError}
 		<div role="alert" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-start gap-3 rounded-lg px-4 py-2 text-sm shadow-xl select-text"
-			style="background:var(--cv-surface); border:1px solid var(--cv-border); color:var(--cv-text); z-index:61; width:max-content; max-width:calc(100% - 32px); max-height:40vh; overflow:auto; user-select:text;">
+			style="background:{darkMode ? '#422b0b' : '#fff3cd'}; border:1px solid var(--cv-warn); color:var(--cv-text); z-index:61; width:min(640px, calc(100vw - 32px)); max-height:40vh; overflow:auto; user-select:text; overflow-wrap:anywhere;">
 			<span class="min-w-0 break-words">{saveError}</span>
 			<button type="button" class="shrink-0" onclick={() => (saveError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
 		</div>
