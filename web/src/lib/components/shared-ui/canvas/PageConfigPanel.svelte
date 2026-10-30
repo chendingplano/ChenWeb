@@ -60,10 +60,7 @@
  }
 </script>
 
-<aside class="panel select-text" style="width:{width}px">
- <div class="heading">{mode === 'page' ? m.wpi_page_config_title() : mode === 'panes' ? m.wpi_panes_title() : m.wpi_panel_title()}</div>
- <div class="fields">
-  {#if mode === 'panes'}
+{#snippet pageLayouterSelector()}
    <label for="wpi-page-layouter-id">{m.wpi_page_layouter_type()}</label>
    <select id="wpi-page-layouter-id" value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')} onchange={(event) => {
     const cls = pageLayouters.find((item) => item.descriptor_id === event.currentTarget.value);
@@ -74,6 +71,15 @@
     {/if}
     {#each pageLayouters as cls (String(cls.descriptor_id))}<option value={String(cls.descriptor_id)}>{String(cls.descriptor_id)}</option>{/each}
    </select>
+{/snippet}
+
+<aside class="panel select-text" style="width:{width}px">
+ <div class="heading">{mode === 'page' ? m.wpi_page_config_title() : mode === 'panes' ? m.wpi_panes_title() : m.wpi_panel_title()}</div>
+ <div class="fields">
+  {#if mode === 'page' || mode === 'panes'}
+   {@render pageLayouterSelector()}
+  {/if}
+  {#if mode === 'panes'}
    <div class="label">{m.wpi_pane_tree()}</div>
    <ul class="tree" aria-label={m.wpi_pane_tree()}>
     {#each flat(root) as item (item.pane.pane_id)}

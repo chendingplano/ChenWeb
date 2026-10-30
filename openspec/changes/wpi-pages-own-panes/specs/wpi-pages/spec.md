@@ -124,10 +124,14 @@ preview SHALL be resizable by pointer and keyboard; resizing changes the editor 
 than page descriptor dimensions, and SHALL be undoable. Saving SHALL store the page with the
 server's class copies and adopt the stored page the server returns.
 
-Under *Panes*, the page layouter selector SHALL list the latest active page layouter classes
+Under *Page* and *Panes*, the page layouter selector SHALL list the latest active page layouter classes
 from `kb.wpi_descriptors`. Choosing a class SHALL apply its pane tree and update the page's class copy. Panels in matching
 leaf panes remain in place; elements displaced from other panes move to the first leaf. The
 change SHALL be undoable.
+
+#### Scenario: Page configuration shows the page layouter
+- **WHEN** the author opens *Page*
+- **THEN** the page layouter selector shows the current class and allows choosing another active class
 
 #### Scenario: Change a page layouter
 - **WHEN** the author selects another active page layouter
