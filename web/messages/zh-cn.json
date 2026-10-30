@@ -7895,5 +7895,6 @@
 	"wpi_page_group_geometry": "几何布局",
 	"wpi_page_group_colors": "颜色",
 	"wpi_page_group_actions": "操作",
-	"wpi_page_group_misc": "其他"
+	"wpi_page_group_misc": "其他",
+	"wpi_autosave_failed": "无法自动保存此页面。您的更改尚未保存。"
 }

@@ -169,13 +169,22 @@ func TestGetApp(t *testing.T) {
 	})
 }
 
+func expectNewPageSave(mock sqlmock.Sqlmock, body any) {
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("greeting").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO archive\.frontend_pages`).WithArgs("greeting").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`UPDATE kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, body, "admin@example.com").WillReturnRows(sqlmock.NewRows([]string{"version"}))
+	mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, body, "admin@example.com").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+	mock.ExpectExec(`DELETE FROM archive\.frontend_pages`).WithArgs("greeting", "admin@example.com").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+}
+
 func TestPutDescriptor(t *testing.T) {
 	t.Run("stored", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		expectClassCopies(mock)
-		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, filledPage(greetingRaw), "admin@example.com").
-			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+		expectNewPageSave(mock, filledPage(greetingRaw))
 		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", greetingRaw, "kind", "page", "descriptorId", "greeting")
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"version":1`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -196,8 +205,7 @@ func TestPutDescriptor(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		expectClassCopies(mock)
-		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, sqlmock.AnyArg(), "admin@example.com").
-			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+		expectNewPageSave(mock, sqlmock.AnyArg())
 		page := panelPage("greeting", ``, `{"element": "list"}`)
 		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", page, "kind", "page", "descriptorId", "greeting")
 		if rec.Code != 200 {
@@ -613,12 +621,18 @@ func TestCreateOnlyPage(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
 			expectClassCopies(mock)
-			rows := sqlmock.NewRows([]string{"version"})
-			if !existing {
-				rows.AddRow(1)
+			mock.ExpectBegin()
+			mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("greeting").WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery(`SELECT EXISTS`).WithArgs("greeting").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(existing))
+			if existing {
+				mock.ExpectRollback()
+			} else {
+				mock.ExpectExec(`INSERT INTO archive\.frontend_pages`).WithArgs("greeting").WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectQuery(`UPDATE kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, filledPage(greetingRaw), "admin@example.com").WillReturnRows(sqlmock.NewRows([]string{"version"}))
+				mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, filledPage(greetingRaw), "admin@example.com").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+				mock.ExpectExec(`DELETE FROM archive\.frontend_pages`).WithArgs("greeting", "admin@example.com").WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectCommit()
 			}
-			mock.ExpectQuery(`INSERT INTO kb\.frontend_pages .*ON CONFLICT \(descriptor_id, version\) DO NOTHING RETURNING version`).
-				WithArgs("greeting", SchemaVersion, filledPage(greetingRaw), "admin@example.com").WillReturnRows(rows)
 			req := httptest.NewRequest("PUT", "/", strings.NewReader(greetingRaw))
 			req.Header.Set("If-None-Match", "*")
 			rec := httptest.NewRecorder()

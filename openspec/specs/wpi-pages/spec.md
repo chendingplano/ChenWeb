@@ -16,14 +16,32 @@ and actions SHALL refer to a page by its `descriptor_id`.
 - **THEN** `vip-customer-form` version 1 is stored and `customer-form` is unchanged
 
 ### Requirement: Page storage
-The system SHALL store pages in `kb.frontend_pages`, one row per version, identified by
-`(descriptor_id, version)`. The page in use SHALL be the highest `version` whose `status` is
-`active`. `PUT /api/v1/wpi/descriptors/page/:descriptorId` SHALL write pages to this table.
+The system SHALL store the current page in `kb.frontend_pages`. A new page starts at version 1.
+On a subsequent save the system SHALL copy the current record to `archive.frontend_pages`,
+update the current record, and increment its version, in one transaction. The page in use SHALL
+be the highest `version` whose `status` is `active`. `PUT /api/v1/wpi/descriptors/page/:descriptorId` SHALL write pages to this table.
 `kb.wpi_descriptors` SHALL NOT hold pages.
 
 #### Scenario: Page written through the descriptor endpoint
 - **WHEN** an admin PUTs a valid page `customers` whose latest version in `kb.frontend_pages` is 2
-- **THEN** version 3 is stored in `kb.frontend_pages` and nothing is written to `kb.wpi_descriptors`
+- **THEN** version 2 is archived, version 3 is stored in `kb.frontend_pages` and nothing is written to `kb.wpi_descriptors`
+
+### Requirement: Editor auto-saving
+The editor SHALL save each dirty page as a recovery record in `archive.frontend_pages` every N
+seconds since its last save or auto-save, defaulting to 10 seconds. Recovery records SHALL be
+private to the author, SHALL NOT create a page version, and SHALL NOT mark the page clean.
+When loading a page with a recovery record the editor SHALL load that record and mark the page
+dirty. A successful ordinary save SHALL remove that author's recovery record atomically with
+the page save. Unnamed pages SHALL receive temporary recovery IDs and be restored as dirty tabs
+when the editor opens. A recovery write based on an obsolete page version SHALL be rejected.
+
+#### Scenario: Recover edits
+- **WHEN** an author loads a page with their recovery record
+- **THEN** the editor displays the recovery copy and marks the tab dirty
+
+#### Scenario: Saving removes recovery
+- **WHEN** an author successfully saves a page with a recovery record
+- **THEN** the recovery record is removed and the previous page version is archived
 
 #### Scenario: Existing pages are moved
 - **WHEN** the migration runs on a database whose `kb.wpi_descriptors` holds page rows

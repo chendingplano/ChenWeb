@@ -219,13 +219,39 @@ export async function getPage(
 	return body as unknown as { page: JsonObject; version: number };
 }
 
+export async function getPageRecovery(id: string, signal?: AbortSignal): Promise<JsonObject | null> {
+	const res = await fetch(`/api/v1/wpi/pages/${encodeURIComponent(id)}/recovery`, { credentials: 'same-origin', signal });
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return body.page as JsonObject | null;
+}
+
+export async function savePageRecovery(id: string, version: number, page: JsonObject): Promise<void> {
+	const res = await fetch(`/api/v1/wpi/pages/${encodeURIComponent(id)}/recovery`, {
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version, page })
+	});
+	if (!res.ok) { const body = await parse(res); throw new WpiError(String(body.error ?? res.statusText), res.status); }
+}
+
+export async function deletePageRecovery(id: string): Promise<void> {
+	const res = await fetch(`/api/v1/wpi/pages/${encodeURIComponent(id)}/recovery`, { method: 'DELETE', credentials: 'same-origin' });
+	if (!res.ok) throw new WpiError(res.statusText, res.status);
+}
+
+export async function listUnsavedRecoveries(): Promise<{ id: string; page: JsonObject }[]> {
+	const res = await fetch('/api/v1/wpi/recoveries/unsaved', { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return body.recoveries as { id: string; page: JsonObject }[];
+}
+
 // Save a page as a new active descriptor version. Validation errors are returned to the author.
 // Saves a page as a new version. The server copies the active classes into
 // instances and layouter copies that have none, and returns the stored page
 // (OpenSpec wpi-pages-own-panes, design D4).
-export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch, createOnly = false): Promise<{ version: number; page: JsonObject }> {
+export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch, createOnly = false, recoveryID = ''): Promise<{ version: number; page: JsonObject }> {
 	const res = await fetchFn(`/api/v1/wpi/descriptors/page/${encodeURIComponent(id)}`, {
-		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(createOnly ? { 'If-None-Match': '*' } : {}) }, body: JSON.stringify(page)
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(createOnly ? { 'If-None-Match': '*' } : {}), ...(recoveryID ? { 'X-WPI-Recovery-ID': recoveryID } : {}) }, body: JSON.stringify(page)
 	});
 	const body = await parse(res);
 	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);

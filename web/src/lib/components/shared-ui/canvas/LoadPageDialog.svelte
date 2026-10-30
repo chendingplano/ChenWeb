@@ -3,7 +3,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { localized } from '$lib/wpi/text';
-	import { getPage, searchPages, type PageSummary } from '$lib/wpi/api';
+	import { getPage, getPageRecovery, searchPages, type PageSummary } from '$lib/wpi/api';
 	import type { JsonObject } from '$lib/wpi/types';
 	import { canvasThemeVars } from './canvas-theme';
 
@@ -14,7 +14,7 @@
 	}: {
 		darkMode?: boolean;
 		onClose: () => void;
-		onLoad: (page: JsonObject) => void;
+		onLoad: (page: JsonObject, version: number, recovery: JsonObject | null) => void;
 	} = $props();
 	let dialog: HTMLDialogElement;
 	let descriptor = $state('');
@@ -86,7 +86,8 @@
 		error = '';
 		try {
 			const result = await getPage(id, controller.signal);
-			if (!controller.signal.aborted) onLoad(result.page);
+			const recovery = await getPageRecovery(id, controller.signal);
+			if (!controller.signal.aborted) onLoad(result.page, result.version, recovery);
 		} catch {
 			if (!controller.signal.aborted) error = m.wpi_load_page_failed();
 		} finally {

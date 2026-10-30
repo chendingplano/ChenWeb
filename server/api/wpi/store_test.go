@@ -163,15 +163,33 @@ func TestStoreUpdateClassMissing(t *testing.T) {
 	}
 }
 
-func TestStoreInsertVersion(t *testing.T) {
+func TestPageSaveArchivesCurrentVersion(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	mock.ExpectQuery(`INSERT INTO kb\.frontend_pages .+ COALESCE\(MAX\(version\), 0\) \+ 1,.+ FROM kb\.frontend_pages .+ RETURNING version`).
-		WithArgs("customers", SchemaVersion, `{"a":1}`, "cding@example.com").
-		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
-	v, err := store{db}.insertVersion(context.Background(), KindPage, "customers", []byte(`{"a":1}`), "cding@example.com")
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("customers").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO archive\.frontend_pages`).WithArgs("customers").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`UPDATE kb\.frontend_pages`).WithArgs("customers", SchemaVersion, `{"a":1}`, "editor").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
+	mock.ExpectExec(`DELETE FROM archive\.frontend_pages`).WithArgs("customers", "editor").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	v, err := (store{db}).savePage(context.Background(), "customers", []byte(`{"a":1}`), "editor", "", false)
 	if err != nil || v != 3 {
-		t.Fatalf("got %d, %v", v, err)
+		t.Fatalf("got version %d, error %v", v, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPageSaveRollsBackIfArchiveFails(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("customers").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO archive\.frontend_pages`).WithArgs("customers").WillReturnError(errors.New("archive failed"))
+	mock.ExpectRollback()
+	if _, err := (store{db}).savePage(context.Background(), "customers", []byte(`{}`), "editor", "", false); err == nil {
+		t.Fatal("expected archive error")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

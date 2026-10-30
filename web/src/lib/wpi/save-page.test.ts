@@ -26,3 +26,11 @@ test('requests create-only page storage when creating a page', async () => {
  }) as typeof fetch;
  await savePage('example', {}, fetchFn, true);
 });
+
+test('includes the temporary recovery identity when creating a page', async () => {
+ const fetchFn = (async (_url, init) => {
+  assert.equal(new Headers(init?.headers).get('X-WPI-Recovery-ID'), 'unsaved-123');
+  return Response.json({ version: 1, page: {} });
+ }) as typeof fetch;
+ await savePage('example', {}, fetchFn, true, 'unsaved-123');
+});

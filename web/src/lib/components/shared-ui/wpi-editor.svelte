@@ -17,7 +17,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, listPageLayouters, listTriggerActions, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -286,6 +286,13 @@
 	let redoStack = $state<PageSnapshot[]>([]);
 	let lastSavedSnapshot = $state<PageSnapshot | null>(null);
 	let savedName = $state('');
+	let activeTabId = $state(0);
+	let recoveredTabs = $state(new Set<number>());
+	const pageVersions = new Map<number, number>();
+	const lastRecovery = new Map<number, number>();
+	const recovering = new Map<number, Promise<void>>();
+	const recoveryIDs = new Map<number, string>();
+	let recoveryTimer: ReturnType<typeof setInterval>;
 	// Threshold warning flags (fire once)
 	let warnedNodes = $state(false);
 	let warnedEdges = $state(false);
@@ -293,10 +300,10 @@
 	const MAX_UNDO = 50;
 
 	const isDirty = $derived(
-		lastSavedSnapshot !== null &&
+		recoveredTabs.has(activeTabId) || (lastSavedSnapshot !== null &&
 			(activeFlow?.flow_name !== savedName || !sameCanvasContent({ nodes, edges }, lastSavedSnapshot) ||
 			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page) ||
-			 JSON.stringify(previewSize) !== JSON.stringify(lastSavedSnapshot.previewSize))
+			 JSON.stringify(previewSize) !== JSON.stringify(lastSavedSnapshot.previewSize)))
 	);
 	type CanvasTab = {
 		id: number; flow: Flow | null; savedName: string; snapshot: PageSnapshot; saved: PageSnapshot | null;
@@ -304,7 +311,6 @@
 		selected: string | null; config: ConfigMode | null; dirty: boolean;
 	};
 	let tabs = $state<CanvasTab[]>([]);
-	let activeTabId = $state(0);
 	let nextTabId = 1;
 	function currentSnapshot(): PageSnapshot {
 		return JSON.parse(JSON.stringify({ nodes, edges, page: loadedPage, previewSize }));
@@ -329,10 +335,12 @@
 		viewport = { ...tab.viewport }; selectedNodeId = tab.selected; configMode = tab.config; selectedPane = null;
 		canvasRevision++;
 	}
-	function addTab(page?: JsonObject) {
+	function addTab(page?: JsonObject, version?: number, recovery?: JsonObject | null, recoveryID?: string) {
 		captureTab();
 		const empty: PageSnapshot = { nodes: [], edges: [], page: blankPage(), previewSize: { ...DEFAULT_PREVIEW_SIZE } };
 		const id = nextTabId++;
+		lastRecovery.set(id, Date.now());
+		if (recoveryID) recoveryIDs.set(id, recoveryID);
 		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.wpi_unnamed()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
 		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false };
 		tabs = [...tabs, tab];
@@ -340,6 +348,12 @@
 		if (page) {
 			loadPage(page);
 			lastSavedSnapshot = currentSnapshot();
+			if (version) pageVersions.set(id, version);
+			lastRecovery.set(id, Date.now());
+			if (recovery) {
+				loadPage(recovery);
+				recoveredTabs = new Set([...recoveredTabs, id]);
+			}
 			undoStack = [];
 			redoStack = [];
 		}
@@ -355,6 +369,31 @@
 			else addTab();
 		}
 		tabs = tabs.filter((item) => item.id !== id);
+		const recoveryID = recoveryIDs.get(id);
+		if (recoveryID) void (recovering.get(id) ?? Promise.resolve()).then(() => deletePageRecovery(recoveryID)).catch(console.error);
+		recoveryIDs.delete(id);
+		pageVersions.delete(id); lastRecovery.delete(id);
+		recoveredTabs = new Set([...recoveredTabs].filter((tabId) => tabId !== id));
+	}
+	function autoSavePages() {
+		captureTab();
+		for (const tab of tabs) {
+			const version = pageVersions.get(tab.id) ?? 0;
+			const page = tab.snapshot.page;
+			let configured = 0;
+			try { configured = Number(localStorage.getItem('wpi.autoSaveSeconds')); } catch { /* Use the default. */ }
+			const interval = Number.isFinite(configured) && configured > 0 ? configured * 1000 : 10000;
+			if (!tab.dirty || !page || recovering.has(tab.id) || savingTabs.has(tab.id) || Date.now() - (lastRecovery.get(tab.id) ?? 0) < interval) continue;
+			let id = String(page.descriptor_id || '');
+			if (!id) {
+				id = recoveryIDs.get(tab.id) ?? `unsaved-${crypto.randomUUID()}`;
+				recoveryIDs.set(tab.id, id);
+			}
+			lastRecovery.set(tab.id, Date.now());
+			const recovery = pageJson(tab.snapshot.nodes, { ...page, descriptor_id: id });
+			const pending = savePageRecovery(id, version, recovery).then(() => { lastRecovery.set(tab.id, Date.now()); }).catch((error) => { console.error('WPI auto-save failed', error); toast(m.wpi_autosave_failed()); }).finally(() => recovering.delete(tab.id));
+			recovering.set(tab.id, pending);
+		}
 	}
 	function tabTitle(tab: CanvasTab): string {
 		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
@@ -453,6 +492,7 @@
 
 	// ── Load flow ───────────────────────────────────────────────────────────
 	async function loadFlow(flow: Flow) {
+		const tabID = activeTabId;
 		activeFlow = flow;
 		savedName = flow.flow_name;
 		configMode = null;
@@ -472,6 +512,19 @@
 		warnedNodes = false;
 		warnedEdges = false;
 		showPicker = false;
+		const pageID = String(loadedPage?.descriptor_id || '');
+		if (pageID) {
+			const before = JSON.stringify(currentSnapshot());
+			try {
+				const [stored, recovery] = await Promise.all([getPage(pageID), getPageRecovery(pageID)]);
+				pageVersions.set(tabID, stored.version);
+				lastRecovery.set(tabID, Date.now());
+				if (recovery && activeTabId === tabID && before === JSON.stringify(currentSnapshot())) {
+					loadPage(recovery);
+					recoveredTabs = new Set([...recoveredTabs, tabID]);
+				}
+			} catch (error) { console.error('WPI page recovery load failed', error); toast(m.wpi_load_page_failed()); }
+		}
 	}
 
 	async function loadDefaultOrPicker() {
@@ -518,15 +571,21 @@
 		const name = activeFlow?.flow_name ?? '';
 		const page = pageJson(snapshot.nodes, { ...snapshot.page, ...metadata } as JsonObject);
 		try {
+			await recovering.get(id);
+			const recoveryID = recoveryIDs.get(id) ?? '';
 			let result;
 			try {
-				result = await savePage(String(page.descriptor_id), page, fetch, !!metadata);
+				result = await savePage(String(page.descriptor_id), page, fetch, !!metadata, recoveryID);
 			} catch (error) {
 				if (!metadata || !(error instanceof WpiError) || error.status !== 409) throw error;
 				if (!confirm(m.wpi_create_page_overwrite({ id: metadata.descriptor_id }))) return false;
-				result = await savePage(String(page.descriptor_id), page);
+				result = await savePage(String(page.descriptor_id), page, fetch, false, recoveryID);
 			}
 			const { page: stored } = result;
+			recoveryIDs.delete(id);
+			pageVersions.set(id, result.version);
+			lastRecovery.set(id, Date.now());
+			recoveredTabs = new Set([...recoveredTabs].filter((tabId) => tabId !== id));
 			if (id === activeTabId) {
 				// The stored page holds the class copies the server made; the canvas
 				// adopts them, unless it changed while saving.
@@ -846,6 +905,7 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(async () => {
+		recoveryTimer = setInterval(autoSavePages, 1000);
 		restorePanel();
 		addTab();
 		loadElementClasses();
@@ -854,9 +914,17 @@
 		const res = await flowService.getNodeTypes();
 		nodeTypes = res.nodeTypes ?? [];
 		await loadDefaultOrPicker();
+		try {
+			const recoveries = await listUnsavedRecoveries();
+			if (recoveries.length) showPicker = false;
+			for (const item of recoveries) {
+				addTab(blankPage(), 0, { ...item.page, descriptor_id: '' }, item.id);
+			}
+		} catch (error) { console.error('WPI recovery load failed', error); toast(m.wpi_load_page_failed()); }
 	});
 
 	onDestroy(() => {
+		clearInterval(recoveryTimer);
 		if (toastTimeout) clearTimeout(toastTimeout);
 	});
 </script>
@@ -1248,7 +1316,7 @@
 	<LoadPageDialog
 		{darkMode}
 		onClose={() => (showLoadPage = false)}
-		onLoad={(page) => addTab(page)}
+		onLoad={(page, version, recovery) => addTab(page, version, recovery)}
 	/>
 {/if}
 

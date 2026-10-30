@@ -31,6 +31,52 @@ func decodeBody(raw []byte) (map[string]any, error) {
 
 type store struct{ db *sql.DB }
 
+// savePage serializes saves for a page and archives the row before updating it.
+func (s store) savePage(ctx context.Context, id string, raw []byte, actor, recoveryID string, createOnly bool) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, id); err != nil {
+		return 0, err
+	}
+	if createOnly {
+		var exists bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.frontend_pages WHERE descriptor_id = $1)`, id).Scan(&exists); err != nil {
+			return 0, err
+		}
+		if exists {
+			return 0, sql.ErrNoRows
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO archive.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by, created_at, updated_at)
+ SELECT descriptor_id, version, schema_version, body, status, created_by, updated_by, created_at, updated_at FROM kb.frontend_pages WHERE id = (SELECT id FROM kb.frontend_pages WHERE descriptor_id = $1 ORDER BY version DESC LIMIT 1)`, id); err != nil {
+		return 0, err
+	}
+	var version int
+	err = tx.QueryRowContext(ctx, `UPDATE kb.frontend_pages SET version = version + 1, schema_version = $2, body = $3::jsonb, status = 'active', updated_by = $4, updated_at = NOW()
+ WHERE id = (SELECT id FROM kb.frontend_pages WHERE descriptor_id = $1 ORDER BY version DESC LIMIT 1) RETURNING version`, id, schemaVersionOf(KindPage), string(raw), actor).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = tx.QueryRowContext(ctx, `INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by) VALUES ($1, 1, $2, $3::jsonb, 'active', $4, $4) RETURNING version`, id, schemaVersionOf(KindPage), string(raw), actor).Scan(&version)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM archive.frontend_pages WHERE descriptor_id = $1 AND owner = $2 AND recovery`, id, actor); err != nil {
+		return 0, err
+	}
+	if recoveryID != "" && recoveryID != id {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM archive.frontend_pages WHERE descriptor_id = $1 AND owner = $2 AND recovery AND version = 0`, recoveryID, actor); err != nil {
+			return 0, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
 // Pages live in kb.frontend_pages, the other kinds in kb.wpi_descriptors
 // (devdoc 2026102601 §6, design D1).
 const (
@@ -75,28 +121,10 @@ func (s store) latest(ctx context.Context, kind Kind, ids []string) (map[string]
 // insertVersion stores body as the next active version of the descriptor.
 func (s store) insertVersion(ctx context.Context, kind Kind, id string, raw []byte, actor string) (int, error) {
 	var version int
-	if kind == KindPage {
-		err := s.db.QueryRowContext(ctx, `INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by)
-		SELECT $1::text, COALESCE(MAX(version), 0) + 1, $2::text, $3::jsonb, 'active', $4::text, $4::text
-		FROM kb.frontend_pages WHERE descriptor_id = $1::text
-		RETURNING version`, id, schemaVersionOf(KindPage), string(raw), actor).Scan(&version)
-		return version, err
-	}
 	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
 		SELECT $1::text, $2::text, COALESCE(MAX(version), 0) + 1, $3::text, $4::jsonb, 'active', $5::text, $5::text
 		FROM kb.wpi_descriptors WHERE kind = $1::text AND descriptor_id = $2::text
 		RETURNING version`, string(kind), id, schemaVersionOf(kind), string(raw), actor).Scan(&version)
-	return version, err
-}
-
-// insertNewPage creates version 1 only if the ID has no versions. The unique
-// (descriptor_id, version) constraint also protects concurrent creates.
-func (s store) insertNewPage(ctx context.Context, id string, raw []byte, actor string) (int, error) {
-	var version int
-	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by)
- SELECT $1::text, 1, $2::text, $3::jsonb, 'active', $4::text, $4::text
- WHERE NOT EXISTS (SELECT 1 FROM kb.frontend_pages WHERE descriptor_id = $1::text)
- ON CONFLICT (descriptor_id, version) DO NOTHING RETURNING version`, id, schemaVersionOf(KindPage), string(raw), actor).Scan(&version)
 	return version, err
 }
 

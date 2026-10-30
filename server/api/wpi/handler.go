@@ -184,8 +184,12 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 		}
 	}
 	var version int
-	if Kind(kind) == KindPage && c.Request().Header.Get("If-None-Match") == "*" {
-		version, err = st.insertNewPage(ctx, id, raw, actorName(user))
+	if Kind(kind) == KindPage {
+		recoveryID := c.Request().Header.Get("X-WPI-Recovery-ID")
+		if recoveryID != "" && !idPattern.MatchString(recoveryID) {
+			return errorJSON(c, http.StatusBadRequest, "Invalid recovery ID")
+		}
+		version, err = st.savePage(ctx, id, raw, actorName(user), recoveryID, c.Request().Header.Get("If-None-Match") == "*")
 		if errors.Is(err, sql.ErrNoRows) {
 			return errorJSON(c, http.StatusConflict, "Page already exists")
 		}

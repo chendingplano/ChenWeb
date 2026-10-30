@@ -7895,5 +7895,6 @@
 	"wpi_page_group_geometry": "Geometry",
 	"wpi_page_group_colors": "Colors",
 	"wpi_page_group_actions": "Actions",
-	"wpi_page_group_misc": "Misc"
+	"wpi_page_group_misc": "Misc",
+	"wpi_autosave_failed": "Could not auto-save this page. Your changes remain unsaved."
 }
