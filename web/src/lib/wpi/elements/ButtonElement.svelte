@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { m } from '$lib/paraglide/messages.js';
 	import { actionRef } from '../entries';
 	import { getRuntime } from '../runtime.svelte';
 	import { localized } from '../text';
@@ -22,4 +23,4 @@
 	}
 </script>
 
-<Button onclick={click} disabled={busy}>{localized(d.label)}</Button>
+<Button onclick={click} disabled={busy}>{localized(d.label) || (rt.editorPreview ? m.wpi_editor_button_placeholder() : '')}</Button>

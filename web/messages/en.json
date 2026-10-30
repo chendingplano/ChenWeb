@@ -1438,6 +1438,7 @@
 	"wpi_toolbar_distribute_horizontal": "Distribute horizontally",
 	"wpi_toolbar_distribute_vertical": "Distribute vertically",
 	"wpi_editor_page": "Page",
+	"wpi_editor_button_placeholder": "Button",
 	"wpi_editor_element": "Element",
 	"wpi_editor_action": "Action",
 	"wpi_editor_draft_class": "{id} (draft)",

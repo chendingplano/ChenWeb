@@ -1438,6 +1438,7 @@
 	"wpi_toolbar_distribute_horizontal": "水平等距分布",
 	"wpi_toolbar_distribute_vertical": "垂直等距分布",
 	"wpi_editor_page": "页面",
+	"wpi_editor_button_placeholder": "按钮",
 	"wpi_editor_element": "元素",
 	"wpi_editor_action": "动作",
 	"wpi_editor_draft_class": "{id}（草稿）",
