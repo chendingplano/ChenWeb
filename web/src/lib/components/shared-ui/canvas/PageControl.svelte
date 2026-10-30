@@ -1,7 +1,8 @@
 <script lang="ts">
  import { m } from '$lib/paraglide/messages.js';
  import GripIcon from '@lucide/svelte/icons/grip';
- let { mode, onChoose }: { mode: 'page' | 'layouter' | null; onChoose: (mode: 'page' | 'layouter') => void } = $props();
+ import type { ConfigMode } from './PageConfigPanel.svelte';
+ let { mode, onChoose }: { mode: ConfigMode | null; onChoose: (mode: ConfigMode) => void } = $props();
  let x = $state(0);
  let y = $state(0);
  let drag: { id: number; startX: number; startY: number; x: number; y: number } | null = null;
@@ -30,7 +31,8 @@
 <div class="frame" style="transform:translate({x}px, {y}px)" role="group" aria-label={m.wpi_page_controls()}>
  <button type="button" class="handle select-none" aria-label={m.wpi_move_page_controls()} title={m.wpi_move_page_controls()} onpointerdown={start} onpointermove={move} onpointerup={end} onpointercancel={end} onkeydown={keymove}><GripIcon size={14} /></button>
  <button type="button" class:active={mode === 'page'} aria-pressed={mode === 'page'} onclick={() => onChoose('page')}>{m.wpi_view_page_config()}</button>
- <button type="button" class:active={mode === 'layouter'} aria-pressed={mode === 'layouter'} onclick={() => onChoose('layouter')}>{m.wpi_layouter_title()}</button>
+ <button type="button" class:active={mode === 'panes'} aria-pressed={mode === 'panes'} onclick={() => onChoose('panes')}>{m.wpi_panes_title()}</button>
+ <button type="button" class:active={mode === 'panel'} aria-pressed={mode === 'panel'} onclick={() => onChoose('panel')}>{m.wpi_panel_title()}</button>
 </div>
 <style>
  .frame { display:flex; gap:2px; align-items:center; padding:4px; background:var(--cv-raised); border:1px solid var(--cv-border); border-radius:6px; box-shadow:0 3px 12px var(--cv-shadow); pointer-events:auto; }

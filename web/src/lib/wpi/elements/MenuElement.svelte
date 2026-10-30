@@ -7,21 +7,22 @@
 	import type { MenuItem } from '../types';
 	import type { ElementProps } from './index';
 
-	let { panelId, element }: ElementProps = $props();
+	let { instanceId, element }: ElementProps = $props();
 
 	const rt = getRuntime();
 	const d = $derived(element.desc);
-	// Bindings are per menu instance: this element in this panel.
-	const instance = $derived(`${panelId}${element.pointer}`);
 	let collapsed = $state<Record<string, boolean>>({});
 
 	// path is the JSON Pointer of the item below the element's "items" attribute.
 	function choose(item: MenuItem, path: string) {
 		if (!item.on_click) return;
-		void rt.runTrigger(item.on_click, actionRef(element, 'items', `${path}/on_click`), {
-			panelId,
-			binding: `${instance}/${item.item_id}`
-		});
+		void rt.runTrigger(item.on_click, actionRef(element, 'items', `${path}/on_click`), { instanceId });
+	}
+
+	// An item is current while the pane it opens its page in shows that page
+	// with the item's input (OpenSpec wpi-pages-own-panes, design D8).
+	function current(item: MenuItem, path: string): boolean {
+		return !!item.on_click && rt.isShowing(item.on_click, actionRef(element, 'items', `${path}/on_click`), { instanceId });
 	}
 
 	onMount(() => {
@@ -64,7 +65,7 @@
 					</button>
 					{#if open}{@render branch(item.children, `${path}/children`, depth + 1)}{/if}
 				{:else}
-					{@const active = rt.isShowing(`${instance}/${item.item_id}`)}
+					{@const active = current(item, path)}
 					<button
 						type="button"
 						class="hover:bg-muted flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm {active ? 'bg-muted font-medium' : ''}"

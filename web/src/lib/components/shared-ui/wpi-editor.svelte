@@ -31,10 +31,12 @@
 	import WpiApp from '$lib/wpi/WpiApp.svelte';
 	import PageControl from './canvas/PageControl.svelte';
 	import CenterPage from './canvas/CenterPage.svelte';
-	import PageConfigPanel from './canvas/PageConfigPanel.svelte';
+	import PageConfigPanel, { type ConfigMode } from './canvas/PageConfigPanel.svelte';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
-	import type { Bundle, JsonObject } from '$lib/wpi/types';
-	import { isElementNode, nodeData, nodeJson, pageJson, pageNodes } from './canvas/wpi-json';
+	import type { Bundle, ClassRow, JsonObject, PageDescriptor } from '$lib/wpi/types';
+	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
+	import { isElementNode, nodeData, nodeJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
+	import { addPane, deletePane, moveNode, nodesUnder, renamePane, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
@@ -164,7 +166,10 @@
 	}
 	let showLoadPage = $state(false);
 	let loadedPage = $state<JsonObject | null>(null);
-	let configMode = $state<'page' | 'layouter' | null>(null);
+	let configMode = $state<ConfigMode | null>(null);
+	// The pane selected in the preview or the Panes tree.
+	let selectedPane = $state<string | null>(null);
+	const leaves = $derived(loadedPage ? leafPanes(effectiveRoot(loadedPage as unknown as PageDescriptor)) : []);
 	let canvasRevision = $state(0);
 	const DEFAULT_PREVIEW_SIZE = { width: 1000, height: 650 };
 	let previewSize = $state({ ...DEFAULT_PREVIEW_SIZE });
@@ -287,7 +292,7 @@
 	type CanvasTab = {
 		id: number; flow: Flow | null; savedName: string; snapshot: PageSnapshot; saved: PageSnapshot | null;
 		undo: PageSnapshot[]; redo: PageSnapshot[]; viewport: { x: number; y: number; zoom: number };
-		selected: string | null; config: 'page' | 'layouter' | null; dirty: boolean;
+		selected: string | null; config: ConfigMode | null; dirty: boolean;
 	};
 	let tabs = $state<CanvasTab[]>([]);
 	let activeTabId = $state(0);
@@ -312,7 +317,7 @@
 		({ nodes, edges, page: loadedPage, previewSize } = JSON.parse(JSON.stringify(tab.snapshot)));
 		lastSavedSnapshot = tab.saved;
 		undoStack = tab.undo; redoStack = tab.redo;
-		viewport = { ...tab.viewport }; selectedNodeId = tab.selected; configMode = tab.config;
+		viewport = { ...tab.viewport }; selectedNodeId = tab.selected; configMode = tab.config; selectedPane = null;
 		canvasRevision++;
 	}
 	function addTab(page?: JsonObject) {
@@ -366,12 +371,17 @@
 	);
 	const selectedTotal = $derived(selectedCount(nodes));
 	// The class of the selected element node, whose instance attributes the properties
-	// panel edits: null when it is not in the class list, undefined for other nodes.
-	const selectedElementClass = $derived(
-		selectedNode?.type === 'wpi-element'
-			? (elementClasses.find((c) => c.descriptor_id === selectedNode.data.element) ?? null)
-			: undefined
-	);
+	// panel edits: the copy the instance holds, else the class in the class list;
+	// null when there is neither, undefined for other nodes.
+	const selectedElementClass = $derived.by((): ElementClassSummary | null | undefined => {
+		if (selectedNode?.type !== 'wpi-element') return undefined;
+		const copy = selectedNode.data.class as ClassRow | undefined;
+		if (copy) {
+			const { descriptor_id, schema_version: _v, description, implement_notes: _n, code_module_id: _c, ...attributes } = copy;
+			return { descriptor_id, version: 0, status: 'active', description, attributes } as unknown as ElementClassSummary;
+		}
+		return elementClasses.find((c) => c.descriptor_id === selectedNode.data.element) ?? null;
+	});
 
 	// ── Toast ──────────────────────────────────────────────────────────────
 	function toast(msg: string) {
@@ -495,11 +505,14 @@
 		savingTabs.add(id);
 		const snapshot = currentSnapshot();
 		const name = activeFlow?.flow_name ?? '';
-		const page = { ...snapshot.page, elements: pageJson(snapshot.nodes).elements } as JsonObject;
+		const page = pageJson(snapshot.nodes, snapshot.page as JsonObject);
 		try {
-			await savePage(String(page.descriptor_id), page);
+			const { page: stored } = await savePage(String(page.descriptor_id), page);
 			if (id === activeTabId) {
-				lastSavedSnapshot = snapshot;
+				// The stored page holds the class copies the server made; the canvas
+				// adopts them, unless it changed while saving.
+				if (JSON.stringify(currentSnapshot()) === JSON.stringify(snapshot)) adoptStored(stored);
+				lastSavedSnapshot = currentSnapshot();
 				savedName = name;
 			} else {
 				tabs = tabs.map((tab) => tab.id === id ? { ...tab, savedName: name, saved: snapshot, dirty: tab.flow?.flow_name !== name || !sameCanvasContent(tab.snapshot, snapshot) || JSON.stringify(tab.snapshot.page) !== JSON.stringify(snapshot.page) || JSON.stringify(tab.snapshot.previewSize) !== JSON.stringify(snapshot.previewSize) } : tab);
@@ -512,6 +525,50 @@
 			savingTabs.delete(id);
 		}
 	}
+
+	// Takes the class copies of a stored page into the canvas: each element node
+	// gets the attributes and copy of the instance at its place in its panel.
+	function adoptStored(stored: JsonObject) {
+		if (nodes.some((n) => isElementNode(n) && !leaves.includes(nodePane(n)))) return;
+		const fresh = pageNodes(stored);
+		nodes = nodes.map((n) => {
+			if (!isElementNode(n)) return n;
+			const pane = nodePane(n);
+			const index = paneNodes(nodes, pane).findIndex((p) => p.id === n.id);
+			const from = fresh.filter((f) => f.data.pane === pane)[index];
+			return from ? { ...n, data: { ...n.data, attrs: from.data.attrs, ...(from.data.class ? { class: from.data.class } : {}) } } : n;
+		});
+		loadedPage = stored;
+	}
+
+	// ── Pane edits (Panes in the page controls; undoable) ──────────────────
+	function paneEdit(fn: (e: Edit) => Edit) {
+		if (!loadedPage) return;
+		takeSnapshot();
+		const next = fn({ page: loadedPage, nodes });
+		loadedPage = next.page;
+		nodes = next.nodes;
+	}
+	const paneActions = {
+		split: (pane: string, split: 'rows' | 'columns') => paneEdit((e) => splitPane(e, pane, split)),
+		add: (pane: string) => paneEdit((e) => ({ ...e, page: addPane(e.page, pane) })),
+		remove(pane: string) {
+			if (!loadedPage) return;
+			const doomed = nodesUnder(loadedPage, nodes, pane);
+			if (doomed.length && !confirm(m.wpi_pane_delete_confirm({ pane, count: doomed.length }))) return;
+			paneEdit((e) => deletePane(e, pane));
+			if (doomed.some((n) => n.id === selectedNodeId)) selectedNodeId = null;
+			selectedPane = null;
+		},
+		rename(pane: string, to: string) {
+			paneEdit((e) => renamePane(e, pane, to));
+			selectedPane = to;
+		},
+		move(nodeId: string, pane: string) {
+			takeSnapshot();
+			nodes = moveNode(nodes, nodeId, pane);
+		}
+	};
 
 	// ── Drag-and-drop from palette ──────────────────────────────────────────
 	function onPaletteDragStart(event: DragEvent, nodeType: NodeType) {
@@ -537,8 +594,10 @@
 
 		const cls = nodeType.id.startsWith(ELEMENT_CLASS_PREFIX) ? nodeType.id.slice(ELEMENT_CLASS_PREFIX.length) : null;
 		const type = cls ? 'wpi-element' : nodeType.id;
-		if (type === 'wpi-element' && (!loadedPage || !isInsidePage(point, previewSize))) {
-			toast(m.wpi_drop_element_inside_page());
+		// An element goes into the leaf pane under the pointer.
+		const pane = (document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-editor-pane]') as HTMLElement | null)?.dataset.editorPane;
+		if (type === 'wpi-element' && (!loadedPage || !isInsidePage(point, previewSize) || !pane)) {
+			toast(m.wpi_drop_element_inside_pane());
 			return;
 		}
 		const id = `${type}-${Date.now()}`;
@@ -552,7 +611,7 @@
 				hidden: !!loadedPage && type === 'wpi-element',
 				position,
 				selected: true,
-				data: cls ? { label: cls, element: cls } : { ...nodeType.defaultData, label: nodeType.label }
+				data: cls ? { label: cls, element: cls, pane } : { ...nodeType.defaultData, label: nodeType.label }
 			}
 		];
 		selectedNodeId = id;
@@ -896,7 +955,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} size={previewSize} zoom={viewport.zoom} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} />
+							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -1033,12 +1092,17 @@
 			</div>
 			<div class="properties-content">
 		{#if loadedPage && configMode}
-			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} onUpdate={(page) => { takeSnapshot(); loadedPage = page; }} />
+			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} {selectedPane}
+				onUpdate={(page) => { takeSnapshot(); loadedPage = page; }}
+				onSelectPane={(pane) => (selectedPane = pane)}
+				onSplit={paneActions.split} onAdd={paneActions.add} onDelete={paneActions.remove} onRename={paneActions.rename} />
 		{:else}
 		<PropertiesPanel
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
 			elementClass={selectedElementClass}
+			panes={loadedPage && selectedNode?.type === 'wpi-element' ? leaves : undefined}
+			onMovePane={paneActions.move}
 			nodeTab
 			width={propsWidth}
 			{darkMode}
@@ -1102,7 +1166,7 @@
 			: isElementNode(selectedNode)
 				? ''
 				: m.wpi_view_json_node_data_note()}
-		json={selectedNode ? nodeJson(selectedNode) : { ...pageJson(nodes), ...loadedPage, elements: pageJson(nodes).elements }}
+		json={selectedNode ? nodeJson(selectedNode) : pageJson(nodes, loadedPage ?? {})}
 		onApply={(value) => {
 			if (selectedNode) {
 				if (isElementNode(selectedNode) && typeof value.element !== 'string') return false;
@@ -1111,19 +1175,9 @@
 			} else {
 				let next: Node[];
 				try { next = pageNodes(value); } catch { return false; }
-				const existing = nodes.filter(isElementNode).sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
 				takeSnapshot();
-				const used = new Set(nodes.map((node) => node.id));
-				const elements = next.map((node, index) => {
-					const old = existing[index];
-					if (old) return { ...old, hidden: true, data: nodeData(old, nodeJson(node)) };
-					let id = node.id;
-					while (used.has(id)) id += '-new';
-					used.add(id);
-					return { ...node, id, hidden: true };
-				});
-				const removed = new Set(existing.slice(elements.length).map((node) => node.id));
-				nodes = [...nodes.filter((node) => !isElementNode(node)), ...elements];
+				const removed = new Set(nodes.filter(isElementNode).map((node) => node.id));
+				nodes = [...nodes.filter((node) => !isElementNode(node)), ...next.map((node) => ({ ...node, hidden: true }))];
 				edges = edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target));
 				loadedPage = value;
 				canvasRevision++;

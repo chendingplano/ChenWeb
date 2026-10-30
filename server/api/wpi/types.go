@@ -2,27 +2,33 @@
 // and validation, the app bundle endpoint, page search, and the actions that
 // run on the server (load, save, query, load-file).
 // Design: KnowledgeStore devdoc 2026102601 and the OpenSpec changes wpi-pilot,
-// wpi-classes-and-instances, wpi-pages, wpi-create-element-class and
-// wpi-code-modules.
+// wpi-classes-and-instances, wpi-pages, wpi-create-element-class,
+// wpi-code-modules and wpi-pages-own-panes.
 package wpi
 
 import "encoding/json"
 
-// SchemaVersion is the descriptor format of apps, pages and action classes.
+// Descriptor formats by kind (devdoc 2026102601 §4). Apps, pages and layouter
+// classes are written in SchemaVersion (OpenSpec wpi-pages-own-panes: pages own
+// their panes, and instances and layouter copies hold a copy of their class).
 // Element class rows are written in ElementSchemaVersion, where each instance
 // attribute is an object with a help tip, a default and whether instances may
-// change it (OpenSpec wpi-create-element-class), and the class names its code
-// module in code_module_id (OpenSpec wpi-code-modules). These are the only
-// formats this interpreter accepts.
+// change it, and the class names its code module in code_module_id. Action class
+// rows are written in ActionSchemaVersion. These are the only formats this
+// interpreter accepts.
 const (
-	SchemaVersion        = "0.2"
+	SchemaVersion        = "0.5"
 	ElementSchemaVersion = "0.4"
+	ActionSchemaVersion  = "0.2"
 )
 
 // schemaVersionOf returns the descriptor format of a kind.
 func schemaVersionOf(kind Kind) string {
-	if kind == KindElement {
+	switch kind {
+	case KindElement:
 		return ElementSchemaVersion
+	case KindAction:
+		return ActionSchemaVersion
 	}
 	return SchemaVersion
 }
@@ -32,27 +38,21 @@ func schemaVersionOf(kind Kind) string {
 type Kind string
 
 const (
-	KindApp     Kind = "app"
-	KindPage    Kind = "page"
-	KindElement Kind = "element"
-	KindAction  Kind = "action"
+	KindApp             Kind = "app"
+	KindPage            Kind = "page"
+	KindElement         Kind = "element"
+	KindAction          Kind = "action"
+	KindPageLayouter    Kind = "page-layouter"
+	KindElementLayouter Kind = "element-layouter"
 )
 
 func validKind(k string) bool {
 	switch Kind(k) {
-	case KindApp, KindPage, KindElement, KindAction:
+	case KindApp, KindPage, KindElement, KindAction, KindPageLayouter, KindElementLayouter:
 		return true
 	}
 	return false
 }
-
-// templatePanes lists the pane IDs each layout template provides.
-var templatePanes = map[string][]string{
-	"single-pane":                  {"main"},
-	"top-left-middle-right-bottom": {"top", "left", "middle", "right", "bottom"},
-}
-
-var layouters = []string{"flow-layouter"}
 
 // Descriptor is the latest active version of one stored descriptor.
 type Descriptor struct {
@@ -72,13 +72,11 @@ type Issue struct {
 	Message      string `json:"message"`
 }
 
-// Bundle is an app with every page reachable from it and the element and
-// action classes those pages use, keyed by ID.
+// Bundle is an app with every page reachable from it, keyed by ID. Instances
+// carry copies of their classes, so no class rows are sent.
 type Bundle struct {
 	App      json.RawMessage            `json:"app"`
 	Pages    map[string]json.RawMessage `json:"pages"`
-	Elements map[string]json.RawMessage `json:"elements"`
-	Actions  map[string]json.RawMessage `json:"actions"`
 	Warnings []Issue                    `json:"warnings"`
 }
 

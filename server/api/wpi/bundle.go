@@ -44,10 +44,11 @@ func str(v any) string {
 	return s
 }
 
-// BuildBundle loads appID, every page reachable from it and all classes, then
-// validates the whole set: structure, instances against their classes,
-// references, panes, tables and columns, stored statements and files,
-// bindings.
+// BuildBundle loads appID and every page reachable from it, then validates the
+// whole set: each page with its instances against their class copies, the
+// code modules the copies name, references, the panes open-page instances name,
+// tables and columns, stored statements and files, bindings. Instances carry
+// their class copies, so no class rows are loaded (OpenSpec wpi-pages-own-panes).
 func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns, registered Registered) (*BundleResult, error) {
 	apps, err := load(ctx, KindApp, []string{appID})
 	if err != nil {
@@ -57,11 +58,8 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 	if !ok {
 		return nil, ErrNotFound
 	}
-	classes, err := loadClasses(ctx, load)
-	if err != nil {
-		return nil, err
-	}
-	pages, refs, err := loadPages(ctx, app, classes[KindAction], load)
+	initial := str(app.Body["initial_page"])
+	pages, refs, err := loadPages(ctx, appID, initial, load)
 	if err != nil {
 		return nil, err
 	}
@@ -73,45 +71,28 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 			res.Errors = append(res.Errors, Issue{r.kind, r.id, r.path, fmt.Sprintf("page %q does not exist", r.to)})
 		}
 	}
-	used := map[Kind]map[string]bool{KindElement: {}, KindAction: {}}
 	var actions []mergedAction
+	byPage := map[string][]mergedAction{}
+	var modules []moduleRef
 	for _, id := range slices.Sorted(maps.Keys(pages)) {
 		body := pages[id].Body
-		if issues := ValidateDescriptor(KindPage, id, body); len(issues) > 0 {
+		issues, els, acts := validatePage(id, body)
+		if len(issues) > 0 {
 			res.Errors = append(res.Errors, issues...)
 			continue
 		}
-		v := &validator{kind: KindPage, id: id, classes: classes}
-		els, acts := v.pageInstances(body)
-		res.Errors = append(res.Errors, v.issues...)
-		for _, e := range els {
-			used[KindElement][e.cls] = true
-		}
-		for _, a := range acts {
-			used[KindAction][a.cls] = true
-		}
 		actions = append(actions, acts...)
+		byPage[id] = acts
+		modules = append(modules, pageModules(id, body, els)...)
 		res.Warnings = append(res.Warnings, unboundSaveWarnings(id, els, acts)...)
+		res.Warnings = append(res.Warnings, copyWarnings(id, els)...)
 	}
-	// Only the classes the app uses are checked, so a broken class row that no
-	// page uses does not break every app. Attributes an element class names that
-	// its code module does not support are warnings.
-	usedElements := map[string]map[string]any{}
-	for _, kind := range []Kind{KindElement, KindAction} {
-		for _, cls := range slices.Sorted(maps.Keys(used[kind])) {
-			res.Errors = append(res.Errors, ValidateDescriptor(kind, cls, classes[kind][cls].Body)...)
-			if kind == KindElement {
-				res.Warnings = append(res.Warnings, classWarnings(cls, classes[kind][cls].Body)...)
-				usedElements[cls] = classes[kind][cls].Body
-			}
-		}
-	}
-	moduleErrs, err := moduleErrors(ctx, registered, usedElements)
+	moduleErrs, err := moduleErrors(ctx, registered, modules)
 	if err != nil {
 		return nil, err
 	}
 	res.Errors = append(res.Errors, moduleErrs...)
-	res.Errors = append(res.Errors, paneErrors(appID, str(app.Body["layout_template"]), actions)...)
+	res.Errors = append(res.Errors, paneErrors(initial, pages, byPage)...)
 	tableErrs, err := tableErrors(ctx, columns, actions)
 	if err != nil {
 		return nil, err
@@ -128,15 +109,13 @@ func BuildBundle(ctx context.Context, appID string, load Loader, columns Columns
 
 	res.Bundle = &Bundle{
 		App:      app.Raw,
-		Pages:    rawMap(pages, nil),
-		Elements: rawMap(classes[KindElement], used[KindElement]),
-		Actions:  rawMap(classes[KindAction], used[KindAction]),
+		Pages:    rawMap(pages),
 		Warnings: nonNil(res.Warnings),
 	}
 	return res, nil
 }
 
-// BuildPagePreviewBundle builds a normal single-pane app around a stored page.
+// BuildPagePreviewBundle builds an app whose initial page is a stored page.
 func BuildPagePreviewBundle(ctx context.Context, pageID string, load Loader, columns Columns, registered Registered) (*BundleResult, error) {
 	pages, err := load(ctx, KindPage, []string{pageID})
 	if err != nil {
@@ -145,7 +124,7 @@ func BuildPagePreviewBundle(ctx context.Context, pageID string, load Loader, col
 	if _, ok := pages[pageID]; !ok {
 		return nil, ErrNotFound
 	}
-	body := map[string]any{"descriptor_id": "editor-preview", "schema_version": "0.2", "layout_template": "single-pane", "panes": map[string]any{"main": map[string]any{"page": pageID}}}
+	body := map[string]any{"descriptor_id": "editor-preview", "schema_version": SchemaVersion, "initial_page": pageID}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -159,46 +138,20 @@ func BuildPagePreviewBundle(ctx context.Context, pageID string, load Loader, col
 	return BuildBundle(ctx, "editor-preview", previewLoader, columns, registered)
 }
 
-// loadClasses loads every active element and action class. Classes are few by
-// design, so all of them are loaded, one query per kind, and every instance can
-// be merged as soon as its page arrives.
-func loadClasses(ctx context.Context, load Loader) (map[Kind]map[string]Descriptor, error) {
-	classes := map[Kind]map[string]Descriptor{}
-	for _, kind := range []Kind{KindElement, KindAction} {
-		var err error
-		if classes[kind], err = load(ctx, kind, nil); err != nil {
-			return nil, err
-		}
-	}
-	return classes, nil
-}
-
-// ValidatePageInstances checks a page's instances against the active class
-// rows, as a bundle does: classes exist, element instances set only what their
-// class names and nothing it fixes, required attributes are set, and the merged
-// instances are complete. Call it on a page that passes ValidateDescriptor.
-func ValidatePageInstances(id string, page map[string]any, classes map[Kind]map[string]Descriptor) []Issue {
-	v := &validator{kind: KindPage, id: id, classes: classes}
-	v.pageInstances(page)
-	return v.issues
-}
-
-// rawMap returns the descriptors' JSON by ID, only those in keep unless it is nil.
-func rawMap(ds map[string]Descriptor, keep map[string]bool) map[string]json.RawMessage {
+// rawMap returns the descriptors' JSON by ID.
+func rawMap(ds map[string]Descriptor) map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}
 	for id, d := range ds {
-		if keep == nil || keep[id] {
-			out[id] = d.Raw
-		}
+		out[id] = d.Raw
 	}
 	return out
 }
 
-// loadPages fetches every page reachable from the app round by round: the
-// pages its panes name, then the pages their open-page instances open. Cycles
-// end because each ID is tried once. It returns the pages found and every
-// place that names a page.
-func loadPages(ctx context.Context, app Descriptor, actionClasses map[string]Descriptor, load Loader) (map[string]Descriptor, []pageRef, error) {
+// loadPages fetches every page reachable from the app round by round: its
+// initial page, then the pages its open-page instances open. Cycles end because
+// each ID is tried once. It returns the pages found and every place that names
+// a page.
+func loadPages(ctx context.Context, appID, initial string, load Loader) (map[string]Descriptor, []pageRef, error) {
 	pages := map[string]Descriptor{}
 	tried := map[string]bool{}
 	var refs []pageRef
@@ -213,11 +166,7 @@ func loadPages(ctx context.Context, app Descriptor, actionClasses map[string]Des
 			pending = append(pending, r.to)
 		}
 	}
-	panes, _ := app.Body["panes"].(map[string]any)
-	for _, pid := range slices.Sorted(maps.Keys(panes)) {
-		p, _ := panes[pid].(map[string]any)
-		name(pageRef{KindApp, app.ID, "/panes/" + pid + "/page", str(p["page"])})
-	}
+	name(pageRef{KindApp, appID, "/initial_page", initial})
 	for len(pending) > 0 {
 		ids := slices.Sorted(slices.Values(pending))
 		pending = nil
@@ -234,7 +183,8 @@ func loadPages(ctx context.Context, app Descriptor, actionClasses map[string]Des
 			for _, pos := range actionPositions(d.Body) {
 				m, _ := pos.val.(map[string]any)
 				if str(m["action"]) == "open-page" {
-					merged := mergeInstance(KindAction, actionClasses["open-page"].Body, instanceAttrs(m, "action"))
+					row, _ := m[copyKey].(map[string]any)
+					merged := mergeInstance(KindAction, row, instanceAttrs(m, "action"))
 					name(pageRef{KindPage, id, pos.path + "/page", str(merged["page"])})
 				}
 			}
@@ -270,18 +220,72 @@ func unboundSaveWarnings(pageID string, els []mergedElement, acts []mergedAction
 	return out
 }
 
-func paneErrors(appID, tmpl string, actions []mergedAction) []Issue {
-	panes, known := templatePanes[tmpl]
-	if !known {
-		return nil // reported by the app's structure check
+// maxHostChain caps how many pages a page can be opened inside, one in the other,
+// when the bundle checks panes, so cycles of open-page instances end.
+const maxHostChain = 8
+
+// paneErrors checks that the pane of every open-page instance resolves, looking
+// outward from the page that holds it through the pages it can be opened in
+// (devdoc 2026102601 §5.1, OpenSpec wpi-pages-own-panes design D9). It walks
+// (page, host chain) pairs from the initial page, which has no host; a page
+// opened in a pane gets the chain of that pane's page. acts holds each valid
+// page's merged action instances.
+func paneErrors(initial string, pages map[string]Descriptor, acts map[string][]mergedAction) []Issue {
+	type visit struct {
+		page  string
+		chain []string // host pages, innermost first
 	}
+	seen := map[string]bool{}
+	reported := map[string]bool{}
 	var out []Issue
-	for _, a := range actions {
-		if pane := str(a.body["pane"]); a.cls == "open-page" && pane != "" && !slices.Contains(panes, pane) {
-			out = append(out, Issue{KindPage, a.page, a.path + "/pane", fmt.Sprintf("pane %q is not part of layout template %q used by app %q", pane, tmpl, appID)})
+	queue := []visit{{initial, nil}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		key := cur.page + "|" + strings.Join(cur.chain, "/")
+		if seen[key] || len(cur.chain) > maxHostChain {
+			continue
+		}
+		seen[key] = true
+		full := append([]string{cur.page}, cur.chain...)
+		for _, a := range acts[cur.page] {
+			target, pane := str(a.body["page"]), str(a.body["pane"])
+			if a.cls != "open-page" || pane == "" {
+				continue
+			}
+			chain, ok := resolvePane(pages, full, pane)
+			if !ok {
+				msg := fmt.Sprintf("pane %q is not a leaf pane of page %q or of a page it is opened in (%s)", pane, cur.page, strings.Join(full, " in "))
+				if !reported[a.path+msg] {
+					reported[a.path+msg] = true
+					out = append(out, Issue{KindPage, cur.page, a.path + "/pane", msg})
+				}
+				continue
+			}
+			if _, exists := pages[target]; exists {
+				queue = append(queue, visit{target, chain})
+			}
 		}
 	}
 	return out
+}
+
+// resolvePane looks pane up in full, a page followed by the pages it is opened
+// in, innermost first. In each page it accepts a leaf pane; a page opened in a
+// pane has that pane in place of its root, so its root's ID names the pane of
+// the next page. It returns the host chain of a page opened in the pane found.
+func resolvePane(pages map[string]Descriptor, full []string, pane string) ([]string, bool) {
+	for k, id := range full {
+		root := effectiveRoot(pages[id].Body)
+		embedded := k+1 < len(full)
+		if embedded && str(root["pane_id"]) == pane {
+			return full[k+1:], true
+		}
+		if leaves, _ := paneLeaves(root); leaves[pane] {
+			return full[k:], true
+		}
+	}
+	return nil, false
 }
 
 func tableErrors(ctx context.Context, columns Columns, actions []mergedAction) ([]Issue, error) {
@@ -313,30 +317,77 @@ func tableErrors(ctx context.Context, columns Columns, actions []mergedAction) (
 	return out, nil
 }
 
-// moduleErrors reports element class rows whose code_module_id does not name an
-// active element module in kb.code_modules (OpenSpec wpi-code-modules, design
-// D9). A missing or malformed code_module_id is left to the class checks.
-func moduleErrors(ctx context.Context, registered Registered, rows map[string]map[string]any) ([]Issue, error) {
-	var names []string
-	for _, id := range slices.Sorted(maps.Keys(rows)) {
-		if m := str(rows[id]["code_module_id"]); idPattern.MatchString(m) {
-			names = append(names, m)
+// moduleRef is a code module a class copy in a page names, of a module type.
+type moduleRef struct {
+	kind   string // storedModule, storedPageLayouterModule or storedElementLayouterModule
+	module string
+	page   string
+	path   string
+}
+
+// pageModules lists the code modules a valid page's class copies name: its page
+// layouter's, each panel's element layouter's and each element instance's.
+func pageModules(pageID string, page map[string]any, els []mergedElement) []moduleRef {
+	var out []moduleRef
+	add := func(kind string, holder map[string]any, path string) {
+		row, _ := holder[copyKey].(map[string]any)
+		out = append(out, moduleRef{kind, str(row["code_module_id"]), pageID, path + "/" + copyKey + "/code_module_id"})
+	}
+	pl, _ := page["page_layouter"].(map[string]any)
+	add(storedPageLayouterModule, pl, "/page_layouter")
+	panels, _ := page["panels"].(map[string]any)
+	for _, paneID := range slices.Sorted(maps.Keys(panels)) {
+		panel, _ := panels[paneID].(map[string]any)
+		el, _ := panel["elem_layouter"].(map[string]any)
+		add(storedElementLayouterModule, el, "/panels/"+paneID+"/elem_layouter")
+	}
+	for _, e := range els {
+		out = append(out, moduleRef{storedModule, str(e.copy["code_module_id"]), pageID, e.path + "/" + copyKey + "/code_module_id"})
+	}
+	return out
+}
+
+// moduleErrors reports class copies whose code_module_id does not name an
+// active code module of the right type in kb.code_modules (OpenSpec
+// wpi-code-modules, design D9; wpi-pages-own-panes, design D6).
+func moduleErrors(ctx context.Context, registered Registered, refs []moduleRef) ([]Issue, error) {
+	names := map[string][]string{}
+	for _, r := range refs {
+		if idPattern.MatchString(r.module) && !slices.Contains(names[r.kind], r.module) {
+			names[r.kind] = append(names[r.kind], r.module)
 		}
 	}
-	if len(names) == 0 {
-		return nil, nil
-	}
-	found, err := registered(ctx, storedModule, names)
-	if err != nil {
-		return nil, err
+	found := map[string]map[string]bool{}
+	for _, kind := range slices.Sorted(maps.Keys(names)) {
+		var err error
+		if found[kind], err = registered(ctx, kind, names[kind]); err != nil {
+			return nil, err
+		}
 	}
 	var out []Issue
-	for _, id := range slices.Sorted(maps.Keys(rows)) {
-		if m := str(rows[id]["code_module_id"]); idPattern.MatchString(m) && !found[m] {
-			out = append(out, Issue{KindElement, id, "/code_module_id", fmt.Sprintf("code module %q is not an active element module in kb.code_modules", m)})
+	for _, r := range refs {
+		if idPattern.MatchString(r.module) && !found[r.kind][r.module] {
+			out = append(out, Issue{KindPage, r.page, r.path, fmt.Sprintf("code module %q is not an active %s module in kb.code_modules", r.module, moduleTypes[r.kind])})
 		}
 	}
 	return out, nil
+}
+
+// copyWarnings reports, once per class and page, the attributes an element
+// class copy names that its code module does not support.
+func copyWarnings(pageID string, els []mergedElement) []Issue {
+	var out []Issue
+	done := map[string]bool{}
+	for _, e := range els {
+		if done[e.cls] {
+			continue
+		}
+		done[e.cls] = true
+		for _, w := range classWarnings(e.cls, e.copy) {
+			out = append(out, Issue{KindPage, pageID, e.path + "/" + copyKey + w.Path, w.Message})
+		}
+	}
+	return out
 }
 
 // storedRefs says which attribute of a query or load-file instance names a

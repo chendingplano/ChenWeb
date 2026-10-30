@@ -8,7 +8,7 @@
 	import type { Json, JsonObject } from '../types';
 	import type { ElementProps } from './index';
 
-	let { panelId, element }: ElementProps = $props();
+	let { instanceId, element }: ElementProps = $props();
 
 	const rt = getRuntime();
 	const d = $derived(element.desc);
@@ -36,7 +36,7 @@
 		}
 		status = 'loading';
 		try {
-			const result = await requestWithTimeout((requestSignal) => rt.queryList(panelId, actionRef(element, 'source'), d.source?.args, requestSignal, d.source), 20_000, signal);
+			const result = await requestWithTimeout((requestSignal) => rt.queryList(instanceId, actionRef(element, 'source'), d.source?.args, requestSignal, d.source), 20_000, signal);
 			if (signal.aborted) return;
 			records = result;
 			page = 1;
@@ -50,9 +50,9 @@
 
 	// Refresh for a changed source and when a page configured to refresh is shown again.
 	$effect(() => {
-		const panel = rt.panels[panelId];
-		const shown = panel?.shown ?? 0;
-		const onShow = panel ? !!rt.bundle.pages[panel.pageId].refresh?.on_show : false;
+		const inst = rt.pages[instanceId];
+		const shown = inst?.shown ?? 0;
+		const onShow = inst ? !!rt.bundle.pages[inst.pageId]?.refresh?.on_show : false;
 		JSON.stringify(d.source);
 		element.pageId;
 		if (onShow) shown;
@@ -66,7 +66,7 @@
 	}
 
 	function open(record: JsonObject) {
-		if (d.on_row_click) void rt.runTrigger(d.on_row_click, actionRef(element, 'on_row_click'), { panelId, record });
+		if (d.on_row_click) void rt.runTrigger(d.on_row_click, actionRef(element, 'on_row_click'), { instanceId, record });
 	}
 </script>
 

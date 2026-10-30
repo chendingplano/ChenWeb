@@ -2,7 +2,15 @@ package wpi
 
 import "testing"
 
+// TestFlowLayouterConfig covers the parameters of a panel's flow-layouter copy,
+// which replace the copy's config whole (OpenSpec wpi-pages-own-panes, design D2).
 func TestFlowLayouterConfig(t *testing.T) {
+	page := func(t *testing.T, config string) map[string]any {
+		p := withCopies(t, testClasses(), "p", decode(t, pageWith(``)))
+		layouter := p["panels"].(map[string]any)["main"].(map[string]any)["elem_layouter"].(map[string]any)
+		layouter["config"] = decode(t, `{"c":`+config+`}`)["c"]
+		return p
+	}
 	for _, config := range []string{
 		`{}`, `{"column_gap":"0px","row_gap":"1.5rem"}`,
 		`{"horizontal_alignment":"start","vertical_alignment":"top","rows_alignment":"top"}`,
@@ -11,27 +19,25 @@ func TestFlowLayouterConfig(t *testing.T) {
 		`{"horizontal_alignment":"space-between","vertical_alignment":"stretch","rows_alignment":"space-between"}`,
 	} {
 		t.Run(config, func(t *testing.T) {
-			page := decode(t, pageWith(``))
-			page["layouter_config"] = decode(t, config)
-			expectIssue(t, ValidateDescriptor(KindPage, "p", page), "")
+			expectIssue(t, ValidateDescriptor(KindPage, "p", page(t, config)), "")
 		})
 	}
+	const path = "/panels/main/elem_layouter/config"
 	for _, tc := range []struct{ config, path string }{
-		{`null`, "/layouter_config"}, {`[]`, "/layouter_config"}, {`"center"`, "/layouter_config"},
-		{`{"gap":"12px"}`, `/layouter_config/gap unknown attribute "gap"`},
-		{`{"column_gap":"-1px"}`, "/layouter_config/column_gap"},
-		{`{"row_gap":"10%"}`, "/layouter_config/row_gap"},
-		{`{"row_gap":"1em"}`, "/layouter_config/row_gap"},
-		{`{"row_gap":0}`, "/layouter_config/row_gap"},
-		{`{"column_gap":"0"}`, "/layouter_config/column_gap"},
-		{`{"column_gap":"1px; color:red"}`, "/layouter_config/column_gap"},
-		{`{"horizontal_alignment":"left"}`, "/layouter_config/horizontal_alignment"},
-		{`{"vertical_alignment":"start"}`, "/layouter_config/vertical_alignment"},
-		{`{"rows_alignment":"stretch"}`, "/layouter_config/rows_alignment"},
+		{`null`, path}, {`[]`, path}, {`"center"`, path},
+		{`{"gap":"12px"}`, path + `/gap unknown attribute "gap"`},
+		{`{"column_gap":"-1px"}`, path + "/column_gap"},
+		{`{"row_gap":"10%"}`, path + "/row_gap"},
+		{`{"row_gap":"1em"}`, path + "/row_gap"},
+		{`{"row_gap":0}`, path + "/row_gap"},
+		{`{"column_gap":"0"}`, path + "/column_gap"},
+		{`{"column_gap":"1px; color:red"}`, path + "/column_gap"},
+		{`{"horizontal_alignment":"left"}`, path + "/horizontal_alignment"},
+		{`{"vertical_alignment":"start"}`, path + "/vertical_alignment"},
+		{`{"rows_alignment":"stretch"}`, path + "/rows_alignment"},
 	} {
 		t.Run(tc.config, func(t *testing.T) {
-			page := decode(t, `{"descriptor_id":"p","schema_version":"0.2","layouter":"flow-layouter","elements":[],"layouter_config":`+tc.config+`}`)
-			expectIssue(t, ValidateDescriptor(KindPage, "p", page), tc.path)
+			expectIssue(t, ValidateDescriptor(KindPage, "p", page(t, tc.config)), tc.path)
 		})
 	}
 }

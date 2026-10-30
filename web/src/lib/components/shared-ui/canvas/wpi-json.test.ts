@@ -4,9 +4,17 @@ import type { JsonObject } from '$lib/wpi/types';
 import type { Node } from '@xyflow/svelte';
 import { nodeData, nodeJson, pageJson, pageNodes } from './wpi-json';
 
-function element(id: string, cls: string, x: number, y: number, attrs?: Record<string, unknown>): Node {
-	return { id, type: 'wpi-element', position: { x, y }, data: { label: `name of ${id}`, element: cls, ...(attrs ? { attrs } : {}) } };
+function element(id: string, cls: string, x: number, y: number, attrs?: Record<string, unknown>, pane = 'main'): Node {
+	return { id, type: 'wpi-element', position: { x, y }, data: { label: `name of ${id}`, element: cls, pane, ...(attrs ? { attrs } : {}) } };
 }
+
+const single: JsonObject = { descriptor_id: 'p', schema_version: '0.5', page_layouter: { layouter: 'single-pane', root: { pane_id: 'main' } } };
+const twoPanes: JsonObject = {
+	descriptor_id: 'p',
+	schema_version: '0.5',
+	page_layouter: { layouter: 'single-pane', root: { pane_id: 'page', split: 'columns', children: [{ pane_id: 'list' }, { pane_id: 'detail' }] } },
+	panels: { detail: { elem_layouter: { layouter: 'flow-layouter', config: { column_gap: '1rem' } }, elem_list: [] } }
+};
 
 test('an element node is its class and the attributes set, not the node name', () => {
 	const node = element('b', 'button', 0, 0, { label: 'Save', on_click: { action: 'save-page' } });
@@ -23,7 +31,7 @@ test('other nodes show their data', () => {
 test('an edited element instance goes back into the node, which keeps its name', () => {
 	const node = element('b', 'button', 0, 0, { label: 'Save' });
 	const data = nodeData(node, { element: 'link', label: 'Send', width: 200 });
-	assert.deepEqual(data, { label: 'name of b', element: 'link', attrs: { label: 'Send', width: 200 } });
+	assert.deepEqual(data, { label: 'name of b', element: 'link', pane: 'main', attrs: { label: 'Send', width: 200 } });
 	assert.deepEqual(nodeJson({ ...node, data }), { element: 'link', label: 'Send', width: 200 });
 });
 
@@ -32,39 +40,53 @@ test('other nodes take the edited JSON as their data', () => {
 	assert.deepEqual(nodeData(page, { label: 'Start', note: 'x' }), { label: 'Start', note: 'x' });
 });
 
-test('the page lists element nodes in reading order and skips other nodes', () => {
+test('the page lists the element nodes of each pane in reading order and skips other nodes', () => {
 	const nodes: Node[] = [
 		element('save', 'button', 200, 100),
 		{ id: 'p', type: 'wpi-page', position: { x: 0, y: 0 }, data: { label: 'Page' } },
 		element('name', 'input', 0, 100),
 		element('title', 'text', 400, 0)
 	];
-	assert.deepEqual(pageJson(nodes), {
-		schema_version: '0.2',
-		layouter: 'flow-layouter',
-		elements: [{ element: 'text' }, { element: 'input' }, { element: 'button' }]
+	assert.deepEqual(pageJson(nodes, single), {
+		...single,
+		panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [{ element: 'text' }, { element: 'input' }, { element: 'button' }] } }
 	});
 	assert.equal(nodes[0].id, 'save', 'the canvas order is left alone');
+	const split = pageJson([element('a', 'text', 0, 0, {}, 'detail'), element('b', 'text', 0, 0, {}, 'list'), element('c', 'text', 0, 0, {}, 'gone')], twoPanes);
+	assert.deepEqual(Object.keys(split.panels as JsonObject), ['list', 'detail']);
+	assert.deepEqual((split.panels as JsonObject).detail, { elem_layouter: { layouter: 'flow-layouter', config: { column_gap: '1rem' } }, elem_list: [{ element: 'text' }] });
+	assert.equal(((split.panels as JsonObject).list as JsonObject & { elem_list: unknown[] }).elem_list.length, 2, 'a node of an unknown pane goes to the first leaf');
 });
 
-test('an empty canvas is a page with no elements', () => {
-	assert.deepEqual(pageJson([]), { schema_version: '0.2', layouter: 'flow-layouter', elements: [] });
+test('an empty canvas is a page with no panels', () => {
+	assert.deepEqual(pageJson([], single), { ...single, panels: {} });
 });
 
-test('loading preserves instance order, duplicate classes and nested attributes', () => {
+test('class copies stay out of the node JSON and come back in the page', () => {
+	const copy = { descriptor_id: 'text', schema_version: '0.4', code_module_id: 'text' };
+	const node = { ...element('t', 'text', 0, 0, { text: 'Hi' }), data: { label: 't', element: 'text', attrs: { text: 'Hi' }, pane: 'main', class: copy } };
+	assert.deepEqual(nodeJson(node), { element: 'text', text: 'Hi' });
+	assert.equal(nodeData(node, { element: 'text', text: 'Bye' }).class, copy, 'editing the JSON keeps the copy');
+	assert.deepEqual((pageJson([node], single).panels as JsonObject).main, { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [{ element: 'text', text: 'Hi', class: copy }] });
+});
+
+test('loading preserves each panel order, duplicate classes, copies and nested attributes', () => {
 	const page: JsonObject = {
-		elements: [
-			{ element: 'input', binding: { path: '$input_doc.name' }, width: 200 },
-			{ element: 'input', label: { en: 'Email', 'zh-cn': '邮箱' } },
-			{ element: 'button', on_click: { action: 'save' } }
-		]
+		...twoPanes,
+		panels: {
+			list: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [
+				{ element: 'input', binding: { path: '$input_doc.name' }, width: 200 },
+				{ element: 'input', label: { en: 'Email', 'zh-cn': '邮箱' }, class: { descriptor_id: 'input' } }
+			] },
+			detail: { elem_layouter: { layouter: 'flow-layouter', config: { column_gap: '1rem' } }, elem_list: [{ element: 'button', on_click: { action: 'save' } }] }
+		}
 	};
 	const nodes = pageNodes(page);
 	assert.equal(new Set(nodes.map((n) => n.id)).size, 3);
-	assert.deepEqual(pageJson(nodes).elements, page.elements);
-	assert.deepEqual(pageNodes({ elements: [] }), []);
-	assert.throws(() => pageNodes({ elements: [null] }));
-	assert.throws(() => pageNodes({}));
+	assert.deepEqual(nodes.map((n) => n.data.pane), ['list', 'list', 'detail']);
+	assert.deepEqual(pageJson(nodes, page), page);
+	assert.deepEqual(pageNodes(single), []);
+	assert.throws(() => pageNodes({ ...single, panels: { main: { elem_list: [null] } } }));
 });
 
 test('JSON editing accepts objects and reports invalid syntax or non-objects', async () => {

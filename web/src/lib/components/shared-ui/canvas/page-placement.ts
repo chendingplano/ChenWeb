@@ -1,8 +1,15 @@
 type Size = { width: number; height: number };
 type Point = { x: number; y: number };
 
+// A new page: one pane, main, whose panel uses the flow layouter. Saving it
+// gives it copies of the active classes (OpenSpec wpi-pages-own-panes, D4).
 export function blankPage() {
- return { descriptor_id: '', schema_version: '0.2', layouter: 'flow-layouter', elements: [] };
+ return {
+  descriptor_id: '',
+  schema_version: '0.5',
+  page_layouter: { layouter: 'single-pane', root: { pane_id: 'main' } },
+  panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [] } }
+ };
 }
 
 export function isInsidePage(point: Point, page: Size): boolean {

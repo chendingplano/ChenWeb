@@ -1,12 +1,20 @@
-// Descriptor shapes for WPI schema_version "0.2" (apps, pages, action classes)
-// and "0.4" (element classes), and the API responses.
+// Descriptor shapes for WPI schema_version "0.5" (apps, pages, layouter
+// classes), "0.4" (element classes) and "0.2" (action classes), and the API
+// responses (OpenSpec wpi-pages-own-panes).
 // The Go validator (server/api/wpi) is the authority on what is valid; these
-// types describe what the interpreter receives in a validated bundle.
+// types describe what the interpreter receives in a validated bundle. A stored
+// page holds a copy of each class it uses in "class"; a page being edited may
+// not have them yet, so "class" is optional here.
 
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type JsonObject = { [key: string]: Json };
 
+// One pane of a page layouter's tree (devdoc 2026102601 §3.2.2). A pane with
+// split is divided into children; one without is a leaf and holds a panel.
 export type PaneSpec = {
+	pane_id: string;
+	split?: 'rows' | 'columns';
+	children?: PaneSpec[];
 	width?: string;
 	height?: string;
 	min_width?: string;
@@ -14,15 +22,21 @@ export type PaneSpec = {
 	min_height?: string;
 	max_height?: string;
 	resizable?: boolean;
-	scroll?: 'auto' | 'none';
-	page?: string;
+	left_margin?: string;
+	right_margin?: string;
+	top_margin?: string;
+	bottom_margin?: string;
+	hori_align?: 'left' | 'center' | 'right';
+	vert_align?: 'top' | 'center' | 'bottom';
+	hori_scrollbar?: 'auto' | 'hide';
+	vert_scrollbar?: 'auto' | 'hide';
 };
 
+// An app opens its initial page in its page area.
 export type AppDescriptor = {
 	descriptor_id: string;
 	schema_version: string;
-	layout_template: string;
-	panes: Record<string, PaneSpec>;
+	initial_page: string;
 };
 
 // Text shown the same in every language, or one text per language code.
@@ -33,6 +47,7 @@ export type Text = string | Record<string, string>;
 // read only by the server.
 export type ActionInstance = {
 	action: string;
+	class?: ClassRow;
 	table?: string;
 	result?: string;
 	fields?: { column: string; attribute: string }[];
@@ -63,6 +78,7 @@ export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
 	width?: string | number;
 	height?: string | number;
 	element: string;
+	class?: ClassRow;
 	text?: string;
 	label?: Text;
 	data_binding?: string;
@@ -94,8 +110,6 @@ export type ClassRow = {
 	[attr: string]: unknown;
 };
 
-// A page (devdoc §3.2.1). Its sizes place it inside its pane; binding_mode is
-// the default of its elements that show data.
 export type FlowLayouterConfig = {
 	column_gap?: string;
 	row_gap?: string;
@@ -104,15 +118,28 @@ export type FlowLayouterConfig = {
 	rows_alignment?: 'top' | 'center' | 'bottom' | 'space-between';
 };
 
+// A page's copy of a page layouter class: the whole class in class, and the
+// page's own tree, which replaces the class's when set.
+export type PageLayouterCopy = { layouter: string; class?: ClassRow & { root?: PaneSpec }; root?: PaneSpec };
+
+// A panel's copy of an element layouter class: the whole class in class, and
+// the panel's own parameters, which replace the class's when set.
+export type ElementLayouterCopy = { layouter: string; class?: ClassRow & { config?: FlowLayouterConfig }; config?: FlowLayouterConfig };
+
+// The elements shown in one leaf pane, and the element layouter that arranges
+// them (devdoc §3.3).
+export type Panel = { elem_layouter: ElementLayouterCopy; elem_list?: ElementInstance[] };
+
+// A page (devdoc §3.2.3). Its sizes place it inside its page area: the app's,
+// or the pane it was opened in; binding_mode is the default of its elements
+// that show data.
 export type PageDescriptor = SizeAttrs & {
 	min_height?: string;
 	max_height?: string;
-	left_margin?: string;
-	right_margin?: string;
-	top_margin?: string;
-	bottom_margin?: string;
 	hori_align?: 'left' | 'center' | 'right';
 	vert_align?: 'top' | 'center' | 'bottom';
+	hori_scrollbar?: 'auto' | 'hide';
+	vert_scrollbar?: 'auto' | 'hide';
 	bkgd_color?: string;
 	frgd_color?: string;
 	access_controls?: string[];
@@ -122,9 +149,8 @@ export type PageDescriptor = SizeAttrs & {
 	page_style?: string;
 	descriptor_id: string;
 	schema_version: string;
-	layouter: string;
-	layouter_config?: FlowLayouterConfig;
-	elements: ElementInstance[];
+	page_layouter: PageLayouterCopy;
+	panels?: Record<string, Panel>;
 	page_name?: Text;
 	description?: Text;
 	input?: Input;
@@ -135,18 +161,16 @@ export type PageDescriptor = SizeAttrs & {
 
 export type Issue = { kind: string; descriptor_id: string; path: string; message: string };
 
-// An app, its pages and the element and action classes they use.
+// An app and its pages, whose instances carry their class copies.
 export type Bundle = {
 	app: AppDescriptor;
 	pages: Record<string, PageDescriptor>;
-	elements: Record<string, ClassRow>;
-	actions: Record<string, ClassRow>;
 	warnings: Issue[];
 };
 
 // Names an action instance by its place in a stored page.
 export type ActionRef = { kind: 'page'; id: string; pointer: string };
 
-// A panel's input: {} for an empty doc, static data, or the action instance
+// A page instance's input: {} for an empty doc, static data, or the action instance
 // that produces it and its argument values.
 export type InputSpec = { ref?: ActionRef; args?: JsonObject; doc?: JsonObject };

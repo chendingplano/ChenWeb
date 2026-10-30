@@ -1,9 +1,9 @@
-// Merges instances with their class rows (devdoc 2026102601 §3.5.1): the row's
-// non-null defaults overlaid with the instance's own attributes. Same rule as
-// mergeInstance in server/api/wpi.
-import type { ActionInstance, ActionRef, Bundle, ClassRow, ElementInstance, Input, InputSpec, JsonObject, PageDescriptor, Text } from './types';
+// Merges instances with the class copies they hold (devdoc 2026102601 §3.5.1):
+// the copy's non-null defaults overlaid with the instance's own attributes. Same
+// rule as mergeInstance in server/api/wpi. The stored class is never read.
+import type { ActionInstance, ActionRef, ClassRow, ElementInstance, Input, InputSpec, JsonObject, PageDescriptor, Text } from './types';
 
-const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description', 'implement_notes', 'code_module_id']);
+const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description', 'implement_notes', 'code_module_id', 'class']);
 
 // An action class row holds each instance attribute's default itself.
 export function mergeInstance<T extends object>(row: ClassRow | undefined, own: T): T {
@@ -38,9 +38,9 @@ export function isFixed(row: ClassRow, attr: string): boolean {
 }
 
 export type ResolvedElement = {
-	// The instance merged with its class.
+	// The instance merged with its class copy.
 	desc: ElementInstance;
-	// The code module that draws it: its class's code_module_id.
+	// The code module that draws it: its class copy's code_module_id.
 	module: string;
 	pageId: string;
 	// JSON Pointer of the instance in its page. It identifies the instance, and
@@ -48,18 +48,27 @@ export type ResolvedElement = {
 	pointer: string;
 };
 
-// An element instance that does not set binding_mode takes its page's, when its
-// class names one and does not fix it, so the order is instance, page, class
-// (devdoc §3.2.1). Same rule as withPageDefaults in server/api/wpi.
-export function resolveEntry(bundle: Bundle, page: PageDescriptor, entry: ElementInstance, index: number): ResolvedElement | { error: string } {
-	const row = bundle.elements[entry.element];
-	if (!row) return { error: `element class "${entry.element}" is not in the bundle` };
+// An element instance in a panel, merged with its class copy. An instance that
+// does not set binding_mode takes its page's, when its copy names one and does
+// not fix it, so the order is instance, page, copy (devdoc §3.2.3). Same rule as
+// withPageDefaults in server/api/wpi. classes stands in for copies the editor
+// has not made yet.
+export function resolveEntry(page: PageDescriptor, paneId: string, entry: ElementInstance, index: number, classes: Record<string, ClassRow> = {}): ResolvedElement | { error: string } {
+	const row = entry.class ?? classes[entry.element];
+	if (!row) return { error: `element "${entry.element}" has no class copy` };
+	const { class: _copy, ...rest } = entry;
 	const own =
-		page.binding_mode && 'binding_mode' in row && !isFixed(row, 'binding_mode') && entry.binding_mode === undefined
-			? { ...entry, binding_mode: page.binding_mode }
-			: entry;
+		page.binding_mode && 'binding_mode' in row && !isFixed(row, 'binding_mode') && rest.binding_mode === undefined
+			? { ...rest, binding_mode: page.binding_mode }
+			: rest;
 	const module = typeof row.code_module_id === 'string' ? row.code_module_id : '';
-	return { desc: mergeElement(row, own), module, pageId: page.descriptor_id, pointer: `/elements/${index}` };
+	return { desc: mergeElement(row, own) as ElementInstance, module, pageId: page.descriptor_id, pointer: `/panels/${paneId}/elem_list/${index}` };
+}
+
+// An action instance merged with its class copy.
+export function mergeAction(t: ActionInstance): ActionInstance {
+	const { class: copy, ...own } = t;
+	return mergeInstance(copy, own) as ActionInstance;
 }
 
 // Names the action instance stored under attr (plus a deeper path) of an element.

@@ -1,7 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampPx, flowItemStyle, flowStyle, isResizable, pageFrameStyle, pageStyle, paneStyle } from './layout';
-import type { PageDescriptor } from './types';
+import {
+	clampPx,
+	cssLength,
+	effectiveRoot,
+	fillsHeight,
+	findPane,
+	flowItemStyle,
+	flowStyle,
+	isResizable,
+	leafPanes,
+	pageBoxStyle,
+	panelStyle,
+	paneStyle,
+	placeStyle,
+	splitStyle
+} from './layout';
+import type { PageDescriptor, PaneSpec } from './types';
+
+const page = (extra: Partial<PageDescriptor> = {}): PageDescriptor => ({
+	descriptor_id: 'p',
+	schema_version: '0.5',
+	page_layouter: { layouter: 'single-pane', class: { descriptor_id: 'single-pane', schema_version: '0.5', root: { pane_id: 'main' } } },
+	...extra
+});
+
+const home: PaneSpec = {
+	pane_id: 'page',
+	split: 'rows',
+	children: [
+		{ pane_id: 'top', height: '48px' },
+		{ pane_id: 'middle-row', split: 'columns', children: [{ pane_id: 'left', width: '240px' }, { pane_id: 'middle' }] }
+	]
+};
 
 test('flow defaults preserve content height and start alignment', () => {
 	const css = flowStyle({});
@@ -13,20 +44,15 @@ test('flow defaults preserve content height and start alignment', () => {
 	assert.doesNotMatch(css, /height:/);
 });
 
-test('flow configuration maps both alignment axes and propagates definite height', () => {
-	const css = flowStyle({ height: '400px', layouter_config: {
-		column_gap: '0px', row_gap: '2rem', horizontal_alignment: 'end',
-		vertical_alignment: 'stretch', rows_alignment: 'bottom'
-	} });
+test('flow configuration maps both alignment axes', () => {
+	const css = flowStyle({ column_gap: '0px', row_gap: '2rem', horizontal_alignment: 'end', vertical_alignment: 'stretch', rows_alignment: 'bottom' });
 	assert.match(css, /column-gap: 0px/);
 	assert.match(css, /row-gap: 2rem/);
 	assert.match(css, /justify-content: end/);
 	assert.match(css, /align-items: stretch/);
 	assert.match(css, /align-content: safe flex-end/);
-	assert.match(css, /height: 100%/);
-	assert.match(flowStyle({ layouter_config: { rows_alignment: 'center', vertical_alignment: 'bottom' } }), /align-content: safe center/);
-	assert.match(flowStyle({ layouter_config: { rows_alignment: 'space-between', horizontal_alignment: 'space-between' } }), /align-content: space-between/);
-	assert.doesNotMatch(flowStyle({ height: 'auto' }), /height:/);
+	assert.match(flowStyle({ rows_alignment: 'center', vertical_alignment: 'bottom' }), /align-content: safe center/);
+	assert.match(flowStyle({ rows_alignment: 'space-between', horizontal_alignment: 'space-between' }), /align-content: space-between/);
 });
 
 test('flow item sizes', () => {
@@ -40,39 +66,66 @@ test('flow item sizes', () => {
 	assert.equal(flowItemStyle({ width: '100%', height: '48px' }), 'flex: 0 0 100%; width: 100%; height: 48px');
 });
 
-test('pane sizes', () => {
-	assert.equal(paneStyle({ width: '240px', min_width: '160px' }, 'width'), 'flex: 0 0 240px; min-width: 160px; overflow: auto');
-	assert.equal(paneStyle({ width: '240px' }, 'width', 300), 'flex: 0 0 300px; overflow: auto');
-	assert.equal(paneStyle({ width: 'elastic', scroll: 'none' }, 'width'), 'flex: 1 1 0px; overflow: hidden');
-	assert.equal(paneStyle({ height: '48px' }, 'height'), 'flex: 0 0 48px; overflow: auto');
+test('a panel is as wide as its content, or its pane with elastic or percentage elements', () => {
+	assert.match(panelStyle([{ width: '160px' }, {}]), /max-width: 100%/);
+	assert.match(panelStyle([{ width: 'elastic' }]), /width: 100%/);
+	assert.match(panelStyle([{ width: '50%' }]), /width: 100%/);
 });
 
-test('only fixed-pixel panes are drag-resizable, within min/max', () => {
-	assert.equal(isResizable({ width: '240px', resizable: true }), true);
-	assert.equal(isResizable({ width: 'elastic', resizable: true }), false);
-	assert.equal(isResizable({ width: '240px' }), false);
+test('trees: effective root, leaves, lookup', () => {
+	assert.deepEqual(effectiveRoot(page()), { pane_id: 'main' });
+	assert.equal(effectiveRoot(page({ page_layouter: { layouter: 'single-pane', root: home } })), home);
+	assert.deepEqual(leafPanes(home), ['top', 'left', 'middle']);
+	assert.equal(findPane(home, 'left')?.width, '240px');
+	assert.equal(findPane(home, 'nope'), undefined);
+});
+
+test('pane sizes along the parent axis, with limits', () => {
+	assert.equal(paneStyle({ pane_id: 'a', width: '240px', min_width: '160px' }, 'width'), 'flex: 0 0 240px; min-width: 160px; min-height: 50px');
+	assert.equal(paneStyle({ pane_id: 'a', width: '240px' }, 'width', 300), 'flex: 0 0 300px; min-width: 50px; min-height: 50px');
+	assert.equal(paneStyle({ pane_id: 'a' }, 'width'), 'flex: 1 1 0px; min-width: 50px; min-height: 50px');
+	assert.equal(paneStyle({ pane_id: 'a', height: 'auto', max_height: '30%' }, 'height'), 'flex: 0 0 auto; min-width: 50px; min-height: 50px; max-height: 30%');
+	assert.equal(paneStyle({ pane_id: 'a', height: '48' }, 'height'), 'flex: 0 0 48px; min-width: 50px; min-height: 50px');
+	assert.match(splitStyle({ pane_id: 'r', split: 'columns' }), /flex-direction: row/);
+	assert.match(splitStyle({ pane_id: 'r', split: 'rows' }), /flex-direction: column/);
+});
+
+test('a leaf pane places what it shows inside its margins', () => {
+	const css = placeStyle({ left_margin: '8', top_margin: '1.5 rem', hori_align: 'left', vert_align: 'bottom', hori_scrollbar: 'hide' });
+	assert.match(css, /padding: 1.5rem 0px 0px 8px/);
+	assert.match(css, /align-items: safe flex-start/);
+	assert.match(css, /justify-content: safe flex-end/);
+	assert.match(css, /overflow-x: hidden/);
+	assert.match(css, /overflow-y: auto/);
+	assert.match(placeStyle({}), /padding: 0px 0px 0px 0px; align-items: safe center; justify-content: flex-start/);
+});
+
+test('page box: sizes, colors, height rule, host alignment', () => {
+	assert.equal(
+		pageBoxStyle(page({ width: '50 %', height: '400', min_width: '320', max_height: '600px', bkgd_color: '#fff', frgd_color: 'auto' })),
+		'display: flex; flex-direction: column; box-sizing: border-box; flex: none; min-width: 0; width: 50%; height: 400px; min-width: 320px; min-height: 50px; max-height: 600px; background-color: #fff'
+	);
+	assert.match(pageBoxStyle(page()), /width: 100%/);
+	assert.doesNotMatch(pageBoxStyle(page()), /height: 100%/);
+	const homePage = page({ page_layouter: { layouter: 'top-left-middle-right-bottom', root: home } });
+	assert.equal(fillsHeight(homePage), true, 'rows with an elastic row fill the page area');
+	assert.match(pageBoxStyle(homePage), /height: 100%/);
+	assert.equal(fillsHeight(page({ page_layouter: { layouter: 'x', root: { pane_id: 'r', split: 'rows', children: [{ pane_id: 'a', height: '40px' }, { pane_id: 'b', height: 'auto' }] } } })), false);
+	assert.match(pageBoxStyle(page({ max_width: '640px' }), { pane_id: 'middle', hori_align: 'left' }), /max-width: 640px; align-items: safe flex-start; justify-content: flex-start/);
+});
+
+test('only pixel-sized panes are drag-resizable, within min/max', () => {
+	assert.equal(isResizable({ pane_id: 'a', width: '240px', resizable: true }, 'width'), true);
+	assert.equal(isResizable({ pane_id: 'a', width: 'elastic', resizable: true }, 'width'), false);
+	assert.equal(isResizable({ pane_id: 'a', width: '240px' }, 'width'), false);
+	assert.equal(isResizable({ pane_id: 'a', height: '48px', resizable: true }, 'width'), false);
 	assert.equal(clampPx(100, '160px', '400px'), 160);
 	assert.equal(clampPx(500, '160px', '400px'), 400);
 	assert.equal(clampPx(250), 250);
 });
 
-test('page box: sizes, placement, scroll and colors', () => {
-	const page = (extra: Partial<PageDescriptor>): PageDescriptor => ({ descriptor_id: 'p', schema_version: '0.2', layouter: 'flow-layouter', elements: [], ...extra });
-	const base = 'flex: 0 0 auto; align-self: flex-start';
-	assert.equal(pageStyle(page({ hori_align: 'left' })), `${base}; width: 100%; min-width: 50px; min-height: 50px`);
-	assert.equal(pageStyle(page({})).includes('align-self: center'), true);
-	assert.equal(
-		pageStyle(page({ hori_align: 'right', width: '50 %', height: '400', min_width: '320', max_height: '600px', bkgd_color: '#fff', frgd_color: 'auto' })),
-		'flex: 0 0 auto; align-self: flex-end; width: 50%; height: 400px; min-width: 320px; min-height: 50px; max-height: 600px; overflow: auto; background-color: #fff'
-	);
-	assert.match(pageStyle(page({ max_width: '640px' })), /max-width: 640px; overflow: auto$/);
-});
-
-test('page frame: margins default to 30px and place the page vertically', () => {
-	const page = (extra: Partial<PageDescriptor>): PageDescriptor => ({ descriptor_id: 'p', schema_version: '0.2', layouter: 'flow-layouter', elements: [], ...extra });
-	assert.equal(pageFrameStyle(page({})), 'display: flex; flex-direction: column; box-sizing: border-box; justify-content: flex-start; padding: 30px 30px 30px 30px');
-	assert.equal(
-		pageFrameStyle(page({ vert_align: 'bottom', top_margin: '1.5 rem', left_margin: '8' })),
-		'display: flex; flex-direction: column; box-sizing: border-box; justify-content: flex-end; padding: 1.5rem 30px 30px 8px'
-	);
+test('lengths without a unit are pixels', () => {
+	assert.equal(cssLength('30'), '30px');
+	assert.equal(cssLength('1.5 rem'), '1.5rem');
+	assert.equal(cssLength(undefined), undefined);
 });

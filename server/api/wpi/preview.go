@@ -37,14 +37,27 @@ func (h *Handler) PreviewList(c echo.Context) error {
 	if str(req.Source["action"]) != "load" || str(req.Source["result"]) != "list" {
 		return errorJSON(c, http.StatusBadRequest, "Only list load sources can be previewed")
 	}
+	// An unsaved source has no class copy yet; it gets one of the active class,
+	// as it would when its page is written (OpenSpec wpi-pages-own-panes, D4).
+	if _, has := req.Source[copyKey]; !has {
+		rows, err := store{h.DB}.latest(c.Request().Context(), KindAction, []string{"load"})
+		if err != nil {
+			handlerLog.Error("WPI list preview class load failed", "user", actorName(user), "error", err)
+			return errorJSON(c, http.StatusInternalServerError, "Unable to preview records")
+		}
+		row, ok := rows["load"]
+		if !ok {
+			return errorJSON(c, http.StatusBadRequest, `action class "load" has no active row to copy`)
+		}
+		req.Source[copyKey] = row.Body
+	}
 	v := &validator{kind: KindPage}
 	pos := actionPos{val: req.Source, path: "/source", allowed: []string{"load"}, roots: []string{RootInputDoc}}
-	v.actionInstance(pos)
-	v.required(req.Source, "/source", actionAttrs["load"].required)
+	merged := v.actionInstance(pos)
 	if len(v.issues) > 0 {
 		return errorJSON(c, http.StatusBadRequest, v.issues[0].Message)
 	}
-	body, err := json.Marshal(req.Source)
+	body, err := json.Marshal(merged)
 	if err != nil {
 		return errorJSON(c, http.StatusBadRequest, "Invalid source")
 	}
@@ -55,7 +68,7 @@ func (h *Handler) PreviewList(c echo.Context) error {
 		return errorJSON(c, http.StatusBadRequest, "Invalid source")
 	}
 	act.Class = "load"
-	result, rows, err := h.run(c.Request().Context(), act, req.Source, runRequest{Args: req.Args}, user)
+	result, rows, err := h.run(c.Request().Context(), act, merged, runRequest{Args: req.Args}, user)
 	if err != nil {
 		handlerLog.Warn("WPI list preview failed", "user", actorName(user), "table", act.Table, "error", err)
 		var re *requestError

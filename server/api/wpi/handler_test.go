@@ -48,13 +48,29 @@ func descriptorRows(rows ...[2]string) *sqlmock.Rows {
 	return r
 }
 
-const singlePaneApp = `{"descriptor_id": "hello", "schema_version": "0.2", "layout_template": "single-pane", "panes": {"main": {"page": "greeting"}}}`
-const greetingPage = `{"descriptor_id": "greeting", "schema_version": "0.2", "layouter": "flow-layouter", "elements": [{"element": "text", "text": "Hello"}]}`
+const singlePaneApp = `{"descriptor_id": "hello", "schema_version": "0.5", "initial_page": "greeting"}`
 
-// expectClasses expects the bundle's load of all element and action classes.
-func expectClasses(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(latestAllQuery).WithArgs("element").WillReturnRows(descriptorRows([2]string{"text", testClasses()[KindElement]["text"]}))
-	mock.ExpectQuery(latestAllQuery).WithArgs("action").WillReturnRows(descriptorRows())
+// greetingRaw is a page as an author writes it, without class copies.
+var greetingRaw = panelPage("greeting", ``, `{"element": "text", "text": "Hello"}`)
+
+// expectClassCopies expects the loads of the classes a page write copies into
+// greetingRaw, by kind in sorted order.
+func expectClassCopies(mock sqlmock.Sqlmock) {
+	for _, kind := range []Kind{KindElement, KindElementLayouter, KindPageLayouter} {
+		var rows [][2]string
+		for id, body := range testClasses()[kind] {
+			rows = append(rows, [2]string{id, body})
+		}
+		mock.ExpectQuery(latestQuery).WithArgs(string(kind), sqlmock.AnyArg()).WillReturnRows(descriptorRows(rows...))
+	}
+}
+
+// expectAllModules expects the bundle's checks of code modules, by module
+// type: element, element-layouter, page-layouter.
+func expectAllModules(mock sqlmock.Sqlmock, elementModules ...string) {
+	expectModules(mock, elementModules...)
+	mock.ExpectQuery(typedModulesQuery("element-layouter")).WillReturnRows(sqlmock.NewRows([]string{"code_module_id"}).AddRow("flow-layouter"))
+	mock.ExpectQuery(typedModulesQuery("page-layouter")).WillReturnRows(sqlmock.NewRows([]string{"code_module_id"}).AddRow("page-layouter"))
 }
 
 // expectModules expects the check of code modules against kb.code_modules,
@@ -92,9 +108,8 @@ func TestGetApp(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
-		expectClasses(mock)
-		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", greetingPage}))
-		expectModules(mock, "text")
+		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", filledPage(greetingRaw)}))
+		expectAllModules(mock, "text")
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 200 {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -119,7 +134,6 @@ func TestGetApp(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
-		expectClasses(mock)
 		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows())
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 422 || !strings.Contains(rec.Body.String(), `page \"greeting\" does not exist`) {
@@ -158,12 +172,20 @@ func TestPutDescriptor(t *testing.T) {
 	t.Run("stored", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		expectClasses(mock)
-		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, greetingPage, "admin@example.com").
+		expectClassCopies(mock)
+		mock.ExpectQuery(`INSERT INTO kb\.frontend_pages`).WithArgs("greeting", SchemaVersion, filledPage(greetingRaw), "admin@example.com").
 			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
-		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", greetingPage, "kind", "page", "descriptorId", "greeting")
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", greetingRaw, "kind", "page", "descriptorId", "greeting")
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"version":1`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		// The response returns the stored page, with its class copies.
+		var resp struct{ Page map[string]any }
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := resp.Page["page_layouter"].(map[string]any)[copyKey]; !ok {
+			t.Fatalf("response page without class copies: %s", rec.Body)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatal(err)
@@ -172,8 +194,8 @@ func TestPutDescriptor(t *testing.T) {
 	t.Run("page instances checked against their classes", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		expectClasses(mock)
-		page := strings.Replace(greetingPage, `"text": "Hello"`, `"text": "Hello", "data_binding": "$input_doc.x"`, 1)
+		expectClassCopies(mock)
+		page := strings.Replace(greetingRaw, `"text": "Hello"`, `"text": "Hello", "data_binding": "$input_doc.x"`, 1)
 		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", page, "kind", "page", "descriptorId", "greeting")
 		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "exactly one of") {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -218,11 +240,11 @@ func TestPutDescriptor(t *testing.T) {
 	}{
 		{"element class without code", "element", "slider", `{"descriptor_id": "slider", "schema_version": "0.4", "code_module_id": "slider"}`, adminUser, 400, `code module \"slider\" has no code in this interpreter`},
 		{"element class without code module", "element", "button", `{"descriptor_id": "button", "schema_version": "0.4", "label": {"default_value": null}, "on_click": {"default_value": null}}`, adminUser, 400, `missing attribute \"code_module_id\"`},
-		{"ID mismatch", "page", "other", greetingPage, adminUser, 400, `does not match`},
-		{"unknown kind", "widget", "greeting", greetingPage, adminUser, 400, "Unknown descriptor kind"},
+		{"ID mismatch", "page", "other", greetingRaw, adminUser, 400, `does not match`},
+		{"unknown kind", "widget", "greeting", greetingRaw, adminUser, 400, "Unknown descriptor kind"},
 		{"not JSON", "page", "greeting", `[1, 2]`, adminUser, 400, "JSON object"},
-		{"not an admin", "page", "greeting", greetingPage, plainUser, 403, "Admin access required"},
-		{"not logged in", "page", "greeting", greetingPage, nil, 401, "Authentication required"},
+		{"not an admin", "page", "greeting", greetingRaw, plainUser, 403, "Admin access required"},
+		{"not logged in", "page", "greeting", greetingRaw, nil, 401, "Authentication required"},
 	}
 	for _, c := range rejected {
 		t.Run(c.name, func(t *testing.T) {

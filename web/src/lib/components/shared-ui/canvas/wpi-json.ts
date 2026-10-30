@@ -1,14 +1,16 @@
 // The WPI descriptors the editor's canvas stands for, shown by View JSON and
 // edited in the properties panel's Node tab: an element node as the element
-// instance a page holds, and the canvas as a page descriptor (devdoc 2026102601
-// §3.2.1, §3.5).
+// instance a panel holds, and the canvas as a page descriptor whose panels hold
+// the element nodes of their pane (devdoc 2026102601 §3.2, §3.3, §3.5; OpenSpec
+// wpi-pages-own-panes, design D12). An element node's data is {label, element,
+// attrs, class?, pane}: class is the copy of its class the instance holds, kept
+// out of the node's JSON and put back in the page.
 import type { Node } from '@xyflow/svelte';
-import type { JsonObject } from '$lib/wpi/types';
+import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
+import type { Json, JsonObject, PageDescriptor } from '$lib/wpi/types';
 import { withListSourceDefaults } from './element-attributes';
 
-// Pages are format 0.2, and flow-layouter is the only layouter.
-const PAGE_SCHEMA_VERSION = '0.2';
-const PAGE_LAYOUTER = 'flow-layouter';
+export const PAGE_SCHEMA_VERSION = '0.5';
 
 export function isElementNode(node: Node): boolean {
 	return node.type === 'wpi-element';
@@ -24,44 +26,76 @@ export function nodeJson(node: Node): JsonObject {
 }
 
 // The node's data after its JSON was edited, the inverse of nodeJson. An element
-// node keeps the rest of its data, such as its name in data.label.
+// node keeps the rest of its data: its name in data.label, its class copy and
+// its pane.
 export function nodeData(node: Node, json: JsonObject): Record<string, unknown> {
 	if (!isElementNode(node)) return json;
-	const { element, ...attrs } = json;
+	const { element, class: _copy, ...attrs } = json;
 	return { ...node.data, element, attrs };
 }
 
-// The canvas as a page: its element nodes in reading order (top to bottom, then
-// left to right), the order flow-layouter places them in. The canvas has no page
-// ID, so descriptor_id is left out.
-export function pageJson(nodes: Node[]): JsonObject {
-	const elements = nodes
-		.filter(isElementNode)
-		.sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
-		.map(nodeJson);
-	return { schema_version: PAGE_SCHEMA_VERSION, layouter: PAGE_LAYOUTER, elements };
+// The pane an element node is in.
+export function nodePane(node: Node): string {
+	return String(node.data.pane ?? '');
 }
 
-// Import every instance, including repeated classes, retaining all its attributes.
+// The element nodes of a pane in reading order (top to bottom, then left to
+// right), the order flow-layouter places them in.
+export function paneNodes(nodes: Node[], pane: string): Node[] {
+	return nodes
+		.filter((n) => isElementNode(n) && nodePane(n) === pane)
+		.sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+}
+
+// An element node as the instance its panel stores: with its class copy.
+export function instanceJson(node: Node): JsonObject {
+	const copy = node.data.class as JsonObject | undefined;
+	return copy ? { ...nodeJson(node), class: copy } : nodeJson(node);
+}
+
+// The canvas as a page: the page's attributes and page layouter, and for each
+// leaf pane a panel whose elem_list is the pane's element nodes. A leaf pane
+// with element nodes but no panel gets one with a flow-layouter. Element nodes
+// of a pane that is not a leaf go to the first leaf.
+export function pageJson(nodes: Node[], page: JsonObject): JsonObject {
+	const leaves = leafPanes(effectiveRoot(page as unknown as PageDescriptor));
+	const placed = nodes.filter(isElementNode).map((n) => (leaves.includes(nodePane(n)) ? n : { ...n, data: { ...n.data, pane: leaves[0] } }));
+	const before = (page.panels && typeof page.panels === 'object' && !Array.isArray(page.panels) ? page.panels : {}) as JsonObject;
+	const panels: JsonObject = {};
+	for (const pane of leaves) {
+		const own = paneNodes(placed, pane);
+		const panel = before[pane] as JsonObject | undefined;
+		if (!panel && own.length === 0) continue;
+		panels[pane] = { ...(panel ?? { elem_layouter: { layouter: 'flow-layouter' } }), elem_list: own.map(instanceJson) };
+	}
+	return { ...page, schema_version: PAGE_SCHEMA_VERSION, panels };
+}
+
+// One editable node per element instance of every panel, in the order of the
+// leaf panes, keeping repeated classes, class copies and all attributes. Nodes
+// are laid out in a grid per pane, so reading order is the panel's order.
 export function pageNodes(page: JsonObject): Node[] {
-	if (!Array.isArray(page.elements)) throw new Error('Invalid page elements');
-	return page.elements.map((instance, index) => {
-		if (
-			!instance ||
-			typeof instance !== 'object' ||
-			Array.isArray(instance) ||
-			typeof instance.element !== 'string'
-		) {
-			throw new Error('Invalid element instance');
-		}
-		const { element, ...attrs } = instance;
-		return {
-			id: `wpi-element-loaded-${index}`,
-			type: 'wpi-element',
-			position: { x: 60 + (index % 4) * 240, y: 60 + Math.floor(index / 4) * 160 },
-			data: { label: element, element, attrs }
-		};
+	const leaves = leafPanes(effectiveRoot(page as unknown as PageDescriptor));
+	const panels = (page.panels ?? {}) as Record<string, { elem_list?: Json[] }>;
+	if (typeof panels !== 'object' || Array.isArray(panels)) throw new Error('Invalid page panels');
+	const nodes: Node[] = [];
+	leaves.forEach((pane, p) => {
+		const list = panels[pane]?.elem_list ?? [];
+		if (!Array.isArray(list)) throw new Error('Invalid panel elements');
+		list.forEach((instance, index) => {
+			if (!instance || typeof instance !== 'object' || Array.isArray(instance) || typeof instance.element !== 'string') {
+				throw new Error('Invalid element instance');
+			}
+			const { element, class: copy, ...attrs } = instance;
+			nodes.push({
+				id: `wpi-element-loaded-${pane}-${index}`,
+				type: 'wpi-element',
+				position: { x: 60 + (index % 4) * 240, y: 60 + p * 4000 + Math.floor(index / 4) * 160 },
+				data: { label: element, element, attrs, pane, ...(copy ? { class: copy } : {}) }
+			});
+		});
 	});
+	return nodes;
 }
 
 // The editor can apply JSON objects as page or node descriptors.

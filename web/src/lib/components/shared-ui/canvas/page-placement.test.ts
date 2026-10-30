@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { isInsidePage, centeredPageViewport, blankPage } from './page-placement';
 
 test('blank page has no persisted identifier and starts empty', () => {
- expect(blankPage()).toEqual({ descriptor_id: '', schema_version: '0.2', layouter: 'flow-layouter', elements: [] });
+ expect(blankPage()).toEqual({ descriptor_id: '', schema_version: '0.5', page_layouter: { layouter: 'single-pane', root: { pane_id: 'main' } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [] } } });
 });
 test('element drops must be within the page bounds', () => {
  const page = { width: 1000, height: 650 };

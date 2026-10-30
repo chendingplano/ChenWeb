@@ -147,27 +147,34 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 	if err != nil {
 		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
 	}
-	if issues := ValidateDescriptor(Kind(kind), id, body); len(issues) > 0 {
-		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+	if got, _ := body["descriptor_id"].(string); got != id {
+		return c.JSON(http.StatusBadRequest, map[string]any{"errors": []Issue{{Kind(kind), id, "/descriptor_id", fmt.Sprintf("descriptor_id %q does not match %q", got, id)}}})
 	}
 	st := store{h.DB}
 	ctx := c.Request().Context()
-	if Kind(kind) == KindElement {
-		if refused, err := checkModule(c, st, id, body, user); refused {
-			return err
-		}
-	}
-	// A page's instances are checked against the active class rows, since
-	// which attributes an element instance may set depends on its class
-	// (OpenSpec wpi-code-modules, design D5).
+	// A page's instances and layouter copies that have no class copy yet get
+	// one of the active class, and the page is stored with them (OpenSpec
+	// wpi-pages-own-panes, design D4).
 	if Kind(kind) == KindPage {
-		classes, err := loadClasses(ctx, st.latest)
+		issues, err := fillClassCopies(ctx, id, body, st.latest)
 		if err != nil {
-			handlerLog.Error("WPI class load failed", "kind", kind, "id", id, "user", actorName(user), "error", err)
+			handlerLog.Error("WPI class copy failed", "kind", kind, "id", id, "user", actorName(user), "error", err)
 			return errorJSON(c, http.StatusInternalServerError, "Unable to check descriptor")
 		}
-		if issues := ValidatePageInstances(id, body, classes); len(issues) > 0 {
+		if len(issues) > 0 {
 			return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+		}
+		if raw, err = json.Marshal(body); err != nil {
+			return errorJSON(c, http.StatusInternalServerError, "Unable to store descriptor")
+		}
+	}
+	if issues := ValidateDescriptor(Kind(kind), id, body); len(issues) > 0 {
+		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
+	}
+	switch Kind(kind) {
+	case KindElement, KindPageLayouter, KindElementLayouter:
+		if refused, err := checkModule(c, st, Kind(kind), id, body, user); refused {
+			return err
 		}
 	}
 	version, err := st.insertVersion(ctx, Kind(kind), id, raw, actorName(user))
@@ -180,7 +187,11 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 		warnings = classWarnings(id, body)
 	}
 	handlerLog.Info("WPI descriptor stored", "kind", kind, "id", id, "version", version, "user", actorName(user), "warnings", len(warnings))
-	return c.JSON(http.StatusOK, map[string]any{"kind": kind, "descriptor_id": id, "version": version, "warnings": nonNil(warnings)})
+	resp := map[string]any{"kind": kind, "descriptor_id": id, "version": version, "warnings": nonNil(warnings)}
+	if Kind(kind) == KindPage {
+		resp["page"] = body
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 // CreateElementClass stores a new element class as a draft: version 1, before
@@ -209,7 +220,7 @@ func (h *Handler) CreateElementClass(c echo.Context) error {
 	}
 	id := body["descriptor_id"].(string)
 	st := store{h.DB}
-	if refused, err := checkModule(c, st, id, body, user); refused {
+	if refused, err := checkModule(c, st, KindElement, id, body, user); refused {
 		return err
 	}
 	err = st.insertDraftClass(c.Request().Context(), id, raw, actorName(user))
@@ -311,7 +322,7 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 	if len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
-	if refused, err := checkModule(c, st, id, body, user); refused {
+	if refused, err := checkModule(c, st, KindElement, id, body, user); refused {
 		return err
 	}
 	version, err := st.updateClass(ctx, id, cur, raw, actorName(user))
@@ -328,11 +339,16 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"descriptor_id": id, "version": version, "status": cur.Status, "warnings": nonNil(warnings)})
 }
 
-// checkModule refuses an element class row whose code_module_id does not name
-// an active element module in kb.code_modules (OpenSpec wpi-code-modules, design
-// D9). When refused is true, the response has been written and err is its error.
-func checkModule(c echo.Context, st store, id string, body map[string]any, user *ApiTypes.UserInfo) (refused bool, err error) {
-	issues, err := moduleErrors(c.Request().Context(), st.registered, map[string]map[string]any{id: body})
+// checkModule refuses an element or layouter class row whose code_module_id does
+// not name an active module of its type in kb.code_modules (OpenSpec
+// wpi-code-modules, design D9; wpi-pages-own-panes, design D6). When refused is
+// true, the response has been written and err is its error.
+func checkModule(c echo.Context, st store, kind Kind, id string, body map[string]any, user *ApiTypes.UserInfo) (refused bool, err error) {
+	moduleKind := map[Kind]string{KindElement: storedModule, KindPageLayouter: storedPageLayouterModule, KindElementLayouter: storedElementLayouterModule}[kind]
+	issues, err := moduleErrors(c.Request().Context(), st.registered, []moduleRef{{moduleKind, str(body["code_module_id"]), id, "/code_module_id"}})
+	for i := range issues {
+		issues[i].Kind = kind
+	}
 	if err != nil {
 		handlerLog.Error("WPI code module check failed", "id", id, "user", actorName(user), "error", err)
 		return true, errorJSON(c, http.StatusInternalServerError, "Unable to check code module")

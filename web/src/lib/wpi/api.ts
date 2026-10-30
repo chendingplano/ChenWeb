@@ -103,7 +103,7 @@ export type CodeModule = {
 	code_module_id: string;
 	module_name: string;
 	description: string;
-	module_type: 'element' | 'action' | 'page' | 'layouter';
+	module_type: 'element' | 'action' | 'page' | 'page-layouter' | 'element-layouter';
 	module_doc: string;
 	notes: string;
 	status: 'active' | 'suspended';
@@ -206,11 +206,14 @@ export async function getPage(
 }
 
 // Save a page as a new active descriptor version. Validation errors are returned to the author.
-export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch): Promise<number> {
+// Saves a page as a new version. The server copies the active classes into
+// instances and layouter copies that have none, and returns the stored page
+// (OpenSpec wpi-pages-own-panes, design D4).
+export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch): Promise<{ version: number; page: JsonObject }> {
 	const res = await fetchFn(`/api/v1/wpi/descriptors/page/${encodeURIComponent(id)}`, {
 		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(page)
 	});
 	const body = await parse(res);
 	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
-	return body.version as number;
+	return { version: body.version as number, page: body.page as JsonObject };
 }

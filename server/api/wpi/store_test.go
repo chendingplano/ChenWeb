@@ -182,6 +182,11 @@ func TestStoreInsertVersion(t *testing.T) {
 // element modules in kb.code_modules (OpenSpec wpi-code-modules).
 const activeModulesQuery = `SELECT code_module_id FROM kb\.code_modules WHERE module_type = 'element' AND status = 'active' AND code_module_id = ANY\(\$1\)`
 
+// typedModulesQuery finds the active code modules of a module type.
+func typedModulesQuery(moduleType string) string {
+	return `SELECT code_module_id FROM kb\.code_modules WHERE module_type = '` + moduleType + `' AND status = 'active' AND code_module_id = ANY\(\$1\)`
+}
+
 const listCodeModulesQuery = `SELECT code_module_id, module_name, description, module_type, module_doc, notes, status\s+FROM kb\.code_modules ORDER BY module_type, code_module_id`
 
 func TestStoreCodeModules(t *testing.T) {

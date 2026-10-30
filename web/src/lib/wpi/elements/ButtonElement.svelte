@@ -5,7 +5,7 @@
 	import { localized } from '../text';
 	import type { ElementProps } from './index';
 
-	let { panelId, element }: ElementProps = $props();
+	let { instanceId, element }: ElementProps = $props();
 
 	const rt = getRuntime();
 	const d = $derived(element.desc);
@@ -15,7 +15,7 @@
 		if (!d.on_click) return;
 		busy = true;
 		try {
-			await rt.runTrigger(d.on_click, actionRef(element, 'on_click'), { panelId });
+			await rt.runTrigger(d.on_click, actionRef(element, 'on_click'), { instanceId });
 		} finally {
 			busy = false;
 		}

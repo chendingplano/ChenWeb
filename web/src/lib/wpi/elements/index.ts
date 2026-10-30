@@ -12,7 +12,7 @@ import MenuElement from './MenuElement.svelte';
 import SelectElement from './SelectElement.svelte';
 import TextElement from './TextElement.svelte';
 
-export type ElementProps = { panelId: string; element: ResolvedElement };
+export type ElementProps = { instanceId: string; element: ResolvedElement };
 
 export const codeModules: Record<string, Component<ElementProps>> = {
 	text: TextElement,

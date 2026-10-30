@@ -107,7 +107,7 @@ type fieldErrors map[string][]string
 func (f fieldErrors) Error() string { return "field rules failed" }
 
 // resolveAction finds the referenced action instance in its stored page,
-// checks it against its class row and returns it merged with the class.
+// checks it against its class copy and returns it merged with the copy.
 func (h *Handler) resolveAction(ctx context.Context, user *ApiTypes.UserInfo, ref ActionRef) (Action, map[string]any, error) {
 	var act Action
 	if ref.Kind != string(KindPage) {
@@ -145,16 +145,10 @@ func (h *Handler) resolveAction(ctx context.Context, user *ApiTypes.UserInfo, re
 	if !slices.Contains(serverClasses, cls) {
 		return act, nil, badRequest("only %s actions run on the server, not %q", strings.Join(serverClasses, ", "), cls)
 	}
-	rows, err := st.latest(ctx, KindAction, []string{cls})
-	if err != nil {
-		return act, nil, err
-	}
-	v := &validator{kind: KindPage, id: ref.ID, classes: map[Kind]map[string]Descriptor{KindAction: rows}}
-	v.actionInstance(pos)
-	var merged map[string]any
-	if len(v.issues) == 0 {
-		merged = v.actionComplete(pos)
-	}
+	// The instance is checked and merged against the class copy it holds, not
+	// the stored class (devdoc 2026102601 §3.5.1).
+	v := &validator{kind: KindPage, id: ref.ID}
+	merged := v.actionInstance(pos)
 	if len(v.issues) > 0 {
 		return act, nil, badRequest("the action instance is invalid: %s", v.issues[0].Message)
 	}

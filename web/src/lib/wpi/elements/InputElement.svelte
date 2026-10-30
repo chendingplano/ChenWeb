@@ -5,19 +5,19 @@
 	import type { Json } from '../types';
 	import type { ElementProps } from './index';
 
-	let { panelId, element }: ElementProps = $props();
+	let { instanceId, element }: ElementProps = $props();
 
 	const rt = getRuntime();
 	const id = $props.id();
 	const d = $derived(element.desc);
 	const editable = $derived(d.binding_mode === 'read-write');
-	const value = $derived(rt.read(panelId, d.data_binding));
-	const errors = $derived(rt.errorsFor(panelId, d.data_binding));
+	const value = $derived(rt.read(instanceId, d.data_binding));
+	const errors = $derived(rt.errorsFor(instanceId, d.data_binding));
 
 	function edit(raw: string) {
 		let next: Json = raw;
 		if (d.input_type === 'number') next = raw === '' || Number.isNaN(Number(raw)) ? (raw === '' ? null : raw) : Number(raw);
-		rt.write(panelId, d.data_binding, next);
+		rt.write(instanceId, d.data_binding, next);
 	}
 </script>
 

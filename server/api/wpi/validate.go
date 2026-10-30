@@ -23,12 +23,32 @@ var (
 	colorPattern      = regexp.MustCompile(`^(auto|#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(rgb|rgba|hsl|hsla)\([0-9.,%\s/-]+\)|[a-zA-Z]{3,30})$`)
 	flowGapPattern    = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(px|rem)$`)
 	localePattern     = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
+	paneIDPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 )
 
 var elementSizeAttrs = []string{"width", "height", "min_width", "max_width"}
 
 // pageSizeAttrs are the page's lengths; only width and height accept auto.
-var pageSizeAttrs = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "left_margin", "right_margin", "top_margin", "bottom_margin"}
+var pageSizeAttrs = []string{"width", "height", "min_width", "min_height", "max_width", "max_height"}
+
+// paneAttrs apply to every pane; leafPaneAttrs concern what a pane shows, so they
+// apply to leaf panes only (devdoc 2026102601 §3.2.2).
+var (
+	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable"}
+	leafPaneAttrs = []string{"left_margin", "right_margin", "top_margin", "bottom_margin", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar"}
+	scrollbars    = []string{"auto", "hide"}
+)
+
+// pageLayouterModules are the code modules that draw pane trees, and
+// elementLayouterModules the parameters each element layouter code module takes
+// in its config, keyed by code module ID (OpenSpec wpi-pages-own-panes, design
+// D6). The frontend registers the code under the same IDs.
+var (
+	pageLayouterModules    = []string{"page-layouter"}
+	elementLayouterModules = map[string][]string{
+		"flow-layouter": {"column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment"},
+	}
+)
 
 var bindingModes = []string{"read-only", "read-write"}
 
@@ -71,6 +91,11 @@ var actionAttrs = map[string]codeAttrs{
 // code_module_id is set only in element class rows.
 var classAttrs = []string{"descriptor_id", "schema_version", "description", "implement_notes", "code_module_id"}
 
+// copyKey is the attribute in which an instance or layouter copy holds the
+// whole class row it was copied from (devdoc 2026102601 §3.5.1), so no class row
+// may name an attribute "class".
+const copyKey = "class"
+
 // actionHolding attributes hold action instances. A class row cannot give them
 // defaults, so every action instance is written in a page (design D5).
 var actionHolding = []string{"on_click", "on_row_click", "source", "items", "input"}
@@ -93,19 +118,32 @@ type validator struct {
 	kind   Kind
 	id     string
 	issues []Issue
-	// classes, when set, are the class rows instances are checked against.
-	classes map[Kind]map[string]Descriptor
+	// els and acts collect a page's instances merged with their class copies.
+	els  []mergedElement
+	acts []mergedAction
 }
 
 func (v *validator) errf(path, format string, a ...any) {
 	v.issues = append(v.issues, Issue{Kind: v.kind, DescriptorID: v.id, Path: path, Message: fmt.Sprintf(format, a...)})
 }
 
-// ValidateDescriptor checks one stored descriptor's structure and that every
-// class it names has code. It checks a page's instances only as far as that is
-// possible without class rows; BuildBundle checks them against the rows and
-// follows references to other descriptors.
+// ValidateDescriptor checks one stored descriptor completely, as far as that is
+// possible without the database: structure, that every class it names has code,
+// and a page's instances and layouter copies against the class copies they hold.
+// BuildBundle follows references to other descriptors and checks tables, stored
+// sources, code modules and panes.
 func ValidateDescriptor(kind Kind, id string, body map[string]any) []Issue {
+	return newValidator(kind, id, body).issues
+}
+
+// validatePage checks a page and returns its issues and its instances merged
+// with their class copies.
+func validatePage(id string, body map[string]any) ([]Issue, []mergedElement, []mergedAction) {
+	v := newValidator(KindPage, id, body)
+	return v.issues, v.els, v.acts
+}
+
+func newValidator(kind Kind, id string, body map[string]any) *validator {
 	v := &validator{kind: kind, id: id}
 	if !idPattern.MatchString(id) {
 		v.errf("", "descriptor ID %q must match %s", id, idPattern)
@@ -121,10 +159,12 @@ func ValidateDescriptor(kind Kind, id string, body map[string]any) []Issue {
 		v.page(body)
 	case KindElement, KindAction:
 		v.classRow(body)
+	case KindPageLayouter, KindElementLayouter:
+		v.layouterClass(body)
 	default:
 		v.errf("", "unknown descriptor kind %q", kind)
 	}
-	return v.issues
+	return v
 }
 
 func (v *validator) schemaVersion(body map[string]any) {
@@ -270,52 +310,20 @@ func (v *validator) values(obj map[string]any, key, path string, roots ...string
 	}
 }
 
+// app checks an app descriptor: it names the page it opens in its page area.
 func (v *validator) app(b map[string]any) {
-	v.keys(b, "", []string{"descriptor_id", "schema_version", "layout_template", "panes"})
-	tmpl, _ := v.oneOf(b, "layout_template", "", slices.Sorted(maps.Keys(templatePanes)))
-	panes, ok := b["panes"]
-	if !ok {
-		return
-	}
-	m, ok := v.object(panes, "/panes")
-	if !ok {
-		return
-	}
-	for _, paneID := range slices.Sorted(maps.Keys(m)) {
-		path := "/panes/" + paneID
-		if tmpl != "" && !slices.Contains(templatePanes[tmpl], paneID) {
-			v.errf(path, "pane %q is not part of layout template %q", paneID, tmpl)
-		}
-		p, ok := v.object(m[paneID], path)
-		if !ok {
-			continue
-		}
-		v.keys(p, path, nil, "width", "height", "min_width", "max_width", "min_height", "max_height", "resizable", "scroll", "page")
-		for _, k := range []string{"width", "height", "min_width", "max_width", "min_height", "max_height"} {
-			v.size(p, k, path)
-		}
-		v.boolean(p, "resizable", path)
-		v.oneOf(p, "scroll", path, []string{"auto", "none"})
-		v.matching(p, "page", path, idPattern)
-	}
+	v.keys(b, "", []string{"descriptor_id", "schema_version", "initial_page"})
+	v.matching(b, "initial_page", "", idPattern)
 }
 
 func (v *validator) page(b map[string]any) {
-	v.keys(b, "", []string{"descriptor_id", "schema_version", "layouter", "elements"}, "input", "save_action", "refresh",
-		"page_name", "description", "binding_mode", "layouter_config", "access_controls", "keywords", "page_tags",
-		"page_policy", "page_style", "hori_align", "vert_align", "bkgd_color", "frgd_color",
-		"width", "height", "min_width", "min_height", "max_width", "max_height",
-		"left_margin", "right_margin", "top_margin", "bottom_margin")
-	v.oneOf(b, "layouter", "", layouters)
-	if config, present := b["layouter_config"]; present {
-		if m, ok := v.object(config, "/layouter_config"); ok {
-			v.keys(m, "/layouter_config", nil, "column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment")
-			v.matching(m, "column_gap", "/layouter_config", flowGapPattern)
-			v.matching(m, "row_gap", "/layouter_config", flowGapPattern)
-			v.oneOf(m, "horizontal_alignment", "/layouter_config", []string{"start", "center", "end", "space-between"})
-			v.oneOf(m, "vertical_alignment", "/layouter_config", []string{"top", "center", "bottom", "stretch"})
-			v.oneOf(m, "rows_alignment", "/layouter_config", []string{"top", "center", "bottom", "space-between"})
-		}
+	v.keys(b, "", []string{"descriptor_id", "schema_version", "page_layouter"}, "panels", "input", "save_action", "refresh",
+		"page_name", "description", "binding_mode", "access_controls", "keywords", "page_tags",
+		"page_policy", "page_style", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar", "bkgd_color", "frgd_color",
+		"width", "height", "min_width", "min_height", "max_width", "max_height")
+	var leaves map[string]bool
+	if pl, ok := b["page_layouter"]; ok {
+		leaves = v.pageLayouterCopy(pl, "/page_layouter")
 	}
 	v.text(b, "page_name", "")
 	v.textLength(b, "page_name", 100)
@@ -329,6 +337,8 @@ func (v *validator) page(b map[string]any) {
 	v.str(b, "page_style", "")
 	v.oneOf(b, "hori_align", "", []string{"left", "center", "right"})
 	v.oneOf(b, "vert_align", "", []string{"top", "center", "bottom"})
+	v.oneOf(b, "hori_scrollbar", "", scrollbars)
+	v.oneOf(b, "vert_scrollbar", "", scrollbars)
 	for _, k := range []string{"bkgd_color", "frgd_color"} {
 		v.matching(b, k, "", colorPattern)
 	}
@@ -342,19 +352,250 @@ func (v *validator) page(b map[string]any) {
 			v.boolean(m, "on_show", "/refresh")
 		}
 	}
-	if els, ok := b["elements"]; ok {
-		if list, ok := v.array(els, "/elements", false); ok {
-			for i, e := range list {
-				path := "/elements/" + strconv.Itoa(i)
-				if m, ok := v.object(e, path); ok {
-					v.elementInstance(m, path)
-				}
+	if panels, ok := b["panels"]; ok {
+		v.panels(b, panels, leaves)
+	}
+	for _, pos := range actionPositions(b) {
+		if merged := v.actionInstance(pos); merged != nil {
+			v.acts = append(v.acts, mergedAction{v.id, pos.path, str(pos.val.(map[string]any)["action"]), merged})
+		}
+	}
+}
+
+// panels checks a page's panels: each is keyed by a leaf pane of the page's
+// page layouter (leaves is nil when the page layouter is invalid) and has an
+// element layouter copy and a list of element instances (devdoc 2026102601 §3.3).
+func (v *validator) panels(page map[string]any, val any, leaves map[string]bool) {
+	m, ok := v.object(val, "/panels")
+	if !ok {
+		return
+	}
+	for _, paneID := range slices.Sorted(maps.Keys(m)) {
+		path := "/panels/" + paneID
+		if leaves != nil && !leaves[paneID] {
+			v.errf(path, "%q is not a leaf pane of this page's page layouter", paneID)
+		}
+		p, ok := v.object(m[paneID], path)
+		if !ok {
+			continue
+		}
+		v.keys(p, path, []string{"elem_layouter"}, "elem_list")
+		if el, ok := p["elem_layouter"]; ok {
+			v.elementLayouterCopy(el, path+"/elem_layouter")
+		}
+		list, ok := p["elem_list"]
+		if !ok {
+			continue
+		}
+		items, ok := v.array(list, path+"/elem_list", false)
+		if !ok {
+			continue
+		}
+		for i, e := range items {
+			ep := path + "/elem_list/" + strconv.Itoa(i)
+			if em, ok := v.object(e, ep); ok {
+				v.elementInstance(page, em, ep)
 			}
 		}
 	}
-	for _, pos := range actionPositions(b) {
-		v.actionInstance(pos)
+}
+
+// pageLayouterCopy checks a page's page layouter copy, {layouter, class, root?}:
+// the class copy is a valid page layouter class row, and the page's own root,
+// when set, replaces the copy's whole (OpenSpec wpi-pages-own-panes, design D2).
+// It returns the leaf pane IDs of the effective tree, or nil when it is invalid.
+func (v *validator) pageLayouterCopy(val any, path string) map[string]bool {
+	m, ok := v.object(val, path)
+	if !ok {
+		return nil
 	}
+	v.keys(m, path, []string{"layouter", copyKey}, "root")
+	row, ok := v.classCopy(KindPageLayouter, m, "layouter", path)
+	if root, present := m["root"]; present {
+		return v.paneTree(root, path+"/root")
+	}
+	if !ok {
+		return nil
+	}
+	leaves, _ := paneLeaves(row["root"])
+	return leaves
+}
+
+// elementLayouterCopy checks a panel's element layouter copy,
+// {layouter, class, config?}: the class copy is a valid element layouter class
+// row, and the panel's own config, when set, replaces the copy's whole.
+func (v *validator) elementLayouterCopy(val any, path string) {
+	m, ok := v.object(val, path)
+	if !ok {
+		return
+	}
+	v.keys(m, path, []string{"layouter", copyKey}, "config")
+	row, ok := v.classCopy(KindElementLayouter, m, "layouter", path)
+	if config, present := m["config"]; present && ok {
+		v.layouterConfig(str(row["code_module_id"]), config, path+"/config")
+	}
+}
+
+// layouterClass checks a page layouter class row (a code module and a pane
+// tree, root) or an element layouter class row (a code module and its default
+// parameters, config).
+func (v *validator) layouterClass(b map[string]any) {
+	registry, tree := pageLayouterModules, "root"
+	if v.kind == KindElementLayouter {
+		registry, tree = slices.Sorted(maps.Keys(elementLayouterModules)), "config"
+	}
+	v.keys(b, "", []string{"descriptor_id", "schema_version", "code_module_id", tree}, "description")
+	v.text(b, "description", "")
+	module, ok := v.matching(b, "code_module_id", "", idPattern)
+	if ok && !slices.Contains(registry, module) {
+		v.errf("/code_module_id", "code module %q has no %s code in this interpreter", module, v.kind)
+		ok = false
+	}
+	val, present := b[tree]
+	switch {
+	case !present:
+	case v.kind == KindPageLayouter:
+		v.paneTree(val, "/root")
+	case ok:
+		v.layouterConfig(module, val, "/config")
+	}
+}
+
+// layouterConfig checks the parameters of an element layouter code module.
+func (v *validator) layouterConfig(module string, val any, path string) {
+	m, ok := v.object(val, path)
+	if !ok {
+		return
+	}
+	v.keys(m, path, nil, elementLayouterModules[module]...)
+	if module == "flow-layouter" {
+		v.matching(m, "column_gap", path, flowGapPattern)
+		v.matching(m, "row_gap", path, flowGapPattern)
+		v.oneOf(m, "horizontal_alignment", path, []string{"start", "center", "end", "space-between"})
+		v.oneOf(m, "vertical_alignment", path, []string{"top", "center", "bottom", "stretch"})
+		v.oneOf(m, "rows_alignment", path, []string{"top", "center", "bottom", "space-between"})
+	}
+}
+
+// paneTree checks a pane tree with exactly one root and returns its leaf pane
+// IDs (devdoc 2026102601 §3.2.1, §3.2.2).
+func (v *validator) paneTree(val any, path string) map[string]bool {
+	ids, leaves := map[string]bool{}, map[string]bool{}
+	v.pane(val, path, ids, leaves)
+	return leaves
+}
+
+func (v *validator) pane(val any, path string, ids, leaves map[string]bool) {
+	p, ok := v.object(val, path)
+	if !ok {
+		return
+	}
+	v.keys(p, path, []string{"pane_id"}, append(append([]string{"split", "children"}, paneAttrs...), leafPaneAttrs...)...)
+	id, ok := v.matching(p, "pane_id", path, paneIDPattern)
+	if ok {
+		if ids[id] {
+			v.errf(path+"/pane_id", "pane ID %q is used twice in this page", id)
+		}
+		ids[id] = true
+	}
+	for _, k := range []string{"width", "height"} {
+		v.length(p, k, path, lengthKind{auto: true, elastic: true, percent: true})
+	}
+	for _, k := range []string{"min_width", "min_height", "max_width", "max_height"} {
+		v.length(p, k, path, lengthKind{percent: true})
+	}
+	v.boolean(p, "resizable", path)
+	if _, split := p["split"]; split {
+		v.oneOf(p, "split", path, []string{"rows", "columns"})
+		for _, k := range leafPaneAttrs {
+			if _, set := p[k]; set {
+				v.errf(path+"/"+k, "%q applies to leaf panes only", k)
+			}
+		}
+		children, ok := v.array(p["children"], path+"/children", false)
+		if ok && len(children) < 2 {
+			v.errf(path+"/children", "a split pane needs two or more children")
+		}
+		for i, c := range children {
+			v.pane(c, path+"/children/"+strconv.Itoa(i), ids, leaves)
+		}
+		return
+	}
+	if _, has := p["children"]; has {
+		v.errf(path+"/children", "a pane without %q has no children", "split")
+	}
+	if ok {
+		leaves[id] = true
+	}
+	for _, k := range []string{"left_margin", "right_margin", "top_margin", "bottom_margin"} {
+		v.length(p, k, path, lengthKind{})
+	}
+	v.oneOf(p, "hori_align", path, []string{"left", "center", "right"})
+	v.oneOf(p, "vert_align", path, []string{"top", "center", "bottom"})
+	v.oneOf(p, "hori_scrollbar", path, scrollbars)
+	v.oneOf(p, "vert_scrollbar", path, scrollbars)
+}
+
+// paneLeaves returns the leaf pane IDs of a tree that is already known to be
+// valid, and every pane ID in it.
+func paneLeaves(root any) (leaves, all map[string]bool) {
+	leaves, all = map[string]bool{}, map[string]bool{}
+	var walk func(any)
+	walk = func(val any) {
+		p, _ := val.(map[string]any)
+		id := str(p["pane_id"])
+		all[id] = true
+		children, split := p["children"].([]any)
+		if !split {
+			leaves[id] = true
+		}
+		for _, c := range children {
+			walk(c)
+		}
+	}
+	walk(root)
+	return leaves, all
+}
+
+// effectiveRoot returns a page's pane tree: its page layouter's own root, else
+// the root of its class copy.
+func effectiveRoot(page map[string]any) map[string]any {
+	pl, _ := page["page_layouter"].(map[string]any)
+	if root, ok := pl["root"].(map[string]any); ok {
+		return root
+	}
+	row, _ := pl[copyKey].(map[string]any)
+	root, _ := row["root"].(map[string]any)
+	return root
+}
+
+// classCopy checks the class copy an instance or layouter copy holds in
+// "class": it is a valid class row of kind, checked as that kind's descriptor,
+// and its descriptor_id equals the name in nameKey. Issues inside the copy are
+// reported at their place in this descriptor. It returns the copy and whether
+// it is valid.
+func (v *validator) classCopy(kind Kind, m map[string]any, nameKey, path string) (map[string]any, bool) {
+	name, ok := v.matching(m, nameKey, path, idPattern)
+	if !ok {
+		return nil, false
+	}
+	val, present := m[copyKey]
+	if !present {
+		return nil, false // reported by the caller's keys check
+	}
+	row, ok := v.object(val, path+"/"+copyKey)
+	if !ok {
+		return nil, false
+	}
+	if got := str(row["descriptor_id"]); got != name {
+		v.errf(path+"/"+nameKey, "%s %q does not match the descriptor_id %q of its class copy", nameKey, name, got)
+		return nil, false
+	}
+	issues := ValidateDescriptor(kind, name, row)
+	for _, is := range issues {
+		v.errf(path+"/"+copyKey+is.Path, "class copy: %s", is.Message)
+	}
+	return row, len(issues) == 0
 }
 
 // classRow checks an active element or action class row (design D2). An action
@@ -474,7 +715,7 @@ func (v *validator) elementClassAttrs(b map[string]any) (defaults map[string]any
 		switch {
 		case slices.Contains(classAttrs, k):
 			continue
-		case k == "element" || !segmentPattern.MatchString(k):
+		case k == "element" || k == copyKey || !segmentPattern.MatchString(k):
 			v.errf(p, "%q cannot be an attribute name", k)
 			continue
 		}
@@ -576,19 +817,30 @@ func (v *validator) sharedAttrs(e map[string]any, path string) {
 	v.oneOf(e, "binding_mode", path, bindingModes)
 }
 
-// elementInstance checks a page entry {"element": class, ...} as far as it can
-// without the class row: it names a class, sets no class attribute, and the
-// attributes many classes share are valid. pageInstances checks it against its
-// class row and code module.
-func (v *validator) elementInstance(m map[string]any, path string) {
-	if _, ok := v.matching(m, "element", path, idPattern); !ok {
-		if _, present := m["element"]; !present {
-			v.errf(path, "missing attribute %q", "element")
+// elementInstance checks a panel entry {"element": class, "class": copy, ...}:
+// it names its class, holds a valid copy of it, sets no class attribute, and is
+// checked and merged against the copy, never the stored class (devdoc 2026102601
+// §3.5.1). A page-wide binding_mode fills in first (withPageDefaults).
+func (v *validator) elementInstance(page, m map[string]any, path string) {
+	for _, k := range []string{"element", copyKey} {
+		if _, present := m[k]; !present {
+			v.errf(path, "missing attribute %q", k)
 		}
-		return
 	}
 	v.noClassAttrs(m, path)
-	v.sharedAttrs(instanceAttrs(m, "element"), path)
+	own := instanceAttrs(m, "element")
+	v.sharedAttrs(own, path)
+	row, ok := v.classCopy(KindElement, m, "element", path)
+	if !ok {
+		return
+	}
+	cls := str(m["element"])
+	own = withPageDefaults(page, row, own)
+	merged := v.againstCopy(KindElement, cls, row, own, path)
+	module := str(row["code_module_id"])
+	v.element(module, own, path)
+	v.elementComplete(module, merged, path)
+	v.els = append(v.els, mergedElement{cls, path, merged, row})
 }
 
 func (v *validator) noClassAttrs(m map[string]any, path string) {
@@ -600,11 +852,11 @@ func (v *validator) noClassAttrs(m map[string]any, path string) {
 }
 
 // instanceAttrs returns an instance's own attributes: everything but its class
-// name (classKey) and class attributes.
+// name (classKey), its class copy and class attributes.
 func instanceAttrs(m map[string]any, classKey string) map[string]any {
 	out := map[string]any{}
 	for k, val := range m {
-		if k != classKey && !slices.Contains(classAttrs, k) {
+		if k != classKey && k != copyKey && !slices.Contains(classAttrs, k) {
 			out[k] = val
 		}
 	}
@@ -761,17 +1013,41 @@ func (v *validator) stringList(obj map[string]any, key string, max int) {
 // pageLength checks a page length: a non-negative number with an optional unit,
 // and for % a value within [0, 100].
 func (v *validator) pageLength(obj map[string]any, key string, allowAuto bool) {
-	s, ok := v.str(obj, key, "")
-	if !ok || (allowAuto && s == "auto") {
+	v.length(obj, key, "", lengthKind{auto: allowAuto, percent: true})
+}
+
+// lengthKind says which values besides a length (a non-negative number with an
+// optional unit px, rem or em, px when left out) a length attribute accepts.
+type lengthKind struct{ auto, elastic, percent bool }
+
+// length checks a length attribute; a percentage is within [0, 100].
+func (v *validator) length(obj map[string]any, key, path string, k lengthKind) {
+	s, ok := v.str(obj, key, path)
+	if !ok || (k.auto && s == "auto") || (k.elastic && s == "elastic") {
 		return
 	}
 	m := pageLengthPattern.FindStringSubmatch(s)
-	if m == nil {
-		v.errf("/"+key, "%q must be a non-negative number with an optional unit (px, rem, em, %%)%s", s, map[bool]string{true: " or auto"}[allowAuto])
+	if m == nil || (!k.percent && m[3] == "%") {
+		units := "px, rem, em"
+		if k.percent {
+			units += ", %"
+		}
+		var extra []string
+		if k.elastic {
+			extra = append(extra, "elastic")
+		}
+		if k.auto {
+			extra = append(extra, "auto")
+		}
+		or := ""
+		if len(extra) > 0 {
+			or = " or " + strings.Join(extra, " or ")
+		}
+		v.errf(path+"/"+key, "%q must be a non-negative number with an optional unit (%s)%s", s, units, or)
 		return
 	}
 	if n, _ := strconv.ParseFloat(m[1], 64); m[3] == "%" && n > 100 {
-		v.errf("/"+key, "%q must be within 0%% and 100%%", s)
+		v.errf(path+"/"+key, "%q must be within 0%% and 100%%", s)
 	}
 }
 
@@ -906,19 +1182,23 @@ func actionPositions(page map[string]any) []actionPos {
 	if s, ok := page["save_action"]; ok {
 		out = append(out, actionPos{s, "/save_action", saveClass, nil, false})
 	}
-	els, _ := page["elements"].([]any)
-	for i, e := range els {
-		m, _ := e.(map[string]any)
-		path := "/elements/" + strconv.Itoa(i)
-		add := func(attr string, allowed, roots []string) {
-			if val, ok := m[attr]; ok {
-				out = append(out, actionPos{val, path + "/" + attr, allowed, roots, false})
+	panels, _ := page["panels"].(map[string]any)
+	for _, paneID := range slices.Sorted(maps.Keys(panels)) {
+		panel, _ := panels[paneID].(map[string]any)
+		els, _ := panel["elem_list"].([]any)
+		for i, e := range els {
+			m, _ := e.(map[string]any)
+			path := "/panels/" + paneID + "/elem_list/" + strconv.Itoa(i)
+			add := func(attr string, allowed, roots []string) {
+				if val, ok := m[attr]; ok {
+					out = append(out, actionPos{val, path + "/" + attr, allowed, roots, false})
+				}
 			}
+			add("on_click", triggerClasses, []string{RootInputDoc})
+			add("source", sourceClasses, []string{RootInputDoc})
+			add("on_row_click", triggerClasses, []string{RootInputDoc, RootRecord})
+			out = append(out, itemPositions(m["items"], path+"/items")...)
 		}
-		add("on_click", triggerClasses, []string{RootInputDoc})
-		add("source", sourceClasses, []string{RootInputDoc})
-		add("on_row_click", triggerClasses, []string{RootInputDoc, RootRecord})
-		out = append(out, itemPositions(m["items"], path+"/items")...)
 	}
 	for i := 0; i < len(out); i++ {
 		m, _ := out[i].val.(map[string]any)
@@ -943,32 +1223,48 @@ func itemPositions(items any, path string) []actionPos {
 	return out
 }
 
-// actionInstance checks an action instance as far as it can without the class
-// row: its class has code and is allowed here, and the attributes it sets are
-// defined by that code and valid.
-func (v *validator) actionInstance(pos actionPos) {
+// actionInstance checks an action instance: its class has code and is allowed
+// here, it holds a valid copy of its class, and the attributes it sets are
+// defined by that code, valid, and complete against the copy. It returns the
+// instance merged with its copy, or nil for static data or an invalid instance.
+func (v *validator) actionInstance(pos actionPos) map[string]any {
 	m, ok := v.object(pos.val, pos.path)
 	if !ok || pos.isStatic() {
-		return
+		return nil
 	}
 	cls, ok := v.str(m, "action", pos.path)
 	if !ok {
 		if _, present := m["action"]; !present {
 			v.errf(pos.path, "missing attribute %q", "action")
 		}
-		return
+		return nil
 	}
 	if _, known := actionAttrs[cls]; !known {
 		v.errf(pos.path+"/action", "action class %q has no code in this interpreter", cls)
-		return
+		return nil
 	}
 	if !slices.Contains(pos.allowed, cls) {
 		v.errf(pos.path+"/action", "a %s action is not allowed here (allowed: %s)", cls, strings.Join(pos.allowed, ", "))
-		return
+		return nil
+	}
+	if _, present := m[copyKey]; !present {
+		v.errf(pos.path, "missing attribute %q", copyKey)
 	}
 	v.noClassAttrs(m, pos.path)
-	v.action(cls, instanceAttrs(m, "action"), pos.path, "args")
+	own := instanceAttrs(m, "action")
+	v.action(cls, own, pos.path, "args")
 	v.values(m, "args", pos.path, pos.roots...)
+	row, ok := v.classCopy(KindAction, m, "action", pos.path)
+	if !ok {
+		return nil
+	}
+	before := len(v.issues)
+	merged := v.againstCopy(KindAction, cls, row, own, pos.path)
+	v.required(merged, pos.path, actionAttrs[cls].required)
+	if len(v.issues) > before {
+		return nil
+	}
+	return merged
 }
 
 // action checks the attributes an action instance or class row sets; extra
@@ -1058,56 +1354,30 @@ func mergeInstance(kind Kind, row, own map[string]any) map[string]any {
 	return out
 }
 
-// againstClass checks an instance's own attributes against its active class
-// row and returns the merged instance and the row. Every attribute whose
-// default is null must be set by the instance. An element instance may set only
-// the attributes its class names, plus the size attributes every element has,
-// and none that its class fixes (OpenSpec wpi-code-modules, design D4, D5).
-func (v *validator) againstClass(kind Kind, cls string, own map[string]any, path string) (map[string]any, map[string]any, bool) {
-	row, ok := v.classes[kind][cls]
-	if !ok {
-		key := "element"
-		if kind == KindAction {
-			key = "action"
-		}
-		v.errf(path+"/"+key, "%s class %q does not exist", kind, cls)
-		return nil, nil, false
-	}
+// againstCopy checks an instance's own attributes against the class copy it
+// holds and returns the merged instance. Every attribute whose default in the
+// copy is null must be set by the instance. An element instance may set only
+// the attributes its copy names, plus the size attributes every element has,
+// and none that its copy fixes (devdoc 2026102601 §3.5.1).
+func (v *validator) againstCopy(kind Kind, cls string, row, own map[string]any, path string) map[string]any {
 	if kind == KindElement {
 		for _, k := range slices.Sorted(maps.Keys(own)) {
-			_, named := row.Body[k]
+			_, named := row[k]
 			switch {
-			case isFixed(row.Body, k):
+			case isFixed(row, k):
 				v.errf(path+"/"+k, "attribute %q is fixed by element class %q; an instance cannot set it", k, cls)
 			case !named && !slices.Contains(elementSizeAttrs, k):
 				v.errf(path+"/"+k, "element class %q has no attribute %q", cls, k)
 			}
 		}
 	}
-	_, required := classDefaults(kind, row.Body)
+	_, required := classDefaults(kind, row)
 	for _, k := range required {
 		if _, set := own[k]; !set {
-			v.errf(path, "attribute %q has no default in %s class %q, so this instance must set it", k, kind, cls)
+			v.errf(path, "attribute %q has no default in this instance's copy of %s class %q, so the instance must set it", k, kind, cls)
 		}
 	}
-	return mergeInstance(kind, row.Body, own), row.Body, true
-}
-
-// actionComplete checks an action instance against its class row and returns
-// the merged instance, or nil for static data or an instance whose class
-// problems actionInstance reports.
-func (v *validator) actionComplete(pos actionPos) map[string]any {
-	m, _ := pos.val.(map[string]any)
-	cls := str(m["action"])
-	if _, known := actionAttrs[cls]; !known || !slices.Contains(pos.allowed, cls) {
-		return nil
-	}
-	merged, _, ok := v.againstClass(KindAction, cls, instanceAttrs(m, "action"), pos.path)
-	if !ok {
-		return nil
-	}
-	v.required(merged, pos.path, actionAttrs[cls].required)
-	return merged
+	return mergeInstance(kind, row, own)
 }
 
 // withPageDefaults gives an element instance that does not set binding_mode
@@ -1124,43 +1394,18 @@ func withPageDefaults(page, row, own map[string]any) map[string]any {
 	return own
 }
 
-// mergedElement is an element instance merged with its class.
+// mergedElement is an element instance merged with its class copy, which it
+// keeps for the checks that need the database.
 type mergedElement struct {
 	cls, path string
 	body      map[string]any
+	copy      map[string]any
 }
 
-// mergedAction is an action instance merged with its class.
+// mergedAction is an action instance merged with its class copy.
 type mergedAction struct {
 	page, path, cls string
 	body            map[string]any
-}
-
-// pageInstances checks a page's instances against their class rows (design
-// D3, second stage) and the code modules those rows name, and returns them
-// merged with their classes.
-func (v *validator) pageInstances(page map[string]any) ([]mergedElement, []mergedAction) {
-	var els []mergedElement
-	list, _ := page["elements"].([]any)
-	for i, e := range list {
-		m, _ := e.(map[string]any)
-		cls, path := str(m["element"]), "/elements/"+strconv.Itoa(i)
-		own := withPageDefaults(page, v.classes[KindElement][cls].Body, instanceAttrs(m, "element"))
-		if merged, row, ok := v.againstClass(KindElement, cls, own, path); ok {
-			module := str(row["code_module_id"])
-			v.element(module, own, path)
-			v.elementComplete(module, merged, path)
-			els = append(els, mergedElement{cls, path, merged})
-		}
-	}
-	var acts []mergedAction
-	for _, pos := range actionPositions(page) {
-		if merged := v.actionComplete(pos); merged != nil {
-			m, _ := pos.val.(map[string]any)
-			acts = append(acts, mergedAction{v.id, pos.path, str(m["action"]), merged})
-		}
-	}
-	return els, acts
 }
 
 func (v *validator) fieldMaps(a map[string]any, path string, save bool) {

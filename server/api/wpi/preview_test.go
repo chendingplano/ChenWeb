@@ -20,6 +20,7 @@ func TestPreviewListReadsUnsavedSource(t *testing.T) {
 	defer shared.Close()
 	h := testHandler(project, adminUser)
 	h.Databases = map[string]*sql.DB{"shared": shared}
+	projectMock.ExpectQuery(latestQuery).WithArgs("action", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"load", testClasses()[KindAction]["load"]}))
 	sharedMock.ExpectQuery(catalogQuery).WithArgs("kb", "people").WillReturnRows(sqlmock.NewRows([]string{"column_name"}).AddRow("name"))
 	sharedMock.ExpectQuery(`SELECT "name" FROM "kb"\."people" LIMIT \$1`).WithArgs(200).WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("alice"))
 	rec := call(t, h.PreviewList, "POST", `{"source":{"action":"load","table":"shared.kb.people","result":"list","fields":[{"column":"name","attribute":"name"}]}}`)
@@ -64,6 +65,10 @@ func TestPreviewListRejectsInvalidAndUnlistedSources(t *testing.T) {
 		`{"source":{"action":"load","table":"private.kb.people","result":"list","fields":[{"column":"name","attribute":"name"}]}}`,
 		`{"source":{"action":"load","table":"kb.people","result":"list","fields":[]}}`,
 	} {
+		// A load source without a class copy gets one of the active class first.
+		if strings.Contains(body, `"action":"load"`) {
+			mock.ExpectQuery(latestQuery).WithArgs("action", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"load", testClasses()[KindAction]["load"]}))
+		}
 		rec := call(t, h.PreviewList, "POST", body)
 		if rec.Code != 400 {
 			t.Fatalf("source %s: expected 400, got %d %s", body, rec.Code, rec.Body.String())

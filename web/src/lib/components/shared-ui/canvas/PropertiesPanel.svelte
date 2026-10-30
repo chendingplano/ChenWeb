@@ -14,6 +14,8 @@
     node,
     nodeType,
     elementClass,
+    panes,
+    onMovePane,
     nodeTab  = false,
     width    = 240,
     darkMode = true,
@@ -25,6 +27,9 @@
     // instead of nodeType's: null when the class is not in the class list,
     // left out for other nodes.
     elementClass?: ElementClassSummary | null;
+    // The leaf panes of the page, for moving an element node to another one.
+    panes?:    string[];
+    onMovePane?: (nodeId: string, pane: string) => void;
     // Tabs Properties and Node, where Node edits the node's descriptor (the WPI editor).
     nodeTab?:  boolean;
     width?:    number;
@@ -158,6 +163,15 @@
             style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); box-sizing:border-box;"
           />
         </div>
+        {#if panes?.length}
+          <div style="margin-bottom:10px;">
+            <label for="prop-element-pane" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.wpi_element_pane()}</label>
+            <select id="prop-element-pane" value={String(node.data.pane ?? '')} onchange={(e) => onMovePane?.(node.id, e.currentTarget.value)}
+              style="width:100%; background:var(--cv-field); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">
+              {#each panes as pane (pane)}<option value={pane}>{pane}</option>{/each}
+            </select>
+          </div>
+        {/if}
         {#if elementClass === null}
           <div style="font-size:10px; color:var(--cv-text-faint);">{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</div>
         {:else}

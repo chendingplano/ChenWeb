@@ -4,19 +4,19 @@
 	import { fieldErrorText, localized } from '../text';
 	import type { ElementProps } from './index';
 
-	let { panelId, element }: ElementProps = $props();
+	let { instanceId, element }: ElementProps = $props();
 
 	const rt = getRuntime();
 	const id = $props.id();
 	const d = $derived(element.desc);
 	const options = $derived(d.options ?? []);
-	const value = $derived(rt.read(panelId, d.data_binding));
-	const errors = $derived(rt.errorsFor(panelId, d.data_binding));
+	const value = $derived(rt.read(instanceId, d.data_binding));
+	const errors = $derived(rt.errorsFor(instanceId, d.data_binding));
 
 	// Option values may be numbers; write back the option's own value.
 	function choose(raw: string) {
 		const option = options.find((o) => String(o.value) === raw);
-		rt.write(panelId, d.data_binding, option ? option.value : null);
+		rt.write(instanceId, d.data_binding, option ? option.value : null);
 	}
 </script>
 

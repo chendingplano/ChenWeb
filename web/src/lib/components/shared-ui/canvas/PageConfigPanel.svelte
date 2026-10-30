@@ -1,42 +1,131 @@
+<script lang="ts" module>
+ // Page: the page's attributes. Panes: its page layouter's tree and the selected
+ // pane. Panel: the element layouter of the selected leaf pane's panel
+ // (OpenSpec wpi-pages-own-panes, design D12).
+ export type ConfigMode = 'page' | 'panes' | 'panel';
+</script>
+
 <script lang="ts">
  import { m } from '$lib/paraglide/messages.js';
- import type { JsonObject } from '$lib/wpi/types';
+ import { findPane, isLeaf } from '$lib/wpi/layout';
+ import type { JsonObject, PaneSpec } from '$lib/wpi/types';
  import { valueText, withAttribute } from './element-attributes';
- let { page, mode, width, onUpdate }: { page: JsonObject; mode: 'page' | 'layouter'; width: number; onUpdate: (page: JsonObject) => void } = $props();
- const pageFields = ['descriptor_id', 'schema_version', 'page_name', 'description', 'access_controls', 'keywords', 'page_tags', 'page_policy', 'page_style', 'width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'hori_align', 'vert_align', 'left_margin', 'right_margin', 'top_margin', 'bottom_margin', 'bkgd_color', 'frgd_color', 'binding_mode', 'input', 'save_action', 'refresh'];
- const layoutFields = ['column_gap', 'row_gap', 'horizontal_alignment', 'vertical_alignment', 'rows_alignment'];
- const config = $derived((page.layouter_config && typeof page.layouter_config === 'object' && !Array.isArray(page.layouter_config) ? page.layouter_config : {}) as JsonObject);
- const fields = $derived(mode === 'page' ? [...new Set([...pageFields, ...Object.keys(page).filter(k => !['elements', 'layouter', 'layouter_config'].includes(k))])] : [...new Set([...layoutFields, ...Object.keys(config)])]);
+ import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelConfig } from './pane-edit';
+
+ let { page, mode, width, selectedPane, onUpdate, onSelectPane, onSplit, onAdd, onDelete, onRename }: {
+  page: JsonObject; mode: ConfigMode; width: number; selectedPane: string | null;
+  onUpdate: (page: JsonObject) => void; onSelectPane: (pane: string) => void;
+  onSplit: (pane: string, split: 'rows' | 'columns') => void; onAdd: (pane: string) => void;
+  onDelete: (pane: string) => void; onRename: (pane: string, to: string) => void;
+ } = $props();
+
+ const pageFields = ['descriptor_id', 'schema_version', 'page_name', 'description', 'access_controls', 'keywords', 'page_tags', 'page_policy', 'page_style', 'width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'hori_align', 'vert_align', 'hori_scrollbar', 'vert_scrollbar', 'bkgd_color', 'frgd_color', 'binding_mode', 'input', 'save_action', 'refresh'];
+ const flowFields = ['column_gap', 'row_gap', 'horizontal_alignment', 'vertical_alignment', 'rows_alignment'];
+ // Fields are labelled with their attribute names, as in the descriptor.
+ const PANE_ID = 'pane_id';
+
+ const root = $derived(rootOf(page));
+ const pane = $derived(selectedPane ? findPane(root, selectedPane) : undefined);
+ const panel = $derived(pane && isLeaf(pane) ? ((page.panels as JsonObject | undefined)?.[pane.pane_id] as JsonObject | undefined) : undefined);
+ const layouter = $derived((panel?.elem_layouter ?? { layouter: 'flow-layouter' }) as JsonObject);
+ const copyConfig = $derived((((layouter.class as JsonObject | undefined)?.config) ?? {}) as JsonObject);
+ const ownConfig = $derived(layouter.config as JsonObject | undefined);
+ const paneFields = $derived(pane ? (isLeaf(pane) ? [...PANE_ATTRS, ...LEAF_PANE_ATTRS] : PANE_ATTRS) : []);
+ const fields = $derived(mode === 'page' ? [...new Set([...pageFields, ...Object.keys(page).filter((k) => !['page_layouter', 'panels'].includes(k))])] : mode === 'panes' ? paneFields : flowFields);
+
  let editing = $state<{ key: string; text: string } | null>(null);
- function fieldText(key: string): string { return editing?.key === key ? editing.text : valueText((mode === 'page' ? page : config)[key]); }
+ let renaming = $state<string | null>(null);
+ const renameError = $derived(pane && renaming !== null ? renameProblem(page, pane.pane_id, renaming) : null);
+
+ function source(): JsonObject {
+  if (mode === 'page') return page;
+  if (mode === 'panes') return (pane ?? {}) as unknown as JsonObject;
+  return ownConfig ?? copyConfig;
+ }
+ function fieldText(key: string): string { return editing?.key === key ? editing.text : valueText(source()[key]); }
  function commit(key: string, text: string) {
-  const attrs = withAttribute(mode === 'page' ? page : config, key, text);
-  onUpdate(mode === 'page' ? attrs : { ...page, layouter_config: attrs });
   editing = null;
+  const next = withAttribute(source(), key, text);
+  if (mode === 'page') onUpdate(next);
+  else if (mode === 'panes' && pane) onUpdate(setPaneAttr(page, pane.pane_id, key, next[key]));
+  else if (mode === 'panel' && pane) onUpdate(setPanelConfig(page, pane.pane_id, next));
+ }
+ function commitRename() {
+  if (pane && renaming !== null && !renameError && renaming !== pane.pane_id) onRename(pane.pane_id, renaming);
+  renaming = null;
+ }
+ // The tree as a list, each pane with its depth.
+ function flat(p: PaneSpec, depth = 0): { pane: PaneSpec; depth: number }[] {
+  return [{ pane: p, depth }, ...(p.children ?? []).flatMap((c) => flat(c, depth + 1))];
  }
 </script>
+
 <aside class="panel select-text" style="width:{width}px">
- <div class="heading">{mode === 'page' ? m.wpi_page_config_title() : m.wpi_layouter_title()}</div>
+ <div class="heading">{mode === 'page' ? m.wpi_page_config_title() : mode === 'panes' ? m.wpi_panes_title() : m.wpi_panel_title()}</div>
  <div class="fields">
-  {#if mode === 'layouter'}
-   <label for="wpi-layouter-id">{m.wpi_layouter_type()}</label>
-   <input id="wpi-layouter-id" value={String(page.layouter ?? '')} readonly />
+  {#if mode === 'panes'}
+   <label for="wpi-page-layouter-id">{m.wpi_page_layouter_type()}</label>
+   <input id="wpi-page-layouter-id" value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')} readonly />
+   <div class="label">{m.wpi_pane_tree()}</div>
+   <ul class="tree" aria-label={m.wpi_pane_tree()}>
+    {#each flat(root) as item (item.pane.pane_id)}
+     <li><button type="button" class:active={item.pane.pane_id === selectedPane} aria-pressed={item.pane.pane_id === selectedPane} style="padding-left:{6 + item.depth * 12}px" onclick={() => onSelectPane(item.pane.pane_id)}>{item.pane.pane_id}{#if item.pane.split}<span class="split"> · {item.pane.split}</span>{/if}</button></li>
+    {/each}
+   </ul>
+   {#if pane}
+    <div class="actions">
+     {#if isLeaf(pane)}
+      <button type="button" onclick={() => onSplit(pane.pane_id, 'rows')}>{m.wpi_pane_split_rows()}</button>
+      <button type="button" onclick={() => onSplit(pane.pane_id, 'columns')}>{m.wpi_pane_split_columns()}</button>
+     {:else}
+      <button type="button" onclick={() => onAdd(pane.pane_id)}>{m.wpi_pane_add()}</button>
+     {/if}
+     {#if pane.pane_id !== root.pane_id}<button type="button" class="danger" onclick={() => onDelete(pane.pane_id)}>{m.wpi_pane_delete()}</button>{/if}
+    </div>
+    <label for="wpi-pane-id">{PANE_ID}</label>
+    <input id="wpi-pane-id" value={renaming ?? pane.pane_id} aria-invalid={!!renameError}
+     oninput={(event) => renaming = event.currentTarget.value}
+     onchange={commitRename} onblur={commitRename} />
+    {#if renameError}<p class="error" role="alert">{renameError === 'taken' ? m.wpi_pane_id_taken({ pane: renaming ?? '' }) : m.wpi_pane_id_invalid()}</p>{/if}
+   {:else}
+    <p class="hint">{m.wpi_pane_select_hint()}</p>
+   {/if}
+  {:else if mode === 'panel'}
+   {#if !pane || !isLeaf(pane)}
+    <p class="hint">{m.wpi_panel_select_leaf()}</p>
+   {:else}
+    <label for="wpi-layouter-id">{m.wpi_layouter_type()}</label>
+    <input id="wpi-layouter-id" value={String(layouter.layouter ?? '')} readonly />
+   {/if}
   {/if}
-  {#each fields as key (key)}
-   <label for={`wpi-page-field-${key}`}>{key}</label>
-   <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
-    oninput={(event) => editing = { key, text: event.currentTarget.value }}
-    onchange={(event) => commit(key, event.currentTarget.value)}
-    onblur={(event) => { if (editing?.key === key) commit(key, event.currentTarget.value); }}></textarea>
-  {/each}
+  {#if mode === 'page' || pane && (mode === 'panes' || isLeaf(pane))}
+   {#each fields as key (key)}
+    <label for={`wpi-page-field-${key}`}>{key}</label>
+    <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
+     placeholder={mode === 'panel' && !ownConfig ? valueText(copyConfig[key]) : undefined}
+     oninput={(event) => editing = { key, text: event.currentTarget.value }}
+     onchange={(event) => commit(key, event.currentTarget.value)}
+     onblur={(event) => { if (editing?.key === key) commit(key, event.currentTarget.value); }}></textarea>
+   {/each}
+  {/if}
  </div>
 </aside>
 <style>
  .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); }
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
- label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
+ label, .label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
  textarea, input { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }
  input:read-only, textarea:read-only { background:transparent; color:var(--cv-text-2); }
+ .tree { list-style:none; margin:0 0 10px; padding:0; border:1px solid var(--cv-border); border-radius:4px; }
+ .tree button { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--cv-text-2); font-size:11px; padding:4px 6px; cursor:pointer; }
+ .tree button:hover, .tree button.active { background:var(--cv-hover); color:var(--cv-text); }
+ .split { color:var(--cv-text-muted); }
+ .actions { display:flex; flex-wrap:wrap; gap:4px; margin:0 0 12px; }
+ .actions button { border:1px solid var(--cv-border); border-radius:4px; background:var(--cv-surface); color:var(--cv-text-2); font-size:10px; padding:4px 8px; cursor:pointer; }
+ .actions button:hover { background:var(--cv-hover); }
+ .actions .danger { color:#dc2626; }
+ .hint { font-size:11px; color:var(--cv-text-muted); margin:0 0 12px; }
+ .error { font-size:10px; color:#dc2626; margin:-8px 0 12px; }
 </style>

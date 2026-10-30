@@ -1,16 +1,25 @@
-// The running WPI app: panes, panels, input docs, menu bindings and the
-// unsaved-changes prompt (design D8, D11). Panel bookkeeping decisions come
-// from panels.ts; this class keeps the state in $state and talks to the API.
+// The running WPI app: page instances, the panes they own, the Panel Cache, input
+// docs and the unsaved-changes prompt (devdoc 2026102601 §3.3; OpenSpec
+// wpi-pages-own-panes, design D8, D9). Cache decisions come from panel-cache.ts;
+// this class keeps the state in $state and talks to the API.
 import { getContext, setContext } from 'svelte';
 import { previewList, runAction, WpiError } from './api';
 import { previewLoadSource } from './list-request';
 import { canonical } from './dirty';
-import { isAction, mergeInstance, staticInput } from './entries';
-import { planOpen, removePanel, sharingKey, showPanel, type Bindings, type PaneModel, type PanelModel } from './panels';
+import { isAction, mergeAction, staticInput } from './entries';
+import { effectiveRoot, leafPanes } from './layout';
+import { findCached, forget, paneInstanceId, paneOwner, sharingKey, show, type PaneModel } from './panel-cache';
 import { getPath, parseRef, resolveArgs, setPath } from './refs';
 import type { ActionInstance, ActionRef, Bundle, Input, InputSpec, Json, JsonObject } from './types';
 
-export type PanelState = PanelModel & {
+// One open copy of a page. hostPane is the pane instance it was opened in, or
+// null for the page in the app's page area.
+export type PageInstance = {
+	id: string;
+	pageId: string;
+	hostPane: string | null;
+	// Instances of the same page with the same input share it (panel-cache.ts).
+	key: string;
 	doc: JsonObject;
 	// Canonical JSON of the doc as last loaded or saved.
 	snapshot: string;
@@ -21,13 +30,13 @@ export type PanelState = PanelModel & {
 	loading: boolean;
 	error: string | null;
 	fieldErrors: Record<string, string[]>;
-	// Incremented each time the panel goes from hidden to visible.
+	// Incremented each time the instance goes from hidden to shown.
 	shown: number;
 };
 
 export type Choice = 'save' | 'discard' | 'keep';
 
-export type TriggerContext = { panelId: string; record?: JsonObject; binding?: string };
+export type TriggerContext = { instanceId: string; record?: JsonObject };
 
 const KEY = Symbol('wpi-runtime');
 
@@ -48,63 +57,83 @@ function message(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-
 export class AppRuntime {
 	readonly bundle: Bundle;
+	pages = $state<Record<string, PageInstance>>({});
 	panes = $state<Record<string, PaneModel>>({});
-	panels = $state<Record<string, PanelState>>({});
-	bindings = $state<Bindings>({});
-	prompt = $state<{ panelId: string; canSave: boolean; resolve: (c: Choice) => void } | null>(null);
+	// Pixel sizes of resized panes, by pane instance.
+	paneSizes = $state<Record<string, number>>({});
+	// The page instance in the app's page area.
+	root = $state<string | null>(null);
+	prompt = $state<{ instanceId: string; canSave: boolean; resolve: (c: Choice) => void } | null>(null);
 	#seq = 0;
 
 	constructor(bundle: Bundle, readonly editorPreview = false) {
 		this.bundle = bundle;
-		for (const paneId of Object.keys(bundle.app.panes)) this.panes[paneId] = { panels: [], visible: null };
 	}
 
-	// Opens the pages the app descriptor names for its panes.
+	// Opens the app's initial page in its page area.
 	start(): void {
-		for (const [paneId, spec] of Object.entries(this.bundle.app.panes)) {
-			if (spec.page) void this.openPage({ page: spec.page, pane: paneId });
-		}
+		this.root = this.#create(this.bundle.app.initial_page, null, this.#pageInput(this.bundle.app.initial_page));
 	}
 
-	async openPage(req: { page: string; pane: string; input?: InputSpec; binding?: string }): Promise<void> {
-		const pane = this.panes[req.pane];
-		const page = this.bundle.pages[req.page];
-		if (!pane || !page) throw new Error(`cannot open page "${req.page}" in pane "${req.pane}"`);
-		const input = req.input ?? this.#pageInput(req.page);
-		const key = sharingKey(req.page, input);
-		const plan = planOpen(pane, this.panels, this.bindings, { key, binding: req.binding });
-		if (plan.current?.fate === 'close' && !(await this.closePanel(plan.current.id, false))) return;
-		let id = plan.reuse;
-		if (!id) {
-			id = `${req.page}#${++this.#seq}`;
-			const doc = $state.snapshot<unknown>(input.doc ?? {}) as JsonObject;
-			this.panels[id] = {
-				id,
-				paneId: req.pane,
-				pageId: req.page,
-				key,
-				doc,
-				snapshot: canonical(doc),
-				input,
-				ready: !input.ref,
-				loading: false,
-				error: null,
-				fieldErrors: {},
-				shown: 0
-			};
+	pane(id: string): PaneModel {
+		return (this.panes[id] ??= { opened: [], visible: null });
+	}
+
+	#create(pageId: string, hostPane: string | null, input: InputSpec): string {
+		if (!this.bundle.pages[pageId]) throw new Error(`page "${pageId}" is not in the bundle`);
+		const id = `${pageId}#${++this.#seq}`;
+		const doc = $state.snapshot<unknown>(input.doc ?? {}) as JsonObject;
+		this.pages[id] = {
+			id,
+			pageId,
+			hostPane,
+			key: sharingKey(pageId, input),
+			doc,
+			snapshot: canonical(doc),
+			input,
+			ready: !input.ref,
+			loading: false,
+			error: null,
+			fieldErrors: {},
+			shown: 0
+		};
+		if (input.ref) void this.#loadInput(id);
+		return id;
+	}
+
+	// The pane instance a pane ID names, looked up outward from a page instance:
+	// its own leaf panes first, then those of the page it was opened in, and so
+	// on. An instance opened in a pane has that pane in place of its root, so
+	// its root's ID names that pane (devdoc §5.1). null if no page has the pane.
+	resolvePane(fromInstance: string, paneId: string): string | null {
+		let inst: PageInstance | undefined = this.pages[fromInstance];
+		while (inst) {
+			const root = effectiveRoot(this.bundle.pages[inst.pageId]);
+			if (inst.hostPane && root.pane_id === paneId) return inst.hostPane;
+			if (leafPanes(root).includes(paneId)) return paneInstanceId(inst.id, paneId);
+			if (!inst.hostPane) return null;
+			inst = this.pages[paneOwner(inst.hostPane)];
 		}
-		if (req.binding) this.bindings[req.binding] = id;
-		this.#show(req.pane, id);
-		if (!plan.reuse && input.ref) await this.#loadInput(id);
+		return null;
+	}
+
+	// Opens a page in a pane: the pane hides what it shows, then shows the
+	// cached instance of the page with this input, or a new one (design D8).
+	async openPage(req: { page: string; pane: string; from: string; input?: InputSpec }): Promise<void> {
+		const paneId = this.resolvePane(req.from, req.pane);
+		if (!paneId) throw new Error(`pane "${req.pane}" is not a pane of this page or of a page it is opened in`);
+		const input = req.input ?? this.#pageInput(req.page);
+		const pane = this.pane(paneId);
+		const id = findCached(pane, this.pages, sharingKey(req.page, input)) ?? this.#create(req.page, paneId, input);
+		this.#show(paneId, id);
 	}
 
 	// A page's own input: static data or its action instance, whose args are
 	// literals.
 	#pageInput(pageId: string): InputSpec {
-		const input = this.bundle.pages[pageId].input;
+		const input = this.bundle.pages[pageId]?.input;
 		if (!input) return {};
 		if (!isAction(input)) return staticInput(input);
 		return { ref: { kind: 'page', id: pageId, pointer: '/input' }, args: resolveArgs(input.args, {}) };
@@ -120,70 +149,71 @@ export class AppRuntime {
 	}
 
 	#show(paneId: string, id: string): void {
-		const pane = this.panes[paneId];
-		const wasHidden = pane.panels.includes(id) && pane.visible !== id;
-		showPanel(pane, id);
+		const pane = this.pane(paneId);
+		const wasHidden = pane.opened.includes(id) && pane.visible !== id;
+		show(pane, id);
 		if (!wasHidden) return;
-		const panel = this.panels[id];
-		panel.shown++;
-		if (this.bundle.pages[panel.pageId].refresh?.on_show && panel.input.ref && !this.isDirty(id)) {
+		const inst = this.pages[id];
+		inst.shown++;
+		if (this.bundle.pages[inst.pageId].refresh?.on_show && inst.input.ref && !this.isDirty(id)) {
 			void this.#loadInput(id);
 		}
 	}
 
 	async #loadInput(id: string): Promise<void> {
-		const panel = this.panels[id];
-		if (!panel?.input.ref) return;
-		panel.loading = true;
-		panel.error = null;
+		const inst = this.pages[id];
+		if (!inst?.input.ref) return;
+		inst.loading = true;
+		inst.error = null;
 		try {
-			const res = await runAction(panel.input.ref, panel.input.args ?? {});
-			if (!this.panels[id]) return;
-			panel.doc = (res.result ?? {}) as JsonObject;
-			panel.snapshot = canonical(panel.doc);
+			const res = await runAction(inst.input.ref, inst.input.args ?? {});
+			if (!this.pages[id]) return;
+			inst.doc = (res.result ?? {}) as JsonObject;
+			inst.snapshot = canonical(inst.doc);
 		} catch (err) {
-			panel.error = message(err);
+			inst.error = message(err);
 		} finally {
-			panel.loading = false;
-			panel.ready = true;
+			inst.loading = false;
+			inst.ready = true;
 		}
 	}
 
 	isDirty(id: string): boolean {
-		const panel = this.panels[id];
-		return !!panel && canonical(panel.doc) !== panel.snapshot;
+		const inst = this.pages[id];
+		return !!inst && canonical(inst.doc) !== inst.snapshot;
 	}
 
 	anyDirty(): boolean {
-		return Object.keys(this.panels).some((id) => this.isDirty(id));
+		return Object.keys(this.pages).some((id) => this.isDirty(id));
 	}
 
-	// Closes a panel after the unsaved-changes check; false if the user kept
-	// editing or saving failed. showNext makes the pane show its most recently
-	// shown remaining panel.
-	async closePanel(id: string, showNext = true): Promise<boolean> {
-		const panel = this.panels[id];
-		if (!panel) return true;
+	// Closes a page instance: first the instances opened in its panes, then it,
+	// each after the unsaved-changes check; false if the user kept editing or a
+	// save failed. Its pane then shows its own panel (design D8).
+	async closePage(id: string): Promise<boolean> {
+		const inst = this.pages[id];
+		if (!inst) return true;
+		for (const nested of Object.values(this.pages).filter((p) => p.hostPane?.startsWith(`${id}/`))) {
+			if (!(await this.closePage(nested.id))) return false;
+		}
 		if (this.isDirty(id)) {
 			const choice = await this.#ask(id);
 			if (choice === 'keep') return false;
 			if (choice === 'save' && !(await this.save(id))) return false;
 		}
-		const pane = this.panes[panel.paneId];
-		const next = removePanel(pane, this.bindings, id);
-		delete this.panels[id];
-		if (next) {
-			pane.visible = null;
-			if (showNext) this.#show(panel.paneId, next);
+		if (inst.hostPane) forget(this.pane(inst.hostPane), id);
+		for (const paneId of Object.keys(this.panes)) {
+			if (paneId.startsWith(`${id}/`)) delete this.panes[paneId];
 		}
+		delete this.pages[id];
 		return true;
 	}
 
-	#ask(panelId: string): Promise<Choice> {
-		const canSave = !!this.bundle.pages[this.panels[panelId].pageId].save_action;
+	#ask(instanceId: string): Promise<Choice> {
+		const canSave = !!this.bundle.pages[this.pages[instanceId].pageId].save_action;
 		return new Promise((resolve) => {
 			this.prompt = {
-				panelId,
+				instanceId,
 				canSave,
 				resolve: (choice) => {
 					this.prompt = null;
@@ -193,79 +223,93 @@ export class AppRuntime {
 		});
 	}
 
-	// Saves a panel's input doc with ref, or with its page's save_action.
+	// Saves a page instance's input doc with ref, or with its page's save_action.
 	async save(id: string, ref?: ActionRef): Promise<boolean> {
-		const panel = this.panels[id];
-		const saveAction = this.bundle.pages[panel.pageId].save_action;
-		const actionRef = ref ?? (saveAction ? ({ kind: 'page', id: panel.pageId, pointer: '/save_action' } as const) : null);
+		const inst = this.pages[id];
+		const saveAction = this.bundle.pages[inst.pageId].save_action;
+		const actionRef = ref ?? (saveAction ? ({ kind: 'page', id: inst.pageId, pointer: '/save_action' } as const) : null);
 		if (!actionRef) return false;
-		panel.error = null;
+		inst.error = null;
 		try {
-			const res = await runAction(actionRef, {}, $state.snapshot<unknown>(panel.doc) as JsonObject);
-			setPath(panel.doc, [String(res.key_attribute)], res.key_value);
-			panel.snapshot = canonical(panel.doc);
-			panel.fieldErrors = {};
+			const res = await runAction(actionRef, {}, $state.snapshot<unknown>(inst.doc) as JsonObject);
+			setPath(inst.doc, [String(res.key_attribute)], res.key_value);
+			inst.snapshot = canonical(inst.doc);
+			inst.fieldErrors = {};
 			return true;
 		} catch (err) {
-			if (err instanceof WpiError && err.fieldErrors) panel.fieldErrors = err.fieldErrors;
-			else panel.error = message(err);
+			if (err instanceof WpiError && err.fieldErrors) inst.fieldErrors = err.fieldErrors;
+			else inst.error = message(err);
 			return false;
 		}
 	}
 
+	// The page, pane and input an open-page instance asks for, from ctx.
+	#openRequest(t: ActionInstance, ref: ActionRef, ctx: TriggerContext) {
+		const a = mergeAction(t);
+		const args = resolveArgs(a.args, { input_doc: this.pages[ctx.instanceId]?.doc, record: ctx.record });
+		return { page: a.page!, pane: a.pane!, from: ctx.instanceId, input: this.#nestedInput(a.input, ref, args) };
+	}
+
 	// Runs an action instance an element triggers; ref names it to the server.
 	async runTrigger(t: ActionInstance, ref: ActionRef, ctx: TriggerContext): Promise<void> {
-		const panel = this.panels[ctx.panelId];
-		const a = mergeInstance(this.bundle.actions[t.action], t);
-		const args = resolveArgs(a.args, { input_doc: panel?.doc, record: ctx.record });
-		switch (a.action) {
-			case 'open-page':
-				await this.openPage({ page: a.page!, pane: a.pane!, input: this.#nestedInput(a.input, ref, args), binding: ctx.binding });
-				return;
-			case 'close-page':
-				await this.closePanel(ctx.panelId);
-				return;
-			case 'save':
-				await this.save(ctx.panelId, ref);
-				return;
-			case 'save-page':
-				await this.save(ctx.panelId);
-				return;
+		const inst = this.pages[ctx.instanceId];
+		try {
+			switch (t.action) {
+				case 'open-page':
+					await this.openPage(this.#openRequest(t, ref, ctx));
+					return;
+				case 'close-page':
+					// The page in the app's page area cannot be closed.
+					if (inst?.hostPane) await this.closePage(ctx.instanceId);
+					return;
+				case 'save':
+					await this.save(ctx.instanceId, ref);
+					return;
+				case 'save-page':
+					await this.save(ctx.instanceId);
+					return;
+			}
+		} catch (err) {
+			if (inst) inst.error = message(err);
 		}
 	}
 
-	// Runs a list's source load instance in the context of its panel.
-	async queryList(panelId: string, ref: ActionRef, args?: JsonObject, signal?: AbortSignal, source?: ActionInstance): Promise<JsonObject[]> {
-		const resolved = resolveArgs(args, { input_doc: this.panels[panelId]?.doc });
+	// Whether an open-page instance's page, with its input, is what its pane
+	// shows: a menu item shows itself as current then.
+	isShowing(t: ActionInstance, ref: ActionRef, ctx: TriggerContext): boolean {
+		if (t.action !== 'open-page') return false;
+		const req = this.#openRequest(t, ref, ctx);
+		const paneId = this.resolvePane(req.from, req.pane);
+		const visible = paneId ? this.panes[paneId]?.visible : null;
+		return !!visible && this.pages[visible]?.key === sharingKey(req.page, req.input ?? this.#pageInput(req.page));
+	}
+
+	// Runs a list's source load instance in the context of its page instance.
+	async queryList(instanceId: string, ref: ActionRef, args?: JsonObject, signal?: AbortSignal, source?: ActionInstance): Promise<JsonObject[]> {
+		const resolved = resolveArgs(args, { input_doc: this.pages[instanceId]?.doc });
 		const previewSource = this.editorPreview ? previewLoadSource(source) : null;
 		if (previewSource) return previewList(previewSource, resolved, signal);
 		const res = await runAction(ref, resolved, undefined, fetch, signal);
 		return (res.result ?? []) as JsonObject[];
 	}
 
-	read(panelId: string, binding: string | undefined): Json | undefined {
+	read(instanceId: string, binding: string | undefined): Json | undefined {
 		const path = bindingPath(binding);
-		return path ? getPath(this.panels[panelId]?.doc, path) : undefined;
+		return path ? getPath(this.pages[instanceId]?.doc, path) : undefined;
 	}
 
 	// Writes an edit to the input doc and clears that attribute's save errors.
-	write(panelId: string, binding: string | undefined, value: Json): void {
-		const panel = this.panels[panelId];
+	write(instanceId: string, binding: string | undefined, value: Json): void {
+		const inst = this.pages[instanceId];
 		const path = bindingPath(binding);
-		if (!panel || !path) return;
-		setPath(panel.doc, path, value);
+		if (!inst || !path) return;
+		setPath(inst.doc, path, value);
 		const attr = path.join('.');
-		if (panel.fieldErrors[attr]) delete panel.fieldErrors[attr];
+		if (inst.fieldErrors[attr]) delete inst.fieldErrors[attr];
 	}
 
-	errorsFor(panelId: string, binding: string | undefined): string[] {
+	errorsFor(instanceId: string, binding: string | undefined): string[] {
 		const path = bindingPath(binding);
-		return (path && this.panels[panelId]?.fieldErrors[path.join('.')]) || [];
-	}
-
-	// The panel a menu binding points at, if it is still open and visible.
-	isShowing(binding: string): boolean {
-		const id = this.bindings[binding];
-		return !!id && Object.values(this.panes).some((p) => p.visible === id);
+		return (path && this.pages[instanceId]?.fieldErrors[path.join('.')]) || [];
 	}
 }

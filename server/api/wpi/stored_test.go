@@ -15,17 +15,15 @@ import (
 
 // directoryPage reads its input from a stored file, lists customers through a
 // stored statement and opens one through another, with a parameter.
-const directoryPage = `{"descriptor_id": "directory", "schema_version": "0.2", "layouter": "flow-layouter",
-  "input": {"action": "load-file", "file_id": "about"},
-  "elements": [{"element": "list",
+var directoryPage = filledPage(panelPage("directory", `"input": {"action": "load-file", "file_id": "about"}, `, `{"element": "list",
     "source": {"action": "query", "sql_stmt_id": "directory", "result": "list"},
     "columns": [{"field": "email", "label": "Email"}],
     "on_row_click": {"action": "open-page", "page": "customer-form", "pane": "right", "args": {"id": "$record.id"},
-      "input": {"action": "query", "sql_stmt_id": "customer-by-id", "result": "record", "params": ["$args.id", "x"]}}}]}`
+      "input": {"action": "query", "sql_stmt_id": "customer-by-id", "result": "record", "params": ["$args.id", "x"]}}}`))
 
 const (
-	directoryRef = `"ref": {"kind": "page", "id": "directory", "pointer": "/elements/0/source"}`
-	byIDRef      = `"ref": {"kind": "page", "id": "directory", "pointer": "/elements/0/on_row_click/input"}`
+	directoryRef = `"ref": {"kind": "page", "id": "directory", "pointer": "/panels/main/elem_list/0/source"}`
+	byIDRef      = `"ref": {"kind": "page", "id": "directory", "pointer": "/panels/main/elem_list/0/on_row_click/input"}`
 	aboutRef     = `"ref": {"kind": "page", "id": "directory", "pointer": "/input"}`
 	stmtRowQuery = `SELECT sql_stmt, access_controls FROM kb\.stored_stmts WHERE stmt_name = \$1`
 	fileRowQuery = `SELECT file_content::text, access_controls FROM kb\.stored_files WHERE file_name = \$1`
@@ -62,7 +60,6 @@ func TestRunQueryList(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	stored(mock, KindPage, "directory", directoryPage)
-	storedClass(mock, "query")
 	storedRow(mock, stmtRowQuery, "directory", "SELECT id, email FROM kb.c ORDER BY email;\n", "{all}")
 	expectReadOnlyQuery(mock, `SELECT id, email FROM kb\.c ORDER BY email`, "1000", jsonRows(`{"id": 1, "email": "a@x.org"}`, `{"id": 2, "email": "b@x.org"}`))
 	runAction(t, mock, testHandler(db, plainUser), `{`+directoryRef+`}`, 200, `{"result":[{"id":1,"email":"a@x.org"},{"id":2,"email":"b@x.org"}]}`)
@@ -72,7 +69,6 @@ func TestRunQueryRecordWithParams(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	stored(mock, KindPage, "directory", directoryPage)
-	storedClass(mock, "query")
 	storedRow(mock, stmtRowQuery, "customer-by-id", "SELECT id, email FROM kb.c WHERE id = $1 AND kind = $2", nil)
 	expectReadOnlyQuery(mock, `SELECT id, email FROM kb\.c WHERE id = \$1 AND kind = \$2`, "1", jsonRows(`{"id": 7, "email": "g@x.org"}`), "7", "x")
 	runAction(t, mock, testHandler(db, plainUser), `{`+byIDRef+`, "args": {"id": 7}}`, 200, `{"result":{"id":7,"email":"g@x.org"}}`)
@@ -82,7 +78,6 @@ func TestRunQueryRecordNotFound(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	stored(mock, KindPage, "directory", directoryPage)
-	storedClass(mock, "query")
 	storedRow(mock, stmtRowQuery, "customer-by-id", "SELECT id FROM kb.c WHERE id = $1 AND kind = $2", nil)
 	expectReadOnlyQuery(mock, `SELECT id FROM kb\.c WHERE id = \$1 AND kind = \$2`, "1", jsonRows(), "99", "x")
 	runAction(t, mock, testHandler(db, plainUser), `{`+byIDRef+`, "args": {"id": 99}}`, 404, "Record not found")
@@ -92,7 +87,6 @@ func TestRunLoadFile(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	stored(mock, KindPage, "directory", directoryPage)
-	storedClass(mock, "load-file")
 	storedRow(mock, fileRowQuery, "about", `{"title": "About", "version": 3}`, "{}")
 	runAction(t, mock, testHandler(db, plainUser), `{`+aboutRef+`}`, 200, `{"result":{"title":"About","version":3}}`)
 }
@@ -108,27 +102,22 @@ func TestRunStoredRefused(t *testing.T) {
 	}{
 		{"statement not registered", plainUser, func(m sqlmock.Sqlmock) {
 			stored(m, KindPage, "directory", directoryPage)
-			storedClass(m, "query")
 			m.ExpectQuery(stmtRowQuery).WithArgs("directory").WillReturnRows(sqlmock.NewRows([]string{"content", "access_controls"}))
 		}, `{` + directoryRef + `}`, 400, `SQL statement \"directory\" is not registered`},
 		{"role required", plainUser, func(m sqlmock.Sqlmock) {
 			stored(m, KindPage, "directory", directoryPage)
-			storedClass(m, "query")
 			storedRow(m, stmtRowQuery, "directory", "SELECT 1", "{finance}")
 		}, `{` + directoryRef + `}`, 403, `You may not use SQL statement \"directory\"`},
 		{"file not registered", plainUser, func(m sqlmock.Sqlmock) {
 			stored(m, KindPage, "directory", directoryPage)
-			storedClass(m, "load-file")
 			m.ExpectQuery(fileRowQuery).WithArgs("about").WillReturnRows(sqlmock.NewRows([]string{"content", "access_controls"}))
 		}, `{` + aboutRef + `}`, 400, `file \"about\" is not registered`},
 		{"file for admins only", plainUser, func(m sqlmock.Sqlmock) {
 			stored(m, KindPage, "directory", directoryPage)
-			storedClass(m, "load-file")
 			storedRow(m, fileRowQuery, "about", `{}`, "{admin}")
 		}, `{` + aboutRef + `}`, 403, `You may not use file \"about\"`},
 		{"missing argument", plainUser, func(m sqlmock.Sqlmock) {
 			stored(m, KindPage, "directory", directoryPage)
-			storedClass(m, "query")
 			storedRow(m, stmtRowQuery, "customer-by-id", "SELECT 1", nil)
 		}, `{` + byIDRef + `, "args": {}}`, 400, `missing argument \"id\"`},
 	}
@@ -262,7 +251,7 @@ func TestGetPage(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
 		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).
-			WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).AddRow("greeting", 4, []byte(greetingPage)))
+			WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).AddRow("greeting", 4, []byte(greetingRaw)))
 		rec := call(t, testHandler(db, plainUser).GetPage, "GET", "", "pageId", "greeting")
 		if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), `{"page":{"descriptor_id":"greeting"`) || !strings.Contains(rec.Body.String(), `"version":4`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)

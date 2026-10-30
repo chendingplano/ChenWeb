@@ -54,7 +54,6 @@ func TestConfiguredDatabaseListUsesItsPool(t *testing.T) {
 	h := testHandler(project, plainUser)
 	h.Databases = map[string]*sql.DB{"shared": shared}
 	stored(projectMock, KindPage, "customers", strings.ReplaceAll(customersPage, "kb.wpi_demo_customers", "shared.kb.wpi_demo_customers"))
-	storedClass(projectMock, "load")
 	customerColumns(sharedMock)
 	sharedMock.ExpectQuery(`ORDER BY`).WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).AddRow(2, "a@example.com"))
 	runAction(t, projectMock, h, `{`+loadListRef+`}`, 200, `"id":2`)

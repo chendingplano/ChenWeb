@@ -79,7 +79,7 @@ func (s store) insertVersion(ctx context.Context, kind Kind, id string, raw []by
 		err := s.db.QueryRowContext(ctx, `INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by)
 		SELECT $1::text, COALESCE(MAX(version), 0) + 1, $2::text, $3::jsonb, 'active', $4::text, $4::text
 		FROM kb.frontend_pages WHERE descriptor_id = $1::text
-		RETURNING version`, id, SchemaVersion, string(raw), actor).Scan(&version)
+		RETURNING version`, id, schemaVersionOf(KindPage), string(raw), actor).Scan(&version)
 		return version, err
 	}
 	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
@@ -249,19 +249,29 @@ func (s store) updateClass(ctx context.Context, id string, current ClassRow, raw
 }
 
 // Kinds of stored rows that query and load-file name (design D8), and the code
-// modules element classes name: only active element modules count (OpenSpec
-// wpi-code-modules, design D9).
+// modules class copies name: only active modules of the right type count
+// (OpenSpec wpi-code-modules, design D9; wpi-pages-own-panes, design D6).
 const (
-	storedStatement = "statement"
-	storedFile      = "file"
-	storedModule    = "code_module"
+	storedStatement             = "statement"
+	storedFile                  = "file"
+	storedModule                = "code_module"
+	storedPageLayouterModule    = "page_layouter_module"
+	storedElementLayouterModule = "element_layouter_module"
 )
 
+// moduleTypes is the kb.code_modules.module_type each module kind checks.
+var moduleTypes = map[string]string{
+	storedModule:                "element",
+	storedPageLayouterModule:    "page-layouter",
+	storedElementLayouterModule: "element-layouter",
+}
+
+const activeModuleSQL = `SELECT code_module_id FROM kb.code_modules WHERE module_type = '%s' AND status = 'active' AND code_module_id = ANY($1)`
+
 var storedSQL = map[string]struct{ exist, row string }{
-	storedModule: {
-		`SELECT code_module_id FROM kb.code_modules WHERE module_type = 'element' AND status = 'active' AND code_module_id = ANY($1)`,
-		``,
-	},
+	storedModule:                {fmt.Sprintf(activeModuleSQL, "element"), ``},
+	storedPageLayouterModule:    {fmt.Sprintf(activeModuleSQL, "page-layouter"), ``},
+	storedElementLayouterModule: {fmt.Sprintf(activeModuleSQL, "element-layouter"), ``},
 	storedStatement: {
 		`SELECT stmt_name FROM kb.stored_stmts WHERE stmt_name = ANY($1)`,
 		`SELECT sql_stmt, access_controls FROM kb.stored_stmts WHERE stmt_name = $1`,
