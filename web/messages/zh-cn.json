@@ -7876,5 +7876,10 @@
 	"wpi_create_page_tags": "标签",
 	"wpi_create_page_comma_separated": "用逗号分隔",
 	"wpi_create_page_cancel": "取消",
-	"wpi_create_page_submit": "创建"
+	"wpi_create_page_submit": "创建",
+	"wpi_page_group_basic": "基本信息",
+	"wpi_page_group_geometry": "几何布局",
+	"wpi_page_group_colors": "颜色",
+	"wpi_page_group_actions": "操作",
+	"wpi_page_group_misc": "其他"
 }

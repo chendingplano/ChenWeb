@@ -19,7 +19,14 @@
   onDelete: (pane: string) => void; onRename: (pane: string, to: string) => void;
  } = $props();
 
- const pageFields = ['descriptor_id', 'schema_version', 'page_name', 'description', 'access_controls', 'keywords', 'page_tags', 'page_policy', 'page_style', 'width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'hori_align', 'vert_align', 'hori_scrollbar', 'vert_scrollbar', 'bkgd_color', 'frgd_color', 'binding_mode', 'input', 'save_action', 'refresh'];
+ const pageGroups = [
+  { title: () => m.wpi_page_group_basic(), fields: ['descriptor_id', 'schema_version', 'page_name', 'description', 'keywords', 'page_tags'] },
+  { title: () => m.wpi_page_group_geometry(), fields: ['width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'hori_align', 'vert_align', 'hori_scrollbar', 'vert_scrollbar'] },
+  { title: () => m.wpi_page_group_colors(), fields: ['bkgd_color', 'frgd_color'] },
+  { title: () => m.wpi_page_group_actions(), fields: ['save_action', 'refresh'] },
+  { title: () => m.wpi_page_group_misc(), fields: ['access_controls', 'page_policy', 'page_style', 'binding_mode', 'input'] },
+ ];
+ const pageFields = pageGroups.flatMap((group) => group.fields);
  const flowFields = ['column_gap', 'row_gap', 'horizontal_alignment', 'vertical_alignment', 'rows_alignment'];
  // Fields are labelled with their attribute names, as in the descriptor.
  const PANE_ID = 'pane_id';
@@ -31,7 +38,8 @@
  const copyConfig = $derived((((layouter.class as JsonObject | undefined)?.config) ?? {}) as JsonObject);
  const ownConfig = $derived(layouter.config as JsonObject | undefined);
  const paneFields = $derived(pane ? (isLeaf(pane) ? [...PANE_ATTRS, ...LEAF_PANE_ATTRS] : PANE_ATTRS) : []);
- const fields = $derived(mode === 'page' ? [...new Set([...pageFields, ...Object.keys(page).filter((k) => !['page_layouter', 'panels'].includes(k))])] : mode === 'panes' ? paneFields : flowFields);
+ const extraPageFields = $derived(Object.keys(page).filter((key) => !['page_layouter', 'panels', ...pageFields].includes(key)));
+ const fields = $derived(mode === 'panes' ? paneFields : flowFields);
 
  let editing = $state<{ key: string; text: string } | null>(null);
  let renaming = $state<string | null>(null);
@@ -73,10 +81,19 @@
    </select>
 {/snippet}
 
+{#snippet field(key: string)}
+ <label for={`wpi-page-field-${key}`}>{key}</label>
+ <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
+  placeholder={mode === 'panel' && !ownConfig ? valueText(copyConfig[key]) : undefined}
+  oninput={(event) => editing = { key, text: event.currentTarget.value }}
+  onchange={(event) => commit(key, event.currentTarget.value)}
+  onblur={(event) => { if (editing?.key === key) commit(key, event.currentTarget.value); }}></textarea>
+{/snippet}
+
 <aside class="panel select-text" style="width:{width}px">
  <div class="heading">{mode === 'page' ? m.wpi_page_config_title() : mode === 'panes' ? m.wpi_panes_title() : m.wpi_panel_title()}</div>
  <div class="fields">
-  {#if mode === 'page' || mode === 'panes'}
+  {#if mode === 'panes'}
    {@render pageLayouterSelector()}
   {/if}
   {#if mode === 'panes'}
@@ -112,15 +129,18 @@
     <input id="wpi-layouter-id" value={String(layouter.layouter ?? '')} readonly />
    {/if}
   {/if}
-  {#if mode === 'page' || pane && (mode === 'panes' || isLeaf(pane))}
-   {#each fields as key (key)}
-    <label for={`wpi-page-field-${key}`}>{key}</label>
-    <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
-     placeholder={mode === 'panel' && !ownConfig ? valueText(copyConfig[key]) : undefined}
-     oninput={(event) => editing = { key, text: event.currentTarget.value }}
-     onchange={(event) => commit(key, event.currentTarget.value)}
-     onblur={(event) => { if (editing?.key === key) commit(key, event.currentTarget.value); }}></textarea>
+  {#if mode === 'page'}
+   {#each pageGroups as group, index}
+    <section class="group" aria-label={group.title()}>
+     <h3>{group.title()}</h3>
+     {#if index === 1}{@render pageLayouterSelector()}{/if}
+     {#each index === 4 ? [...group.fields, ...extraPageFields] : group.fields as key (key)}
+      {@render field(key)}
+     {/each}
+    </section>
    {/each}
+  {:else if pane && (mode === 'panes' || isLeaf(pane))}
+   {#each fields as key (key)}{@render field(key)}{/each}
   {/if}
  </div>
 </aside>
@@ -128,6 +148,8 @@
  .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); }
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
+ .group + .group { border-top:1px solid var(--cv-divider); padding-top:10px; }
+ .group h3 { margin:0 0 10px; font-size:11px; font-weight:600; color:var(--cv-text); }
  label, .label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
  textarea, input, select { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }

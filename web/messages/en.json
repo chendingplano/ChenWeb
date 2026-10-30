@@ -7876,5 +7876,10 @@
 	"wpi_create_page_tags": "Tags",
 	"wpi_create_page_comma_separated": "Separate with commas",
 	"wpi_create_page_cancel": "Cancel",
-	"wpi_create_page_submit": "Create"
+	"wpi_create_page_submit": "Create",
+	"wpi_page_group_basic": "Basic Info",
+	"wpi_page_group_geometry": "Geometry",
+	"wpi_page_group_colors": "Colors",
+	"wpi_page_group_actions": "Actions",
+	"wpi_page_group_misc": "Misc"
 }
