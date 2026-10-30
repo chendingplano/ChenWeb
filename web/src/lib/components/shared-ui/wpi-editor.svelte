@@ -20,6 +20,7 @@
 	import { listElementClasses, listPageLayouters, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import XIcon from '@lucide/svelte/icons/x';
 
 	import FlowPicker from './canvas/FlowPicker.svelte';
 	import NodePalette from './canvas/NodePalette.svelte';
@@ -184,6 +185,7 @@
 	let canvasWidth = $state(0);
 	let canvasHeight = $state(0);
 	let toastMsg = $state('');
+	let saveError = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// ── Properties panel width (dragged by the separator on its left) ────
@@ -504,7 +506,7 @@
 			return;
 		}
 		if (edges.length || nodes.some((node) => !isElementNode(node))) {
-			toast(m.wpi_save_page_elements_only());
+			saveError = m.wpi_save_page_elements_only();
 			return;
 		}
 		const id = activeTabId;
@@ -535,7 +537,7 @@
 			toast(m.canvas_01_saved());
 		} catch (error) {
 			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : '';
-			toast(detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes());
+			saveError = detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes();
 		} finally {
 			savingTabs.delete(id);
 		}
@@ -1136,6 +1138,13 @@
 		{/if}
 	</div>
 
+	{#if saveError}
+		<div role="alert" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-start gap-3 rounded-lg px-4 py-2 text-sm shadow-xl select-text"
+			style="background:var(--cv-surface); border:1px solid var(--cv-border); color:var(--cv-text); z-index:61; width:max-content; max-width:calc(100% - 32px); max-height:40vh; overflow:auto; user-select:text;">
+			<span class="min-w-0 break-words">{saveError}</span>
+			<button type="button" class="shrink-0" onclick={() => (saveError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
+		</div>
+	{/if}
 	<!-- Toast -->
 	{#if toastMsg}
 		<div

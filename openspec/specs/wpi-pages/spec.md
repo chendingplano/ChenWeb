@@ -184,7 +184,8 @@ When an unnamed page is saved in the WPI editor, the editor SHALL ask for a page
 description, keywords and tags. It SHALL require a non-blank name, accept comma-separated
 keywords and tags, and create a page with a new unique descriptor ID and the current canvas
 contents. Subsequent saves SHALL create versions of that page. Cancelling or a failed save
-SHALL leave the page unsaved.
+SHALL leave the page unsaved. Save errors SHALL remain visible until the author dismisses
+them, and their text SHALL be selectable.
 
 #### Scenario: Create a page on first save
 - **WHEN** an author saves an unnamed page and submits its information
