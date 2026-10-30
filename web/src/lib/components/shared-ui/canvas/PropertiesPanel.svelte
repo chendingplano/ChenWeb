@@ -58,6 +58,28 @@
     { id: 'node',       label: m.propertiespanel_tab_node() },
   ]);
 
+  function attributeLabel(name: string): string {
+    switch (name) {
+      case 'label': return m.propertiespanel_attr_label();
+      case 'width': return m.propertiespanel_attr_width();
+      case 'height': return m.propertiespanel_attr_height();
+      case 'label_hori_align': return m.propertiespanel_attr_horizontal_alignment();
+      case 'label_vert_align': return m.propertiespanel_attr_vertical_alignment();
+      case 'on_click': return m.propertiespanel_attr_on_click();
+      default: return name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    }
+  }
+
+  function orderedAttributes(attributes: Record<string, ElementAttribute>): [string, ElementAttribute | null][] {
+    const order = ['label', 'width', 'height', 'label_hori_align', 'label_vert_align', '__pane', 'on_click'];
+    const entries: [string, ElementAttribute | null][] = Object.entries(attributes);
+    entries.push(['__pane', null]);
+    return entries.sort(([a], [b]) => {
+      const ai = order.indexOf(a), bi = order.indexOf(b);
+      return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
+    });
+  }
+
   function update(key: string, value: unknown) {
     if (!node) return;
     onUpdate(node.id, { ...node.data, [key]: value });
@@ -144,6 +166,9 @@
       {#if !nodeTab}
         <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
       {/if}
+      {#if elementClass !== undefined}
+        <div style="font-size:14px; font-weight:700; color:var(--cv-text); margin-bottom:10px;">{String(node.data.label ?? nodeType.label)} · {String(node.data.element ?? '')}</div>
+      {:else}
       <!-- Node name -->
       <div style="margin-bottom:10px;">
         <label for="prop-node-label" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.propertiespanel_name()}</label>
@@ -156,34 +181,29 @@
           style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;"
         />
       </div>
+      {/if}
     </div>
 
     <div class="flex-1 overflow-y-auto" style="padding:10px 12px; scrollbar-width:thin; scrollbar-color:var(--cv-border) transparent;">
       {#if elementClass !== undefined}
-        <!-- Element class and its instance attributes -->
-        <div style="margin-bottom:10px;">
-          <label for="prop-element-class" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.propertiespanel_element_class()}</label>
-          <input id="prop-element-class" type="text" readonly value={String(node.data.element ?? '')}
-            style="width:100%; background:transparent; border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text-2); box-sizing:border-box;"
-          />
-        </div>
-        {#if panes?.length}
-          <div style="margin-bottom:10px;">
-            <label for="prop-element-pane" style="font-size:9px; color:var(--cv-text-muted); display:block; margin-bottom:3px;">{m.wpi_element_pane()}</label>
-            <select id="prop-element-pane" value={String(node.data.pane ?? '')} onchange={(e) => onMovePane?.(node.id, e.currentTarget.value)}
-              style="width:100%; background:var(--cv-field); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">
-              {#each panes as pane (pane)}<option value={pane}>{pane}</option>{/each}
-            </select>
-          </div>
-        {/if}
         {#if elementClass === null}
+          <div style="margin-bottom:10px;">
+            <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:3px;">{m.wpi_element_pane()}</div>
+            <div style="font-size:10px; color:var(--cv-text);">{String(node.data.pane ?? '')}</div>
+          </div>
           <div style="font-size:10px; color:var(--cv-text-faint);">{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</div>
         {:else}
-          {#each Object.entries(elementClass.attributes) as [name, attr] (name)}
+          {#each orderedAttributes(elementClass.attributes) as [name, attr] (name)}
+            {#if name === '__pane'}
+              <div style="margin-bottom:10px;">
+                <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:3px;">{m.wpi_element_pane()}</div>
+                <div style="font-size:10px; color:var(--cv-text);">{String(node.data.pane ?? '')}</div>
+              </div>
+            {:else if attr}
             <div style="margin-bottom:10px;">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
                 <label for={`prop-attr-${name}`} style="font-size:9px; color:var(--cv-text-muted);">
-                  {name}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
+                  {attributeLabel(name)}{#if attr.default_value === null}<span title={m.propertiespanel_required()} style="color:var(--cv-accent);"> *</span>{/if}
                 </label>
                 {#if name === 'columns' && node.data.element === 'list' && attr.instance_modifiable !== false}
                   <div style="display:flex; gap:3px;">
@@ -290,6 +310,7 @@
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>
               {/if}
             </div>
+            {/if}
           {/each}
         {/if}
       {/if}
