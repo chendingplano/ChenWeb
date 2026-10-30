@@ -6,9 +6,8 @@ page. A pane SHALL have a `pane_id` (`^[a-z0-9][a-z0-9-]{0,63}$`), unique in the
 with `split` (`rows` or `columns`) SHALL have two or more `children`; a pane without `split` is
 a leaf and SHALL NOT have `children`. With `rows` the children are stacked top to bottom and
 divide the pane's height; with `columns` they sit left to right and divide its width. The
-attributes that concern what a pane shows (`left_margin`, `right_margin`, `top_margin`,
-`bottom_margin`, `hori_align`, `vert_align`, `hori_scrollbar`, `vert_scrollbar`) SHALL apply to
-leaf panes only and SHALL be an error on a split pane. A page whose root pane has no children
+margins SHALL apply to all panes, including split panes. The alignment and scrollbar attributes
+(`hori_align`, `vert_align`, `hori_scrollbar`, `vert_scrollbar`) SHALL apply to leaf panes only and SHALL be an error on a split pane. A page whose root pane has no children
 is a single-pane page.
 
 #### Scenario: Nested split
@@ -25,7 +24,7 @@ is a single-pane page.
 
 #### Scenario: Margin on a split pane
 - **WHEN** a split pane sets `left_margin`
-- **THEN** writing the page fails with an error saying the attribute applies to leaf panes only
+- **THEN** the page is valid and the split pane places its children inside that margin
 
 ### Requirement: Pane attributes and geometry
 A pane's `width` and `height` SHALL be a length (`px`, `rem` or `em`; `px` when the unit is
@@ -34,7 +33,7 @@ default) or `auto`. `elastic` panes SHALL share what their fixed, percentage and
 siblings leave, within their limits. `auto` SHALL size a leaf pane to its panel and a split
 pane to its children. `min_width` and `min_height` (default `50px`), `max_width` and
 `max_height` SHALL limit the size. The size of the root pane SHALL NOT be used: the page's own
-sizes apply. A leaf pane SHALL place its content inside its four margins (each `0px` by
+sizes apply. Every pane SHALL place its content or children inside its four margins (each `0px` by
 default); its content fits in a direction only if the content and the two margins of that
 direction fit. When the content is smaller, `hori_align` (`left`, `center` default, `right`)
 and `vert_align` (`top` default, `center`, `bottom`) SHALL place it; when it does not fit,

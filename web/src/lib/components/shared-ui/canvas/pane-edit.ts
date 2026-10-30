@@ -9,9 +9,10 @@ import { isElementNode, nodePane, paneNodes } from './wpi-json';
 
 export const PANE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-// Attributes that concern what a pane shows; they apply to leaf panes only.
-export const LEAF_PANE_ATTRS = ['left_margin', 'right_margin', 'top_margin', 'bottom_margin', 'hori_align', 'vert_align', 'hori_scrollbar', 'vert_scrollbar'];
-export const PANE_ATTRS = ['width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'resizable'];
+// Alignment and scrollbars apply to leaf panes only.
+export const LEAF_PANE_ATTRS = ['hori_align', 'vert_align', 'hori_scrollbar', 'vert_scrollbar'];
+const PANE_SIZE_ATTRS = ['width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'resizable'];
+export const PANE_ATTRS = [...PANE_SIZE_ATTRS, 'left_margin', 'right_margin', 'top_margin', 'bottom_margin'];
 
 export type Edit = { page: JsonObject; nodes: Node[] };
 
@@ -122,8 +123,8 @@ export function deletePane({ page, nodes }: Edit, id: string): Edit {
 		if (!p.children) return p;
 		const children = p.children.filter((c) => c.pane_id !== id).map(removeFrom);
 		if (children.length === 1 && p.children.some((c) => c.pane_id === id)) {
-			const own = Object.entries(children[0]).filter(([k]) => !PANE_ATTRS.includes(k));
-			const sizes = Object.entries(p).filter(([k]) => PANE_ATTRS.includes(k));
+			const own = Object.entries(children[0]).filter(([k]) => !PANE_SIZE_ATTRS.includes(k));
+			const sizes = Object.entries(p).filter(([k]) => PANE_SIZE_ATTRS.includes(k));
 			return Object.fromEntries([...own, ...sizes]) as PaneSpec;
 		}
 		return { ...p, children };

@@ -31,11 +31,11 @@ var elementSizeAttrs = []string{"width", "height", "min_width", "max_width"}
 // pageSizeAttrs are the page's lengths; only width and height accept auto.
 var pageSizeAttrs = []string{"width", "height", "min_width", "min_height", "max_width", "max_height"}
 
-// paneAttrs apply to every pane; leafPaneAttrs concern what a pane shows, so they
+// paneAttrs apply to every pane; leafPaneAttrs concern how a leaf places content, so they
 // apply to leaf panes only (devdoc 2026102601 §3.2.2).
 var (
-	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable"}
-	leafPaneAttrs = []string{"left_margin", "right_margin", "top_margin", "bottom_margin", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar"}
+	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable", "left_margin", "right_margin", "top_margin", "bottom_margin"}
+	leafPaneAttrs = []string{"hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar"}
 	scrollbars    = []string{"auto", "hide"}
 )
 
@@ -505,6 +505,9 @@ func (v *validator) pane(val any, path string, ids, leaves map[string]bool) {
 		v.length(p, k, path, lengthKind{percent: true})
 	}
 	v.boolean(p, "resizable", path)
+	for _, k := range []string{"left_margin", "right_margin", "top_margin", "bottom_margin"} {
+		v.length(p, k, path, lengthKind{})
+	}
 	if _, split := p["split"]; split {
 		v.oneOf(p, "split", path, []string{"rows", "columns"})
 		for _, k := range leafPaneAttrs {
@@ -526,9 +529,6 @@ func (v *validator) pane(val any, path string, ids, leaves map[string]bool) {
 	}
 	if ok {
 		leaves[id] = true
-	}
-	for _, k := range []string{"left_margin", "right_margin", "top_margin", "bottom_margin"} {
-		v.length(p, k, path, lengthKind{})
 	}
 	v.oneOf(p, "hori_align", path, []string{"left", "center", "right"})
 	v.oneOf(p, "vert_align", path, []string{"top", "center", "bottom"})

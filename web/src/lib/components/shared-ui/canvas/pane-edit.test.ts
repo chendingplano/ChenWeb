@@ -17,7 +17,7 @@ const single: JsonObject = {
 test('splitting a leaf moves its panel, elements and leaf attributes to the first child', () => {
 	const page = setPaneAttr(setPaneAttr(single, 'main', 'left_margin', '8px'), 'main', 'width', '400px');
 	const { page: split, nodes } = splitPane({ page, nodes: [node('a', 'main'), node('b', 'main')] }, 'main', 'columns');
-	assert.deepEqual(rootOf(split), { pane_id: 'main', width: '400px', split: 'columns', children: [{ pane_id: 'main-1', left_margin: '8px' }, { pane_id: 'main-2' }] });
+	assert.deepEqual(rootOf(split), { pane_id: 'main', width: '400px', left_margin: '8px', split: 'columns', children: [{ pane_id: 'main-1' }, { pane_id: 'main-2' }] });
 	assert.deepEqual(Object.keys(split.panels as JsonObject), ['main-1']);
 	assert.deepEqual(nodes.map((n) => n.data.pane), ['main-1', 'main-1']);
 	assert.equal(splitPane({ page: split, nodes }, 'main', 'rows').page, split, 'a split pane is not split again');

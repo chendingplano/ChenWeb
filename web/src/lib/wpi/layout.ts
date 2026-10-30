@@ -99,7 +99,8 @@ export function paneStyle(spec: PaneSpec, axis: 'width' | 'height', size?: numbe
 
 // A split pane lays its children out in a row (columns) or a column (rows).
 export function splitStyle(spec: PaneSpec): string {
-	return `display: flex; flex-direction: ${spec.split === 'columns' ? 'row' : 'column'}; width: 100%; height: 100%; min-width: 0; min-height: 0`;
+	const m = (value: string | undefined) => cssLength(value) ?? '0px';
+	return `display: flex; flex-direction: ${spec.split === 'columns' ? 'row' : 'column'}; box-sizing: border-box; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: ${m(spec.top_margin)} ${m(spec.right_margin)} ${m(spec.bottom_margin)} ${m(spec.left_margin)}`;
 }
 
 const crossAlign = { left: 'safe flex-start', center: 'safe center', right: 'safe flex-end' };

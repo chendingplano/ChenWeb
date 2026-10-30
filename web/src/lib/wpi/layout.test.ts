@@ -129,3 +129,9 @@ test('lengths without a unit are pixels', () => {
 	assert.equal(cssLength('1.5 rem'), '1.5rem');
 	assert.equal(cssLength(undefined), undefined);
 });
+
+test('split panes place their children inside their margins', () => {
+ const css = splitStyle({ pane_id: 'root', split: 'rows', left_margin: '12px', top_margin: '2rem' });
+ assert.match(css, /box-sizing: border-box/);
+ assert.match(css, /padding: 2rem 0px 0px 12px/);
+});
