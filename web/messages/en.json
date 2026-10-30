@@ -1254,6 +1254,7 @@
 	"propertiespanel_connectors": "CONNECTORS",
 	"propertiespanel_in": "← in: {inp}",
 	"propertiespanel_out": "→ out: {out}",
+	"propertiespanel_element_title": "Element: {name}",
 	"propertiespanel_attr_label": "Label",
 	"propertiespanel_attr_width": "Width",
 	"propertiespanel_attr_height": "Height",

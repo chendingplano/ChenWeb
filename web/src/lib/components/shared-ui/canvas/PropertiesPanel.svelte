@@ -167,7 +167,9 @@
         <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
       {/if}
       {#if elementClass !== undefined}
-        <div style="font-size:14px; font-weight:700; color:var(--cv-text); margin-bottom:10px;">{String(node.data.label ?? nodeType.label)} · {String(node.data.element ?? '')}</div>
+        {@const elementName = String(node.data.label ?? nodeType.label)}
+        {@const descriptorId = String(node.data.element ?? '')}
+        <div style="font-size:14px; font-weight:700; color:var(--cv-text); margin-bottom:10px;">{m.propertiespanel_element_title({ name: elementName })}{#if descriptorId && descriptorId !== elementName} ({descriptorId}){/if}</div>
       {:else}
       <!-- Node name -->
       <div style="margin-bottom:10px;">
@@ -189,7 +191,7 @@
         {#if elementClass === null}
           <div style="margin-bottom:10px;">
             <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:3px;">{m.wpi_element_pane()}</div>
-            <div style="font-size:10px; color:var(--cv-text);">{String(node.data.pane ?? '')}</div>
+            <div style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">{String(node.data.pane ?? '')}</div>
           </div>
           <div style="font-size:10px; color:var(--cv-text-faint);">{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</div>
         {:else}
@@ -197,7 +199,7 @@
             {#if name === '__pane'}
               <div style="margin-bottom:10px;">
                 <div style="font-size:9px; color:var(--cv-text-muted); margin-bottom:3px;">{m.wpi_element_pane()}</div>
-                <div style="font-size:10px; color:var(--cv-text);">{String(node.data.pane ?? '')}</div>
+                <div style="width:100%; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:4px; padding:4px 8px; font-size:10px; color:var(--cv-text); box-sizing:border-box;">{String(node.data.pane ?? '')}</div>
               </div>
             {:else if attr}
             <div style="margin-bottom:10px;">
