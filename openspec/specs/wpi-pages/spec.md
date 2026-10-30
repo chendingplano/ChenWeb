@@ -35,6 +35,8 @@ dirty. A successful ordinary save SHALL remove that author's recovery record ato
 the page save. Unnamed pages SHALL receive temporary recovery IDs in the form
 `unnamed-yyyymmdd-hhmmss` using local time and be restored as dirty tabs
 when the editor opens. A recovery write based on an obsolete page version SHALL be rejected.
+When unnamed recoveries are restored at startup, the editor SHALL omit the default empty
+Unnamed tab; an existing tab containing a page or edits SHALL be preserved.
 
 #### Scenario: Recover edits
 - **WHEN** an author loads a page with their recovery record

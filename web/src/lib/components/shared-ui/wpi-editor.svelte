@@ -914,20 +914,33 @@
 	onMount(async () => {
 		recoveryTimer = setInterval(autoSavePages, 1000);
 		restorePanel();
-		addTab();
 		loadElementClasses();
 		listTriggerActions().then((actions) => triggerActions = actions).catch(() => toast(m.propertiespanel_actions_failed()));
 		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => toast(m.wpi_page_layouters_failed()));
-		const res = await flowService.getNodeTypes();
-		nodeTypes = res.nodeTypes ?? [];
-		await loadDefaultOrPicker();
 		try {
-			const recoveries = await listUnsavedRecoveries();
-			if (recoveries.length) showPicker = false;
-			for (const item of recoveries) {
-				addTab(blankPage(), 0, { ...item.page, descriptor_id: '' }, item.id);
-			}
+			const res = await flowService.getNodeTypes();
+			nodeTypes = res.nodeTypes ?? [];
+		} catch (error) { console.error('WPI node types load failed', error); }
+		let recoveries: Awaited<ReturnType<typeof listUnsavedRecoveries>> = [];
+		try {
+			recoveries = await listUnsavedRecoveries();
 		} catch (error) { console.error('WPI recovery load failed', error); toast(m.wpi_load_page_failed()); }
+		if (recoveries.length === 0) {
+			addTab();
+			await loadDefaultOrPicker();
+		} else {
+			// Keep a default flow with content, but do not create an empty tab beside recoveries.
+			try {
+				const { flow } = await flowService.getDefault();
+				const data = flow.flow_data;
+				if ((data?.nodes?.length ?? 0) > 0 || (data?.edges?.length ?? 0) > 0 ||
+					(data?.wpi_page && JSON.stringify(data.wpi_page) !== JSON.stringify(blankPage()))) {
+					addTab();
+					await loadFlow(flow);
+				}
+			} catch { /* An absent default does not prevent recovery. */ }
+			for (const item of recoveries) addTab(blankPage(), 0, { ...item.page, descriptor_id: '' }, item.id);
+		}
 	});
 
 	onDestroy(() => {
