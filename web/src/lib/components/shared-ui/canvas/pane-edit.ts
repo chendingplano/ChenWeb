@@ -24,6 +24,11 @@ function withRoot(page: JsonObject, root: PaneSpec): JsonObject {
 	return { ...page, page_layouter: { ...pl, root: root as unknown as JsonObject } };
 }
 
+// Change the class without losing the page's existing pane tree or panels.
+export function setPageLayouter(page: JsonObject, cls: JsonObject): JsonObject {
+ return { ...page, page_layouter: { layouter: cls.descriptor_id, class: cls, root: rootOf(page) as unknown as JsonObject } };
+}
+
 // The tree with pane id replaced by what fn returns for it.
 function mapPane(pane: PaneSpec, id: string, fn: (p: PaneSpec) => PaneSpec): PaneSpec {
 	if (pane.pane_id === id) return fn(pane);

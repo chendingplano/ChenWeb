@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
-import { addPane, deletePane, moveNode, nodesUnder, renamePane, renameProblem, rootOf, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
+import { addPane, deletePane, moveNode, nodesUnder, renamePane, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
 import { pageJson } from './wpi-json';
 
 const node = (id: string, pane: string, y = 0): Node => ({ id, type: 'wpi-element', position: { x: 0, y }, data: { label: id, element: 'text', attrs: { text: id }, pane } });
@@ -65,4 +65,12 @@ test('a panel config replaces the copy\'s; an empty one clears it', () => {
 	assert.deepEqual((set.panels as Record<string, { elem_layouter: JsonObject }>).main.elem_layouter, { layouter: 'flow-layouter', config: { row_gap: '2rem' } });
 	assert.deepEqual((setPanelConfig(set, 'main', {}).panels as Record<string, { elem_layouter: JsonObject }>).main.elem_layouter, { layouter: 'flow-layouter' });
 	assert.ok((setPanelConfig(single, 'other', { row_gap: '1rem' }).panels as JsonObject).other, 'a panel is created for a leaf without one');
+});
+
+test('changing the page layouter preserves the current pane tree and panels', () => {
+ const cls: JsonObject = { descriptor_id: 'other', root: { pane_id: 'new' } };
+ const changed = setPageLayouter(single, cls);
+ assert.deepEqual(changed.page_layouter, { layouter: 'other', class: cls, root: { pane_id: 'main' } });
+ assert.deepEqual(changed.panels, single.panels);
+ assert.deepEqual(rootOf(single), { pane_id: 'main' });
 });

@@ -97,6 +97,13 @@ export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise
 	return (body.classes as ElementClassSummary[]) ?? [];
 }
 
+export async function listPageLayouters(fetchFn: typeof fetch = fetch): Promise<JsonObject[]> {
+ const res = await fetchFn('/api/v1/wpi/classes/page-layouter', { credentials: 'same-origin' });
+ const body = await parse(res);
+ if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+ return (body.classes as JsonObject[]) ?? [];
+}
+
 // A row of kb.code_modules: the code that draws elements, performs actions or
 // lays out pages. An element class may name only an active element module.
 export type CodeModule = {

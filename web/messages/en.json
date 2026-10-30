@@ -7829,6 +7829,7 @@
 	"wpi_drop_element_inside_pane": "Drop elements on a pane of the page.",
 	"wpi_panes_title": "Panes",
 	"wpi_panel_title": "Panel",
+	"wpi_page_layouters_failed": "Unable to load page layouters",
 	"wpi_page_layouter_type": "Page layouter",
 	"wpi_pane_tree": "Pane tree",
 	"wpi_pane_select_hint": "Select a pane in the tree or in the page.",

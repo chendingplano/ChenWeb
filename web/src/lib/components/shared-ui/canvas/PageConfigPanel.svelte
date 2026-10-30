@@ -10,10 +10,10 @@
  import { findPane, isLeaf } from '$lib/wpi/layout';
  import type { JsonObject, PaneSpec } from '$lib/wpi/types';
  import { valueText, withAttribute } from './element-attributes';
- import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelConfig } from './pane-edit';
+ import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig } from './pane-edit';
 
- let { page, mode, width, selectedPane, onUpdate, onSelectPane, onSplit, onAdd, onDelete, onRename }: {
-  page: JsonObject; mode: ConfigMode; width: number; selectedPane: string | null;
+ let { page, mode, width, selectedPane, pageLayouters, onUpdate, onSelectPane, onSplit, onAdd, onDelete, onRename }: {
+  page: JsonObject; pageLayouters: JsonObject[]; mode: ConfigMode; width: number; selectedPane: string | null;
   onUpdate: (page: JsonObject) => void; onSelectPane: (pane: string) => void;
   onSplit: (pane: string, split: 'rows' | 'columns') => void; onAdd: (pane: string) => void;
   onDelete: (pane: string) => void; onRename: (pane: string, to: string) => void;
@@ -65,7 +65,15 @@
  <div class="fields">
   {#if mode === 'panes'}
    <label for="wpi-page-layouter-id">{m.wpi_page_layouter_type()}</label>
-   <input id="wpi-page-layouter-id" value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')} readonly />
+   <select id="wpi-page-layouter-id" value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')} onchange={(event) => {
+    const cls = pageLayouters.find((item) => item.descriptor_id === event.currentTarget.value);
+    if (cls) onUpdate(setPageLayouter(page, cls));
+   }}>
+    {#if !pageLayouters.some((item) => item.descriptor_id === (page.page_layouter as JsonObject | undefined)?.layouter)}
+     <option value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')}>{String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')}</option>
+    {/if}
+    {#each pageLayouters as cls (String(cls.descriptor_id))}<option value={String(cls.descriptor_id)}>{String(cls.descriptor_id)}</option>{/each}
+   </select>
    <div class="label">{m.wpi_pane_tree()}</div>
    <ul class="tree" aria-label={m.wpi_pane_tree()}>
     {#each flat(root) as item (item.pane.pane_id)}
@@ -115,7 +123,7 @@
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
  label, .label { display:block; font-size:10px; color:var(--cv-text-muted); margin:0 0 4px; }
- textarea, input { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
+ textarea, input, select { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }
  input:read-only, textarea:read-only { background:transparent; color:var(--cv-text-2); }
  .tree { list-style:none; margin:0 0 10px; padding:0; border:1px solid var(--cv-border); border-radius:4px; }

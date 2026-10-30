@@ -17,7 +17,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, listPageLayouters, savePage, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 
@@ -130,6 +130,7 @@
 	// prefix, so they are unique; dropping one adds a wpi-element node of that class.
 	const ELEMENT_CLASS_PREFIX = 'wpi-element:';
 	let elementClasses = $state<ElementClassSummary[]>([]);
+	let pageLayouters = $state<JsonObject[]>([]);
 	const elementClassTypes = $derived<NodeType[]>(
 		elementClasses.map((c) => ({
 			id: ELEMENT_CLASS_PREFIX + c.descriptor_id,
@@ -819,6 +820,7 @@
 		restorePanel();
 		addTab();
 		loadElementClasses();
+		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => toast(m.wpi_page_layouters_failed()));
 		const res = await flowService.getNodeTypes();
 		nodeTypes = res.nodeTypes ?? [];
 		await loadDefaultOrPicker();
@@ -1092,7 +1094,7 @@
 			</div>
 			<div class="properties-content">
 		{#if loadedPage && configMode}
-			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} {selectedPane}
+			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} {selectedPane} {pageLayouters}
 				onUpdate={(page) => { takeSnapshot(); loadedPage = page; }}
 				onSelectPane={(pane) => (selectedPane = pane)}
 				onSplit={paneActions.split} onAdd={paneActions.add} onDelete={paneActions.remove} onRename={paneActions.rename} />

@@ -576,3 +576,17 @@ func TestListCodeModules(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestListPageLayouters(t *testing.T) {
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	mock.ExpectQuery(latestAllQuery).WithArgs("page-layouter").WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).
+		AddRow("single-pane", 2, []byte(`{"descriptor_id":"single-pane","root":{"pane_id":"main"}}`)))
+	rec := call(t, testHandler(db, plainUser).ListPageLayouters, "GET", "")
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"classes":[{"descriptor_id":"single-pane","root":{"pane_id":"main"}}]}` {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, testHandler(db, nil).ListPageLayouters, "GET", ""); rec.Code != 401 {
+		t.Fatalf("not logged in: %d", rec.Code)
+	}
+}

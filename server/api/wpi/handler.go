@@ -254,6 +254,30 @@ func (h *Handler) ListElementClasses(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"classes": classes})
 }
 
+// ListPageLayouters returns the latest active page layouter classes.
+func (h *Handler) ListPageLayouters(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	classes, err := (store{h.DB}).latest(c.Request().Context(), KindPageLayouter, nil)
+	if err != nil {
+		handlerLog.Error("WPI page layouter list failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to list page layouters")
+	}
+	ids := make([]string, 0, len(classes))
+	for id := range classes {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	bodies := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		bodies = append(bodies, classes[id].Body)
+	}
+	handlerLog.Info("WPI page layouters listed", "user", actorName(user), "found", len(bodies))
+	return c.JSON(http.StatusOK, map[string]any{"classes": bodies})
+}
+
 // GetElementClass returns the latest draft or active version of an element
 // class, for the editor's edit form.
 // Endpoint: GET /api/v1/wpi/classes/element/:classId
