@@ -17,7 +17,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -158,17 +158,19 @@
 	let showJson = $state(false);
 	let previewBundle = $state<Bundle | null>(null);
 	let previewLoading = $state(false);
+	let previewIsDraft = $state(false);
 	let previewRequest = 0;
 	async function togglePreview() {
 		if (previewBundle) { previewBundle = null; return; }
 		if (previewLoading) return;
-		if (isDirty || !loadedPage?.descriptor_id) { showError(m.wpi_preview_save_first()); return; }
+		if (!loadedPage) return;
+		const draft = isDirty || !loadedPage.descriptor_id;
 		const tab = activeTabId;
 		const request = ++previewRequest;
 		previewLoading = true;
 		try {
-			const bundle = await fetchPagePreview(String(loadedPage.descriptor_id));
-			if (tab === activeTabId && request === previewRequest) previewBundle = bundle;
+			const bundle = draft ? await previewDraftPage(pageJson(nodes, loadedPage)) : await fetchPagePreview(String(loadedPage.descriptor_id));
+			if (tab === activeTabId && request === previewRequest) { previewIsDraft = draft; previewBundle = bundle; }
 		} catch (error) {
 			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : String(error);
 			showError(m.wpi_preview_failed({ detail }));
@@ -1011,7 +1013,7 @@
 			<button type="button" class="add-tab" aria-label={m.wpi_add_canvas_tab()} title={m.wpi_add_canvas_tab()} onclick={() => addTab()}>+</button>
 		</div>
 		{#if previewBundle}
-			<div class="min-h-0 flex-1 overflow-auto bg-background text-foreground"><WpiApp bundle={previewBundle} /></div>
+			<div class="min-h-0 flex-1 overflow-auto bg-background text-foreground"><WpiApp bundle={previewBundle} editorPreview={previewIsDraft} /></div>
 		{:else}
 		<div
 			class="min-h-0 flex-1 overflow-hidden"
@@ -1263,7 +1265,7 @@
 		<div role="alert" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-start gap-3 rounded-lg px-4 py-2 text-sm shadow-xl select-text"
 			style="background:{darkMode ? '#422b0b' : '#fff3cd'}; border:1px solid var(--cv-warn); color:var(--cv-text); z-index:61; width:min(640px, calc(100vw - 32px)); max-height:40vh; overflow:auto; user-select:text; overflow-wrap:anywhere;">
 			<span class="min-w-0 break-words">{editorError}</span>
-			<button type="button" class="shrink-0" onclick={() => (editorError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
+			<button type="button" class="ml-auto shrink-0" onclick={() => (editorError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
 		</div>
 	{/if}
 	<!-- Toast -->

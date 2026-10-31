@@ -139,6 +139,53 @@ func BuildPagePreviewBundle(ctx context.Context, pageID string, load Loader, col
 	return BuildBundle(ctx, "editor-preview", previewLoader, columns, registered)
 }
 
+// BuildDraftPagePreviewBundle validates a temporary page without storing it.
+func BuildDraftPagePreviewBundle(ctx context.Context, body map[string]any, load Loader, columns Columns, registered Registered) (*BundleResult, error) {
+	id := str(body["descriptor_id"])
+	if id == "" {
+		id = "editor-preview-page"
+		body["descriptor_id"] = id
+	}
+	issues, err := fillClassCopies(ctx, id, body, load)
+	if err != nil {
+		return nil, err
+	}
+	if len(issues) > 0 {
+		return &BundleResult{Errors: issues}, nil
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	draft := Descriptor{Kind: KindPage, ID: id, Raw: raw, Body: body}
+	draftLoader := func(ctx context.Context, kind Kind, ids []string) (map[string]Descriptor, error) {
+		if kind != KindPage {
+			return load(ctx, kind, ids)
+		}
+		others := make([]string, 0, len(ids))
+		for _, requested := range ids {
+			if requested != id {
+				others = append(others, requested)
+			}
+		}
+		rows := map[string]Descriptor{}
+		if len(others) > 0 {
+			var err error
+			rows, err = load(ctx, kind, others)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, requested := range ids {
+			if requested == id {
+				rows[id] = draft
+			}
+		}
+		return rows, nil
+	}
+	return BuildPagePreviewBundle(ctx, id, draftLoader, columns, registered)
+}
+
 // rawMap returns the descriptors' JSON by ID.
 func rawMap(ds map[string]Descriptor) map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}

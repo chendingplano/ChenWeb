@@ -118,6 +118,37 @@ func (h *Handler) GetPagePreview(c echo.Context) error {
 	return c.JSON(http.StatusOK, res.Bundle)
 }
 
+// PreviewDraftPage builds a preview from an editor snapshot without saving it.
+func (h *Handler) PreviewDraftPage(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	if !isAdmin(user) {
+		return errorJSON(c, http.StatusForbidden, "Admin access required")
+	}
+	raw, err := io.ReadAll(io.LimitReader(c.Request().Body, maxBodyBytes+1))
+	if err != nil || len(raw) > maxBodyBytes {
+		return errorJSON(c, http.StatusBadRequest, "Invalid request body")
+	}
+	body, err := decodeBody(raw)
+	if err != nil || body == nil {
+		return errorJSON(c, http.StatusBadRequest, "Body must be a JSON object")
+	}
+	st := store{h.DB}
+	res, err := BuildDraftPagePreviewBundle(c.Request().Context(), body, st.latest, h.columns, st.registered)
+	if err != nil {
+		handlerLog.Error("WPI draft preview failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to load page preview")
+	}
+	if len(res.Errors) > 0 {
+		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"errors": res.Errors, "warnings": nonNil(res.Warnings)})
+	}
+	dropRestrictedPages(res.Bundle, user)
+	handlerLog.Info("WPI draft preview served", "user", actorName(user))
+	return c.JSON(http.StatusOK, res.Bundle)
+}
+
 func nonNil(issues []Issue) []Issue {
 	if issues == nil {
 		return []Issue{}

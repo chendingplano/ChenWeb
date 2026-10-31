@@ -378,3 +378,28 @@ func TestBuildPagePreviewBundle(t *testing.T) {
 	}
 	expectIssue(t, result.Errors, `pane "right" is not a leaf pane of page "list-page"`)
 }
+
+func TestBuildDraftPagePreviewBundle(t *testing.T) {
+	fx := fixture()
+	body := decode(t, `{"descriptor_id":"","schema_version":"0.5","page_layouter":{"layouter":"single-pane"},"panels":{"main":{"elem_layouter":{"layouter":"flow-layouter"},"elem_list":[]}}}`)
+	res, err := BuildDraftPagePreviewBundle(context.Background(), body, fixtureLoader(t, fx), func(context.Context, string) (map[string]bool, error) { return nil, nil }, registeredIn(nil))
+	if err != nil || res.Bundle == nil || len(res.Errors) != 0 {
+		t.Fatalf("draft preview: %+v, %v", res, err)
+	}
+	if _, ok := res.Bundle.Pages["editor-preview-page"]; !ok {
+		t.Fatal("draft page missing")
+	}
+}
+
+func TestBuildDraftPagePreviewOverridesStoredPage(t *testing.T) {
+	fx := fixture()
+	fx[KindPage]["simple"] = `{"descriptor_id":"simple","schema_version":"0.5","page_layouter":{"layouter":"single-pane"},"panels":{}}`
+	body := decode(t, `{"descriptor_id":"simple","schema_version":"0.5","page_layouter":{"layouter":"single-pane"},"panels":{"main":{"elem_layouter":{"layouter":"flow-layouter"},"elem_list":[]}}}`)
+	res, err := BuildDraftPagePreviewBundle(context.Background(), body, fixtureLoader(t, fx), func(context.Context, string) (map[string]bool, error) { return nil, nil }, registeredIn(nil))
+	if err != nil || res.Bundle == nil || len(res.Errors) != 0 {
+		t.Fatalf("draft preview: %+v, %v", res, err)
+	}
+	if !strings.Contains(string(res.Bundle.Pages["simple"]), `"main"`) {
+		t.Fatal("preview did not use the edited page")
+	}
+}

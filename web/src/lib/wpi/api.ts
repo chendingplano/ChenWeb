@@ -36,6 +36,13 @@ export async function fetchPagePreview(pageId: string): Promise<Bundle> {
  return body as unknown as Bundle;
 }
 
+export async function previewDraftPage(page: JsonObject): Promise<Bundle> {
+ const res = await fetch('/api/v1/wpi/pages/preview', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(page) });
+ const body = await parse(res);
+ if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+ return body as unknown as Bundle;
+}
+
 export type SaveResult = { key_attribute: string; key_value: Json };
 
 // Runs a load or save instance named by its place in a stored page. Throws

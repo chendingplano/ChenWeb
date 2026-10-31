@@ -194,11 +194,11 @@ loaded page alongside its editable elements.
 
 ### Requirement: Interactive page preview
 The editor toolbar SHALL offer Preview for the selected tab, switching the canvas to
-an interactive WPI runtime and providing an Edit control to return. Preview SHALL
-require a saved page with no unsaved editor changes, and load its latest saved
-version and referenced descriptors. It SHALL use the single-pane layout with a
-`main` pane; incompatible page references and other validation failures SHALL be
-reported to the author. Switching tabs SHALL return to editing.
+an interactive WPI runtime and providing an Edit control to return. Preview SHALL use
+the current page, whether named or unnamed, and load the pages it opens. A draft
+preview SHALL NOT save the page; input and save actions tied to the draft page SHALL
+report that saving is required. Validation failures SHALL be reported to the author.
+Switching tabs SHALL return to editing.
 
 ### Requirement: Page and layouter controls
 When a page is loaded, the editor SHALL show a movable control frame at the upper

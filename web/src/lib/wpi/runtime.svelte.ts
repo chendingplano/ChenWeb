@@ -3,6 +3,7 @@
 // wpi-pages-own-panes, design D8, D9). Cache decisions come from panel-cache.ts;
 // this class keeps the state in $state and talks to the API.
 import { getContext, setContext } from 'svelte';
+import { m } from '$lib/paraglide/messages.js';
 import { previewList, runAction, WpiError } from './api';
 import { previewLoadSource } from './list-request';
 import { canonical } from './dirty';
@@ -172,6 +173,11 @@ export class AppRuntime {
 	async #loadInput(id: string): Promise<void> {
 		const inst = this.pages[id];
 		if (!inst?.input.ref) return;
+		if (this.editorPreview && inst.input.ref.id === this.bundle.app.initial_page) {
+			inst.error = m.wpi_preview_draft_action_unavailable();
+			inst.ready = true;
+			return;
+		}
 		inst.loading = true;
 		inst.error = null;
 		try {
@@ -238,6 +244,10 @@ export class AppRuntime {
 		const saveAction = this.bundle.pages[inst.pageId].save_action;
 		const actionRef = ref ?? (saveAction ? ({ kind: 'page', id: inst.pageId, pointer: '/save_action' } as const) : null);
 		if (!actionRef) return false;
+		if (this.editorPreview && actionRef.id === this.bundle.app.initial_page) {
+			inst.error = m.wpi_preview_draft_action_unavailable();
+			return false;
+		}
 		let valid = true;
 		for (const check of this.#validators.get(id)?.values() ?? []) if (!check(valid)) valid = false;
 		if (!valid) return false;

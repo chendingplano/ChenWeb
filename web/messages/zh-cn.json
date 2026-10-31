@@ -1420,6 +1420,7 @@
 	"flowtoolbar_close": "关闭",
 	"wpi_preview_action": "预览",
 	"wpi_preview_edit": "编辑",
+	"wpi_preview_draft_action_unavailable": "请先保存页面，然后在预览中运行此操作。",
 	"wpi_preview_save_first": "请先保存页面再预览。",
 	"wpi_preview_failed": "无法预览页面：{detail}",
 	"wpi_toolbar_label": "画布工具",

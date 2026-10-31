@@ -101,9 +101,9 @@ editable elements.
 
 ### Requirement: Interactive page preview
 The editor toolbar SHALL offer Preview for the selected tab, switching the canvas to
-an interactive WPI runtime and providing an Edit control to return. Preview SHALL
-require a saved page with no unsaved editor changes, and load its latest saved
-version and the pages it opens. The page SHALL be the app's initial page, drawn in the app's
+an interactive WPI runtime and providing an Edit control to return. Preview SHALL use the current page, whether named or unnamed, and load the pages
+it opens. A draft preview SHALL NOT save the page; input and save actions tied to
+the draft page SHALL report that saving is required. The page SHALL be the app's initial page, drawn in the app's
 page area; panes that its `open-page` instances name but that only an outer page would have,
 and other validation failures, SHALL be reported to the author. Switching tabs SHALL return
 to editing.
