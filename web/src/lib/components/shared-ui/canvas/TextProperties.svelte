@@ -212,7 +212,7 @@
 								}}
 							/>
 						{/if}
-						{#if invalid}<p class="error" role="alert">{exceeds ? m.wpi_text_exceeds_maximum() : m.wpi_text_invalid()}</p>{/if}
+						{#if invalid}<p class="error" role="alert">{exceeds ? m.wpi_text_exceeds_maximum() : ['width', 'height', 'min_width', 'max_width'].includes(name) ? m.wpi_text_invalid_size() : m.wpi_text_invalid()}</p>{/if}
 						{#if group === 'other'}<p class="hint" role="status">{m.wpi_text_unsupported()}</p>{/if}
 						{#if def.help_tip}<p class="hint">{localized(def.help_tip)}</p>{/if}
 						{#if !fixed}<p class="origin">
