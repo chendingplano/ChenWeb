@@ -10,11 +10,11 @@
  import { getElementClass } from '$lib/wpi/api';
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
  import { resolveEntry } from '$lib/wpi/entries';
- import { effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, isLeaf, pageBoxStyle, panelStyle, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
+ import { effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
  import { flowGeometry } from '$lib/wpi/layouters/flow-geometry';
  import ElementView from '$lib/wpi/elements/Element.svelte';
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
- import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec, SurfaceColors } from '$lib/wpi/types';
+ import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec, SurfaceColors, PaneBorder } from '$lib/wpi/types';
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
  import { MIN_PANE_SIZE } from './pane-edit';
 
@@ -181,10 +181,11 @@
  });
 </script>
 
-{#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined, sides: Side[] = ['top', 'bottom', 'left', 'right'], inheritedColors: SurfaceColors = {})}
+{#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined, sides: Side[] = ['top', 'bottom', 'left', 'right'], inheritedColors: SurfaceColors = {}, inheritedBorder: PaneBorder = {})}
  {@const colors = inheritPaneColors(pane, inheritedColors)}
+ {@const border = inheritPaneBorder(pane, inheritedBorder)}
  <section class="pane" class:pane-selected={selectedPane === pane.pane_id} data-editor-pane={isLeaf(pane) ? pane.pane_id : undefined} data-pane-id={pane.pane_id} data-pane-axis={axis}
-  style={`${axis ? `${paneStyle(pane, axis)}; min-width:${MIN_PANE_SIZE}px; min-height:${MIN_PANE_SIZE}px; max-width:none; max-height:none; ${next ? '' : 'flex-grow:1'}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}`}>
+  style={`${axis ? `${paneStyle(pane, axis)}; min-width:${MIN_PANE_SIZE}px; min-height:${MIN_PANE_SIZE}px; max-width:none; max-height:none; ${next ? '' : 'flex-grow:1'}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}; ${paneBorderStyle(border)}`}>
   {#if isLeaf(pane)}
    {@const items = entries(pane.pane_id)}
    {@const config = panelConfig(pane.pane_id)}
@@ -206,8 +207,8 @@
    </div>
    <button type="button" class="pane-tag nodrag nopan" aria-label={m.wpi_select_pane({ pane: pane.pane_id })} aria-pressed={selectedPane === pane.pane_id} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>{pane.pane_id}</button>
   {:else}
-   <div style={splitStyle(pane)} class={pane.split === 'columns' ? 'divide-x' : 'divide-y'}>
-    {#each pane.children ?? [] as child, i (child.pane_id)}{@render paneTree(child, pane.split === 'columns' ? 'width' : 'height', pane.children?.[i + 1]?.pane_id, sides.filter((side) => pane.split === 'columns' ? (side !== 'left' || i === 0) && (side !== 'right' || i === (pane.children?.length ?? 0) - 1) : (side !== 'top' || i === 0) && (side !== 'bottom' || i === (pane.children?.length ?? 0) - 1)), colors)}{/each}
+   <div style={splitStyle(pane)}>
+    {#each pane.children ?? [] as child, i (child.pane_id)}{@render paneTree(child, pane.split === 'columns' ? 'width' : 'height', pane.children?.[i + 1]?.pane_id, sides.filter((side) => pane.split === 'columns' ? (side !== 'left' || i === 0) && (side !== 'right' || i === (pane.children?.length ?? 0) - 1) : (side !== 'top' || i === 0) && (side !== 'bottom' || i === (pane.children?.length ?? 0) - 1)), colors, border)}{/each}
    </div>
   {/if}
   {#if isLeaf(pane)}

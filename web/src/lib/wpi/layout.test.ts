@@ -4,6 +4,7 @@ import {
 	clampPx,
 	surfaceColorStyle,
 	inheritPaneColors,
+	inheritPaneBorder, paneBorderStyle,
 
 	cssLength,
 	effectiveRoot,
@@ -160,4 +161,13 @@ test('pane colors inherit independently from the closest ancestor', () => {
  assert.deepEqual(inheritPaneColors({}, middle), { background_color: 'red', foreground_color: 'blue' });
  assert.deepEqual(inheritPaneColors({ background_color: 'transparent', foreground_color: null }, middle), { background_color: 'transparent', foreground_color: 'blue' });
  assert.deepEqual(inheritPaneColors({}, {}), {});
+});
+
+test('pane border attributes inherit independently and zero disables drawing', () => {
+ const root = inheritPaneBorder({ border_thickness: '2px', border_light_color: 'black', border_dark_color: 'white' });
+ const middle = inheritPaneBorder({ border_light_color: 'red' }, root);
+ assert.deepEqual(inheritPaneBorder({}, middle), { border_thickness: '2px', border_light_color: 'red', border_dark_color: 'white' });
+ assert.match(paneBorderStyle(middle), /border: 2px solid light-dark\(red, white\)/);
+ assert.equal(paneBorderStyle(inheritPaneBorder({ border_thickness: '0px' }, middle)), '');
+ assert.match(paneBorderStyle({ border_thickness: '1px' }), /light-dark\(#000, #fff\)/);
 });

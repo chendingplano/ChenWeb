@@ -10,10 +10,10 @@
 	import PageView from './PageView.svelte';
 	import PanelView from './PanelView.svelte';
 	import PaneView from './PaneView.svelte';
-	import { clampPx, isLeaf, isResizable, inheritPaneColors, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
+	import { clampPx, isLeaf, isResizable, inheritPaneColors, inheritPaneBorder, paneBorderStyle, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
 	import { paneInstanceId } from './panel-cache';
 	import { getRuntime } from './runtime.svelte';
-	import type { PaneSpec, SurfaceColors } from './types';
+	import type { PaneSpec, SurfaceColors, PaneBorder } from './types';
 
 	let {
 		instanceId,
@@ -22,8 +22,9 @@
 		handle = null,
 		bare = false,
 		host = undefined,
-		inheritedColors = {}
-	}: { instanceId: string; pane: PaneSpec; axis?: 'width' | 'height'; handle?: 'start' | 'end' | null; bare?: boolean; host?: PaneSpec; inheritedColors?: SurfaceColors } = $props();
+		inheritedColors = {},
+		inheritedBorder = {}
+	}: { instanceId: string; pane: PaneSpec; axis?: 'width' | 'height'; handle?: 'start' | 'end' | null; bare?: boolean; host?: PaneSpec; inheritedColors?: SurfaceColors; inheritedBorder?: PaneBorder } = $props();
 
 	const rt = getRuntime();
 	const id = $derived(paneInstanceId(instanceId, pane.pane_id));
@@ -31,7 +32,8 @@
 	const childAxis = $derived(pane.split === 'columns' ? 'width' : 'height');
 	const children = $derived(pane.children ?? []);
 	const colors = $derived(bare ? inheritPaneColors(host ?? {}, inheritedColors) : inheritPaneColors(pane, inheritedColors));
-	const effectivePane = $derived({ ...(bare ? (host ?? { pane_id: pane.pane_id }) : pane), ...colors });
+	const border = $derived(bare ? inheritPaneBorder(host ?? {}, inheritedBorder) : inheritPaneBorder(pane, inheritedBorder));
+	const effectivePane = $derived({ ...(bare ? (host ?? { pane_id: pane.pane_id }) : pane), ...colors, ...border });
 	const resizable = $derived(!!axis && handle !== null && isResizable(pane, axis));
 
 	let section = $state<HTMLElement>();
@@ -65,9 +67,9 @@
 </script>
 
 {#snippet split()}
-	<div style={splitStyle(pane)} class={pane.split === 'columns' ? 'divide-x' : 'divide-y'}>
+	<div style={splitStyle(pane)}>
 		{#each children as child, i (child.pane_id)}
-			<PaneView {instanceId} pane={child} inheritedColors={colors} axis={childAxis} handle={edge(i)} />
+			<PaneView {instanceId} pane={child} inheritedColors={colors} inheritedBorder={border} axis={childAxis} handle={edge(i)} />
 		{/each}
 	</div>
 {/snippet}
@@ -80,7 +82,7 @@
 		data-pane={pane.pane_id}
 		data-wpi-surface
 		class="relative min-h-0 min-w-0"
-		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}`}
+		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}; ${paneBorderStyle(border)}`}
 	>
 		{#if isLeaf(pane)}
 			<div style={placeStyle(pane)}>

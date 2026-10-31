@@ -4,7 +4,7 @@
 // in its row within min/max, and "auto" (or nothing) sizes to content. Panes
 // are flex items of their split parent; a leaf pane places what it shows inside
 // its margins, with its alignment and scroll bars.
-import type { ElementInstance, FlowLayouterConfig, PageDescriptor, PaneSpec, SurfaceColors, SurfaceColor } from './types';
+import type { ElementInstance, FlowLayouterConfig, PageDescriptor, PaneSpec, SurfaceColors, SurfaceColor, PaneBorder } from './types';
 
 function isFixed(size: string | undefined): size is string {
 	return !!size && size !== 'auto' && size !== 'elastic';
@@ -186,4 +186,17 @@ export function inheritPaneColors(pane: SurfaceColors, parent: SurfaceColors = {
  const background = pane.background_color ?? parent.background_color;
  const foreground = pane.foreground_color ?? parent.foreground_color;
  return { ...(background != null ? { background_color: background } : {}), ...(foreground != null ? { foreground_color: foreground } : {}) };
+}
+
+// Each border attribute inherits independently; zero is an explicit override.
+export function inheritPaneBorder(pane: PaneBorder, parent: PaneBorder = {}): PaneBorder {
+ const border_thickness = pane.border_thickness ?? parent.border_thickness;
+ const border_light_color = pane.border_light_color ?? parent.border_light_color;
+ const border_dark_color = pane.border_dark_color ?? parent.border_dark_color;
+ return { ...(border_thickness != null ? { border_thickness } : {}), ...(border_light_color != null ? { border_light_color } : {}), ...(border_dark_color != null ? { border_dark_color } : {}) };
+}
+
+export function paneBorderStyle(border: PaneBorder): string {
+ if (!border.border_thickness || parseFloat(border.border_thickness) <= 0) return '';
+ return `box-sizing: border-box; border: ${border.border_thickness} solid light-dark(${border.border_light_color ?? '#000'}, ${border.border_dark_color ?? '#fff'})`;
 }

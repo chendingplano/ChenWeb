@@ -34,7 +34,7 @@ var pageSizeAttrs = []string{"width", "height", "min_width", "min_height", "max_
 // paneAttrs apply to every pane; leafPaneAttrs concern how a leaf places content, so they
 // apply to leaf panes only (devdoc 2026102601 §3.2.2).
 var (
-	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable", "background_color", "foreground_color", "left_margin", "right_margin", "top_margin", "bottom_margin"}
+	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable", "background_color", "foreground_color", "border_thickness", "border_light_color", "border_dark_color", "left_margin", "right_margin", "top_margin", "bottom_margin"}
 	leafPaneAttrs = []string{"hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar"}
 	scrollbars    = []string{"auto", "hide"}
 )
@@ -527,6 +527,20 @@ func (v *validator) pane(val any, path string, ids, leaves map[string]bool) {
 	}
 	v.boolean(p, "resizable", path)
 	v.surfaceColors(p, path)
+	if raw, ok := p["border_thickness"]; ok && raw != nil {
+		value, valid := raw.(string)
+		if !valid || !regexp.MustCompile(`^[0-9]+(\.[0-9]+)?px$`).MatchString(value) {
+			v.errf(path+"/border_thickness", "must be a non-negative pixel length")
+		}
+	}
+	for _, key := range []string{"border_light_color", "border_dark_color"} {
+		if raw, ok := p[key]; ok && raw != nil {
+			value, valid := raw.(string)
+			if !valid || value == "auto" || !colorPattern.MatchString(value) {
+				v.errf(path+"/"+key, "must be a CSS color")
+			}
+		}
+	}
 	for _, k := range []string{"left_margin", "right_margin", "top_margin", "bottom_margin"} {
 		v.length(p, k, path, lengthKind{})
 	}

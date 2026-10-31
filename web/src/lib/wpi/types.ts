@@ -14,7 +14,8 @@ export type JsonObject = { [key: string]: Json };
 export type SurfaceColor = string | { light: string; dark: string };
 export type SurfaceColors = { background_color?: SurfaceColor | null; foreground_color?: SurfaceColor | null };
 
-export type PaneSpec = SurfaceColors & {
+export type PaneBorder = { border_thickness?: string | null; border_light_color?: string | null; border_dark_color?: string | null };
+export type PaneSpec = SurfaceColors & PaneBorder & {
 	pane_id: string;
 	split?: 'rows' | 'columns';
 	children?: PaneSpec[];
