@@ -162,7 +162,7 @@
 	async function togglePreview() {
 		if (previewBundle) { previewBundle = null; return; }
 		if (previewLoading) return;
-		if (isDirty || !loadedPage?.descriptor_id) { toast(m.wpi_preview_save_first()); return; }
+		if (isDirty || !loadedPage?.descriptor_id) { showError(m.wpi_preview_save_first()); return; }
 		const tab = activeTabId;
 		const request = ++previewRequest;
 		previewLoading = true;
@@ -171,7 +171,7 @@
 			if (tab === activeTabId && request === previewRequest) previewBundle = bundle;
 		} catch (error) {
 			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : String(error);
-			toast(m.wpi_preview_failed({ detail }));
+			showError(m.wpi_preview_failed({ detail }));
 		} finally { previewLoading = false; }
 	}
 	let showLoadPage = $state(false);
@@ -191,7 +191,7 @@
 	let canvasWidth = $state(0);
 	let canvasHeight = $state(0);
 	let toastMsg = $state('');
-	let saveError = $state('');
+	let editorError = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// ── Properties panel width (dragged by the separator on its left) ────
@@ -402,7 +402,7 @@
 			lastRecovery.set(tab.id, Date.now());
 			const pending = savePageRecovery(id, version, recovery, version === 0 && !claimedRecoveryIDs.has(id)).then(() => { if (version === 0) claimedRecoveryIDs.add(id); if (tabs.some((item) => item.id === tab.id)) recoveryContent.set(tab.id, JSON.stringify(recovery)); lastRecovery.set(tab.id, Date.now()); }).catch((error) => {
 				if (version === 0 && !page.descriptor_id && error instanceof WpiError && error.status === 409) recoveryIDs.delete(tab.id);
-				console.error('WPI auto-save failed', error); toast(m.wpi_autosave_failed());
+				console.error('WPI auto-save failed', error); showError(m.wpi_autosave_failed());
 			}).finally(() => recovering.delete(tab.id));
 			recovering.set(tab.id, pending);
 		}
@@ -443,7 +443,11 @@
 		return elementClasses.find((c) => c.descriptor_id === selectedNode.data.element) ?? null;
 	});
 
-	// ── Toast ──────────────────────────────────────────────────────────────
+	// ── Notifications ──────────────────────────────────────────────────────
+	function showError(msg: string) {
+		editorError = msg;
+	}
+
 	function toast(msg: string) {
 		toastMsg = msg;
 		if (toastTimeout) clearTimeout(toastTimeout);
@@ -536,7 +540,7 @@
 					recoveryContent.set(tabID, JSON.stringify(pageJson(nodes, recovery)));
 					recoveredTabs = new Set([...recoveredTabs, tabID]);
 				}
-			} catch (error) { console.error('WPI page recovery load failed', error); toast(m.wpi_load_page_failed()); }
+			} catch (error) { console.error('WPI page recovery load failed', error); showError(m.wpi_load_page_failed()); }
 		}
 	}
 
@@ -575,7 +579,7 @@
 			return false;
 		}
 		if (edges.length || nodes.some((node) => !isElementNode(node))) {
-			saveError = m.wpi_save_page_elements_only();
+			editorError = m.wpi_save_page_elements_only();
 			return true;
 		}
 		const id = activeTabId;
@@ -623,7 +627,7 @@
 			return true;
 		} catch (error) {
 			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : '';
-			saveError = detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes();
+			editorError = detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes();
 			return true;
 		} finally {
 			savingTabs.delete(id);
@@ -702,7 +706,7 @@
 		// An element goes into the leaf pane under the pointer.
 		const pane = (document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-editor-pane]') as HTMLElement | null)?.dataset.editorPane;
 		if (type === 'wpi-element' && (!loadedPage || !isInsidePage(point, previewSize) || !pane)) {
-			toast(m.wpi_drop_element_inside_pane());
+			showError(m.wpi_drop_element_inside_pane());
 			return;
 		}
 		const id = `${type}-${Date.now()}`;
@@ -725,11 +729,11 @@
 
 	function checkLimits() {
 		if (!warnedNodes && nodes.length > 500) {
-			toast(m.canvas_01_warning_over_500_nodes_performance());
+			showError(m.canvas_01_warning_over_500_nodes_performance());
 			warnedNodes = true;
 		}
 		if (!warnedEdges && edges.length > 1000) {
-			toast(m.canvas_01_warning_over_1000_edges_performance());
+			showError(m.canvas_01_warning_over_1000_edges_performance());
 			warnedEdges = true;
 		}
 	}
@@ -786,7 +790,7 @@
 		try {
 			elementClasses = await listElementClasses();
 		} catch {
-			toast(m.wpi_editor_element_classes_failed());
+			showError(m.wpi_editor_element_classes_failed());
 		}
 	}
 
@@ -860,7 +864,7 @@
 		savedName = res.flow.flow_name;
 			lastSavedSnapshot = { nodes: [], edges: [], page: loadedPage, previewSize: { ...previewSize } };
 		} catch {
-			toast(m.canvas_01_could_not_create_flow_on());
+			showError(m.canvas_01_could_not_create_flow_on());
 			activeFlow = {
 				flow_id: -1,
 				user_id: 0,
@@ -890,14 +894,14 @@
 	// ── Save as template ────────────────────────────────────────────────────
 	async function saveCurrentAsTemplate() {
 		if (!activeFlow || activeFlow.flow_id < 0) {
-			toast(m.canvas_01_save_the_flow_first());
+			showError(m.canvas_01_save_the_flow_first());
 			return;
 		}
 		try {
 			await flowService.saveAsTemplate(activeFlow.flow_id);
 			toast(m.canvas_01_saved_as_template());
 		} catch {
-			toast(m.canvas_01_failed_to_save_as_template());
+			showError(m.canvas_01_failed_to_save_as_template());
 		}
 	}
 
@@ -928,8 +932,8 @@
 		recoveryTimer = setInterval(autoSavePages, 1000);
 		restorePanel();
 		loadElementClasses();
-		listTriggerActions().then((actions) => triggerActions = actions).catch(() => toast(m.propertiespanel_actions_failed()));
-		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => toast(m.wpi_page_layouters_failed()));
+		listTriggerActions().then((actions) => triggerActions = actions).catch(() => showError(m.propertiespanel_actions_failed()));
+		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => showError(m.wpi_page_layouters_failed()));
 		try {
 			const res = await flowService.getNodeTypes();
 			nodeTypes = res.nodeTypes ?? [];
@@ -937,7 +941,7 @@
 		let recoveries: Awaited<ReturnType<typeof listUnsavedRecoveries>> = [];
 		try {
 			recoveries = await listUnsavedRecoveries();
-		} catch (error) { console.error('WPI recovery load failed', error); toast(m.wpi_load_page_failed()); }
+		} catch (error) { console.error('WPI recovery load failed', error); showError(m.wpi_load_page_failed()); }
 		if (recoveries.length === 0) {
 			addTab();
 			await loadDefaultOrPicker();
@@ -1255,11 +1259,11 @@
 		{/if}
 	</div>
 
-	{#if saveError}
+	{#if editorError}
 		<div role="alert" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-start gap-3 rounded-lg px-4 py-2 text-sm shadow-xl select-text"
 			style="background:{darkMode ? '#422b0b' : '#fff3cd'}; border:1px solid var(--cv-warn); color:var(--cv-text); z-index:61; width:min(640px, calc(100vw - 32px)); max-height:40vh; overflow:auto; user-select:text; overflow-wrap:anywhere;">
-			<span class="min-w-0 break-words">{saveError}</span>
-			<button type="button" class="shrink-0" onclick={() => (saveError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
+			<span class="min-w-0 break-words">{editorError}</span>
+			<button type="button" class="shrink-0" onclick={() => (editorError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
 		</div>
 	{/if}
 	<!-- Toast -->
