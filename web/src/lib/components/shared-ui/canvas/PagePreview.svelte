@@ -15,6 +15,7 @@
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
  import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
+ import { MIN_PANE_SIZE } from './pane-edit';
 
  let { descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onOuterResize, onOuterShift, onMeasurePanes }: {
   descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
@@ -63,7 +64,7 @@
   if (!right) return;
   const first = left.getBoundingClientRect()[axis] / (zoom || 1);
   const second = right.getBoundingClientRect()[axis] / (zoom || 1);
-  paneDrag = { pointer: event.pointerId, start: axis === 'width' ? event.clientX : event.clientY, first, second, a, b, axis, left, right, value: first, oldLeft: left.style.flex, oldRight: right.style.flex, min: 1, max: Math.max(1, first + second - 1) };
+  paneDrag = { pointer: event.pointerId, start: axis === 'width' ? event.clientX : event.clientY, first, second, a, b, axis, left, right, value: first, oldLeft: left.style.flex, oldRight: right.style.flex, min: MIN_PANE_SIZE, max: Math.max(MIN_PANE_SIZE, first + second - MIN_PANE_SIZE) };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   event.preventDefault(); event.stopPropagation();
  }
@@ -102,7 +103,7 @@
   if (!d || d.pointer !== event.pointerId) return;
   const sign = d.side === 'left' || d.side === 'top' ? -1 : 1;
   const delta = sign * ((d.axis === 'width' ? event.clientX : event.clientY) - d.start) / (zoom || 1);
-  const change = Math.max(1 - d.initial, (d.axis === 'width' ? 240 : 160) - d.page, delta);
+  const change = Math.max(MIN_PANE_SIZE - d.initial, (d.axis === 'width' ? 240 : 160) - d.page, delta);
   d.value = Math.round(d.initial + change);
   if (d.pane) d.pane.style.flex = `0 0 ${d.value}px`;
   onResize({ ...size, [d.axis]: Math.round(d.page + change) });
@@ -181,7 +182,7 @@
 
 {#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined, sides: Side[] = ['top', 'bottom', 'left', 'right'])}
  <section class="pane" class:pane-selected={selectedPane === pane.pane_id} data-editor-pane={isLeaf(pane) ? pane.pane_id : undefined} data-pane-id={pane.pane_id} data-pane-axis={axis}
-  style={axis ? `${paneStyle(pane, axis)}; min-width:0; min-height:0; max-width:none; max-height:none; ${next ? "" : "flex-grow:1"}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}>
+  style={axis ? `${paneStyle(pane, axis)}; min-width:${MIN_PANE_SIZE}px; min-height:${MIN_PANE_SIZE}px; max-width:none; max-height:none; ${next ? "" : "flex-grow:1"}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}>
   {#if isLeaf(pane)}
    {@const items = entries(pane.pane_id)}
    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

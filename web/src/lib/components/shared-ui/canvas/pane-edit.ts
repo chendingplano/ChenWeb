@@ -7,6 +7,7 @@ import { effectiveRoot, findPane, isLeaf, leafPanes } from '$lib/wpi/layout';
 import type { JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
 import { isElementNode, nodePane, paneNodes } from './wpi-json';
 
+export const MIN_PANE_SIZE = 20;
 export const PANE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 // Alignment and scrollbars apply to leaf panes only.
@@ -73,6 +74,7 @@ export function setPaneAttr(page: JsonObject, id: string, name: string, value: u
 	return withRoot(page, mapPane(rootOf(page), id, (p) => {
 		const next = { ...p } as Record<string, unknown>;
 		if (value === undefined || value === '') delete next[name];
+		else if ((name === 'min_width' || name === 'min_height') && typeof value === 'string' && /^\s*\d+(?:\.\d+)?\s*px\s*$/.test(value) && parseFloat(value) < MIN_PANE_SIZE) next[name] = `${MIN_PANE_SIZE}px`;
 		else next[name] = value;
 		return next as PaneSpec;
 	}));
@@ -82,6 +84,7 @@ export function setPaneAttr(page: JsonObject, id: string, name: string, value: u
 export function resizePane(page: JsonObject, id: string, axis: 'width' | 'height', size: number, parentSize: number): JsonObject {
  const pane = findPane(rootOf(page), id);
  if (!pane) return page;
+ size = Math.max(MIN_PANE_SIZE, size);
  const next = setPaneAttr(page, id, axis, `${Math.round(size)}px`);
  return adjustPaneLimits(next, id, axis, size, parentSize);
 }
@@ -93,7 +96,7 @@ export function adjustPaneLimits(page: JsonObject, id: string, axis: 'width' | '
  const min = pane[axis === 'width' ? 'min_width' : 'min_height'] ?? '50px';
  const minMatch = min.trim().match(/^([\d.]+)\s*(px|%)$/);
  const minimum = minMatch ? Number(minMatch[1]) * (minMatch[2] === '%' ? parentSize / 100 : 1) : 0;
- if (size < minimum) next = setPaneAttr(next, id, `min_${axis}`, `${Math.floor(size)}px`);
+ if (size < minimum) next = setPaneAttr(next, id, `min_${axis}`, `${Math.max(MIN_PANE_SIZE, Math.floor(size))}px`);
  const max = pane[axis === 'width' ? 'max_width' : 'max_height'];
  if (max) {
   const match = max.trim().match(/^([\d.]+)\s*(px|%)$/);

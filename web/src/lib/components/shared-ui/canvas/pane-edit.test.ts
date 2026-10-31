@@ -111,3 +111,12 @@ test('resizing below a pane minimum lowers it, including the default', () => {
  const percent = setPaneAttr(single, 'main', 'min_width', '20%');
  assert.equal(rootOf(resizePane(percent, 'main', 'width', 75, 500)).min_width, '75px');
 });
+
+test('pane sizes and pixel minimum attributes cannot be set below 20px', () => {
+ const page = setPaneAttr(single, 'main', 'min_width', '5px');
+ assert.equal(rootOf(page).min_width, '20px');
+ assert.equal(rootOf(setPaneAttr(page, 'main', 'min_height', '10px')).min_height, '20px');
+ const resized = resizePane(setPaneAttr(single, 'main', 'min_width', '160px'), 'main', 'width', 5, 500);
+ assert.equal(rootOf(resized).width, '20px');
+ assert.equal(rootOf(resized).min_width, '20px');
+});
