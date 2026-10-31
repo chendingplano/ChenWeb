@@ -106,14 +106,15 @@ export function parseJsonObject(text: string): JsonObject {
 }
 
 // The same pane assignment and reading order as the page descriptor.
-export function elementTree(nodes: Node[], page: JsonObject): string {
+export function elementTree(nodes: Node[], page: JsonObject, labels: { pane: string; panel: string; layouter: string; elements: string }): string {
  const root = effectiveRoot(page as unknown as PageDescriptor);
  const assembled = pageJson(nodes, page);
  const panels = assembled.panels as Record<string, { elem_list?: JsonObject[] }>;
  function lines(pane: PaneSpec, depth: number): string[] {
   const indent = '  '.repeat(depth);
-  if (pane.split) return [indent + pane.pane_id, ...(pane.children ?? []).flatMap(child => lines(child, depth + 1))];
-  return [indent + pane.pane_id, ...(panels[pane.pane_id]?.elem_list ?? []).map(element => indent + '  ' + String(element.element ?? ''))];
+  const title = indent + pane.pane_id + ' ' + labels.pane;
+  if (pane.split) return [title, ...(pane.children ?? []).flatMap(child => lines(child, depth + 1))];
+  return [title, indent + '  ' + labels.panel, indent + '    ' + labels.layouter, indent + '    ' + labels.elements, ...(panels[pane.pane_id]?.elem_list ?? []).map(element => indent + '      ' + String(element.element ?? ''))];
  }
  return lines(root, 0).join('\n');
 }

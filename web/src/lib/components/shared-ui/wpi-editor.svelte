@@ -1390,5 +1390,5 @@
 {/if}
 
 {#if showTree}
-	<WpiTreeDialog {darkMode} tree={elementTree(nodes, loadedPage ?? {})} onClose={() => (showTree = false)} />
+	<WpiTreeDialog {darkMode} tree={elementTree(nodes, loadedPage ?? {}, { pane: m.wpi_tree_pane(), panel: m.wpi_tree_panel(), layouter: m.wpi_tree_layouter(), elements: m.wpi_tree_elements() })} onClose={() => (showTree = false)} />
 {/if}
