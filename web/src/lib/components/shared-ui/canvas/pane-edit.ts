@@ -78,6 +78,27 @@ export function setPaneAttr(page: JsonObject, id: string, name: string, value: u
 	}));
 }
 
+// Set a dragged size and expand an explicit maximum when needed.
+export function resizePane(page: JsonObject, id: string, axis: 'width' | 'height', size: number, parentSize: number): JsonObject {
+ const pane = findPane(rootOf(page), id);
+ if (!pane) return page;
+ const next = setPaneAttr(page, id, axis, `${Math.round(size)}px`);
+ return expandPaneMax(next, id, axis, size, parentSize);
+}
+
+export function expandPaneMax(page: JsonObject, id: string, axis: 'width' | 'height', size: number, parentSize: number): JsonObject {
+ const pane = findPane(rootOf(page), id);
+ if (!pane) return page;
+ let next = page;
+ const max = pane[axis === 'width' ? 'max_width' : 'max_height'];
+ if (max) {
+  const match = max.trim().match(/^([\d.]+)\s*(px|%)$/);
+  const limit = match ? Number(match[1]) * (match[2] === '%' ? parentSize / 100 : 1) : Infinity;
+  if (size > limit) next = setPaneAttr(next, id, `max_${axis}`, `${Math.ceil(size)}px`);
+ }
+ return next;
+}
+
 // Splits leaf pane id into rows or columns: it gets two children; the first
 // takes its panel, elements and leaf-only attributes.
 export function splitPane({ page, nodes }: Edit, id: string, split: 'rows' | 'columns'): Edit {

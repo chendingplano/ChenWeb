@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
-import { addPane, deletePane, mergePane, moveNode, nodesUnder, renamePane, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
+import { addPane, deletePane, mergePane, moveNode, nodesUnder, renamePane, renameProblem, resizePane, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
 import { nodePane, pageJson } from './wpi-json';
 
 const node = (id: string, pane: string, y = 0): Node => ({ id, type: 'wpi-element', position: { x: 0, y }, data: { label: id, element: 'text', attrs: { text: id }, pane } });
@@ -92,4 +92,13 @@ test('merging a split keeps all elements in pane order', () => {
  assert.deepEqual(rootOf(merged.page), { pane_id: 'main' });
  assert.deepEqual(merged.nodes.map(nodePane), ['main', 'main']);
  assert.deepEqual(((pageJson(merged.nodes, merged.page).panels as JsonObject).main as { elem_list: JsonObject[] }).elem_list.map(e => e.text), ['a', 'b']);
+});
+
+test('resizing a pane expands only an exceeded maximum', () => {
+ const page = setPaneAttr(single, 'main', 'max_width', '100px');
+ const resized = resizePane(page, 'main', 'width', 140, 500);
+ assert.equal(rootOf(resized).width, '140px');
+ assert.equal(rootOf(resized).max_width, '140px');
+ assert.equal(rootOf(resizePane(page, 'main', 'width', 80, 500)).max_width, '100px');
+ assert.equal(rootOf(resizePane(setPaneAttr(single, 'main', 'max_width', '20%'), 'main', 'width', 140, 500)).max_width, '140px');
 });

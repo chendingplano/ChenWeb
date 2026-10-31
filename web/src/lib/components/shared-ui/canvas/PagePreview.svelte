@@ -16,14 +16,23 @@
  import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
 
- let { descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize }: {
+ let { descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onOuterResize, onOuterShift, onMeasurePanes }: {
   descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
-  onPaneResize: (a: string, b: string, axis: 'width' | 'height', first: number, second: number) => void;
+  onPaneResize: (a: string, b: string, axis: 'width' | 'height', first: number, second: number, parentSize: number) => void;
+  onMeasurePanes: (panes: { id: string; width: number; height: number; parentWidth: number; parentHeight: number }[]) => void;
+  onOuterShift: (x: number, y: number, start: boolean) => void;
+  onOuterResize: (pane: string | null, axis: 'width' | 'height', value: number, parentSize: number, pageSize: number) => void;
   onMeasure: (id: string, size: { width: number; height: number }) => void;
  } = $props();
+ let previewElement: HTMLElement;
+ function measurePanes() {
+  requestAnimationFrame(() => {
+   onMeasurePanes(Array.from(previewElement.querySelectorAll<HTMLElement>('[data-pane-id]')).map((pane) => ({ id: pane.dataset.paneId!, width: pane.getBoundingClientRect().width / (zoom || 1), height: pane.getBoundingClientRect().height / (zoom || 1), parentWidth: (pane.parentElement?.getBoundingClientRect().width ?? 0) / (zoom || 1), parentHeight: (pane.parentElement?.getBoundingClientRect().height ?? 0) / (zoom || 1) })));
+  });
+ }
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number } | null = null;
  function startResize(event: PointerEvent) {
   if (event.button !== 0) return;
@@ -44,7 +53,7 @@
   else if (event.key === 'ArrowDown') dy = step; else if (event.key === 'ArrowUp') dy = -step; else return;
   onResizeStart();
   onResize({ width: Math.max(240, size.width + dx), height: Math.max(160, size.height + dy) });
-  event.preventDefault(); event.stopPropagation();
+  measurePanes(); event.preventDefault(); event.stopPropagation();
  }
  let paneDrag: { pointer: number; start: number; first: number; second: number; a: string; b: string; axis: 'width' | 'height'; left: HTMLElement; right: HTMLElement; value: number; oldLeft: string; oldRight: string; min: number; max: number } | null = null;
  function startPaneResize(event: PointerEvent, a: string, b: string, axis: 'width' | 'height') {
@@ -56,8 +65,7 @@
   const second = right.getBoundingClientRect()[axis] / (zoom || 1);
   const l = getComputedStyle(left), r = getComputedStyle(right);
   const minOf = (style: CSSStyleDeclaration) => parseFloat(axis === 'width' ? style.minWidth : style.minHeight) || 0;
-  const maxOf = (style: CSSStyleDeclaration) => parseFloat(axis === 'width' ? style.maxWidth : style.maxHeight) || Infinity;
-  paneDrag = { pointer: event.pointerId, start: axis === 'width' ? event.clientX : event.clientY, first, second, a, b, axis, left, right, value: first, oldLeft: left.style.flex, oldRight: right.style.flex, min: Math.max(minOf(l), first + second - maxOf(r)), max: Math.min(maxOf(l), first + second - minOf(r)) };
+  paneDrag = { pointer: event.pointerId, start: axis === 'width' ? event.clientX : event.clientY, first, second, a, b, axis, left, right, value: first, oldLeft: left.style.flex, oldRight: right.style.flex, min: minOf(l), max: first + second - minOf(r) };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   event.preventDefault(); event.stopPropagation();
  }
@@ -75,7 +83,43 @@
   if (!d || d.pointer !== event.pointerId) return;
   d.left.style.flex = d.oldLeft; d.right.style.flex = d.oldRight;
   paneDrag = null;
-  if (!cancel && Math.abs(d.value - d.first) >= 1) onPaneResize(d.a, d.b, d.axis, d.value, Math.round(d.first + d.second - d.value));
+  if (!cancel && Math.abs(d.value - d.first) >= 1) onPaneResize(d.a, d.b, d.axis, d.value, Math.round(d.first + d.second - d.value), d.left.parentElement!.getBoundingClientRect()[d.axis] / (zoom || 1));
+  event.stopPropagation();
+ }
+ type Side = 'top' | 'bottom' | 'left' | 'right';
+ let outerDrag: { pointer: number; side: Side; axis: 'width' | 'height'; start: number; initial: number; page: number; pane: HTMLElement | null; oldFlex: string; id: string | null; value: number; parentSize: number } | null = null;
+ function startOuter(event: PointerEvent, side: Side) {
+  if (event.button !== 0) return;
+  const axis = side === 'left' || side === 'right' ? 'width' : 'height';
+  let pane = (event.currentTarget as HTMLElement).parentElement as HTMLElement | null;
+  while (pane && pane.dataset.paneAxis !== axis) pane = pane.parentElement?.closest<HTMLElement>('[data-pane-axis]') ?? null;
+  const initial = pane ? pane.getBoundingClientRect()[axis] / (zoom || 1) : size[axis];
+  const parentSize = pane?.parentElement ? pane.parentElement.getBoundingClientRect()[axis] / (zoom || 1) : size[axis];
+  outerDrag = { pointer: event.pointerId, side, axis, start: axis === 'width' ? event.clientX : event.clientY, initial, page: size[axis], pane, oldFlex: pane?.style.flex ?? '', id: pane?.dataset.paneId ?? null, value: initial, parentSize };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  onResizeStart(); onOuterShift(0, 0, true); event.stopPropagation(); event.preventDefault();
+ }
+ function moveOuter(event: PointerEvent) {
+  const d = outerDrag;
+  if (!d || d.pointer !== event.pointerId) return;
+  const sign = d.side === 'left' || d.side === 'top' ? -1 : 1;
+  const delta = sign * ((d.axis === 'width' ? event.clientX : event.clientY) - d.start) / (zoom || 1);
+  const min = d.pane ? parseFloat(d.axis === 'width' ? getComputedStyle(d.pane).minWidth : getComputedStyle(d.pane).minHeight) || 0 : 0;
+  const change = Math.max(min - d.initial, (d.axis === 'width' ? 240 : 160) - d.page, delta);
+  d.value = Math.round(d.initial + change);
+  if (d.pane) d.pane.style.flex = `0 0 ${d.value}px`;
+  onResize({ ...size, [d.axis]: Math.round(d.page + change) });
+  onOuterShift(d.side === 'left' ? -change : 0, d.side === 'top' ? -change : 0, false);
+  event.stopPropagation();
+ }
+ function endOuter(event: PointerEvent, cancel = false) {
+  const d = outerDrag;
+  if (!d || d.pointer !== event.pointerId) return;
+  if (d.pane) d.pane.style.flex = d.oldFlex;
+  outerDrag = null;
+  if (cancel) { onResize({ ...size, [d.axis]: d.page }); onOuterShift(0, 0, false); }
+  else if (Math.abs(d.value - d.initial) >= 1) onOuterResize(d.id, d.axis, d.value, d.parentSize, Math.round(d.page + d.value - d.initial));
+  if (!cancel) measurePanes();
   event.stopPropagation();
  }
  const page = $derived(descriptor as unknown as PageDescriptor);
@@ -138,9 +182,9 @@
  });
 </script>
 
-{#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined)}
- <section class="pane" class:pane-selected={selectedPane === pane.pane_id} data-editor-pane={isLeaf(pane) ? pane.pane_id : undefined}
-  style={axis ? paneStyle(pane, axis) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}>
+{#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined, sides: Side[] = ['top', 'bottom', 'left', 'right'])}
+ <section class="pane" class:pane-selected={selectedPane === pane.pane_id} data-editor-pane={isLeaf(pane) ? pane.pane_id : undefined} data-pane-id={pane.pane_id} data-pane-axis={axis}
+  style={axis ? `${paneStyle(pane, axis)}; max-width:none; max-height:none; ${next ? "" : "flex-grow:1"}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}>
   {#if isLeaf(pane)}
    {@const items = entries(pane.pane_id)}
    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -161,8 +205,13 @@
    <button type="button" class="pane-tag nodrag nopan" aria-label={m.wpi_select_pane({ pane: pane.pane_id })} aria-pressed={selectedPane === pane.pane_id} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>{pane.pane_id}</button>
   {:else}
    <div style={splitStyle(pane)} class={pane.split === 'columns' ? 'divide-x' : 'divide-y'}>
-    {#each pane.children ?? [] as child, i (child.pane_id)}{@render paneTree(child, pane.split === 'columns' ? 'width' : 'height', pane.children?.[i + 1]?.pane_id)}{/each}
+    {#each pane.children ?? [] as child, i (child.pane_id)}{@render paneTree(child, pane.split === 'columns' ? 'width' : 'height', pane.children?.[i + 1]?.pane_id, sides.filter((side) => pane.split === 'columns' ? (side !== 'left' || i === 0) && (side !== 'right' || i === (pane.children?.length ?? 0) - 1) : (side !== 'top' || i === 0) && (side !== 'bottom' || i === (pane.children?.length ?? 0) - 1)))}{/each}
    </div>
+  {/if}
+  {#if isLeaf(pane)}
+   {#each sides as side}
+    <div role="separator" aria-label={m.wpi_resize_pane()} aria-orientation={side === 'left' || side === 'right' ? 'vertical' : 'horizontal'} class="outer-edge nodrag nopan {side}" onpointerdown={(event) => startOuter(event, side)} onpointermove={moveOuter} onpointerup={(event) => endOuter(event)} onpointercancel={(event) => endOuter(event, true)}></div>
+   {/each}
   {/if}
   {#if axis && next}
    <div role="separator" aria-label={m.wpi_resize_pane()} aria-orientation={axis === 'width' ? 'vertical' : 'horizontal'} class="pane-divider nodrag nopan" class:vertical={axis === 'width'} onpointerdown={(event) => startPaneResize(event, pane.pane_id, next, axis)} onpointermove={movePaneResize} onpointerup={(event) => endPaneResize(event)} onpointercancel={(event) => endPaneResize(event, true)}></div>
@@ -170,16 +219,16 @@
  </section>
 {/snippet}
 
-<div class="preview select-text" style="width:{size.width}px; height:{size.height}px" data-wpi-page-preview>
+<div bind:this={previewElement} class="preview select-text" style="width:{size.width}px; height:{size.height}px" data-wpi-page-preview>
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
   <div style={placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}>
-   <div style={pageBoxStyle(page)} data-page={page.descriptor_id} data-page-box>
+   <div style="{pageBoxStyle(page)}; width:100%; height:100%; max-width:none; max-height:none" data-page={page.descriptor_id} data-page-box>
     {@render paneTree(root, undefined)}
    </div>
   </div>
  {/if}
- <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => { if (drag?.id === event.pointerId) drag = null; event.stopPropagation(); }} onpointercancel={() => drag = null} onkeydown={resizeKey}></button>
+ <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => { if (drag?.id === event.pointerId) { drag = null; measurePanes(); } event.stopPropagation(); }} onpointercancel={() => drag = null} onkeydown={resizeKey}></button>
 </div>
 
 <style>
@@ -187,6 +236,12 @@
  .resize-handle { position:absolute; right:0; bottom:0; width:18px; height:18px; z-index:5; border:0; background: linear-gradient(135deg, transparent 45%, var(--cv-accent) 46%, var(--cv-accent) 52%, transparent 53%, transparent 64%, var(--cv-accent) 65%, var(--cv-accent) 71%, transparent 72%); cursor:nwse-resize; touch-action:none; }
  .resize-handle:focus-visible { outline:2px solid var(--cv-accent); }
  .pane { position: relative; outline: 1px dashed rgba(99,102,241,.25); outline-offset: -1px; }
+ .outer-edge { position:absolute; z-index:4; touch-action:none; }
+ .outer-edge.top, .outer-edge.bottom { left:5px; right:5px; height:8px; cursor:row-resize; }
+ .outer-edge.top { top:0; } .outer-edge.bottom { bottom:0; }
+ .outer-edge.left, .outer-edge.right { top:5px; bottom:5px; width:8px; cursor:col-resize; }
+ .outer-edge.left { left:0; } .outer-edge.right { right:0; }
+ .outer-edge:hover { background:rgba(99,102,241,.25); }
  .pane-divider { position:absolute; z-index:4; bottom:-4px; left:0; right:0; height:8px; cursor:row-resize; touch-action:none; }
  .pane-divider.vertical { top:0; bottom:0; left:auto; right:-4px; width:8px; height:auto; cursor:col-resize; }
  .pane-divider:hover { background:rgba(99,102,241,.25); }
