@@ -732,3 +732,17 @@ func TestInputExtendedAttributes(t *testing.T) {
 		})
 	}
 }
+
+func TestSurfaceColors(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{
+		{`{"background_color":null,"foreground_color":"red"}`, ""},
+		{`{"background_color":{"light":"#fff","dark":"#000"}}`, ""},
+		{`{"background_color":{"light":"#fff"}}`, "/background_color/dark"},
+		{`{"foreground_color":"#12"}`, "/foreground_color"},
+		{`{"foreground_color":{"light":"red","dark":"blue","extra":"red"}}`, "/foreground_color/extra"},
+	} {
+		v := &validator{}
+		v.surfaceColors(decode(t, tc.value), "")
+		expectIssue(t, v.issues, tc.want)
+	}
+}

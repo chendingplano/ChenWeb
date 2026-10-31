@@ -4,7 +4,7 @@
 // in its row within min/max, and "auto" (or nothing) sizes to content. Panes
 // are flex items of their split parent; a leaf pane places what it shows inside
 // its margins, with its alignment and scroll bars.
-import type { ElementInstance, FlowLayouterConfig, PageDescriptor, PaneSpec } from './types';
+import type { ElementInstance, FlowLayouterConfig, PageDescriptor, PaneSpec, SurfaceColors, SurfaceColor } from './types';
 
 function isFixed(size: string | undefined): size is string {
 	return !!size && size !== 'auto' && size !== 'elastic';
@@ -170,4 +170,13 @@ export function clampPx(value: number, min?: string, max?: string): number {
 	const lo = min?.endsWith('px') ? parseFloat(min) : 0;
 	const hi = max?.endsWith('px') ? parseFloat(max) : Infinity;
 	return Math.min(Math.max(value, lo), hi);
+}
+
+// Theme pairs follow the active application color scheme; omitted values inherit.
+export function surfaceColorStyle(colors: SurfaceColors, suppressBackground = false): string {
+ const css: string[] = [];
+ const value = (c: SurfaceColor) => typeof c === 'string' ? c : `light-dark(${c.light}, ${c.dark})`;
+ if (colors.background_color && !suppressBackground) css.push(`background-color: ${value(colors.background_color)}`);
+ if (colors.foreground_color) css.push(`color: ${value(colors.foreground_color)}`);
+ return css.join('; ');
 }

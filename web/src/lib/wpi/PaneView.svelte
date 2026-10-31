@@ -10,7 +10,7 @@
 	import PageView from './PageView.svelte';
 	import PanelView from './PanelView.svelte';
 	import PaneView from './PaneView.svelte';
-	import { clampPx, isLeaf, isResizable, paneStyle, placeStyle, splitStyle } from './layout';
+	import { clampPx, isLeaf, isResizable, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
 	import { paneInstanceId } from './panel-cache';
 	import { getRuntime } from './runtime.svelte';
 	import type { PaneSpec } from './types';
@@ -20,8 +20,9 @@
 		pane,
 		axis = undefined,
 		handle = null,
-		bare = false
-	}: { instanceId: string; pane: PaneSpec; axis?: 'width' | 'height'; handle?: 'start' | 'end' | null; bare?: boolean } = $props();
+		bare = false,
+		host = undefined
+	}: { instanceId: string; pane: PaneSpec; axis?: 'width' | 'height'; handle?: 'start' | 'end' | null; bare?: boolean; host?: PaneSpec } = $props();
 
 	const rt = getRuntime();
 	const id = $derived(paneInstanceId(instanceId, pane.pane_id));
@@ -69,18 +70,19 @@
 {/snippet}
 
 {#if bare}
-	{#if isLeaf(pane)}<PanelView {instanceId} paneId={pane.pane_id} />{:else}{@render split()}{/if}
+	{#if isLeaf(pane)}<PanelView {instanceId} paneId={pane.pane_id} pane={bare ? host : pane} />{:else}{@render split()}{/if}
 {:else}
 	<section
 		bind:this={section}
 		data-pane={pane.pane_id}
+		data-wpi-surface
 		class="relative min-h-0 min-w-0"
-		style={axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}
+		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(pane)}`}
 	>
 		{#if isLeaf(pane)}
 			<div style={placeStyle(pane)}>
 				<div style:display={model?.visible ? 'none' : 'contents'}>
-					<PanelView {instanceId} paneId={pane.pane_id} />
+					<PanelView {instanceId} paneId={pane.pane_id} pane={bare ? host : pane} />
 				</div>
 				{#each model?.opened ?? [] as opened (opened)}
 					<div style:display={opened === model?.visible ? 'contents' : 'none'}>
@@ -107,3 +109,8 @@
 		{/if}
 	</section>
 {/if}
+
+<style>
+ [data-wpi-surface] { color-scheme: light; }
+ :global(.dark) [data-wpi-surface] { color-scheme: dark; }
+</style>

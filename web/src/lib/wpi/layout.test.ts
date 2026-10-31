@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	clampPx,
+	surfaceColorStyle,
+
 	cssLength,
 	effectiveRoot,
 	fillsHeight,
@@ -142,4 +144,10 @@ test('split panes place their children inside their margins', () => {
  const css = splitStyle({ pane_id: 'root', split: 'rows', left_margin: '12px', top_margin: '2rem' });
  assert.match(css, /box-sizing: border-box/);
  assert.match(css, /padding: 2rem 0px 0px 12px/);
+});
+
+test('pane and panel colors honor pane background precedence and theme pairs', () => {
+	assert.equal(surfaceColorStyle({ background_color: { light: '#fff', dark: '#000' }, foreground_color: 'red' }), 'background-color: light-dark(#fff, #000); color: red');
+	assert.equal(surfaceColorStyle({ background_color: 'blue', foreground_color: 'white' }, true), 'color: white');
+	assert.equal(surfaceColorStyle({}), '');
 });

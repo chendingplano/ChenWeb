@@ -222,3 +222,7 @@ them, and their text SHALL be selectable.
 - **WHEN** an author saves an unnamed page and submits its information
 - **THEN** the editor stores a new page with that information and its current elements
 - **AND** subsequent saves update that page
+
+### Pane and panel colors
+
+Panes and panels MAY specify `background_color` and `foreground_color` as a CSS color or an object containing `light` and `dark` CSS colors. Missing or null means unset. The active display mode selects the corresponding color. A pane background overrides its own panel background; foreground colors inherit normally. A host pane replaces the root pane of a page opened inside it.

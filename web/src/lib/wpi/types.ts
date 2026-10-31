@@ -11,7 +11,10 @@ export type JsonObject = { [key: string]: Json };
 
 // One pane of a page layouter's tree (devdoc 2026102601 §3.2.2). A pane with
 // split is divided into children; one without is a leaf and holds a panel.
-export type PaneSpec = {
+export type SurfaceColor = string | { light: string; dark: string };
+export type SurfaceColors = { background_color?: SurfaceColor | null; foreground_color?: SurfaceColor | null };
+
+export type PaneSpec = SurfaceColors & {
 	pane_id: string;
 	split?: 'rows' | 'columns';
 	children?: PaneSpec[];
@@ -180,7 +183,7 @@ export type ElementLayouterCopy = { layouter: string; class?: ClassRow & { confi
 
 // The elements shown in one leaf pane, and the element layouter that arranges
 // them (devdoc §3.3).
-export type Panel = { elem_layouter: ElementLayouterCopy; elem_list?: ElementInstance[] };
+export type Panel = SurfaceColors & { elem_layouter: ElementLayouterCopy; elem_list?: ElementInstance[] };
 
 // A page (devdoc §3.2.3). Its sizes place it inside its page area: the app's,
 // or the pane it was opened in; binding_mode is the default of its elements

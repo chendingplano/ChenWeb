@@ -34,7 +34,7 @@
 			{:else if !inst.ready}
 				<p class="text-muted-foreground text-sm">{m.wpi_panel_loading()}</p>
 			{:else}
-				<PaneView {instanceId} pane={root} bare={!!host} />
+				<PaneView {instanceId} pane={root} bare={!!host} {host} />
 			{/if}
 		</div>
 	{/if}

@@ -34,7 +34,7 @@ var pageSizeAttrs = []string{"width", "height", "min_width", "min_height", "max_
 // paneAttrs apply to every pane; leafPaneAttrs concern how a leaf places content, so they
 // apply to leaf panes only (devdoc 2026102601 §3.2.2).
 var (
-	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable", "left_margin", "right_margin", "top_margin", "bottom_margin"}
+	paneAttrs     = []string{"width", "height", "min_width", "min_height", "max_width", "max_height", "resizable", "background_color", "foreground_color", "left_margin", "right_margin", "top_margin", "bottom_margin"}
 	leafPaneAttrs = []string{"hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar"}
 	scrollbars    = []string{"auto", "hide"}
 )
@@ -388,7 +388,8 @@ func (v *validator) panels(page map[string]any, val any, leaves map[string]bool)
 		if !ok {
 			continue
 		}
-		v.keys(p, path, []string{"elem_layouter"}, "elem_list")
+		v.keys(p, path, []string{"elem_layouter"}, "elem_list", "background_color", "foreground_color")
+		v.surfaceColors(p, path)
 		if el, ok := p["elem_layouter"]; ok {
 			v.elementLayouterCopy(el, path+"/elem_layouter")
 		}
@@ -525,6 +526,7 @@ func (v *validator) pane(val any, path string, ids, leaves map[string]bool) {
 		v.length(p, k, path, lengthKind{percent: true})
 	}
 	v.boolean(p, "resizable", path)
+	v.surfaceColors(p, path)
 	for _, k := range []string{"left_margin", "right_margin", "top_margin", "bottom_margin"} {
 		v.length(p, k, path, lengthKind{})
 	}
@@ -1611,4 +1613,31 @@ func (v *validator) orderBy(a map[string]any, path string) {
 
 func validatePageForSave(id string, body map[string]any) []Issue {
 	return newValidatorMode(KindPage, id, body, true).issues
+}
+
+// surfaceColors accepts a fixed CSS color or separate light and dark colors.
+func (v *validator) surfaceColors(obj map[string]any, path string) {
+	for _, key := range []string{"background_color", "foreground_color"} {
+		raw, exists := obj[key]
+		if !exists || raw == nil {
+			continue
+		}
+		if value, ok := raw.(string); ok {
+			if value == "auto" || !colorPattern.MatchString(value) {
+				v.errf(path+"/"+key, "invalid color %q", value)
+			}
+			continue
+		}
+		pair, ok := v.object(raw, path+"/"+key)
+		if !ok {
+			continue
+		}
+		v.keys(pair, path+"/"+key, []string{"light", "dark"})
+		for _, mode := range []string{"light", "dark"} {
+			value, ok := pair[mode].(string)
+			if !ok || value == "auto" || !colorPattern.MatchString(value) {
+				v.errf(path+"/"+key+"/"+mode, "must be a CSS color")
+			}
+		}
+	}
 }
