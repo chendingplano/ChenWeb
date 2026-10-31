@@ -192,7 +192,7 @@
    {@const panel = page.panels?.[pane.pane_id]}
    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
    <div style={placeStyle(pane)} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>
-    <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}; {surfaceColorStyle(panel ?? {}, !!colors.background_color)}" data-flow-layout use:flowGeometry={{ config, count: items.length }}>
+    <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}; {surfaceColorStyle(panel ?? {}, !!colors.background_color)}" data-flow-layout use:flowGeometry={{ config, count: items.length, sizeToRows: !items.some((it) => !('error' in it.entry) && (it.entry.desc.width === 'elastic' || (typeof it.entry.desc.width === 'string' && it.entry.desc.width.endsWith('%')))) }}>
      {#each items as item (item.node.id)}
       <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config)} data-flow-item>
        {#if 'error' in item.entry}

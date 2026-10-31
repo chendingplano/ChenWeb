@@ -27,7 +27,7 @@
 		data: { element: 'text', pane: 'main', attrs: { text: `Item ${i}` }, class: { code_module_id: 'text' } }
 	}));
 	const noop = () => {};
- const runtimeBundle = { app: { descriptor_id: 'runtime', schema_version: '0.5', initial_page: 'p' }, pages: { p: { descriptor_id: 'p', schema_version: '0.5', page_layouter: { layouter: 'single-pane', root: { pane_id: 'root', background_color: 'red', foreground_color: 'white', split: 'rows', children: [{ pane_id: 'middle', background_color: 'blue', foreground_color: 'yellow', split: 'columns', children: [{ pane_id: 'main' }, { pane_id: 'right' }] }, { pane_id: 'bottom' }] } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, background_color: 'purple', elem_list: [] } } } }, warnings: [] } as unknown as Bundle;
+ const runtimeBundle = { app: { descriptor_id: 'runtime', schema_version: '0.5', initial_page: 'p' }, pages: { p: { descriptor_id: 'p', schema_version: '0.5', page_layouter: { layouter: 'single-pane', root: { pane_id: 'root', background_color: 'red', foreground_color: 'white', split: 'rows', children: [{ pane_id: 'middle', background_color: 'blue', foreground_color: 'yellow', split: 'columns', children: [{ pane_id: 'main' }, { pane_id: 'right' }] }, { pane_id: 'bottom' }] } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter', config: { max_num_elems: 2 } }, background_color: 'purple', elem_list: Array.from({ length: 4 }, (_, i) => ({ element: 'text', text: `Item ${i}`, width: '60px', class: { code_module_id: 'text' } })) } } } }, warnings: [] } as unknown as Bundle;
 </script>
 
 <button id="nested" onclick={() => {

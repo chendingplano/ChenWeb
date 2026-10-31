@@ -58,6 +58,10 @@ with tempfile.TemporaryFile(mode='w+') as log:
    positions = items.evaluate_all('(xs) => xs.map(x => x.offsetTop)')
    assert positions[0] == positions[1] and positions[2] == positions[3] and positions[2] > positions[1], positions
    assert page.locator('[data-wpi-page-preview] [data-flow-decoration]').count() >= 2
+   panel_rect = page.locator('[data-wpi-page-preview] [data-flow-layout]').bounding_box()
+   pane_rect = page.locator('[data-editor-pane="main"]').bounding_box()
+   row_rect = items.evaluate_all("xs => { const r = xs.slice(0, 2).map(x => x.getBoundingClientRect()); return {left: r[0].left, right: r[1].right}; }")
+   assert abs((row_rect['left'] + row_rect['right']) / 2 - (pane_rect['x'] + pane_rect['width'] / 2)) < 2, (row_rect, pane_rect, panel_rect)
    count.fill('0'); count.blur()
    config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
    assert config == {'column_gap':'2rem', 'custom':'retained', 'min_elem_width':'100px', 'max_num_elems':0, 'elem_separator':'thin_solid_line'}, config
@@ -121,6 +125,12 @@ with tempfile.TemporaryFile(mode='w+') as log:
    assert runtime_pane.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 0, 255)'
    assert runtime_pane.evaluate('(e) => getComputedStyle(e).color') == 'rgb(255, 255, 0)'
    assert runtime_pane.locator('[data-flow-layout]').evaluate('(e) => getComputedStyle(e.parentElement).backgroundColor') == 'rgba(0, 0, 0, 0)'
+   runtime_items = runtime_pane.locator('[data-flow-item]')
+   expect(runtime_items).to_have_count(4)
+   page.wait_for_timeout(200)
+   runtime_bounds = runtime_items.evaluate_all('xs => xs.slice(0, 2).map(x => x.getBoundingClientRect().toJSON())')
+   runtime_box = runtime_pane.bounding_box()
+   assert abs((runtime_bounds[0]['left'] + runtime_bounds[1]['right']) / 2 - (runtime_box['x'] + runtime_box['width'] / 2)) < 2, (runtime_bounds, runtime_box)
    assert not errors, errors
    browser.close()
  finally:

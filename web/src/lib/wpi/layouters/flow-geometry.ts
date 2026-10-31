@@ -4,10 +4,11 @@ import type { FlowLayouterConfig, FlowSeparator } from '../types';
 // natural line would exceed the configured count, then draw in the gaps.
 export function flowGeometry(
 	node: HTMLElement,
-	initial: { config: FlowLayouterConfig; count: number }
+	initial: { config: FlowLayouterConfig; count: number; sizeToRows?: boolean; sizeTarget?: HTMLElement }
 ) {
 	let options = initial;
 	let frame = 0;
+	let rowWidth = '';
 	const originalWhiteSpace = new WeakMap<HTMLElement, string>();
 	const clear = () => node.querySelectorAll(':scope > [data-flow-decoration]').forEach((n) => n.remove());
 	const line = (
@@ -41,6 +42,8 @@ export function flowGeometry(
 	const layout = () => {
 		frame = 0;
 		clear();
+		const target = options.sizeTarget ?? node;
+		if (options.sizeToRows) target.style.removeProperty('width');
 		const items = Array.from(node.querySelectorAll<HTMLElement>(':scope > [data-flow-item]'));
 		node.style.rowGap = '0px';
 		const rowAlignment = options.config.rows_alignment ?? 'top';
@@ -143,6 +146,15 @@ export function flowGeometry(
 						item.style.marginBottom = `${parseFloat(getComputedStyle(item).marginBottom) + extra}px`;
 					});
 		}
+		// A flex container's intrinsic width ignores forced row breaks. Size the
+		// panel to the widest actual row before the pane positions it.
+		if (options.sizeToRows && rows.length) {
+			const width = Math.max(...rows.map((row) =>
+				Math.max(...row.map((item) => item.offsetLeft + item.offsetWidth)) -
+				Math.min(...row.map((item) => item.offsetLeft))));
+			rowWidth = `${width}px`;
+			target.style.width = rowWidth;
+		}
 		const bounds = rows.map((row) => ({
 			left: Math.min(...row.map((e) => e.offsetLeft)),
 			right: Math.max(...row.map((e) => e.offsetLeft + e.offsetWidth)),
@@ -179,6 +191,7 @@ export function flowGeometry(
 	};
 	const observer = new ResizeObserver(schedule);
 	observer.observe(node);
+	if ((options.sizeTarget ?? node).parentElement) observer.observe((options.sizeTarget ?? node).parentElement!);
 	const observed = new WeakSet<Element>();
 	const observeItems = () =>
 		node.querySelectorAll('[data-flow-item]').forEach((item) => {
@@ -193,6 +206,7 @@ export function flowGeometry(
 	schedule();
 	return {
 		update(next: typeof initial) {
+			if (options.sizeToRows && !next.sizeToRows && (options.sizeTarget ?? node).style.width === rowWidth) (options.sizeTarget ?? node).style.removeProperty('width');
 			options = next;
 			observeItems();
 			schedule();

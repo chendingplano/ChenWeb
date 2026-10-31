@@ -8,6 +8,7 @@
 	import { flowGeometry } from './flow-geometry';
 
 	let { instanceId, page, paneId, panel }: LayouterProps = $props();
+	let flowNode = $state<HTMLElement>();
 
 	// The panel's own parameters replace its class copy's whole (design D2).
 	const config = $derived(panel.elem_layouter.config ?? panel.elem_layouter.class?.config ?? {});
@@ -18,10 +19,11 @@
 </script>
 
 <div
+	bind:this={flowNode}
 	class="relative flex flex-wrap select-text"
 	style="{flowStyle(config)}; {panelStyle(sized)}"
 	data-flow-layout
-	use:flowGeometry={{ config, count: entries.length }}
+	use:flowGeometry={{ config, count: entries.length, sizeTarget: flowNode?.parentElement ?? undefined, sizeToRows: !sized.some((e) => 'width' in e && (e.width === 'elastic' || (typeof e.width === 'string' && e.width.endsWith('%')))) }}
 >
 	{#each entries as entry, i (i)}
 		{#if 'error' in entry}
