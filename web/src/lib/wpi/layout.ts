@@ -54,7 +54,7 @@ export function flowStyle(config: FlowLayouterConfig = {}): string {
 	].join('; ');
 }
 
-export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'min_width' | 'max_width'>): string {
+export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'min_width' | 'max_width'>, config?: FlowLayouterConfig): string {
 	const css: string[] = [];
 	const width = typeof el.width === 'number' ? `${el.width}px` : el.width;
 	const height = typeof el.height === 'number' ? `${el.height}px` : el.height;
@@ -65,8 +65,16 @@ export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'mi
 	} else {
 		css.push('flex: 0 0 auto');
 	}
-	if (el.min_width) css.push(`min-width: ${el.min_width}`);
-	if (el.max_width) css.push(`max-width: ${el.max_width}`);
+	if (config) {
+		const min = config.min_elem_width ?? '20px';
+		const max = config.max_elem_width ?? '300px';
+		css.push(`min-width: ${el.min_width ? `max(${min}, ${el.min_width})` : min}`);
+		css.push(`max-width: ${el.max_width ? `min(${max}, ${el.max_width})` : max}`);
+		css.push(`min-height: ${config.min_row_height ?? '30px'}`, `max-height: ${config.max_row_height ?? '200px'}`);
+	} else {
+		if (el.min_width) css.push(`min-width: ${el.min_width}`);
+		if (el.max_width) css.push(`max-width: ${el.max_width}`);
+	}
 	if (isFixed(height)) css.push(`height: ${height}`);
 	return css.join('; ');
 }

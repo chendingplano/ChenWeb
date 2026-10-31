@@ -17,6 +17,7 @@ func TestFlowLayouterConfig(t *testing.T) {
 		`{"horizontal_alignment":"center","vertical_alignment":"center","rows_alignment":"center"}`,
 		`{"horizontal_alignment":"end","vertical_alignment":"bottom","rows_alignment":"bottom"}`,
 		`{"horizontal_alignment":"space-between","vertical_alignment":"stretch","rows_alignment":"space-between"}`,
+		`{"min_row_height":"30px","max_row_height":"200px","min_elem_width":"20px","max_elem_width":"300px","max_num_elems":0,"row_separator":"thin_solid_line","elem_separator":"bold_dash_line"}`,
 	} {
 		t.Run(config, func(t *testing.T) {
 			expectIssue(t, ValidateDescriptor(KindPage, "p", page(t, config)), "")
@@ -35,6 +36,10 @@ func TestFlowLayouterConfig(t *testing.T) {
 		{`{"horizontal_alignment":"left"}`, path + "/horizontal_alignment"},
 		{`{"vertical_alignment":"start"}`, path + "/vertical_alignment"},
 		{`{"rows_alignment":"stretch"}`, path + "/rows_alignment"},
+		{`{"max_num_elems":-1}`, path + "/max_num_elems"},
+		{`{"max_num_elems":1.5}`, path + "/max_num_elems"},
+		{`{"min_row_height":"-1px"}`, path + "/min_row_height"},
+		{`{"elem_separator":"dotted"}`, path + "/elem_separator"},
 	} {
 		t.Run(tc.config, func(t *testing.T) {
 			expectIssue(t, ValidateDescriptor(KindPage, "p", page(t, tc.config)), tc.path)

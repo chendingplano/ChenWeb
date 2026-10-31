@@ -46,7 +46,7 @@ var (
 var (
 	pageLayouterModules    = []string{"page-layouter"}
 	elementLayouterModules = map[string][]string{
-		"flow-layouter": {"column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment"},
+		"flow-layouter": {"column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment", "min_row_height", "max_row_height", "min_elem_width", "max_elem_width", "max_num_elems", "row_separator", "elem_separator"},
 	}
 )
 
@@ -480,6 +480,17 @@ func (v *validator) layouterConfig(module string, val any, path string) {
 	if module == "flow-layouter" {
 		v.matching(m, "column_gap", path, flowGapPattern)
 		v.matching(m, "row_gap", path, flowGapPattern)
+		for _, key := range []string{"min_row_height", "max_row_height", "min_elem_width", "max_elem_width"} {
+			v.matching(m, key, path, flowGapPattern)
+		}
+		if value, present := m["max_num_elems"]; present {
+			if n, ok := asInt(value); !ok || n < 0 {
+				v.errf(path+"/max_num_elems", "must be a non-negative integer")
+			}
+		}
+		separators := []string{"none", "thin_solid_line", "norm_solid_line", "bold_solid_line", "thin_dash_line", "norm_dash_line", "bold_dash_line"}
+		v.oneOf(m, "row_separator", path, separators)
+		v.oneOf(m, "elem_separator", path, separators)
 		v.oneOf(m, "horizontal_alignment", path, []string{"start", "center", "end", "space-between"})
 		v.oneOf(m, "vertical_alignment", path, []string{"top", "center", "bottom", "stretch"})
 		v.oneOf(m, "rows_alignment", path, []string{"top", "center", "bottom", "space-between"})

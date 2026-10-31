@@ -159,7 +159,16 @@ export type FlowLayouterConfig = {
 	horizontal_alignment?: 'start' | 'center' | 'end' | 'space-between';
 	vertical_alignment?: 'top' | 'center' | 'bottom' | 'stretch';
 	rows_alignment?: 'top' | 'center' | 'bottom' | 'space-between';
+	min_row_height?: string;
+	max_row_height?: string;
+	min_elem_width?: string;
+	max_elem_width?: string;
+	max_num_elems?: number;
+	row_separator?: FlowSeparator;
+	elem_separator?: FlowSeparator;
 };
+
+export type FlowSeparator = 'none' | 'thin_solid_line' | 'norm_solid_line' | 'bold_solid_line' | 'thin_dash_line' | 'norm_dash_line' | 'bold_dash_line';
 
 // A page's copy of a page layouter class: the whole class in class, and the
 // page's own tree, which replaces the class's when set.

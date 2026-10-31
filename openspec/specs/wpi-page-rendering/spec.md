@@ -59,7 +59,7 @@ clicked row's record as `$record`.
 
 ### Requirement: Flow layouter and sizes
 The `flow-layouter` SHALL place a page's elements left to right and wrap to a new row when
-the next element does not fit. A fixed width SHALL be used as given; `elastic` widths SHALL
+the next element does not fit. A fixed width SHALL be used subject to the flow width limits; `elastic` widths SHALL
 share the remaining row width within each element's `min_width` and `max_width`; `auto`
 SHALL size the element to its content. Widths SHALL follow pane resizes.
 
@@ -91,13 +91,24 @@ application theme, so the page follows light and dark mode.
 - **THEN** the page is 300px tall with a vertical scroll bar
 
 ### Requirement: Flow spacing and alignment
-A page MAY set `layouter_config` for `flow-layouter`. It SHALL accept only
+A panel MAY set `elem_layouter.config` for `flow-layouter`. It SHALL accept
 `column_gap` and `row_gap` (nonnegative decimal lengths in `px` or `rem`, default
 `0.75rem`), `horizontal_alignment` (`start`, `center`, `end`, `space-between`,
 default `start`), `vertical_alignment` (`top`, `center`, `bottom`, `stretch`, default
 `top`), and `rows_alignment` (`top`, `center`, `bottom`, `space-between`, default
-`top`). Unknown keys, non-object config and unsupported values SHALL be rejected
-at their descriptor paths. An omitted or empty config SHALL preserve existing layout.
+`top`). It also accepts `min_row_height` and `max_row_height` (defaults `30px` and
+`200px`), `min_elem_width` and `max_elem_width` (defaults `20px` and `300px`),
+`max_num_elems` (default 50; zero is unlimited), and `row_separator` and
+`elem_separator` (default `none`; thin, norm and bold solid or dash lines).
+Dimensions are nonnegative `px` or `rem` lengths, and the count is a nonnegative
+integer. Unknown keys, non-object config and unsupported values SHALL be rejected
+at their descriptor paths. Missing settings use their defaults, including in older copies.
+
+The layouter SHALL clamp wrapper dimensions to the configured limits. Overflowing
+non-text elements SHALL scroll; text exceeding the row maximum SHALL wrap, truncate with
+an ellipsis, and expose its full text on hover. The row limit SHALL apply after natural wrapping.
+Horizontal separators span the widest row; vertical separators span their row. Thin,
+normal, and bold lines measure 1, 2, and 3 pixels respectively.
 
 Horizontal alignment SHALL distribute leftover space independently in each row after
 elastic growth and width limits. Row breaks and source order SHALL be preserved.
@@ -107,7 +118,7 @@ heights. Definite page height SHALL reach the flow container. Rows alignment SHA
 distribute spare vertical space without stretching rows; overflowing rows SHALL fall
 back to top placement. Content-height pages SHALL have no extra height to distribute.
 Space-between SHALL retain configured minimum gaps; a single item or row SHALL start
-at the start/top edge. Fixed oversized items SHALL retain normal overflow.
+at the start/top edge. Items larger than the containing panel SHALL retain normal overflow.
 
 #### Scenario: Exact fit and resized pane
 - **WHEN** seven 240px elements have 16px gaps in a 1008px layout

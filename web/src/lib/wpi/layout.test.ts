@@ -66,6 +66,14 @@ test('flow item sizes', () => {
 	assert.equal(flowItemStyle({ width: '100%', height: '48px' }), 'flex: 0 0 100%; width: 100%; height: 48px');
 });
 
+test('flow constraints apply defaults and honor narrower element limits', () => {
+	const css = flowItemStyle({ width: '400px', min_width: '40px', max_width: '250px' }, {});
+	assert.match(css, /min-width: max\(20px, 40px\)/);
+	assert.match(css, /max-width: min\(300px, 250px\)/);
+	assert.match(css, /min-height: 30px/);
+	assert.match(css, /max-height: 200px/);
+});
+
 test('a panel is as wide as its content, or its pane with elastic or percentage elements', () => {
 	assert.match(panelStyle([{ width: '160px' }, {}]), /max-width: 100%/);
 	assert.match(panelStyle([{ width: 'elastic' }]), /width: 100%/);

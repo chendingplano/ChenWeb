@@ -5,24 +5,41 @@
 	import ErrorBox from '../ErrorBox.svelte';
 	import { flowItemStyle, flowStyle, panelStyle } from '../layout';
 	import type { LayouterProps } from './index';
+	import { flowGeometry } from './flow-geometry';
 
 	let { instanceId, page, paneId, panel }: LayouterProps = $props();
 
 	// The panel's own parameters replace its class copy's whole (design D2).
 	const config = $derived(panel.elem_layouter.config ?? panel.elem_layouter.class?.config ?? {});
-	const entries = $derived((panel.elem_list ?? []).map((entry, i) => resolveEntry(page, paneId, entry, i)));
+	const entries = $derived(
+		(panel.elem_list ?? []).map((entry, i) => resolveEntry(page, paneId, entry, i))
+	);
 	const sized = $derived(entries.map((e) => ('error' in e ? {} : e.desc)));
 </script>
 
-<div class="flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(sized)}" data-flow-layout>
+<div
+	class="relative flex flex-wrap select-text"
+	style="{flowStyle(config)}; {panelStyle(sized)}"
+	data-flow-layout
+	use:flowGeometry={{ config, count: entries.length }}
+>
 	{#each entries as entry, i (i)}
 		{#if 'error' in entry}
-			<ErrorBox title={m.wpi_error_title({ descriptor: page.descriptor_id })} message={entry.error} />
+			<div data-flow-item>
+				<ErrorBox
+					title={m.wpi_error_title({ descriptor: page.descriptor_id })}
+					message={entry.error}
+				/>
+			</div>
 		{:else}
 			<div
 				class="min-w-0"
-				class:stretch={config.vertical_alignment === 'stretch' && (entry.desc.height === undefined || entry.desc.height === 'auto' || entry.desc.height === 'elastic')}
-				style={flowItemStyle(entry.desc)}
+				class:stretch={config.vertical_alignment === 'stretch' &&
+					(entry.desc.height === undefined ||
+						entry.desc.height === 'auto' ||
+						entry.desc.height === 'elastic')}
+				style={flowItemStyle(entry.desc, config)}
+				class:flow-text={entry.module === 'text'}
 				data-flow-item
 			>
 				<ElementView {instanceId} element={entry} />
@@ -32,6 +49,10 @@
 </div>
 
 <style>
+	[data-flow-item] {
+		box-sizing: border-box;
+		overflow: auto;
+	}
 	.stretch {
 		display: flex;
 		flex-direction: column;
