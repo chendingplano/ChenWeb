@@ -249,7 +249,7 @@
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
   <div style={placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}>
-   <div style="{pageBoxStyle(page)}; width:100%; height:100%; max-width:none; max-height:none" data-page={page.descriptor_id} data-page-box>
+   <div style="{pageBoxStyle(page)}; {(!page.height || page.height === 'auto') ? 'height:100%' : ''}" data-page={page.descriptor_id} data-page-box>
     {@render paneTree(root, undefined)}
    </div>
   </div>

@@ -10,7 +10,7 @@
  let action = $state('');
  setNodeActions({ duplicate: (id) => action = `duplicate:${id}`, remove: (id) => action = `remove:${id}`, editClass: (id) => action = `edit:${id}` });
  let locale = $state<'en' | 'zh-cn'>('en');
- let mode = $state<'panel' | 'panes'>('panel');
+ let mode = $state<'page' | 'panel' | 'panes'>('panel');
  let darkMode = $state(false);
 	overwriteGetLocale(() => locale);
 	let page = $state<JsonObject>({
@@ -34,6 +34,7 @@
  const runtimeBundle = { app: { descriptor_id: 'runtime', schema_version: '0.5', initial_page: 'p' }, pages: { p: { descriptor_id: 'p', schema_version: '0.5', page_layouter: { layouter: 'single-pane', root: { pane_id: 'root', background_color: 'red', foreground_color: 'white', split: 'rows', children: [{ pane_id: 'middle', background_color: 'blue', foreground_color: 'yellow', split: 'columns', children: [{ pane_id: 'main' }, { pane_id: 'right' }] }, { pane_id: 'bottom' }] } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter', config: { max_num_elems: 2 } }, background_color: 'purple', elem_list: Array.from({ length: 4 }, (_, i) => ({ element: 'text', text: `Item ${i}`, width: '60px', class: { code_module_id: 'text' } })) } } } }, warnings: [] } as unknown as Bundle;
 </script>
 
+<button id="page-mode" onclick={() => mode = mode === 'page' ? 'panel' : 'page'}>Page mode</button>
 <button id="nested" onclick={() => {
  page = { ...page, page_layouter: { layouter: 'single-pane', root: { pane_id: 'root', background_color: 'red', foreground_color: 'white', split: 'rows', children: [ { pane_id: 'middle', background_color: 'blue', foreground_color: 'yellow', split: 'columns', children: [{ pane_id: 'main' }, { pane_id: 'second', background_color: 'green', foreground_color: 'black' }] }, { pane_id: 'bottom' } ] } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, background_color: 'purple' } } };
 }}>Nested</button>

@@ -191,7 +191,8 @@ layout and element components inside a resizable page surface on the canvas, ini
 rendered element SHALL have a transparent selection overlay that selects its editor
 node and opens its properties without triggering its page action. The preview SHALL
 use the page's stored data sources and preserve element instance attributes when
-properties change. When flow storage supports persistence, the flow data carries the
+properties change. The page box SHALL reflect its configured width, height and size
+limits inside the resizable canvas preview; unspecified dimensions fill the preview. When flow storage supports persistence, the flow data carries the
 loaded page alongside its editable elements.
 
 ### Requirement: Interactive page preview
