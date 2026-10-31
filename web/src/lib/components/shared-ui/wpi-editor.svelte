@@ -43,6 +43,7 @@
 	import { localized } from '$lib/wpi/text';
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 	import { elementIssueLocation, isElementNode, nodeData, nodeViewJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
+	import { resizePageDimension } from './canvas/page-resize';
 	import { addPane, deletePane, mergePane, resizePane, adjustPaneLimits, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
@@ -193,7 +194,6 @@
 	let canvasRevision = $state(0);
 	const DEFAULT_PREVIEW_SIZE = { width: 1000, height: 650 };
 	let previewSize = $state({ ...DEFAULT_PREVIEW_SIZE });
-	let outerStartViewport = { x: 0, y: 0 };
 	function centerPreview() {
 		viewport = centeredPageViewport(previewSize, { width: canvasWidth, height: canvasHeight });
 	}
@@ -1106,7 +1106,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview {darkMode} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onOuterShift={(x, y, start) => { if (start) outerStartViewport = { x: viewport.x, y: viewport.y }; else viewport = { ...viewport, x: outerStartViewport.x + x * viewport.zoom, y: outerStartViewport.y + y * viewport.zoom }; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onOuterResize={(pane, axis, value, parentSize, pageSize) => { if (!loadedPage) return; const next = pane ? resizePane(loadedPage, pane, axis, value, parentSize) : loadedPage; const max = next[`max_${axis}`]; const match = typeof max === 'string' ? max.match(/^([\d.]+)\s*px$/) : null; loadedPage = { ...next, [axis]: `${pageSize}px`, ...(match && pageSize > Number(match[1]) ? { [`max_${axis}`]: `${pageSize}px` } : {}) }; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
+							<PagePreview {darkMode} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
 						{/key}
 					</ViewportPortal>
 				{/if}

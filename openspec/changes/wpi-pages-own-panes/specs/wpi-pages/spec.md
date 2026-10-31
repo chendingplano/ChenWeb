@@ -120,9 +120,14 @@ attributes; *Panel* SHALL show the element layouter of the selected leaf pane's 
 `config`. Selecting an element SHALL return the panel to that element. Edits SHALL update the
 in-memory descriptor, refresh the preview and be undoable. The frame SHALL be movable by
 pointer and keyboard and initially aligned immediately left of the canvas settings button. The
-preview SHALL be resizable by pointer and keyboard; resizing changes the editor surface rather
-than page descriptor dimensions, and SHALL be undoable. Saving SHALL store the page with the
+preview SHALL be resizable by pointer and keyboard. Dragging a page edge SHALL update that
+page's corresponding width or height; dragging the preview corner SHALL resize the preview and
+update the corresponding page dimensions. These changes SHALL be undoable. Saving SHALL store the page with the
 server's class copies and adopt the stored page the server returns.
+
+#### Scenario: Resize a page from its edge
+- **WHEN** the author drags the right edge of a 500px-wide page 100px to the right at 100% zoom
+- **THEN** the page's width attribute becomes `600px`, and its height is unchanged
 
 Under *Page* and *Panes*, the page layouter selector SHALL list the latest active page layouter classes
 from `kb.wpi_descriptors`. Choosing a class SHALL apply its pane tree and update the page's class copy. Panels in matching

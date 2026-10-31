@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { setNodeActions } from '../../src/lib/components/shared-ui/canvas/node-actions';
+	import { resizePageDimension } from '../../src/lib/components/shared-ui/canvas/page-resize';
+ import { setNodeActions } from '../../src/lib/components/shared-ui/canvas/node-actions';
  import WpiApp from '../../src/lib/wpi/WpiApp.svelte';
  import type { Bundle } from '../../src/lib/wpi/types';
  import PageConfigPanel from '../../src/lib/components/shared-ui/canvas/PageConfigPanel.svelte';
@@ -8,6 +9,7 @@
 	import type { JsonObject } from '../../src/lib/wpi/types';
 	let selectedId = $state<string | null>(null);
  let action = $state('');
+ let previewSize = $state({ width: 1100, height: 400 });
  setNodeActions({ duplicate: (id) => action = `duplicate:${id}`, remove: (id) => action = `remove:${id}`, editClass: (id) => action = `edit:${id}` });
  let locale = $state<'en' | 'zh-cn'>('en');
  let mode = $state<'page' | 'panel' | 'panes'>('panel');
@@ -68,9 +70,9 @@
 <div id="runtime"><WpiApp bundle={runtimeBundle} editorPreview /></div>
 <pre id="page">{JSON.stringify(page)}</pre>
 <div style="position:relative; width:1100px; height:400px">
-	<PagePreview {darkMode} descriptor={page} {nodes} {selectedId} selectedPane={null} size={{ width: 1100, height: 400 }} zoom={1}
-		onResizeStart={noop} onResize={noop} onSelect={(id) => selectedId = id} onSelectPane={noop} onMeasure={noop}
-		onPaneResize={noop} onOuterResize={noop} onOuterShift={noop} onMeasurePanes={noop} />
+	<PagePreview {darkMode} descriptor={page} {nodes} {selectedId} selectedPane={null} size={previewSize} zoom={1}
+		onResizeStart={noop} onResize={(value) => previewSize = value} onSelect={(id) => selectedId = id} onSelectPane={noop} onMeasure={noop}
+		onPaneResize={noop} onPageResize={(axis, value) => page = resizePageDimension(page, axis, value)} onPageCancel={(original) => page = original} onMeasurePanes={noop} />
 </div>
 <style>
  :global(.flex) { display:flex; }

@@ -21,16 +21,17 @@
  import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec, SurfaceColors, PaneBorder } from '$lib/wpi/types';
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
  import { MIN_PANE_SIZE } from './pane-edit';
+ import { pageDragSize, type PageSide } from './page-resize';
 
- let { darkMode, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onOuterResize, onOuterShift, onMeasurePanes }: {
+ let { darkMode, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes }: {
   darkMode: boolean; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
   onPaneResize: (a: string, b: string, axis: 'width' | 'height', first: number, second: number, parentSize: number) => void;
   onMeasurePanes: (panes: { id: string; width: number; height: number; parentWidth: number; parentHeight: number }[]) => void;
-  onOuterShift: (x: number, y: number, start: boolean) => void;
-  onOuterResize: (pane: string | null, axis: 'width' | 'height', value: number, parentSize: number, pageSize: number) => void;
+  onPageResize: (axis: 'width' | 'height', value: number) => void;
+  onPageCancel: (original: JsonObject) => void;
   onMeasure: (id: string, size: { width: number; height: number }) => void;
  } = $props();
  const actions = getNodeActions();
@@ -54,10 +55,12 @@
    onMeasurePanes(Array.from(previewElement.querySelectorAll<HTMLElement>('[data-pane-id]')).map((pane) => ({ id: pane.dataset.paneId!, width: pane.getBoundingClientRect().width / (zoom || 1), height: pane.getBoundingClientRect().height / (zoom || 1), parentWidth: (pane.parentElement?.getBoundingClientRect().width ?? 0) / (zoom || 1), parentHeight: (pane.parentElement?.getBoundingClientRect().height ?? 0) / (zoom || 1) })));
   });
  }
- let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number } | null = null;
+ let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number; pageWidth: number; pageHeight: number; original: JsonObject; movedX: boolean; movedY: boolean } | null = null;
  function startResize(event: PointerEvent) {
   if (event.button !== 0) return;
-  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, ...size, zoom: zoom || 1 };
+  const box = previewElement.querySelector<HTMLElement>('[data-page-box]')?.getBoundingClientRect();
+  if (!box) return;
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, ...size, zoom: zoom || 1, pageWidth: box.width / (zoom || 1), pageHeight: box.height / (zoom || 1), original: JSON.parse(JSON.stringify(descriptor)), movedX: false, movedY: false };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   onResizeStart();
   event.stopPropagation();
@@ -65,7 +68,11 @@
  }
  function resize(event: PointerEvent) {
   if (!drag || drag.id !== event.pointerId) return;
-  onResize({ width: Math.max(240, Math.round(drag.width + (event.clientX - drag.x) / drag.zoom)), height: Math.max(160, Math.round(drag.height + (event.clientY - drag.y) / drag.zoom)) });
+  const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+  onResize({ width: Math.max(240, Math.round(drag.width + dx / drag.zoom)), height: Math.max(160, Math.round(drag.height + dy / drag.zoom)) });
+  drag.movedX ||= dx !== 0; drag.movedY ||= dy !== 0;
+  if (drag.movedX) onPageResize('width', pageDragSize(drag.pageWidth, dx, drag.zoom, 'right'));
+  if (drag.movedY) onPageResize('height', pageDragSize(drag.pageHeight, dy, drag.zoom, 'bottom'));
   event.stopPropagation();
  }
  function resizeKey(event: KeyboardEvent) {
@@ -74,6 +81,9 @@
   else if (event.key === 'ArrowDown') dy = step; else if (event.key === 'ArrowUp') dy = -step; else return;
   onResizeStart();
   onResize({ width: Math.max(240, size.width + dx), height: Math.max(160, size.height + dy) });
+  const box = previewElement.querySelector<HTMLElement>('[data-page-box]')?.getBoundingClientRect();
+  if (box && dx) onPageResize('width', pageDragSize(box.width / (zoom || 1), dx, 1, 'right'));
+  if (box && dy) onPageResize('height', pageDragSize(box.height / (zoom || 1), dy, 1, 'bottom'));
   measurePanes(); event.preventDefault(); event.stopPropagation();
  }
  let paneDrag: { pointer: number; start: number; first: number; second: number; a: string; b: string; axis: 'width' | 'height'; left: HTMLElement; right: HTMLElement; value: number; oldLeft: string; oldRight: string; min: number; max: number } | null = null;
@@ -105,39 +115,28 @@
   if (!cancel && Math.abs(d.value - d.first) >= 1) onPaneResize(d.a, d.b, d.axis, d.value, Math.round(d.first + d.second - d.value), d.left.parentElement!.getBoundingClientRect()[d.axis] / (zoom || 1));
   event.stopPropagation();
  }
- type Side = 'top' | 'bottom' | 'left' | 'right';
- let outerDrag: { pointer: number; side: Side; axis: 'width' | 'height'; start: number; initial: number; page: number; pane: HTMLElement | null; oldFlex: string; id: string | null; value: number; parentSize: number } | null = null;
+ type Side = PageSide;
+ let outerDrag: { pointer: number; side: Side; axis: 'width' | 'height'; start: number; initial: number; zoom: number; original: JsonObject } | null = null;
  function startOuter(event: PointerEvent, side: Side) {
   if (event.button !== 0) return;
   const axis = side === 'left' || side === 'right' ? 'width' : 'height';
-  let pane = (event.currentTarget as HTMLElement).parentElement as HTMLElement | null;
-  while (pane && pane.dataset.paneAxis !== axis) pane = pane.parentElement?.closest<HTMLElement>('[data-pane-axis]') ?? null;
-  const initial = pane ? pane.getBoundingClientRect()[axis] / (zoom || 1) : size[axis];
-  const parentSize = pane?.parentElement ? pane.parentElement.getBoundingClientRect()[axis] / (zoom || 1) : size[axis];
-  outerDrag = { pointer: event.pointerId, side, axis, start: axis === 'width' ? event.clientX : event.clientY, initial, page: size[axis], pane, oldFlex: pane?.style.flex ?? '', id: pane?.dataset.paneId ?? null, value: initial, parentSize };
+  const box = (event.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
+  outerDrag = { pointer: event.pointerId, side, axis, start: axis === 'width' ? event.clientX : event.clientY, initial: box[axis] / (zoom || 1), zoom: zoom || 1, original: JSON.parse(JSON.stringify(descriptor)) };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  onResizeStart(); onOuterShift(0, 0, true); event.stopPropagation(); event.preventDefault();
+  onResizeStart(); event.stopPropagation(); event.preventDefault();
  }
  function moveOuter(event: PointerEvent) {
   const d = outerDrag;
   if (!d || d.pointer !== event.pointerId) return;
-  const sign = d.side === 'left' || d.side === 'top' ? -1 : 1;
-  const delta = sign * ((d.axis === 'width' ? event.clientX : event.clientY) - d.start) / (zoom || 1);
-  const change = Math.max(MIN_PANE_SIZE - d.initial, (d.axis === 'width' ? 240 : 160) - d.page, delta);
-  d.value = Math.round(d.initial + change);
-  if (d.pane) d.pane.style.flex = `0 0 ${d.value}px`;
-  onResize({ ...size, [d.axis]: Math.round(d.page + change) });
-  onOuterShift(d.side === 'left' ? -change : 0, d.side === 'top' ? -change : 0, false);
+  const movement = (d.axis === 'width' ? event.clientX : event.clientY) - d.start;
+  onPageResize(d.axis, pageDragSize(d.initial, movement, d.zoom, d.side));
   event.stopPropagation();
  }
  function endOuter(event: PointerEvent, cancel = false) {
   const d = outerDrag;
   if (!d || d.pointer !== event.pointerId) return;
-  if (d.pane) d.pane.style.flex = d.oldFlex;
   outerDrag = null;
-  if (cancel) { onResize({ ...size, [d.axis]: d.page }); onOuterShift(0, 0, false); }
-  else if (Math.abs(d.value - d.initial) >= 1) onOuterResize(d.id, d.axis, d.value, d.parentSize, Math.round(d.page + d.value - d.initial));
-  if (!cancel) measurePanes();
+  if (cancel) onPageCancel(d.original); else measurePanes();
   event.stopPropagation();
  }
  const page = $derived(descriptor as unknown as PageDescriptor);
@@ -204,7 +203,7 @@
  });
 </script>
 
-{#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined, sides: Side[] = ['top', 'bottom', 'left', 'right'], inheritedColors: SurfaceColors = {}, inheritedBorder: PaneBorder = {})}
+{#snippet paneTree(pane: PaneSpec, axis: 'width' | 'height' | undefined, next: string | undefined = undefined, inheritedColors: SurfaceColors = {}, inheritedBorder: PaneBorder = {})}
  {@const colors = inheritPaneColors(pane, inheritedColors)}
  {@const border = inheritPaneBorder(pane, inheritedBorder)}
  <section class="pane" class:pane-selected={selectedPane === pane.pane_id} data-editor-pane={isLeaf(pane) ? pane.pane_id : undefined} data-pane-id={pane.pane_id} data-pane-axis={axis}
@@ -231,13 +230,8 @@
    <button type="button" class="pane-tag nodrag nopan" aria-label={m.wpi_select_pane({ pane: pane.pane_id })} aria-pressed={selectedPane === pane.pane_id} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>{pane.pane_id}</button>
   {:else}
    <div style={splitStyle(pane)}>
-    {#each pane.children ?? [] as child, i (child.pane_id)}{@render paneTree(child, pane.split === 'columns' ? 'width' : 'height', pane.children?.[i + 1]?.pane_id, sides.filter((side) => pane.split === 'columns' ? (side !== 'left' || i === 0) && (side !== 'right' || i === (pane.children?.length ?? 0) - 1) : (side !== 'top' || i === 0) && (side !== 'bottom' || i === (pane.children?.length ?? 0) - 1)), colors, border)}{/each}
+    {#each pane.children ?? [] as child, i (child.pane_id)}{@render paneTree(child, pane.split === 'columns' ? 'width' : 'height', pane.children?.[i + 1]?.pane_id, colors, border)}{/each}
    </div>
-  {/if}
-  {#if isLeaf(pane)}
-   {#each sides as side}
-    <div role="separator" aria-label={m.wpi_resize_pane()} aria-orientation={side === 'left' || side === 'right' ? 'vertical' : 'horizontal'} class="outer-edge nodrag nopan {side}" onpointerdown={(event) => startOuter(event, side)} onpointermove={moveOuter} onpointerup={(event) => endOuter(event)} onpointercancel={(event) => endOuter(event, true)}></div>
-   {/each}
   {/if}
   {#if axis && next}
    <div role="separator" aria-label={m.wpi_resize_pane()} aria-orientation={axis === 'width' ? 'vertical' : 'horizontal'} class="pane-divider nodrag nopan" class:vertical={axis === 'width'} onpointerdown={(event) => startPaneResize(event, pane.pane_id, next, axis)} onpointermove={movePaneResize} onpointerup={(event) => endPaneResize(event)} onpointercancel={(event) => endPaneResize(event, true)}></div>
@@ -249,8 +243,11 @@
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
   <div style={placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}>
-   <div style="{pageBoxStyle(page)}; {(!page.height || page.height === 'auto') ? 'height:100%' : ''}" data-page={page.descriptor_id} data-page-box>
+   <div style="{pageBoxStyle(page)}; position:relative; {(!page.height || page.height === 'auto') ? 'height:100%' : ''}" data-page={page.descriptor_id} data-page-box>
     {@render paneTree(root, undefined)}
+    {#each ['top', 'bottom', 'left', 'right'] as side}
+     <div role="separator" aria-label={m.wpi_resize_preview()} aria-orientation={side === 'left' || side === 'right' ? 'vertical' : 'horizontal'} class="outer-edge nodrag nopan {side}" onpointerdown={(event) => startOuter(event, side as Side)} onpointermove={moveOuter} onpointerup={(event) => endOuter(event)} onpointercancel={(event) => endOuter(event, true)}></div>
+    {/each}
    </div>
   </div>
  {/if}
@@ -261,7 +258,7 @@
    <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
   </div>
  {/if}
- <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => { if (drag?.id === event.pointerId) { drag = null; measurePanes(); } event.stopPropagation(); }} onpointercancel={() => drag = null} onkeydown={resizeKey}></button>
+ <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => { if (drag?.id === event.pointerId) { drag = null; measurePanes(); } event.stopPropagation(); }} onpointercancel={() => { if (drag) { onResize({ width: drag.width, height: drag.height }); onPageCancel(drag.original); drag = null; } }} onkeydown={resizeKey}></button>
 </div>
 
 <style>
