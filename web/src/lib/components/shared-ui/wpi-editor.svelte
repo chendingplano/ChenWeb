@@ -47,6 +47,7 @@
 	import { blankPage, centeredPageViewport, isInsidePage } from './canvas/page-placement';
 	import { unnamedPageID } from './canvas/unnamed-page';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
+	import { needsRecovery } from './canvas/recovery-content';
 	import {
 		alignNodes,
 		distributeNodes,
@@ -292,6 +293,7 @@
 	let recoveredTabs = $state(new Set<number>());
 	const pageVersions = new Map<number, number>();
 	const lastRecovery = new Map<number, number>();
+	const recoveryContent = new Map<number, string>();
 	const recovering = new Map<number, Promise<void>>();
 	const recoveryIDs = new Map<number, string>();
 	const claimedRecoveryIDs = new Set<string>();
@@ -355,6 +357,8 @@
 			lastRecovery.set(id, Date.now());
 			if (recovery) {
 				loadPage(recovery);
+				const restoredID = recoveryID ?? String(recovery.descriptor_id || '');
+				recoveryContent.set(id, JSON.stringify(pageJson(nodes, { ...recovery, descriptor_id: restoredID })));
 				recoveredTabs = new Set([...recoveredTabs, id]);
 			}
 			undoStack = [];
@@ -376,7 +380,7 @@
 		if (recoveryID) void (recovering.get(id) ?? Promise.resolve()).then(() => deletePageRecovery(recoveryID)).catch(console.error);
 		recoveryIDs.delete(id);
 		if (recoveryID) claimedRecoveryIDs.delete(recoveryID);
-		pageVersions.delete(id); lastRecovery.delete(id);
+		pageVersions.delete(id); lastRecovery.delete(id); recoveryContent.delete(id);
 		recoveredTabs = new Set([...recoveredTabs].filter((tabId) => tabId !== id));
 	}
 	function autoSavePages() {
@@ -393,9 +397,10 @@
 				id = recoveryIDs.get(tab.id) ?? unnamedPageID(new Date(), recoveryIDs.values());
 				recoveryIDs.set(tab.id, id);
 			}
-			lastRecovery.set(tab.id, Date.now());
 			const recovery = pageJson(tab.snapshot.nodes, { ...page, descriptor_id: id });
-			const pending = savePageRecovery(id, version, recovery, version === 0 && !claimedRecoveryIDs.has(id)).then(() => { if (version === 0) claimedRecoveryIDs.add(id); lastRecovery.set(tab.id, Date.now()); }).catch((error) => {
+			if (!needsRecovery(recovery, recoveryContent.get(tab.id))) continue;
+			lastRecovery.set(tab.id, Date.now());
+			const pending = savePageRecovery(id, version, recovery, version === 0 && !claimedRecoveryIDs.has(id)).then(() => { if (version === 0) claimedRecoveryIDs.add(id); if (tabs.some((item) => item.id === tab.id)) recoveryContent.set(tab.id, JSON.stringify(recovery)); lastRecovery.set(tab.id, Date.now()); }).catch((error) => {
 				if (version === 0 && !page.descriptor_id && error instanceof WpiError && error.status === 409) recoveryIDs.delete(tab.id);
 				console.error('WPI auto-save failed', error); toast(m.wpi_autosave_failed());
 			}).finally(() => recovering.delete(tab.id));
@@ -528,6 +533,7 @@
 				lastRecovery.set(tabID, Date.now());
 				if (recovery && activeTabId === tabID && before === JSON.stringify(currentSnapshot())) {
 					loadPage(recovery);
+					recoveryContent.set(tabID, JSON.stringify(pageJson(nodes, recovery)));
 					recoveredTabs = new Set([...recoveredTabs, tabID]);
 				}
 			} catch (error) { console.error('WPI page recovery load failed', error); toast(m.wpi_load_page_failed()); }
@@ -592,6 +598,7 @@
 			recoveryIDs.delete(id);
 			if (recoveryID) claimedRecoveryIDs.delete(recoveryID);
 			pageVersions.set(id, result.version);
+			recoveryContent.delete(id);
 			lastRecovery.set(id, Date.now());
 			recoveredTabs = new Set([...recoveredTabs].filter((tabId) => tabId !== id));
 			if (id === activeTabId) {

@@ -28,7 +28,10 @@ be the highest `version` whose `status` is `active`. `PUT /api/v1/wpi/descriptor
 
 ### Requirement: Editor auto-saving
 The editor SHALL save each dirty page as a recovery record in `archive.frontend_pages` every N
-seconds since its last save or auto-save, defaulting to 10 seconds. Recovery records SHALL be
+seconds since its last save or auto-save, defaulting to 10 seconds, when the page descriptor
+has changed since its last successful recovery save. An unchanged recovery SHALL NOT be
+rewritten; edits made during a recovery write SHALL remain eligible for a later write.
+Recovery records SHALL be
 private to the author, SHALL NOT create a page version, and SHALL NOT mark the page clean.
 When loading a page with a recovery record the editor SHALL load that record and mark the page
 dirty. A successful ordinary save SHALL remove that author's recovery record atomically with
@@ -37,6 +40,11 @@ the page save. Unnamed pages SHALL receive temporary recovery IDs in the form
 when the editor opens. A recovery write based on an obsolete page version SHALL be rejected.
 When unnamed recoveries are restored at startup, the editor SHALL omit the default empty
 Unnamed tab; an existing tab containing a page or edits SHALL be preserved.
+
+#### Scenario: Idle after recovery
+- **WHEN** a recovery save succeeds and the page descriptor does not change
+- **THEN** subsequent timer checks do not write another recovery
+- **AND** the page remains dirty until an ordinary save
 
 #### Scenario: Recover edits
 - **WHEN** an author loads a page with their recovery record
