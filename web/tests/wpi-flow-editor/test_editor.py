@@ -38,11 +38,11 @@ with tempfile.TemporaryFile(mode='w+') as log:
    page.locator('#wpi-flow-column_gap').fill('2rem'); page.locator('#wpi-flow-column_gap').blur()
    column = page.locator('#wpi-flow-column_gap')
    column.fill('100'); column.blur()
-   expect(column).to_have_attribute('aria-invalid', 'true')
+   expect(column).to_have_value('2rem')
    expect(page.locator('#wpi-flow-column_gap-error')).to_contain_text('px')
+   expect(page.locator('#wpi-flow-column_gap-error')).to_contain_text('not applied')
    page.locator('#wpi-flow-row_gap').fill('3px'); page.locator('#wpi-flow-row_gap').blur()
-   expect(column).to_have_attribute('aria-invalid', 'true')
-   assert column.input_value() == '100'
+   expect(page.locator('#wpi-flow-column_gap-error')).to_be_visible()
    column.fill('2rem'); column.blur()
    page.locator('#wpi-flow-row_gap').fill(''); page.locator('#wpi-flow-row_gap').blur()
    expect(page.locator('#wpi-flow-max_row_height')).to_have_value('200px')
@@ -65,7 +65,8 @@ with tempfile.TemporaryFile(mode='w+') as log:
    config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
    assert config['row_separator'] == 'bold_dash_line'
    gap = page.locator('#wpi-flow-row_gap'); gap.fill('-1px'); gap.blur()
-   expect(gap).to_have_attribute('aria-invalid','true')
+   expect(gap).to_have_value('0.75rem')
+   expect(page.locator('#wpi-flow-row_gap-error')).to_be_visible()
    assert 'row_gap' not in json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
    gap.fill('1rem'); gap.blur()
    assert json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']['row_gap'] == '1rem'

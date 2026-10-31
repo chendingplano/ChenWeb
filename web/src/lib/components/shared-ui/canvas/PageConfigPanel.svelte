@@ -43,6 +43,7 @@
 
  let editing = $state<{ key: string; text: string } | null>(null);
  let flowDrafts = $state<Record<string, string>>({});
+ let flowRejected = $state<Record<string, boolean>>({});
  let renaming = $state<string | null>(null);
  const renameError = $derived(pane && renaming !== null ? renameProblem(page, pane.pane_id, renaming) : null);
 
@@ -93,6 +94,14 @@
   delete flowDrafts[`${selectedPane}:${key}`];
   onUpdate(setPanelConfig(page, pane.pane_id, setFlowValue(ownConfig ?? copyConfig, key, text)));
  }
+ function blurFlow(key: FlowField, text: string) {
+  const id = `${selectedPane}:${key}`;
+  if (!(id in flowDrafts)) return;
+  if (!validFlowValue(key, text)) {
+   delete flowDrafts[id];
+   flowRejected[id] = true;
+  } else commitFlow(key, text);
+ }
  // The tree as a list, each pane with its depth.
  function flat(p: PaneSpec, depth = 0): { pane: PaneSpec; depth: number }[] {
   return [{ pane: p, depth }, ...(p.children ?? []).flatMap((c) => flat(c, depth + 1))];
@@ -122,12 +131,12 @@
  {:else}
   <input id={`wpi-flow-${key}`} type="text" inputmode={key === 'max_num_elems' ? 'numeric' : 'text'} value={flowText(key)}
    aria-invalid={!validFlowValue(key, flowText(key))}
-   aria-describedby={!validFlowValue(key, flowText(key)) ? `wpi-flow-${key}-error` : key === 'max_num_elems' ? 'wpi-flow-count-hint' : undefined}
-   oninput={(event) => flowDrafts[`${selectedPane}:${key}`] = event.currentTarget.value}
+   aria-describedby={!validFlowValue(key, flowText(key)) || flowRejected[`${selectedPane}:${key}`] ? `wpi-flow-${key}-error` : key === 'max_num_elems' ? 'wpi-flow-count-hint' : undefined}
+   oninput={(event) => { flowDrafts[`${selectedPane}:${key}`] = event.currentTarget.value; delete flowRejected[`${selectedPane}:${key}`]; }}
    onchange={(event) => commitFlow(key, event.currentTarget.value)}
-   onblur={(event) => { if (`${selectedPane}:${key}` in flowDrafts) commitFlow(key, event.currentTarget.value); }} />
-  {#if !validFlowValue(key, flowText(key))}
-   <p class="error" id={`wpi-flow-${key}-error`} role="alert">{key === 'max_num_elems' ? m.wpi_flow_invalid_count() : m.wpi_flow_invalid_length()}</p>
+   onblur={(event) => blurFlow(key, event.currentTarget.value)} />
+  {#if !validFlowValue(key, flowText(key)) || flowRejected[`${selectedPane}:${key}`]}
+   <p class="error" id={`wpi-flow-${key}-error`} role="alert">{key === 'max_num_elems' ? m.wpi_flow_invalid_count() : m.wpi_flow_invalid_length()} {#if flowRejected[`${selectedPane}:${key}`]}{m.wpi_flow_value_not_applied()}{/if}</p>
   {:else if key === 'max_num_elems'}
    <p class="field-hint" id="wpi-flow-count-hint">{m.wpi_flow_unlimited_hint()}</p>
   {/if}

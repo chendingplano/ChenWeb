@@ -7814,6 +7814,7 @@
 	"wpi_flow_unlimited_hint": "Set to 0 for no limit.",
 	"wpi_flow_invalid_length": "Enter a nonnegative length in px or rem.",
 	"wpi_flow_invalid_count": "Enter a nonnegative whole number.",
+	"wpi_flow_value_not_applied": "The value was not applied; the previous value has been restored.",
 	"wpi_flow_start": "Start",
 	"wpi_flow_center": "Center",
 	"wpi_flow_end": "End",
