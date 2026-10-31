@@ -78,18 +78,22 @@ export function setPaneAttr(page: JsonObject, id: string, name: string, value: u
 	}));
 }
 
-// Set a dragged size and expand an explicit maximum when needed.
+// Set a dragged size and adjust its limits when needed.
 export function resizePane(page: JsonObject, id: string, axis: 'width' | 'height', size: number, parentSize: number): JsonObject {
  const pane = findPane(rootOf(page), id);
  if (!pane) return page;
  const next = setPaneAttr(page, id, axis, `${Math.round(size)}px`);
- return expandPaneMax(next, id, axis, size, parentSize);
+ return adjustPaneLimits(next, id, axis, size, parentSize);
 }
 
-export function expandPaneMax(page: JsonObject, id: string, axis: 'width' | 'height', size: number, parentSize: number): JsonObject {
+export function adjustPaneLimits(page: JsonObject, id: string, axis: 'width' | 'height', size: number, parentSize: number): JsonObject {
  const pane = findPane(rootOf(page), id);
  if (!pane) return page;
  let next = page;
+ const min = pane[axis === 'width' ? 'min_width' : 'min_height'] ?? '50px';
+ const minMatch = min.trim().match(/^([\d.]+)\s*(px|%)$/);
+ const minimum = minMatch ? Number(minMatch[1]) * (minMatch[2] === '%' ? parentSize / 100 : 1) : 0;
+ if (size < minimum) next = setPaneAttr(next, id, `min_${axis}`, `${Math.floor(size)}px`);
  const max = pane[axis === 'width' ? 'max_width' : 'max_height'];
  if (max) {
   const match = max.trim().match(/^([\d.]+)\s*(px|%)$/);

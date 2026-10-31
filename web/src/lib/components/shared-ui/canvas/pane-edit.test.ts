@@ -102,3 +102,12 @@ test('resizing a pane expands only an exceeded maximum', () => {
  assert.equal(rootOf(resizePane(page, 'main', 'width', 80, 500)).max_width, '100px');
  assert.equal(rootOf(resizePane(setPaneAttr(single, 'main', 'max_width', '20%'), 'main', 'width', 140, 500)).max_width, '140px');
 });
+
+test('resizing below a pane minimum lowers it, including the default', () => {
+ const page = setPaneAttr(single, 'main', 'min_width', '160px');
+ assert.equal(rootOf(resizePane(page, 'main', 'width', 80, 500)).min_width, '80px');
+ assert.equal(rootOf(resizePane(page, 'main', 'width', 200, 500)).min_width, '160px');
+ assert.equal(rootOf(resizePane(single, 'main', 'height', 25, 500)).min_height, '25px');
+ const percent = setPaneAttr(single, 'main', 'min_width', '20%');
+ assert.equal(rootOf(resizePane(percent, 'main', 'width', 75, 500)).min_width, '75px');
+});
