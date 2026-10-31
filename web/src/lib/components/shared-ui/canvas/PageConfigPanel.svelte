@@ -31,6 +31,7 @@
  // Fields are labelled with their attribute names, as in the descriptor.
  const PANE_ID = 'pane_id';
  const colorFields = ['background_color', 'foreground_color'];
+ const borderColorFields = ['border_light_color', 'border_dark_color'];
 
  const root = $derived(rootOf(page));
  const pane = $derived(selectedPane ? findPane(root, selectedPane) : undefined);
@@ -200,6 +201,14 @@
  {/each}
 {/snippet}
 
+{#snippet borderColorControl(key: string)}
+ <label for={`wpi-color-${key}-value`}>{key}</label>
+ <div class="color-row">
+  <input class="color-picker" type="color" id={`wpi-color-${key}-picker`} aria-label={m.wpi_color_picker_label({field: key, variant: m.wpi_color_single()})} value={pickerValue(colorValue(key, 'single'))} oninput={(event) => setColorValue(key, 'single', event.currentTarget.value)} />
+  <input class="color-value" type="text" id={`wpi-color-${key}-value`} aria-label={m.wpi_color_value_label({field: key, variant: m.wpi_color_single()})} value={colorValue(key, 'single')} onchange={(event) => setColorValue(key, 'single', event.currentTarget.value)} />
+ </div>
+{/snippet}
+
 {#snippet field(key: string)}
  <label for={`wpi-page-field-${key}`}>{key}</label>
  <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
@@ -268,7 +277,7 @@
    {#each colorFields as key (key)}{@render colorControl(key)}{/each}
    {#each flowFields as key (key)}{@render flowField(key)}{/each}
   {:else if pane && mode === 'panes'}
-   {#each fields as key (key)}{#if colorFields.includes(key)}{@render colorControl(key)}{:else}{@render field(key)}{/if}{/each}
+   {#each fields as key (key)}{#if colorFields.includes(key)}{@render colorControl(key)}{:else if borderColorFields.includes(key)}{@render borderColorControl(key)}{:else}{@render field(key)}{/if}{/each}
   {/if}
  </div>
 </aside>
