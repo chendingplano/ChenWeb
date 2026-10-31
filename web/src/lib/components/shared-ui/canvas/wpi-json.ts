@@ -109,12 +109,12 @@ export function parseJsonObject(text: string): JsonObject {
 export function elementTree(nodes: Node[], page: JsonObject, labels: { pane: string; panel: string; layouter: string; elements: string }): string {
  const root = effectiveRoot(page as unknown as PageDescriptor);
  const assembled = pageJson(nodes, page);
- const panels = assembled.panels as Record<string, { elem_list?: JsonObject[] }>;
+ const panels = assembled.panels as Record<string, { elem_layouter?: { layouter?: string }; elem_list?: JsonObject[] }>;
  function lines(pane: PaneSpec, depth: number): string[] {
   const indent = '  '.repeat(depth);
   const title = indent + pane.pane_id + ' ' + labels.pane;
   if (pane.split) return [title, ...(pane.children ?? []).flatMap(child => lines(child, depth + 1))];
-  return [title, indent + '  ' + labels.panel, indent + '    ' + labels.layouter, indent + '    ' + labels.elements, ...(panels[pane.pane_id]?.elem_list ?? []).map(element => indent + '      ' + String(element.element ?? ''))];
+  return [title, indent + '  ' + labels.panel, indent + '    ' + labels.layouter + ': ' + (panels[pane.pane_id]?.elem_layouter?.layouter ?? ''), indent + '    ' + labels.elements, ...(panels[pane.pane_id]?.elem_list ?? []).map(element => indent + '      ' + String(element.element ?? ''))];
  }
  return lines(root, 0).join('\n');
 }

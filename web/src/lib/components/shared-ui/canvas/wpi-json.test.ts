@@ -104,5 +104,14 @@ test('a table-backed list serializes its default load and list settings', () => 
 
 test('element tree follows the page pane hierarchy and element reading order', () => {
 	const nodes = [element('b', 'button', 20, 10, undefined, 'list'), element('a', 'input', 0, 0, undefined, 'list'), element('c', 'text', 0, 0, undefined, 'detail')];
-	assert.equal(elementTree(nodes, twoPanes, { pane: 'pane', panel: 'panel', layouter: 'Layouter', elements: 'Element List' }), 'page pane\n  list pane\n    panel\n      Layouter\n      Element List\n        input\n        button\n  detail pane\n    panel\n      Layouter\n      Element List\n        text');
+	assert.equal(elementTree(nodes, twoPanes, { pane: 'pane', panel: 'panel', layouter: 'Layouter', elements: 'Element List' }), 'page pane\n  list pane\n    panel\n      Layouter: flow-layouter\n      Element List\n        input\n        button\n  detail pane\n    panel\n      Layouter: flow-layouter\n      Element List\n        text');
+});
+
+test('an empty leaf without a panel has no layouter name', () => {
+	assert.equal(elementTree([], single, { pane: 'pane', panel: 'panel', layouter: 'Layouter', elements: 'Element List' }), 'main pane\n  panel\n    Layouter: \n    Element List');
+});
+
+test('element tree shows the configured panel layouter name', () => {
+	const page = { ...single, panels: { main: { elem_layouter: { layouter: 'custom-layouter' } } } };
+	assert.match(elementTree([], page, { pane: 'pane', panel: 'panel', layouter: 'Layouter', elements: 'Element List' }), /Layouter: custom-layouter/);
 });
