@@ -210,11 +210,26 @@
 {/snippet}
 
 {#snippet field(key: string)}
+ {#if key === 'hori_align' || key === 'vert_align'}
+  <label for={`wpi-page-field-${key}`}>{key}</label>
+  <select id={`wpi-page-field-${key}`} value={String(fieldSource()[key] ?? '')} onchange={(event) => commit(key, event.currentTarget.value)}>
+   <option value="">{m.wpi_align_default()}</option>
+   {#each key === 'hori_align' ? ['left', 'center', 'right'] : ['top', 'center', 'bottom'] as option}
+    <option value={option}>{option === 'left' ? m.wpi_align_left() : option === 'right' ? m.wpi_align_right() : optionLabel(option)}</option>
+   {/each}
+  </select>
+ {:else if key === 'hori_scrollbar' || key === 'vert_scrollbar'}
+  <div class="toggle-row">
+   <label for={`wpi-page-field-${key}`}>{key}</label>
+   <input class="toggle" id={`wpi-page-field-${key}`} type="checkbox" role="switch" checked={fieldSource()[key] !== 'hide'} onchange={(event) => commit(key, event.currentTarget.checked ? 'auto' : 'hide')} />
+  </div>
+ {:else}
  <label for={`wpi-page-field-${key}`}>{key}</label>
  <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
   oninput={(event) => editing = { key, text: event.currentTarget.value }}
   onchange={(event) => commit(key, event.currentTarget.value)}
   onblur={(event) => { if (editing?.key === key) commit(key, event.currentTarget.value); }}></textarea>
+ {/if}
 {/snippet}
 
 <aside class="panel select-text" style="width:{width}px">
@@ -293,6 +308,13 @@
  textarea, input, select { display:block; width:100%; box-sizing:border-box; border:1px solid var(--cv-border); background:var(--cv-surface); color:var(--cv-text); border-radius:4px; padding:5px 8px; margin:0 0 12px; font-size:11px; }
  textarea { resize:vertical; field-sizing:content; }
  input:read-only, textarea:read-only { background:transparent; color:var(--cv-text-2); }
+ .toggle-row { display:flex; align-items:center; justify-content:space-between; margin:0 0 12px; }
+ .toggle-row label { margin:0; }
+ .toggle-row .toggle { appearance:none; width:30px; height:17px; flex:none; padding:0; margin:0; border-radius:999px; background:var(--cv-border); cursor:pointer; }
+ .toggle-row .toggle::before { content:""; display:block; width:13px; height:13px; margin:1px; border-radius:50%; background:var(--cv-text); transition:transform 0.15s; }
+ .toggle-row .toggle:checked { background:#6366f1; }
+ .toggle-row .toggle:checked::before { transform:translateX(13px); background:white; }
+ .toggle-row .toggle:focus-visible { outline:2px solid #818cf8; outline-offset:2px; }
  .tree { list-style:none; margin:0 0 10px; padding:0; border:1px solid var(--cv-border); border-radius:4px; }
  .tree button { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--cv-text-2); font-size:11px; padding:4px 6px; cursor:pointer; }
  .tree button:hover, .tree button.active { background:var(--cv-hover); color:var(--cv-text); }
