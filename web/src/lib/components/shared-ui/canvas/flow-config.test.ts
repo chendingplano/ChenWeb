@@ -14,6 +14,8 @@ test('flow editor validates lengths and integer count and retains other settings
 	assert.equal(validFlowValue('max_num_elems', '-1'), false);
 	assert.equal(validFlowValue('max_num_elems', '1.5'), false);
 	assert.equal(validFlowValue('row_gap', '1.5rem'), true);
+ assert.equal(validFlowValue('row_gap', '12'), true);
+ assert.deepEqual(setFlowValue({}, 'row_gap', '12'), { row_gap: '12px' });
 	assert.equal(validFlowValue('row_gap', '-1px'), false);
 	assert.deepEqual(setFlowValue({ column_gap: '1rem', extra: 'preserved' }, 'max_num_elems', '0'), {
 		column_gap: '1rem',

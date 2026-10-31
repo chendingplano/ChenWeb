@@ -47,11 +47,11 @@ export function validFlowValue(key: FlowField, value: string): boolean {
 	if (value === '') return true;
 	if (key === 'max_num_elems') return /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
 	const options = flowOptions[key];
-	return options ? options.includes(value) : /^\d+(?:\.\d+)?(?:px|rem)$/.test(value);
+	return options ? options.includes(value) : /^\d+(?:\.\d+)?(?:px|rem)?$/.test(value);
 }
 export function setFlowValue(config: JsonObject, key: FlowField, value: string): JsonObject {
 	const next = { ...config };
 	if (value === '') delete next[key];
-	else next[key] = key === 'max_num_elems' ? Number(value) : value;
+	else next[key] = key === 'max_num_elems' ? Number(value) : (!flowOptions[key] && /^\d+(?:\.\d+)?$/.test(value) ? `${value}px` : value);
 	return next;
 }

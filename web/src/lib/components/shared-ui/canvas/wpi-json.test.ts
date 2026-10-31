@@ -32,7 +32,7 @@ test('an edited element instance goes back into the node, which keeps its name',
 	const node = element('b', 'button', 0, 0, { label: 'Save' });
 	const data = nodeData(node, { element: 'link', label: 'Send', width: 200 });
 	assert.deepEqual(data, { label: 'name of b', element: 'link', pane: 'main', attrs: { label: 'Send', width: 200 } });
-	assert.deepEqual(nodeJson({ ...node, data }), { element: 'link', label: 'Send', width: 200 });
+	assert.deepEqual(nodeJson({ ...node, data }), { element: 'link', label: 'Send', width: '200px' });
 });
 
 test('other nodes take the edited JSON as their data', () => {
@@ -75,7 +75,7 @@ test('loading preserves each panel order, duplicate classes, copies and nested a
 		...twoPanes,
 		panels: {
 			list: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [
-				{ element: 'input', binding: { path: '$input_doc.name' }, width: 200 },
+				{ element: 'input', binding: { path: '$input_doc.name' }, width: '200px' },
 				{ element: 'input', label: { en: 'Email', 'zh-cn': '邮箱' }, class: { descriptor_id: 'input' } }
 			] },
 			detail: { elem_layouter: { layouter: 'flow-layouter', config: { column_gap: '1rem' } }, elem_list: [{ element: 'button', on_click: { action: 'save' } }] }
@@ -114,4 +114,19 @@ test('an empty leaf without a panel has no layouter name', () => {
 test('element tree shows the configured panel layouter name', () => {
 	const page = { ...single, panels: { main: { elem_layouter: { layouter: 'custom-layouter' } } } };
 	assert.match(elementTree([], page, { pane: 'pane', panel: 'panel', layouter: 'Layouter', elements: 'Element List' }), /Layouter: custom-layouter/);
+});
+
+test('element JSON shows canvas instance ID without saving it as a descriptor attribute', async () => {
+ const { nodeViewJson } = await import('./wpi-json');
+ const node = element('instance-7', 'text', 0, 0, { width: 150 });
+ assert.deepEqual(nodeViewJson(node), { instance_id: 'instance-7', element: 'text', width: '150px' });
+ assert.deepEqual(nodeData(node, { instance_id: 'instance-7', element: 'text' }), { ...node.data, attrs: {} });
+ assert.deepEqual((pageJson([node], single).panels as any).main.elem_list, [{ element: 'text', width: '150px' }]);
+});
+
+test('issue location maps zero-based pointer to the displayed element and its canvas ID', async () => {
+ const { elementIssueLocation } = await import('./wpi-json');
+ const nodes = [element('second', 'text', 10, 0), element('first', 'text', 0, 0)];
+ assert.deepEqual(elementIssueLocation('/panels/main/elem_list/1/width', nodes, single), { pane: 'main', index: 1, id: 'second', field: 'width' });
+ assert.equal(elementIssueLocation('/description', nodes, single), null);
 });

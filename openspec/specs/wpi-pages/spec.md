@@ -178,6 +178,8 @@ and inclusive local calendar date ranges for creation and update, and navigate p
 Loading SHALL fetch the full descriptor before replacing the canvas with one editable
 node per element instance, preserving order, repeated classes and all attributes.
 The descriptor SHALL stay in memory and View JSON SHALL retain its page metadata.
+For an element, View JSON SHALL display the current editor instance ID; that ID is
+session-local and SHALL NOT be written into the page descriptor.
 A nonempty canvas SHALL require confirmation before replacement; undo SHALL restore
 the prior canvas and page metadata. Failed requests SHALL leave the canvas unchanged
 and display a translated error. The dialog SHALL support English and Chinese,
@@ -198,6 +200,10 @@ an interactive WPI runtime and providing an Edit control to return. Preview SHAL
 the current page, whether named or unnamed, and load the pages it opens. A draft
 preview SHALL NOT save the page; input and save actions tied to the draft page SHALL
 report that saving is required. Validation failures SHALL be reported to the author.
+An element issue SHALL identify its pane, its one-based position and zero-based index,
+and its current editor instance ID when the element can be resolved. The editor SHALL
+convert a bare nonnegative numeric value to pixels for element length attributes and
+flow-layout length controls, including existing element values sent in a draft preview.
 Switching tabs SHALL return to editing.
 
 ### Requirement: Page and layouter controls

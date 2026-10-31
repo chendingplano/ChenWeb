@@ -30,6 +30,7 @@
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import WpiTreeDialog from './canvas/WpiTreeDialog.svelte';
 	import { elementTree } from './canvas/wpi-json';
+ import { normalizeElementLengths } from './canvas/element-attributes';
 	import PagePreview from './canvas/PagePreview.svelte';
 	import WpiApp from '$lib/wpi/WpiApp.svelte';
 	import PageControl from './canvas/PageControl.svelte';
@@ -41,7 +42,7 @@
 	import type { Bundle, ClassRow, JsonObject, PageDescriptor, Text } from '$lib/wpi/types';
 	import { localized } from '$lib/wpi/text';
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
-	import { isElementNode, nodeData, nodeJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
+	import { elementIssueLocation, isElementNode, nodeData, nodeViewJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
 	import { addPane, deletePane, mergePane, resizePane, adjustPaneLimits, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
@@ -167,7 +168,8 @@
 		if (previewBundle) { previewBundle = null; return; }
 		if (previewLoading) return;
 		if (!loadedPage) return;
-		const draft = isDirty || !loadedPage.descriptor_id;
+		const normalizedLengths = nodes.some((node) => isElementNode(node) && JSON.stringify(node.data.attrs ?? {}) !== JSON.stringify(normalizeElementLengths((node.data.attrs ?? {}) as JsonObject)));
+  const draft = isDirty || !loadedPage.descriptor_id || normalizedLengths;
 		const tab = activeTabId;
 		const request = ++previewRequest;
 		previewLoading = true;
@@ -175,7 +177,10 @@
 			const bundle = draft ? await previewDraftPage(pageJson(nodes, loadedPage)) : await fetchPagePreview(String(loadedPage.descriptor_id));
 			if (tab === activeTabId && request === previewRequest) { previewIsDraft = draft; previewBundle = bundle; }
 		} catch (error) {
-			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : String(error);
+			const detail = error instanceof WpiError ? (error.issues.map((issue) => {
+    const location = loadedPage && elementIssueLocation(issue.path, nodes, loadedPage);
+    return location ? m.wpi_preview_element_issue({ pane: location.pane, number: String(location.index + 1), index: String(location.index), id: location.id, field: location.field || '—', detail: issue.message }) : `${issue.path}: ${issue.message}`;
+   }).join('; ') || error.message) : String(error);
 			showError(m.wpi_preview_failed({ detail }));
 		} finally { previewLoading = false; }
 	}
@@ -631,7 +636,10 @@
 			toast(m.canvas_01_saved());
 			return true;
 		} catch (error) {
-			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : '';
+			const detail = error instanceof WpiError ? (error.issues.map((issue) => {
+    const location = loadedPage && elementIssueLocation(issue.path, nodes, loadedPage);
+    return location ? m.wpi_preview_element_issue({ pane: location.pane, number: String(location.index + 1), index: String(location.index), id: location.id, field: location.field || '—', detail: issue.message }) : `${issue.path}: ${issue.message}`;
+   }).join('; ') || error.message) : '';
 			editorError = detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes();
 			return true;
 		} finally {
@@ -1317,9 +1325,9 @@
 		note={!selectedNode
 			? (loadedPage ? String(loadedPage.descriptor_id ?? '') : m.wpi_view_json_page_note())
 			: isElementNode(selectedNode)
-				? ''
+				? m.wpi_instance_id_note()
 				: m.wpi_view_json_node_data_note()}
-		json={selectedNode ? nodeJson(selectedNode) : pageJson(nodes, loadedPage ?? {})}
+		json={selectedNode ? nodeViewJson(selectedNode) : pageJson(nodes, loadedPage ?? {})}
 		onApply={(value) => {
 			if (selectedNode) {
 				if (isElementNode(selectedNode) && typeof value.element !== 'string') return false;

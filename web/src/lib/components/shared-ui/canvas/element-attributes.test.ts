@@ -65,3 +65,10 @@ test('selecting a table clears old field mappings and keeps other source setting
  assert.deepEqual(withSelectedTable(attrs, undefined, 'old.items').source, { table: 'old.items', fields: [], limit: 25, action: 'load', result: 'list' });
  assert.deepEqual(attrs.source.fields, [{ column: 'id', attribute: 'id' }]);
 });
+
+test('unit-bearing element attributes accept bare numeric input as pixels', () => {
+ assert.deepEqual(withAttribute({}, 'width', '150'), { width: '150px' });
+ assert.deepEqual(withAttribute({}, 'label_font_size', '1.5'), { label_font_size: '1.5px' });
+ assert.deepEqual(withAttribute({}, 'width', '2rem'), { width: '2rem' });
+ assert.deepEqual(withAttribute({}, 'max_length', '150'), { max_length: 150 });
+});

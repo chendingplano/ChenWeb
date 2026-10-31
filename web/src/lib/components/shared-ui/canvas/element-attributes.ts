@@ -4,6 +4,17 @@
 import type { Json, JsonObject } from '$lib/wpi/types';
 import { parseDefault } from './element-class-form';
 
+const lengthAttributes = new Set(['width', 'height', 'min_width', 'max_width', 'label_horizontal_gap', 'label_vertical_gap', 'label_max_width', 'label_font_size', 'font_size', 'icon_size', 'icon_gap', 'padding']);
+
+export function normalizeElementLengths(attrs: JsonObject): JsonObject {
+ const next = { ...attrs };
+ for (const key of lengthAttributes) {
+  const value = next[key];
+  if ((typeof value === 'number' || typeof value === 'string') && /^\d+(?:\.\d+)?$/.test(String(value).trim())) next[key] = `${String(value).trim()}px`;
+ }
+ return next;
+}
+
 // The text a value is shown as; reading it back gives the same value, so a
 // string that would read as something else ("200", "true") is shown quoted.
 export function valueText(value: Json | undefined): string {
@@ -17,7 +28,7 @@ export function valueText(value: Json | undefined): string {
 export function withAttribute(attrs: JsonObject, name: string, text: string): JsonObject {
 	const next = { ...attrs };
 	if (text.trim() === '') delete next[name];
-	else next[name] = parseDefault(text);
+	else next[name] = normalizeElementLengths({ [name]: parseDefault(text) })[name];
 	return next;
 }
 

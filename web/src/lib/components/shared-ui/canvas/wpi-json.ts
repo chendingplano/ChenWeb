@@ -8,7 +8,7 @@
 import type { Node } from '@xyflow/svelte';
 import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 import type { Json, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
-import { withListSourceDefaults } from './element-attributes';
+import { normalizeElementLengths, withListSourceDefaults } from './element-attributes';
 
 export const PAGE_SCHEMA_VERSION = '0.5';
 
@@ -22,7 +22,23 @@ export function nodeJson(node: Node): JsonObject {
 	if (!isElementNode(node)) return node.data as JsonObject;
 	const element = String(node.data.element ?? '');
 	const attrs = (node.data.attrs as JsonObject | undefined) ?? {};
-	return { element, ...(element === 'list' ? withListSourceDefaults(attrs, undefined) : attrs) };
+	return { element, ...normalizeElementLengths(element === 'list' ? withListSourceDefaults(attrs, undefined) : attrs) };
+}
+
+// Canvas instance IDs identify nodes in this editor session; they are not WPI attributes.
+export function nodeViewJson(node: Node): JsonObject {
+ return isElementNode(node) ? { instance_id: node.id, ...nodeJson(node) } : nodeJson(node);
+}
+
+export function elementIssueLocation(path: string, nodes: Node[], page: JsonObject): { pane: string; index: number; id: string; field: string } | null {
+ const match = path.match(/^\/panels\/([^/]+)\/elem_list\/(\d+)(?:\/(.*))?$/);
+ if (!match) return null;
+ const pane = match[1].replace(/~1/g, '/').replace(/~0/g, '~');
+ const leaves = leafPanes(effectiveRoot(page as unknown as PageDescriptor));
+ const placed = nodes.filter(isElementNode).map(n => leaves.includes(nodePane(n)) ? n : { ...n, data: { ...n.data, pane: leaves[0] } });
+ const index = Number(match[2]);
+ const node = paneNodes(placed, pane)[index];
+ return node ? { pane, index, id: node.id, field: match[3] ?? '' } : null;
 }
 
 // The node's data after its JSON was edited, the inverse of nodeJson. An element
@@ -30,7 +46,7 @@ export function nodeJson(node: Node): JsonObject {
 // its pane.
 export function nodeData(node: Node, json: JsonObject): Record<string, unknown> {
 	if (!isElementNode(node)) return json;
-	const { element, class: _copy, ...attrs } = json;
+	const { element, class: _copy, instance_id: _id, ...attrs } = json;
 	return { ...node.data, element, attrs };
 }
 
