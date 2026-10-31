@@ -180,3 +180,10 @@ export function surfaceColorStyle(colors: SurfaceColors, suppressBackground = fa
  if (colors.foreground_color) css.push(`color: ${value(colors.foreground_color)}`);
  return css.join('; ');
 }
+
+// Each pane inherits each unset color independently from its closest ancestor.
+export function inheritPaneColors(pane: SurfaceColors, parent: SurfaceColors = {}): SurfaceColors {
+ const background = pane.background_color ?? parent.background_color;
+ const foreground = pane.foreground_color ?? parent.foreground_color;
+ return { ...(background != null ? { background_color: background } : {}), ...(foreground != null ? { foreground_color: foreground } : {}) };
+}

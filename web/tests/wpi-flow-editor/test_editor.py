@@ -79,7 +79,7 @@ with tempfile.TemporaryFile(mode='w+') as log:
    background_mode.select_option('theme')
    page.locator('#wpi-color-background_color-light-picker').fill('#ffffff')
    page.locator('#wpi-color-background_color-dark-picker').fill('#000000')
-   panel = page.locator('[data-flow-layout]')
+   panel = page.locator('[data-wpi-page-preview] [data-flow-layout]')
    assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(255, 255, 255)'
    page.locator('#theme').click()
    assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 0, 0)'
@@ -105,6 +105,22 @@ with tempfile.TemporaryFile(mode='w+') as log:
    assert json.loads(page.locator('#page').inner_text())['panels']['main']['background_color'] == '#ffffff'
    page.locator('#wpi-color-background_color-mode').select_option('none')
    assert 'background_color' not in json.loads(page.locator('#page').inner_text())['panels']['main']
+   page.locator('#nested').click()
+   pane = page.locator('[data-pane-id="main"]')
+   assert pane.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 0, 255)'
+   assert pane.evaluate('(e) => getComputedStyle(e).color') == 'rgb(255, 255, 0)'
+   assert pane.locator('[data-flow-layout]').evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgba(0, 0, 0, 0)'
+   sibling = page.locator('[data-pane-id="second"]')
+   assert sibling.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 128, 0)'
+   assert sibling.evaluate('(e) => getComputedStyle(e).color') == 'rgb(0, 0, 0)'
+   bottom = page.locator('[data-pane-id="bottom"]')
+   assert bottom.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(255, 0, 0)'
+   assert bottom.evaluate('(e) => getComputedStyle(e).color') == 'rgb(255, 255, 255)'
+   runtime_pane = page.locator('#runtime [data-pane="main"]')
+   expect(runtime_pane).to_be_visible()
+   assert runtime_pane.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 0, 255)'
+   assert runtime_pane.evaluate('(e) => getComputedStyle(e).color') == 'rgb(255, 255, 0)'
+   assert runtime_pane.locator('[data-flow-layout]').evaluate('(e) => getComputedStyle(e.parentElement).backgroundColor') == 'rgba(0, 0, 0, 0)'
    assert not errors, errors
    browser.close()
  finally:

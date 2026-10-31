@@ -225,4 +225,4 @@ them, and their text SHALL be selectable.
 
 ### Pane and panel colors
 
-Panes and panels MAY specify `background_color` and `foreground_color` as a CSS color or an object containing `light` and `dark` CSS colors. Missing or null means unset. The active display mode selects the corresponding color. A pane background overrides its own panel background; foreground colors inherit normally. A host pane replaces the root pane of a page opened inside it.
+Panes and panels MAY specify `background_color` and `foreground_color` as a CSS color or an object containing `light` and `dark` CSS colors. Missing or null means unset. The active display mode selects the corresponding color. An unset pane color inherits the closest ancestor pane's corresponding color independently. A pane's effective background, including an inherited one, overrides its own panel background; a panel may override the inherited foreground. A host pane replaces the root pane of a page opened inside it.

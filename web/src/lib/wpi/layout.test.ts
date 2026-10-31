@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
 	clampPx,
 	surfaceColorStyle,
+	inheritPaneColors,
 
 	cssLength,
 	effectiveRoot,
@@ -150,4 +151,13 @@ test('pane and panel colors honor pane background precedence and theme pairs', (
 	assert.equal(surfaceColorStyle({ background_color: { light: '#fff', dark: '#000' }, foreground_color: 'red' }), 'background-color: light-dark(#fff, #000); color: red');
 	assert.equal(surfaceColorStyle({ background_color: 'blue', foreground_color: 'white' }, true), 'color: white');
 	assert.equal(surfaceColorStyle({}), '');
+});
+
+
+test('pane colors inherit independently from the closest ancestor', () => {
+ const root = inheritPaneColors({ background_color: 'red', foreground_color: 'white' });
+ const middle = inheritPaneColors({ foreground_color: 'blue' }, root);
+ assert.deepEqual(inheritPaneColors({}, middle), { background_color: 'red', foreground_color: 'blue' });
+ assert.deepEqual(inheritPaneColors({ background_color: 'transparent', foreground_color: null }, middle), { background_color: 'transparent', foreground_color: 'blue' });
+ assert.deepEqual(inheritPaneColors({}, {}), {});
 });

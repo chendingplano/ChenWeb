@@ -10,10 +10,10 @@
 	import PageView from './PageView.svelte';
 	import PanelView from './PanelView.svelte';
 	import PaneView from './PaneView.svelte';
-	import { clampPx, isLeaf, isResizable, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
+	import { clampPx, isLeaf, isResizable, inheritPaneColors, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
 	import { paneInstanceId } from './panel-cache';
 	import { getRuntime } from './runtime.svelte';
-	import type { PaneSpec } from './types';
+	import type { PaneSpec, SurfaceColors } from './types';
 
 	let {
 		instanceId,
@@ -21,14 +21,17 @@
 		axis = undefined,
 		handle = null,
 		bare = false,
-		host = undefined
-	}: { instanceId: string; pane: PaneSpec; axis?: 'width' | 'height'; handle?: 'start' | 'end' | null; bare?: boolean; host?: PaneSpec } = $props();
+		host = undefined,
+		inheritedColors = {}
+	}: { instanceId: string; pane: PaneSpec; axis?: 'width' | 'height'; handle?: 'start' | 'end' | null; bare?: boolean; host?: PaneSpec; inheritedColors?: SurfaceColors } = $props();
 
 	const rt = getRuntime();
 	const id = $derived(paneInstanceId(instanceId, pane.pane_id));
 	const model = $derived(rt.panes[id]);
 	const childAxis = $derived(pane.split === 'columns' ? 'width' : 'height');
 	const children = $derived(pane.children ?? []);
+	const colors = $derived(bare ? inheritPaneColors(host ?? {}, inheritedColors) : inheritPaneColors(pane, inheritedColors));
+	const effectivePane = $derived({ ...(bare ? (host ?? { pane_id: pane.pane_id }) : pane), ...colors });
 	const resizable = $derived(!!axis && handle !== null && isResizable(pane, axis));
 
 	let section = $state<HTMLElement>();
@@ -64,29 +67,29 @@
 {#snippet split()}
 	<div style={splitStyle(pane)} class={pane.split === 'columns' ? 'divide-x' : 'divide-y'}>
 		{#each children as child, i (child.pane_id)}
-			<PaneView {instanceId} pane={child} axis={childAxis} handle={edge(i)} />
+			<PaneView {instanceId} pane={child} inheritedColors={colors} axis={childAxis} handle={edge(i)} />
 		{/each}
 	</div>
 {/snippet}
 
 {#if bare}
-	{#if isLeaf(pane)}<PanelView {instanceId} paneId={pane.pane_id} pane={bare ? host : pane} />{:else}{@render split()}{/if}
+	{#if isLeaf(pane)}<PanelView {instanceId} paneId={pane.pane_id} pane={effectivePane} />{:else}{@render split()}{/if}
 {:else}
 	<section
 		bind:this={section}
 		data-pane={pane.pane_id}
 		data-wpi-surface
 		class="relative min-h-0 min-w-0"
-		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(pane)}`}
+		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}`}
 	>
 		{#if isLeaf(pane)}
 			<div style={placeStyle(pane)}>
 				<div style:display={model?.visible ? 'none' : 'contents'}>
-					<PanelView {instanceId} paneId={pane.pane_id} pane={bare ? host : pane} />
+					<PanelView {instanceId} paneId={pane.pane_id} pane={effectivePane} />
 				</div>
 				{#each model?.opened ?? [] as opened (opened)}
 					<div style:display={opened === model?.visible ? 'contents' : 'none'}>
-						<PageView instanceId={opened} host={pane} />
+						<PageView instanceId={opened} host={effectivePane} />
 					</div>
 				{/each}
 			</div>
