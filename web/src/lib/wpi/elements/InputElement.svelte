@@ -12,7 +12,8 @@
  const id = $props.id();
  const d = $derived(element.desc);
  const editable = $derived(d.binding_mode === 'read-write');
- const value = $derived(rt.read(instanceId, d.data_binding));
+ let unboundValue = $state<Json>('');
+ const value = $derived(d.data_binding ? rt.read(instanceId, d.data_binding) : unboundValue);
  const serverErrors = $derived(rt.errorsFor(instanceId, d.data_binding));
  let touched = $state(false);
  let clientErrors = $state<string[]>([]);
@@ -45,7 +46,8 @@
  function edit(raw: string) {
   let next: Json = raw;
   if (d.input_type === 'number') next = raw === '' || Number.isNaN(Number(raw)) ? (raw === '' ? null : raw) : Number(raw);
-  rt.write(instanceId, d.data_binding, next);
+  if (d.data_binding) rt.write(instanceId, d.data_binding, next);
+  else unboundValue = next;
   if (touched) clientErrors = validateInput(raw, d);
  }
  function onInput(event: Event) {

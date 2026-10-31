@@ -26,7 +26,7 @@ interpreter, and an instance naming such a class, SHALL be validation errors.
 A class row SHALL hold the class attributes `descriptor_id` and `schema_version` (required)
 and `description` (optional). Every other attribute in the row SHALL be an instance
 attribute defined by the class's code; its value SHALL be the default, or `null` meaning
-every instance must set it. An instance attribute the row leaves out SHALL be optional with
+every instance must set it, except an input binding and a button action, which may be unset. An instance attribute the row leaves out SHALL be optional with
 no default. Each attribute the class's code requires SHALL appear in the row. Attributes
 that hold action instances (`on_click`, `on_row_click`, `source`, `items`, and `input` of
 `open-page`) SHALL NOT have a default.
@@ -35,9 +35,10 @@ that hold action instances (`on_click`, `on_row_click`, `source`, `items`, and `
 - **WHEN** the `input` class row has `"binding_mode": "read-write"` and an instance does not set `binding_mode`
 - **THEN** the instance is editable
 
-#### Scenario: Required attribute missing on an instance
-- **WHEN** the `input` class row has `"data_binding": null` and an instance on page `p` does not set `data_binding`
-- **THEN** the app bundle is rejected with an error naming page `p` and the instance's path
+#### Scenario: Unbound input and button without an action
+- **WHEN** an input has no `data_binding`, a null binding, or an empty binding, or a button has no `on_click` or a null action
+- **THEN** the page is valid; the input holds a local value and the button has no action
+- **AND** nonempty bindings and actions remain subject to validation
 
 #### Scenario: Optional attribute without default
 - **WHEN** the `list` class row leaves out `on_row_click` and an instance does not set it

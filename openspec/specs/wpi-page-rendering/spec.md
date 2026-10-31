@@ -135,7 +135,7 @@ at the start/top edge. Items larger than the containing panel SHALL retain norma
 - **THEN** the first row stays at the top and subsequent rows overflow normally
 
 ### Requirement: Data binding
-An element with `data_binding` `$input_doc.<path>` SHALL show the value at that path. With
+An element with `data_binding` `$input_doc.<path>` SHALL show the value at that path. An input whose binding is absent, null, or empty SHALL retain its value locally without writing to the page input document. A button whose action is absent or null SHALL do nothing when clicked. With
 `binding_mode` `read-write` the user SHALL be able to edit it and each edit SHALL be written
 to that path, creating missing attributes; with `read-only` it SHALL NOT be editable.
 Changes to the input doc made by actions SHALL update every element bound to the changed

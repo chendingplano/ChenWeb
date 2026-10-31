@@ -849,16 +849,22 @@ func (v *validator) elementInstance(page, m map[string]any, path string) {
 	}
 	v.noClassAttrs(m, path)
 	own := instanceAttrs(m, "element")
-	v.sharedAttrs(own, path)
 	row, ok := v.classCopy(KindElement, m, "element", path)
 	if !ok {
 		return
 	}
 	cls := str(m["element"])
-	own = withPageDefaults(page, row, own)
-	merged := v.againstCopy(KindElement, cls, row, own, path)
 	module := str(row["code_module_id"])
-	v.element(module, own, path)
+	own = withPageDefaults(page, row, own)
+	checked := maps.Clone(own)
+	if module == "input" {
+		if value, exists := checked["data_binding"]; exists && (value == nil || value == "") {
+			delete(checked, "data_binding")
+		}
+	}
+	v.sharedAttrs(checked, path)
+	merged := v.againstCopy(KindElement, cls, row, own, path)
+	v.element(module, checked, path)
 	v.elementComplete(module, merged, path)
 	v.els = append(v.els, mergedElement{cls, path, merged, row})
 }
@@ -1028,7 +1034,13 @@ func (v *validator) inputAttributes(e map[string]any, path string) {
 // module requires is there, and the rules that span attributes hold.
 func (v *validator) elementComplete(module string, merged map[string]any, path string) {
 	code, _ := elementCode(module)
-	v.required(merged, path, code.required)
+	required := code.required
+	if module == "input" || module == "button" {
+		required = slices.DeleteFunc(slices.Clone(required), func(key string) bool {
+			return module == "input" && key == "data_binding" || module == "button" && key == "on_click"
+		})
+	}
+	v.required(merged, path, required)
 	v.chatComplete(module, merged, path)
 	switch module {
 	case "text":
@@ -1305,7 +1317,7 @@ func actionPositions(page map[string]any) []actionPos {
 			m, _ := e.(map[string]any)
 			path := "/panels/" + paneID + "/elem_list/" + strconv.Itoa(i)
 			add := func(attr string, allowed, roots []string) {
-				if val, ok := m[attr]; ok {
+				if val, ok := m[attr]; ok && !(attr == "on_click" && val == nil) {
 					out = append(out, actionPos{val, path + "/" + attr, allowed, roots, false})
 				}
 			}
@@ -1488,6 +1500,9 @@ func (v *validator) againstCopy(kind Kind, cls string, row, own map[string]any, 
 	}
 	_, required := classDefaults(kind, row)
 	for _, k := range required {
+		if kind == KindElement && ((str(row["code_module_id"]) == "input" && k == "data_binding") || (str(row["code_module_id"]) == "button" && k == "on_click")) {
+			continue
+		}
 		if v.allowIncomplete {
 			break
 		}

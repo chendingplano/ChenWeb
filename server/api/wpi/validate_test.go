@@ -514,7 +514,12 @@ func TestInstancesAgainstCopies(t *testing.T) {
 		name, element, want string
 		edit                func(map[Kind]map[string]string)
 	}{
-		{"null attribute not set", `{"element": "input", "label": "x"}`, `attribute "data_binding" has no default in this instance's copy of element class "input", so the instance must set it`, nil},
+		{"input binding omitted", `{"element": "input", "label": "x"}`, "", nil},
+		{"input binding null", `{"element": "input", "label": "x", "data_binding": null}`, "", nil},
+		{"input binding empty", `{"element": "input", "label": "x", "data_binding": ""}`, "", nil},
+		{"button action omitted", `{"element": "button", "label": "Go"}`, "", nil},
+		{"button action null", `{"element": "button", "label": "Go", "on_click": null}`, "", nil},
+		{"input binding invalid", `{"element": "input", "label": "x", "data_binding": "invalid"}`, "must be a $input_doc path", nil},
 		{"text needs text or binding", `{"element": "text"}`, "exactly one of", nil},
 		{"text with both", `{"element": "text", "text": "x", "data_binding": "$input_doc.x"}`, "exactly one of", nil},
 		{"initial item is a folder", `{"element": "menu", "initial_item": "f", "items": [{"item_id": "f", "label": "F", "children": [{"item_id": "b", "label": "B", "on_click": {"action": "close-page"}}]}]}`,
@@ -530,7 +535,7 @@ func TestInstancesAgainstCopies(t *testing.T) {
 		{"fixed attribute set", `{"element": "fancy-button", "label": "Go", "on_click": {"action": "close-page"}}`,
 			`/panels/main/elem_list/0/label attribute "label" is fixed by element class "fancy-button"; an instance cannot set it`, addFancyButton},
 		{"shared module checks its required attributes", `{"element": "fancy-button"}`,
-			`attribute "on_click" has no default in this instance's copy of element class "fancy-button"`, addFancyButton},
+			"", addFancyButton},
 		{"shared module checks values", `{"element": "big-list", "source": {"action": "query", "sql_stmt_id": "x", "result": "list"}, "columns": [{"field": "a", "label": "A"}], "presentation": "cards"}`,
 			`/panels/main/elem_list/0/presentation "cards" is not supported`, func(c map[Kind]map[string]string) {
 				c[KindElement]["big-list"] = `{"descriptor_id": "big-list", "schema_version": "0.4", "code_module_id": "list",

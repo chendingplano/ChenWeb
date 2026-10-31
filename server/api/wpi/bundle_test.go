@@ -403,3 +403,12 @@ func TestBuildDraftPagePreviewOverridesStoredPage(t *testing.T) {
 		t.Fatal("preview did not use the edited page")
 	}
 }
+
+func TestBuildDraftPreviewWithUnconfiguredControls(t *testing.T) {
+	fx := fixture()
+	body := decode(t, `{"descriptor_id":"","schema_version":"0.5","page_layouter":{"layouter":"single-pane"},"panels":{"main":{"elem_layouter":{"layouter":"flow-layouter"},"elem_list":[{"element":"input","label":"Name","data_binding":""},{"element":"button","label":"Go","on_click":null}]}}}`)
+	res, err := BuildDraftPagePreviewBundle(context.Background(), body, fixtureLoader(t, fx), func(context.Context, string) (map[string]bool, error) { return nil, nil }, registeredIn(nil))
+	if err != nil || res.Bundle == nil || len(res.Errors) != 0 {
+		t.Fatalf("preview: %+v, %v", res, err)
+	}
+}
