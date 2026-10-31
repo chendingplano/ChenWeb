@@ -14,7 +14,7 @@
  import { getElementClass } from '$lib/wpi/api';
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
  import { resolveEntry } from '$lib/wpi/entries';
- import { effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
+ import { cssLength, effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
  import { flowGeometry } from '$lib/wpi/layouters/flow-geometry';
  import ElementView from '$lib/wpi/elements/Element.svelte';
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
@@ -58,9 +58,7 @@
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number; pageWidth: number; pageHeight: number; original: JsonObject; movedX: boolean; movedY: boolean } | null = null;
  function startResize(event: PointerEvent) {
   if (event.button !== 0) return;
-  const box = previewElement.querySelector<HTMLElement>('[data-page-box]')?.getBoundingClientRect();
-  if (!box) return;
-  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, ...size, zoom: zoom || 1, pageWidth: box.width / (zoom || 1), pageHeight: box.height / (zoom || 1), original: JSON.parse(JSON.stringify(descriptor)), movedX: false, movedY: false };
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, ...size, zoom: zoom || 1, pageWidth: size.width, pageHeight: size.height, original: JSON.parse(JSON.stringify(descriptor)), movedX: false, movedY: false };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   onResizeStart();
   event.stopPropagation();
@@ -71,8 +69,8 @@
   const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
   onResize({ width: Math.max(240, Math.round(drag.width + dx / drag.zoom)), height: Math.max(160, Math.round(drag.height + dy / drag.zoom)) });
   drag.movedX ||= dx !== 0; drag.movedY ||= dy !== 0;
-  if (drag.movedX) onPageResize('width', pageDragSize(drag.pageWidth, dx, drag.zoom, 'right'));
-  if (drag.movedY) onPageResize('height', pageDragSize(drag.pageHeight, dy, drag.zoom, 'bottom'));
+  if (drag.movedX) onPageResize('width', Math.max(240, pageDragSize(drag.pageWidth, dx, drag.zoom, 'right')));
+  if (drag.movedY) onPageResize('height', Math.max(160, pageDragSize(drag.pageHeight, dy, drag.zoom, 'bottom')));
   event.stopPropagation();
  }
  function resizeKey(event: KeyboardEvent) {
@@ -81,9 +79,8 @@
   else if (event.key === 'ArrowDown') dy = step; else if (event.key === 'ArrowUp') dy = -step; else return;
   onResizeStart();
   onResize({ width: Math.max(240, size.width + dx), height: Math.max(160, size.height + dy) });
-  const box = previewElement.querySelector<HTMLElement>('[data-page-box]')?.getBoundingClientRect();
-  if (box && dx) onPageResize('width', pageDragSize(box.width / (zoom || 1), dx, 1, 'right'));
-  if (box && dy) onPageResize('height', pageDragSize(box.height / (zoom || 1), dy, 1, 'bottom'));
+  if (dx) onPageResize('width', Math.max(240, size.width + dx));
+  if (dy) onPageResize('height', Math.max(160, size.height + dy));
   measurePanes(); event.preventDefault(); event.stopPropagation();
  }
  let paneDrag: { pointer: number; start: number; first: number; second: number; a: string; b: string; axis: 'width' | 'height'; left: HTMLElement; right: HTMLElement; value: number; oldLeft: string; oldRight: string; min: number; max: number } | null = null;
@@ -120,8 +117,7 @@
  function startOuter(event: PointerEvent, side: Side) {
   if (event.button !== 0) return;
   const axis = side === 'left' || side === 'right' ? 'width' : 'height';
-  const box = (event.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
-  outerDrag = { pointer: event.pointerId, side, axis, start: axis === 'width' ? event.clientX : event.clientY, initial: box[axis] / (zoom || 1), zoom: zoom || 1, original: JSON.parse(JSON.stringify(descriptor)) };
+  outerDrag = { pointer: event.pointerId, side, axis, start: axis === 'width' ? event.clientX : event.clientY, initial: size[axis], zoom: zoom || 1, original: JSON.parse(JSON.stringify(descriptor)) };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   onResizeStart(); event.stopPropagation(); event.preventDefault();
  }
@@ -129,14 +125,16 @@
   const d = outerDrag;
   if (!d || d.pointer !== event.pointerId) return;
   const movement = (d.axis === 'width' ? event.clientX : event.clientY) - d.start;
-  onPageResize(d.axis, pageDragSize(d.initial, movement, d.zoom, d.side));
+  const value = Math.max(d.axis === 'width' ? 240 : 160, pageDragSize(d.initial, movement, d.zoom, d.side));
+  onResize({ ...size, [d.axis]: value });
+  onPageResize(d.axis, value);
   event.stopPropagation();
  }
  function endOuter(event: PointerEvent, cancel = false) {
   const d = outerDrag;
   if (!d || d.pointer !== event.pointerId) return;
   outerDrag = null;
-  if (cancel) onPageCancel(d.original); else measurePanes();
+  if (cancel) { onResize({ ...size, [d.axis]: d.initial }); onPageCancel(d.original); } else measurePanes();
   event.stopPropagation();
  }
  const page = $derived(descriptor as unknown as PageDescriptor);
@@ -242,15 +240,15 @@
 <div bind:this={previewElement} class="preview select-text" style="width:{size.width}px; height:{size.height}px; color-scheme:{darkMode ? 'dark' : 'light'}" data-wpi-page-preview>
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
-  <div style={placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}>
-   <div style="{pageBoxStyle(page)}; position:relative; {(!page.height || page.height === 'auto') ? 'height:100%' : ''}" data-page={page.descriptor_id} data-page-box>
+  <div style="{placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}; padding: 0 40px 40px">
+   <div style="{pageBoxStyle(page)}; position:relative; max-width:min(100%, {cssLength(page.max_width) ?? '100%'}); max-height:min(100%, {cssLength(page.max_height) ?? '100%'}); {(!page.height || page.height === 'auto') ? 'height:100%' : ''}" data-page={page.descriptor_id} data-page-box>
     {@render paneTree(root, undefined)}
-    {#each ['top', 'bottom', 'left', 'right'] as side}
-     <div role="separator" aria-label={m.wpi_resize_preview()} aria-orientation={side === 'left' || side === 'right' ? 'vertical' : 'horizontal'} class="outer-edge nodrag nopan {side}" onpointerdown={(event) => startOuter(event, side as Side)} onpointermove={moveOuter} onpointerup={(event) => endOuter(event)} onpointercancel={(event) => endOuter(event, true)}></div>
-    {/each}
    </div>
   </div>
  {/if}
+    {#each ['bottom', 'right'] as side}
+     <div role="separator" aria-label={m.wpi_resize_preview()} aria-orientation={side === 'left' || side === 'right' ? 'vertical' : 'horizontal'} class="outer-edge nodrag nopan {side}" onpointerdown={(event) => startOuter(event, side as Side)} onpointermove={moveOuter} onpointerup={(event) => endOuter(event)} onpointercancel={(event) => endOuter(event, true)}></div>
+    {/each}
  {#if actions && selectedId && toolbarPosition}
   <div class="element-toolbar nodrag nopan" role="group" aria-label={m.wpi_element_actions()} style:left="{toolbarPosition.left}px" style:top="{toolbarPosition.top}px" onpointerdown={(event) => event.stopPropagation()}>
    {#if actions.editClass}<button title={m.basenode_edit_class()} aria-label={m.basenode_edit_class()} onclick={(event) => { event.stopPropagation(); actions.editClass?.(selectedId!); }}><PencilIcon class="w-3 h-3" /></button>{/if}
