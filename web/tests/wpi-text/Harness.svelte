@@ -42,7 +42,8 @@
 			default_value: 'normal',
 			instance_modifiable: false
 		},
-		future_option: { help_tip: { en: 'Future option', 'zh-cn': '未来选项' } }
+		future_option: { help_tip: { en: 'Future option', 'zh-cn': '未来选项' } },
+		max_height: { default_value: '150px' }
 	} as Record<string, ElementAttribute>;
 	function edit(v: JsonObject) {
 		attrs = v;

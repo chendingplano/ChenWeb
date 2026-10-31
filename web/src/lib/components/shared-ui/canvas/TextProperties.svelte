@@ -42,6 +42,16 @@
 	function get(name: string): Json | undefined {
 		return attrs[name] ?? definitions[name]?.default_value ?? textDefaults[name];
 	}
+	function exceedsMaximum(name: string): boolean {
+		if (name !== 'width' && name !== 'height') return false;
+		const value = get(name);
+		const maximum = get(`max_${name}`);
+		if (typeof value !== 'string' || typeof maximum !== 'string') return false;
+		const length = /^(\d+(?:\.\d+)?)(px|rem|em|%)$/;
+		const a = length.exec(value);
+		const b = length.exec(maximum);
+		return !!a && !!b && a[2] === b[2] && Number(a[1]) > Number(b[1]);
+	}
 	function reset(name: string) {
 		const next = { ...attrs };
 		delete next[name];
@@ -90,7 +100,8 @@
 					{@const localizedField = ['text', 'label', 'help_tip'].includes(name)}
 					{@const languageMap =
 						value !== null && typeof value === 'object' && !Array.isArray(value)}
-					{@const invalid = editing?.name !== name && value !== undefined && !validTextAttribute(name, value)}
+					{@const exceeds = editing?.name !== name && editing?.name !== `max_${name}` && exceedsMaximum(name)}
+					{@const invalid = editing?.name !== name && ((value !== undefined && !validTextAttribute(name, value)) || exceeds)}
 					<div
 						class="attribute"
 						role={localizedField ? 'group' : undefined}
@@ -201,7 +212,7 @@
 								}}
 							/>
 						{/if}
-						{#if invalid}<p class="error" role="alert">{m.wpi_text_invalid()}</p>{/if}
+						{#if invalid}<p class="error" role="alert">{exceeds ? m.wpi_text_exceeds_maximum() : m.wpi_text_invalid()}</p>{/if}
 						{#if group === 'other'}<p class="hint" role="status">{m.wpi_text_unsupported()}</p>{/if}
 						{#if def.help_tip}<p class="hint">{localized(def.help_tip)}</p>{/if}
 						{#if !fixed}<p class="origin">

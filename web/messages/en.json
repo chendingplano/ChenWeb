@@ -8070,6 +8070,7 @@
 	"wpi_text_optional": "Optional; no default",
 	"wpi_text_unsupported": "Unsupported by text; preserved with a warning.",
 	"wpi_text_invalid": "Invalid value for this attribute.",
+	"wpi_text_exceeds_maximum": "Value exceeds the maximum size.",
 	"wpi_text_hint_content": "Set text or a binding, never both.",
 	"wpi_text_hint_caption": "The full caption wraps without truncation.",
 	"wpi_text_hint_icon": "Decorative; keep meaning in text.",

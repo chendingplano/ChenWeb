@@ -8070,6 +8070,7 @@
 	"wpi_text_optional": "可选；无默认值",
 	"wpi_text_unsupported": "文本模块不支持此属性；保留并显示警告。",
 	"wpi_text_invalid": "此属性的值无效。",
+	"wpi_text_exceeds_maximum": "该值超过最大尺寸。",
 	"wpi_text_hint_content": "文本和数据绑定只能设置其一。",
 	"wpi_text_hint_caption": "标题完整换行显示，不截断。",
 	"wpi_text_hint_icon": "仅作装饰；请用文字表达含义。",

@@ -111,6 +111,21 @@ def check(url):
         height.fill('120px')
         height.blur()
         assert json.loads(page.locator('#attrs').inner_text())['height'] == '120px'
+        page.locator('#text-prop-max_width').fill('300px')
+        page.locator('#text-prop-max_width').blur()
+        width.fill('400px')
+        expect(width.locator('..').get_by_role('alert')).to_have_count(0)
+        width.blur()
+        expect(width.locator('..').get_by_role('alert')).to_contain_text('maximum')
+        width.fill('50%')
+        width.blur()
+        expect(width.locator('..').get_by_role('alert')).to_have_count(0)
+        height.fill('160px')
+        height.blur()
+        expect(height.locator('..').get_by_role('alert')).to_contain_text('maximum')
+        page.locator('#text-prop-max_height').fill('200px')
+        page.locator('#text-prop-max_height').blur()
+        expect(height.locator('..').get_by_role('alert')).to_have_count(0)
         # Invalid author values are validated on blur, then reset restores the default.
         size = page.locator("#text-prop-font_size")
         size.fill("0px")
@@ -126,7 +141,7 @@ def check(url):
         assert "font_size" not in state and state["future_option"] == "preserved"
         expect(size).to_have_value("0.875rem")
         expect(page.locator("#text-prop-font_style")).to_have_attribute("readonly", "")
-        expect(page.get_by_text("Unsupported by text; preserved with a warning.", exact=True)).to_be_visible()
+        expect(page.locator('#text-prop-future_option').locator('..').get_by_text("Unsupported by text; preserved with a warning.", exact=True)).to_be_visible()
         page.get_by_role("button", name="No tooltip", exact=True).click()
         assert json.loads(page.locator("#attrs").inner_text())["help_tip"] == ""
         expect(first.locator("button")).to_have_count(0)
