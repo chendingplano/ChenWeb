@@ -198,5 +198,5 @@ export function inheritPaneBorder(pane: PaneBorder, parent: PaneBorder = {}): Pa
 
 export function paneBorderStyle(border: PaneBorder): string {
  if (!border.border_thickness || parseFloat(border.border_thickness) <= 0) return '';
- return `box-sizing: border-box; border: ${border.border_thickness} solid light-dark(${border.border_light_color ?? '#000'}, ${border.border_dark_color ?? '#fff'})`;
+ return `outline: ${border.border_thickness} solid light-dark(${border.border_light_color ?? '#000'}, ${border.border_dark_color ?? '#fff'}); outline-offset: -${border.border_thickness}`;
 }

@@ -167,7 +167,7 @@ test('pane border attributes inherit independently and zero disables drawing', (
  const root = inheritPaneBorder({ border_thickness: '2px', border_light_color: 'black', border_dark_color: 'white' });
  const middle = inheritPaneBorder({ border_light_color: 'red' }, root);
  assert.deepEqual(inheritPaneBorder({}, middle), { border_thickness: '2px', border_light_color: 'red', border_dark_color: 'white' });
- assert.match(paneBorderStyle(middle), /border: 2px solid light-dark\(red, white\)/);
+ assert.match(paneBorderStyle(middle), /outline: 2px solid light-dark\(red, white\); outline-offset: -2px/);
  assert.equal(paneBorderStyle(inheritPaneBorder({ border_thickness: '0px' }, middle)), '');
  assert.match(paneBorderStyle({ border_thickness: '1px' }), /light-dark\(#000, #fff\)/);
 });

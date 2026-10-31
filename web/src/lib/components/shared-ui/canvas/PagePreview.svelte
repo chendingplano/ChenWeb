@@ -248,7 +248,7 @@
  .pane-divider { position:absolute; z-index:4; bottom:-4px; left:0; right:0; height:8px; cursor:row-resize; touch-action:none; }
  .pane-divider.vertical { top:0; bottom:0; left:auto; right:-4px; width:8px; height:auto; cursor:col-resize; }
  .pane-divider:hover { background:rgba(99,102,241,.25); }
- .pane-selected { outline: 2px solid #6366f1; outline-offset: -2px; }
+ .pane-selected { outline: 2px solid #6366f1 !important; outline-offset: -2px !important; }
  .pane-tag { position: absolute; top: 2px; right: 2px; z-index: 3; border: 0; border-radius: 3px; padding: 0 4px; font-size: 9px; line-height: 14px; background: rgba(99,102,241,.12); color: var(--cv-text-muted); cursor: pointer; }
  .pane-tag[aria-pressed='true'] { background: #6366f1; color: #fff; }
  .flow { position: relative; }
