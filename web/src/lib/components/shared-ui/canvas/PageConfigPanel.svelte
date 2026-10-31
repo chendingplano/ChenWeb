@@ -12,11 +12,11 @@
  import { valueText, withAttribute } from './element-attributes';
  import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelConfig } from './pane-edit';
 
- let { page, mode, width, selectedPane, pageLayouters, onUpdate, onLayouterChange, onSelectPane, onSplit, onAdd, onDelete, onRename }: {
+ let { page, mode, width, selectedPane, pageLayouters, onUpdate, onLayouterChange, onSelectPane, onSplit, onAdd, onDelete, onRename, onMerge }: {
   page: JsonObject; pageLayouters: JsonObject[]; mode: ConfigMode; width: number; selectedPane: string | null;
   onUpdate: (page: JsonObject) => void; onLayouterChange: (cls: JsonObject) => void; onSelectPane: (pane: string) => void;
   onSplit: (pane: string, split: 'rows' | 'columns') => void; onAdd: (pane: string) => void;
-  onDelete: (pane: string) => void; onRename: (pane: string, to: string) => void;
+  onDelete: (pane: string) => void; onMerge: (pane: string) => void; onRename: (pane: string, to: string) => void;
  } = $props();
 
  const pageGroups = [
@@ -110,6 +110,7 @@
       <button type="button" onclick={() => onSplit(pane.pane_id, 'columns')}>{m.wpi_pane_split_columns()}</button>
      {:else}
       <button type="button" onclick={() => onAdd(pane.pane_id)}>{m.wpi_pane_add()}</button>
+      <button type="button" onclick={() => onMerge(pane.pane_id)}>{m.wpi_pane_merge()}</button>
      {/if}
      {#if pane.pane_id !== root.pane_id}<button type="button" class="danger" onclick={() => onDelete(pane.pane_id)}>{m.wpi_pane_delete()}</button>{/if}
     </div>

@@ -40,7 +40,7 @@
 	import { localized } from '$lib/wpi/text';
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 	import { isElementNode, nodeData, nodeJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
-	import { addPane, deletePane, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
+	import { addPane, deletePane, mergePane, setPaneAttr, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
@@ -647,6 +647,7 @@
 	}
 	const paneActions = {
 		split: (pane: string, split: 'rows' | 'columns') => paneEdit((e) => splitPane(e, pane, split)),
+		merge: (pane: string) => paneEdit((e) => mergePane(e, pane)),
 		add: (pane: string) => paneEdit((e) => ({ ...e, page: addPane(e.page, pane) })),
 		remove(pane: string) {
 			if (!loadedPage) return;
@@ -1079,7 +1080,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
+							<PagePreview descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onPaneResize={(a, b, axis, first, second) => paneEdit((e) => ({ ...e, page: setPaneAttr(setPaneAttr(e.page, a, axis, `${first}px`), b, axis, `${second}px`) }))} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -1220,7 +1221,7 @@
 				onUpdate={(page) => { takeSnapshot(); loadedPage = page; }}
 				onLayouterChange={(cls) => { paneEdit((edit) => setPageLayouter(edit, cls)); selectedPane = null; }}
 				onSelectPane={(pane) => (selectedPane = pane)}
-				onSplit={paneActions.split} onAdd={paneActions.add} onDelete={paneActions.remove} onRename={paneActions.rename} />
+				onSplit={paneActions.split} onMerge={paneActions.merge} onAdd={paneActions.add} onDelete={paneActions.remove} onRename={paneActions.rename} />
 		{:else}
 		<PropertiesPanel
 			node={selectedNode as any}

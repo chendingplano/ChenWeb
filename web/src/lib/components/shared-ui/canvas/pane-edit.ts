@@ -98,6 +98,28 @@ export function splitPane({ page, nodes }: Edit, id: string, split: 'rows' | 'co
 	return { page: { ...next, panels }, nodes: nodes.map((n) => (isElementNode(n) && nodePane(n) === id ? { ...n, data: { ...n.data, pane: first } } : n)) };
 }
 
+// Collapse a split subtree, keeping its first panel configuration and all elements.
+export function mergePane({ page, nodes }: Edit, id: string): Edit {
+ const pane = findPane(rootOf(page), id);
+ if (!pane || isLeaf(pane)) return { page, nodes };
+ const leaves = leafPanes(pane);
+ const ordered = leaves.flatMap((leaf) => paneNodes(nodes, leaf));
+ const positions = new Map(ordered.map((node, index) => [node.id, index]));
+ const panels = { ...panelsOf(page) };
+ const firstPanel = leaves.find((leaf) => panels[leaf]);
+ const panel = firstPanel ? panels[firstPanel] : undefined;
+ for (const leaf of leaves) delete panels[leaf];
+ if (panel) panels[id] = panel;
+ const next = withRoot(page, mapPane(rootOf(page), id, (p) => {
+  const { split: _split, children: _children, ...rest } = p;
+  return rest;
+ }));
+ return { page: { ...next, panels }, nodes: nodes.map((node) => {
+  const index = positions.get(node.id);
+  return index === undefined ? node : { ...node, position: { x: 0, y: index }, data: { ...node.data, pane: id } };
+ }) };
+}
+
 // Adds a leaf pane at the end of split pane id.
 export function addPane(page: JsonObject, id: string): JsonObject {
 	const pane = findPane(rootOf(page), id);

@@ -8080,5 +8080,6 @@
 	"wpi_text_choice_oblique": "倾斜",
 	"wpi_text_choice_justify": "两端对齐",
 	"wpi_text_choice_pre_wrap": "保留空格和换行",
-	"wpi_text_empty_help": "不显示提示"
+	"wpi_text_empty_help": "不显示提示",
+  "wpi_pane_merge": "合并窗格"
 }

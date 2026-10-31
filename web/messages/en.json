@@ -8080,5 +8080,6 @@
 	"wpi_text_choice_oblique": "Oblique",
 	"wpi_text_choice_justify": "Justify",
 	"wpi_text_choice_pre_wrap": "Preserve spaces and line breaks",
-	"wpi_text_empty_help": "No tooltip"
+	"wpi_text_empty_help": "No tooltip",
+  "wpi_pane_merge": "Merge panes"
 }

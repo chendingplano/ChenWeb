@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
-import { addPane, deletePane, moveNode, nodesUnder, renamePane, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
+import { addPane, deletePane, mergePane, moveNode, nodesUnder, renamePane, renameProblem, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
 import { nodePane, pageJson } from './wpi-json';
 
 const node = (id: string, pane: string, y = 0): Node => ({ id, type: 'wpi-element', position: { x: 0, y }, data: { label: id, element: 'text', attrs: { text: id }, pane } });
@@ -83,4 +83,13 @@ test('changing layouter retains matching panes and moves only displaced elements
  const result = setPageLayouter({ page, nodes: [node('a', 'left'), node('b', 'right')] }, cls);
  assert.deepEqual(result.nodes.map(nodePane), ['left', 'left']);
  assert.deepEqual(Object.keys(result.page.panels as JsonObject), ['left']);
+});
+
+
+test('merging a split keeps all elements in pane order', () => {
+ const { page } = splitPane({ page: single, nodes: [] }, 'main', 'columns');
+ const merged = mergePane({ page, nodes: [node('b', 'main-2'), node('a', 'main-1')] }, 'main');
+ assert.deepEqual(rootOf(merged.page), { pane_id: 'main' });
+ assert.deepEqual(merged.nodes.map(nodePane), ['main', 'main']);
+ assert.deepEqual(((pageJson(merged.nodes, merged.page).panels as JsonObject).main as { elem_list: JsonObject[] }).elem_list.map(e => e.text), ['a', 'b']);
 });
