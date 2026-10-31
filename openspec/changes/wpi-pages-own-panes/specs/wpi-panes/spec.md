@@ -45,6 +45,11 @@ changes its size within its limits while the app runs.
 - **WHEN** a 1000px wide row holds a 240px pane and two elastic panes
 - **THEN** each elastic pane is 380px wide
 
+#### Scenario: Columns exceed a split pane's width
+- **WHEN** the fixed widths and minimum widths of columns exceed their 500px split pane
+- **THEN** the split pane remains 500px wide and scrolls its children horizontally by default
+- **AND** `hori_scrollbar: hide` clips the overflow instead
+
 #### Scenario: Margins count for scrolling
 - **WHEN** a leaf pane 300px tall with `top_margin` and `bottom_margin` 20px shows a panel 280px tall and `vert_scrollbar` is `auto`
 - **THEN** the pane shows a vertical scroll bar

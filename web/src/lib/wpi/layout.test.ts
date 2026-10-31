@@ -112,6 +112,15 @@ test('a leaf pane places what it shows inside its margins', () => {
 	assert.match(placeStyle({}), /padding: 0px 0px 0px 0px; align-items: safe center; justify-content: flex-start/);
 });
 
+test('a split pane contains overflowing children according to its scrollbar settings', () => {
+	const defaults = splitStyle({ pane_id: 'row', split: 'columns' });
+	assert.match(defaults, /overflow-x: auto/);
+	assert.match(defaults, /overflow-y: auto/);
+	const hidden = splitStyle({ pane_id: 'row', split: 'columns', hori_scrollbar: 'hide', vert_scrollbar: 'hide' });
+	assert.match(hidden, /overflow-x: hidden/);
+	assert.match(hidden, /overflow-y: hidden/);
+});
+
 test('page box: sizes, colors, height rule, host alignment', () => {
 	assert.equal(
 		pageBoxStyle(page({ width: '50 %', height: '400', min_width: '320', max_height: '600px', bkgd_color: '#fff', frgd_color: 'auto' })),
