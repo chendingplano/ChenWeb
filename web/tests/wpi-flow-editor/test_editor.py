@@ -29,9 +29,21 @@ with tempfile.TemporaryFile(mode='w+') as log:
    expect(count).to_have_value('50')
    expect(page.locator('#wpi-flow-column_gap')).to_have_value('2rem')
    expect(page.locator('#wpi-flow-max_row_height')).to_have_value('200px')
+   minimum = page.locator('#wpi-flow-min_elem_width')
+   minimum.fill('500px'); minimum.blur()
+   items = page.locator('[data-wpi-page-preview] [data-flow-item]')
+   expect(items).to_have_count(4)
+   assert items.evaluate_all('(xs) => xs.map(x => x.offsetWidth)') == [500] * 4
+   minimum.fill('100px'); minimum.blur()
+   page.locator('#wpi-flow-max_num_elems').fill('2'); page.locator('#wpi-flow-max_num_elems').blur()
+   page.locator('#wpi-flow-elem_separator').select_option('thin_solid_line')
+   page.wait_for_timeout(200)
+   positions = items.evaluate_all('(xs) => xs.map(x => x.offsetTop)')
+   assert positions[0] == positions[1] and positions[2] == positions[3] and positions[2] > positions[1], positions
+   assert page.locator('[data-wpi-page-preview] [data-flow-decoration]').count() >= 2
    count.fill('0'); count.blur()
    config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
-   assert config == {'column_gap':'2rem', 'custom':'retained', 'max_num_elems':0}, config
+   assert config == {'column_gap':'2rem', 'custom':'retained', 'min_elem_width':'100px', 'max_num_elems':0, 'elem_separator':'thin_solid_line'}, config
    page.locator('#wpi-flow-row_separator').select_option('bold_dash_line')
    config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
    assert config['row_separator'] == 'bold_dash_line'

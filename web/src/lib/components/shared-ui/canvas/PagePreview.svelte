@@ -11,6 +11,7 @@
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
  import { resolveEntry } from '$lib/wpi/entries';
  import { effectiveRoot, flowItemStyle, flowStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, placeStyle, splitStyle } from '$lib/wpi/layout';
+ import { flowGeometry } from '$lib/wpi/layouters/flow-geometry';
  import ElementView from '$lib/wpi/elements/Element.svelte';
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
  import type { Bundle, ClassRow, ElementInstance, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
@@ -185,11 +186,12 @@
   style={axis ? `${paneStyle(pane, axis)}; min-width:${MIN_PANE_SIZE}px; min-height:${MIN_PANE_SIZE}px; max-width:none; max-height:none; ${next ? "" : "flex-grow:1"}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}>
   {#if isLeaf(pane)}
    {@const items = entries(pane.pane_id)}
+   {@const config = panelConfig(pane.pane_id)}
    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
    <div style={placeStyle(pane)} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>
-    <div class="flex flex-wrap select-text" style="{flowStyle(panelConfig(pane.pane_id))}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}" data-flow-layout>
+    <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}" data-flow-layout use:flowGeometry={{ config, count: items.length }}>
      {#each items as item (item.node.id)}
-      <div class="element min-w-0" use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc)} data-flow-item>
+      <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config)} data-flow-item>
        {#if 'error' in item.entry}
         <ErrorBox title={m.wpi_error_title({ descriptor: page.descriptor_id })} message={item.entry.error} />
        {:else if rt.root}
@@ -246,7 +248,10 @@
  .pane-selected { outline: 2px solid #6366f1; outline-offset: -2px; }
  .pane-tag { position: absolute; top: 2px; right: 2px; z-index: 3; border: 0; border-radius: 3px; padding: 0 4px; font-size: 9px; line-height: 14px; background: rgba(99,102,241,.12); color: var(--cv-text-muted); cursor: pointer; }
  .pane-tag[aria-pressed='true'] { background: #6366f1; color: #fff; }
- .element { position: relative; }
+ .flow { position: relative; }
+ .element { position: relative; box-sizing: border-box; overflow: auto; }
+ .stretch { display: flex; flex-direction: column; }
+ .stretch > :global(:not(.overlay)) { flex: 1 1 auto; }
  .overlay { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; min-height: 20px; background: transparent; border: 1px solid transparent; cursor: pointer; }
  .overlay:hover { background: rgba(99,102,241,.08); border-color: rgba(99,102,241,.5); }
  .overlay.selected, .overlay:focus-visible { background: rgba(99,102,241,.08); border: 2px solid #6366f1; outline: none; }
