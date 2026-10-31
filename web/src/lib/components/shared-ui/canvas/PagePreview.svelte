@@ -4,7 +4,11 @@
  // and in each leaf pane its element nodes. Each element has a selection
  // overlay; each leaf pane is a drop target (data-editor-pane) and is selected
  // by its tag or a click on its empty area.
- import { onMount, untrack } from 'svelte';
+ import { onMount, tick, untrack } from 'svelte';
+ import CopyIcon from '@lucide/svelte/icons/copy';
+ import Trash2Icon from '@lucide/svelte/icons/trash-2';
+ import PencilIcon from '@lucide/svelte/icons/pencil';
+ import { getNodeActions } from './node-actions';
  import type { Node } from '@xyflow/svelte';
  import { m } from '$lib/paraglide/messages.js';
  import { getElementClass } from '$lib/wpi/api';
@@ -29,7 +33,22 @@
   onOuterResize: (pane: string | null, axis: 'width' | 'height', value: number, parentSize: number, pageSize: number) => void;
   onMeasure: (id: string, size: { width: number; height: number }) => void;
  } = $props();
+ const actions = getNodeActions();
  let previewElement: HTMLElement;
+ let toolbarPosition = $state<{ left: number; top: number } | null>(null);
+ function positionToolbar() {
+  const target = previewElement?.querySelector<HTMLElement>('.overlay.selected');
+  if (!target) { toolbarPosition = null; return; }
+  const root = previewElement.getBoundingClientRect();
+  const rect = target.getBoundingClientRect();
+  const scale = zoom || 1;
+  if (rect.bottom <= root.top || rect.top >= root.bottom || rect.right <= root.left || rect.left >= root.right) { toolbarPosition = null; return; }
+  toolbarPosition = { left: Math.max(55, Math.min(size.width - 55, (rect.left + rect.width / 2 - root.left) / scale)), top: Math.max(2, (rect.top - root.top) / scale - 30) };
+ }
+ $effect(() => {
+  selectedId; nodes; descriptor; size; zoom; ready;
+  void tick().then(positionToolbar);
+ });
  function measurePanes() {
   requestAnimationFrame(() => {
    onMeasurePanes(Array.from(previewElement.querySelectorAll<HTMLElement>('[data-pane-id]')).map((pane) => ({ id: pane.dataset.paneId!, width: pane.getBoundingClientRect().width / (zoom || 1), height: pane.getBoundingClientRect().height / (zoom || 1), parentWidth: (pane.parentElement?.getBoundingClientRect().width ?? 0) / (zoom || 1), parentHeight: (pane.parentElement?.getBoundingClientRect().height ?? 0) / (zoom || 1) })));
@@ -175,9 +194,13 @@
   if (ready) fetchClasses();
  });
  onMount(() => {
+  const observer = new ResizeObserver(positionToolbar);
+  observer.observe(previewElement);
+  previewElement.addEventListener('scroll', positionToolbar, true);
   rt.start();
   fetchClasses();
   ready = true;
+  return () => { observer.disconnect(); previewElement.removeEventListener('scroll', positionToolbar, true); };
  });
 </script>
 
@@ -231,11 +254,21 @@
    </div>
   </div>
  {/if}
+ {#if actions && selectedId && toolbarPosition}
+  <div class="element-toolbar nodrag nopan" role="group" aria-label={m.wpi_element_actions()} style:left="{toolbarPosition.left}px" style:top="{toolbarPosition.top}px" onpointerdown={(event) => event.stopPropagation()}>
+   {#if actions.editClass}<button title={m.basenode_edit_class()} aria-label={m.basenode_edit_class()} onclick={(event) => { event.stopPropagation(); actions.editClass?.(selectedId!); }}><PencilIcon class="w-3 h-3" /></button>{/if}
+   <button title={m.basenode_duplicate()} aria-label={m.basenode_duplicate()} onclick={(event) => { event.stopPropagation(); actions.duplicate(selectedId!); }}><CopyIcon class="w-3 h-3" /></button>
+   <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
+  </div>
+ {/if}
  <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => { if (drag?.id === event.pointerId) { drag = null; measurePanes(); } event.stopPropagation(); }} onpointercancel={() => drag = null} onkeydown={resizeKey}></button>
 </div>
 
 <style>
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
+ .element-toolbar { position:absolute; z-index:10; transform:translateX(-50%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }
+ .element-toolbar button { background:none; border:0; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; display:flex; align-items:center; }
+ .element-toolbar button:last-child { color:#ef4444; }
  .resize-handle { position:absolute; right:0; bottom:0; width:18px; height:18px; z-index:5; border:0; background: linear-gradient(135deg, transparent 45%, var(--cv-accent) 46%, var(--cv-accent) 52%, transparent 53%, transparent 64%, var(--cv-accent) 65%, var(--cv-accent) 71%, transparent 72%); cursor:nwse-resize; touch-action:none; }
  .resize-handle:focus-visible { outline:2px solid var(--cv-accent); }
  .pane { position: relative; outline: 1px dashed rgba(99,102,241,.25); outline-offset: -1px; }
