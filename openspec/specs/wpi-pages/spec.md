@@ -185,6 +185,14 @@ the prior canvas and page metadata. Failed requests SHALL leave the canvas uncha
 and display a translated error. The dialog SHALL support English and Chinese,
 keyboard focus containment, Escape dismissal and text selection.
 
+### Requirement: Root pane dimensions
+The root pane's width and height SHALL be measured against its page box. Each
+supports percentages and absolute `px` or `rem` lengths; an omitted dimension
+defaults to 100%. The editor canvas and interactive runtime SHALL apply the same
+rule. Existing `auto` and `elastic` root dimensions also fill the page for backward
+compatibility. Root pane minimum and maximum dimensions remain effective. When a
+page is opened in a host pane, the host continues to replace its root pane.
+
 ### Requirement: Canvas page preview
 When a page is loaded, the editor SHALL render its elements with the interpreter's
 layout and element components inside a resizable page surface on the canvas, initially centered and scaled to fit. Each

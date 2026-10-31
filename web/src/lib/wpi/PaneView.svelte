@@ -10,7 +10,7 @@
 	import PageView from './PageView.svelte';
 	import PanelView from './PanelView.svelte';
 	import PaneView from './PaneView.svelte';
-	import { clampPx, isLeaf, isResizable, inheritPaneColors, inheritPaneBorder, paneBorderStyle, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
+	import { clampPx, isLeaf, isResizable, inheritPaneColors, inheritPaneBorder, paneBorderStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from './layout';
 	import { paneInstanceId } from './panel-cache';
 	import { getRuntime } from './runtime.svelte';
 	import type { PaneSpec, SurfaceColors, PaneBorder } from './types';
@@ -82,7 +82,7 @@
 		data-pane={pane.pane_id}
 		data-wpi-surface
 		class="relative min-h-0 min-w-0"
-		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}; ${paneBorderStyle(border)}`}
+		style={`${axis ? paneStyle(pane, axis, rt.paneSizes[id]) : rootPaneStyle(pane)}; ${surfaceColorStyle(colors)}; ${paneBorderStyle(border)}`}
 	>
 		{#if isLeaf(pane)}
 			<div style={placeStyle(pane)}>

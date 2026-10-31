@@ -87,6 +87,16 @@ export function panelStyle(elements: Pick<ElementInstance, 'width'>[]): string {
 	return stretches ? 'flex: none; width: 100%; min-width: 0' : 'flex: none; max-width: 100%; min-width: 0';
 }
 
+// Root dimensions are relative to the page box, not a sibling split axis.
+export function rootPaneStyle(spec: PaneSpec): string {
+ const length = (value: string | undefined) => value && value !== 'auto' && value !== 'elastic' ? cssLength(value) : '100%';
+ const css = ['flex: 0 0 auto', 'box-sizing: border-box', `width: ${length(spec.width)}`, `height: ${length(spec.height)}`, 'min-width: 0', 'min-height: 0'];
+ for (const [key, value] of [['min-width', spec.min_width], ['min-height', spec.min_height], ['max-width', spec.max_width], ['max-height', spec.max_height]] as const) {
+  if (value) css.push(`${key}: ${cssLength(value)}`);
+ }
+ return css.join('; ');
+}
+
 // A split pane's child along its parent's axis: rows divide the height, columns
 // the width. size is a width or height the user dragged to, in pixels.
 export function paneStyle(spec: PaneSpec, axis: 'width' | 'height', size?: number): string {

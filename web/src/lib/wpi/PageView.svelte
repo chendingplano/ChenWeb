@@ -1,7 +1,7 @@
 <script lang="ts">
 	// A page instance (devdoc 2026102601 §3.3.2; OpenSpec wpi-pages-own-panes,
 	// design D7). In the app's page area the page's own alignment and scroll bars
-	// place its box, and its root pane fills the box. Opened in a host pane, that
+	// place its box, and its root pane sizes itself within it. Opened in a host pane, that
 	// pane takes the place of the root pane: it already applies its margins,
 	// alignment and scroll bars, and the box draws only the root's content.
 	import { m } from '$lib/paraglide/messages.js';

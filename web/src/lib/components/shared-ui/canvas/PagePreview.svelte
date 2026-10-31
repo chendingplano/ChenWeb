@@ -14,7 +14,7 @@
  import { getElementClass } from '$lib/wpi/api';
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
  import { resolveEntry } from '$lib/wpi/entries';
- import { effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
+ import { effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
  import { flowGeometry } from '$lib/wpi/layouters/flow-geometry';
  import ElementView from '$lib/wpi/elements/Element.svelte';
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
@@ -208,7 +208,7 @@
  {@const colors = inheritPaneColors(pane, inheritedColors)}
  {@const border = inheritPaneBorder(pane, inheritedBorder)}
  <section class="pane" class:pane-selected={selectedPane === pane.pane_id} data-editor-pane={isLeaf(pane) ? pane.pane_id : undefined} data-pane-id={pane.pane_id} data-pane-axis={axis}
-  style={`${axis ? `${paneStyle(pane, axis)}; min-width:${MIN_PANE_SIZE}px; min-height:${MIN_PANE_SIZE}px; max-width:none; max-height:none; ${next ? '' : 'flex-grow:1'}` : 'flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0'}; ${surfaceColorStyle(colors)}; ${paneBorderStyle(border)}`}>
+  style={`${axis ? `${paneStyle(pane, axis)}; min-width:${MIN_PANE_SIZE}px; min-height:${MIN_PANE_SIZE}px; max-width:none; max-height:none; ${next ? '' : 'flex-grow:1'}` : rootPaneStyle(pane)}; ${surfaceColorStyle(colors)}; ${paneBorderStyle(border)}`}>
   {#if isLeaf(pane)}
    {@const items = entries(pane.pane_id)}
    {@const config = panelConfig(pane.pane_id)}
