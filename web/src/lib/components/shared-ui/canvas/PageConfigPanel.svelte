@@ -42,6 +42,7 @@
  const fields = $derived(mode === 'panes' ? paneFields : flowFields);
 
  let editing = $state<{ key: string; text: string } | null>(null);
+ let flowDrafts = $state<Record<string, string>>({});
  let renaming = $state<string | null>(null);
  const renameError = $derived(pane && renaming !== null ? renameProblem(page, pane.pane_id, renaming) : null);
 
@@ -85,11 +86,11 @@
   return labels[value]?.() ?? value;
  }
  function flowText(key: FlowField): string {
-  return editing?.key === key ? editing.text : String(flowValue(key, ownConfig, copyConfig));
+  return flowDrafts[`${selectedPane}:${key}`] ?? String(flowValue(key, ownConfig, copyConfig));
  }
  function commitFlow(key: FlowField, text: string) {
-  if (!pane || !validFlowValue(key, text)) { editing = { key, text }; return; }
-  editing = null;
+  if (!pane || !validFlowValue(key, text)) return;
+  delete flowDrafts[`${selectedPane}:${key}`];
   onUpdate(setPanelConfig(page, pane.pane_id, setFlowValue(ownConfig ?? copyConfig, key, text)));
  }
  // The tree as a list, each pane with its depth.
@@ -120,12 +121,12 @@
   </select>
  {:else}
   <input id={`wpi-flow-${key}`} type="text" inputmode={key === 'max_num_elems' ? 'numeric' : 'text'} value={flowText(key)}
-   aria-invalid={editing?.key === key && !validFlowValue(key, editing.text)}
-   aria-describedby={editing?.key === key && !validFlowValue(key, editing.text) ? `wpi-flow-${key}-error` : key === 'max_num_elems' ? 'wpi-flow-count-hint' : undefined}
-   oninput={(event) => editing = { key, text: event.currentTarget.value }}
+   aria-invalid={!validFlowValue(key, flowText(key))}
+   aria-describedby={!validFlowValue(key, flowText(key)) ? `wpi-flow-${key}-error` : key === 'max_num_elems' ? 'wpi-flow-count-hint' : undefined}
+   oninput={(event) => flowDrafts[`${selectedPane}:${key}`] = event.currentTarget.value}
    onchange={(event) => commitFlow(key, event.currentTarget.value)}
-   onblur={(event) => { if (editing?.key === key) commitFlow(key, event.currentTarget.value); }} />
-  {#if editing?.key === key && !validFlowValue(key, editing.text)}
+   onblur={(event) => { if (`${selectedPane}:${key}` in flowDrafts) commitFlow(key, event.currentTarget.value); }} />
+  {#if !validFlowValue(key, flowText(key))}
    <p class="error" id={`wpi-flow-${key}-error`} role="alert">{key === 'max_num_elems' ? m.wpi_flow_invalid_count() : m.wpi_flow_invalid_length()}</p>
   {:else if key === 'max_num_elems'}
    <p class="field-hint" id="wpi-flow-count-hint">{m.wpi_flow_unlimited_hint()}</p>
