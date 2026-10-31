@@ -63,6 +63,33 @@ with TemporaryDirectory() as tmp:
                 assert all(line[3] == 50 for line in lines if line[1]), lines
                 assert all('1px solid' in line[0] for line in lines if line[0]), lines
                 assert all('3px dashed' in line[1] for line in lines if line[1]), lines
+            # Separators cover each content-sized row, even when shorter items
+            # are centered or bottom-aligned and adjacent rows have different heights.
+            for alignment in ['flex-start', 'center', 'flex-end']:
+                page.evaluate('''(alignment) => {
+                  const flow = document.querySelector('#flow');
+                  flow.style.width = '210px'; flow.style.height = '';
+                  flow.style.alignItems = alignment; flow.style.justifyContent = 'start';
+                  [...flow.querySelectorAll('[data-flow-item]')].forEach((item, i) => {
+                    item.style.height = [80, 30, 40, 65, 20][i] + 'px';
+                    item.style.maxHeight = '100px';
+                  });
+                  geometry.update({config:{max_num_elems:2,row_gap:'10px',
+                    elem_separator:'thin_solid_line'},count:5});
+                }''', alignment)
+                page.wait_for_timeout(100)
+                lines = page.locator('[data-flow-decoration]').evaluate_all('''xs => xs
+                  .filter(x => x.style.borderLeft)
+                  .map(x => [x.offsetTop, x.offsetHeight])''')
+                items = page.locator('[data-flow-item]').evaluate_all('''xs => xs.map(x => [x.offsetTop, x.offsetHeight])''')
+                for n, line in enumerate(lines):
+                    row = items[n*2:n*2+2]
+                    top = min(x[0] for x in row)
+                    bottom = max(x[0] + x[1] for x in row)
+                    assert line == [top, bottom - top], (alignment, line, row)
+                assert len(lines) == 2, (alignment, lines)
+            page.evaluate('''() => { document.querySelector('#flow').style.alignItems='flex-start';
+              document.querySelectorAll('[data-flow-item]').forEach(item => { item.style.height='50px'; item.style.maxHeight='50px'; }); }''')
             page.evaluate('''() => { let x = document.querySelector('#flow'); x.style.width='310px';
               x.style.height='300px'; geometry.update({config:{max_num_elems:2,row_gap:'10px',
               rows_alignment:'space-between'},count:5}); }''')
