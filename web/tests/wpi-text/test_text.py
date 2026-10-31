@@ -91,11 +91,34 @@ def check(url):
         expect(first.locator(".field")).to_have_class(re.compile(r"(?=.*\bhorizontal\b)(?=.*\breverse\b).*"))
         page.locator("#text-prop-label_placement").select_option("bottom")
         expect(first.locator(".field")).to_have_class(re.compile(r".*\breverse\b.*"))
-        # Invalid author values remain visible, then reset restores the class default.
+        # Partial and empty lengths remain editable until focus leaves the field.
+        width = page.locator('#text-prop-width')
+        width.fill('200px')
+        width.blur()
+        width.focus()
+        page.keyboard.press('End')
+        page.keyboard.press('Backspace')
+        expect(width).to_have_value('200p')
+        expect(width).to_have_attribute('aria-invalid', 'false')
+        page.keyboard.press('Backspace')
+        expect(width).to_have_value('200')
+        width.fill('250px')
+        width.blur()
+        assert json.loads(page.locator('#attrs').inner_text())['width'] == '250px'
+        height = page.locator('#text-prop-height')
+        height.fill('')
+        expect(height).to_have_value('')
+        height.fill('120px')
+        height.blur()
+        assert json.loads(page.locator('#attrs').inner_text())['height'] == '120px'
+        # Invalid author values are validated on blur, then reset restores the default.
         size = page.locator("#text-prop-font_size")
         size.fill("0px")
+        expect(size).to_have_attribute("aria-invalid", "false")
+        size.blur()
         expect(size).to_have_attribute("aria-invalid", "true")
         size.fill("1rem")
+        size.blur()
         expect(size).to_have_attribute("aria-invalid", "false")
         assert first.evaluate("e=>getComputedStyle(e).fontSize") == "16px"
         size.locator("..").get_by_role("button", name="Reset").click()

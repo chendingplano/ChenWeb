@@ -50,6 +50,7 @@
 	function set(name: string, value: Json) {
 		onChange({ ...attrs, [name]: value });
 	}
+	let editing = $state<{ name: string; text: string } | null>(null);
 	function visible(name: string): boolean {
 		if (
 			name.startsWith('label_') &&
@@ -89,7 +90,7 @@
 					{@const localizedField = ['text', 'label', 'help_tip'].includes(name)}
 					{@const languageMap =
 						value !== null && typeof value === 'object' && !Array.isArray(value)}
-					{@const invalid = value !== undefined && !validTextAttribute(name, value)}
+					{@const invalid = editing?.name !== name && value !== undefined && !validTextAttribute(name, value)}
 					<div
 						class="attribute"
 						role={localizedField ? 'group' : undefined}
@@ -189,9 +190,15 @@
 							<input
 								id={`text-prop-${name}`}
 								type="text"
-								value={valueText(value)}
+								value={editing?.name === name ? editing.text : valueText(value)}
 								aria-invalid={invalid}
-								oninput={(e) => onChange(withAttribute(attrs, name, e.currentTarget.value))}
+								onfocus={(e) => (editing = { name, text: e.currentTarget.value })}
+								oninput={(e) => (editing = { name, text: e.currentTarget.value })}
+								onblur={(e) => {
+									editing = null;
+									if (e.currentTarget.value !== valueText(get(name)))
+										onChange(withAttribute(attrs, name, e.currentTarget.value));
+								}}
 							/>
 						{/if}
 						{#if invalid}<p class="error" role="alert">{m.wpi_text_invalid()}</p>{/if}
