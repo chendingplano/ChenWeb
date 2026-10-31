@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Node } from '@xyflow/svelte';
 import type { JsonObject } from '$lib/wpi/types';
-import { addPane, deletePane, mergePane, moveNode, nodesUnder, renamePane, renameProblem, resizePane, rootOf, setPageLayouter, setPaneAttr, setPanelConfig, splitPane } from './pane-edit';
+import { addPane, deletePane, mergePane, moveNode, nodesUnder, renamePane, renameProblem, resizePane, rootOf, setPageLayouter, setPaneAttr, setPanelAttr, setPanelConfig, splitPane } from './pane-edit';
 import { nodePane, pageJson } from './wpi-json';
 
 const node = (id: string, pane: string, y = 0): Node => ({ id, type: 'wpi-element', position: { x: 0, y }, data: { label: id, element: 'text', attrs: { text: id }, pane } });
@@ -119,4 +119,20 @@ test('pane sizes and pixel minimum attributes cannot be set below 20px', () => {
  const resized = resizePane(setPaneAttr(single, 'main', 'min_width', '160px'), 'main', 'width', 5, 500);
  assert.equal(rootOf(resized).width, '20px');
  assert.equal(rootOf(resized).min_width, '20px');
+});
+
+
+test('panel colors are stored on the panel and survive config changes and serialization', () => {
+ const colors = { light: '#fff', dark: '#111' };
+ let page = setPanelAttr(single, 'main', 'background_color', colors);
+ page = setPanelAttr(page, 'main', 'foreground_color', 'red');
+ page = setPanelConfig(page, 'main', { row_gap: '2rem' });
+ const panel = (pageJson([], page).panels as JsonObject).main as JsonObject;
+ assert.deepEqual(panel.background_color, colors);
+ assert.equal(panel.foreground_color, 'red');
+ assert.deepEqual((panel.elem_layouter as JsonObject).config, { row_gap: '2rem' });
+ page = setPanelAttr(page, 'main', 'background_color', undefined);
+ assert.equal(((page.panels as JsonObject).main as JsonObject).background_color, undefined);
+ const created = setPanelAttr({ ...single, panels: {} }, 'main', 'background_color', 'blue');
+ assert.deepEqual((created.panels as JsonObject).main, { elem_layouter: { layouter: 'flow-layouter' }, background_color: 'blue' });
 });

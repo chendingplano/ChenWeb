@@ -13,7 +13,7 @@ export const PANE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // Alignment and scrollbars apply to leaf panes only.
 export const LEAF_PANE_ATTRS = ['hori_align', 'vert_align', 'hori_scrollbar', 'vert_scrollbar'];
 const PANE_SIZE_ATTRS = ['width', 'height', 'min_width', 'min_height', 'max_width', 'max_height', 'resizable'];
-export const PANE_ATTRS = [...PANE_SIZE_ATTRS, 'left_margin', 'right_margin', 'top_margin', 'bottom_margin'];
+export const PANE_ATTRS = [...PANE_SIZE_ATTRS, 'left_margin', 'right_margin', 'top_margin', 'bottom_margin', 'background_color', 'foreground_color'];
 
 export type Edit = { page: JsonObject; nodes: Node[] };
 
@@ -227,4 +227,14 @@ export function setPanelConfig(page: JsonObject, pane: string, config: JsonObjec
 	else delete layouter.config;
 	panels[pane] = { ...panel, elem_layouter: layouter };
 	return { ...page, panels };
+}
+
+// Panel attributes belong beside elem_layouter, not inside its config.
+export function setPanelAttr(page: JsonObject, pane: string, name: string, value: JsonObject[string] | undefined): JsonObject {
+ const panels = { ...panelsOf(page) };
+ const panel = { ...((panels[pane] ?? { elem_layouter: { layouter: 'flow-layouter' } }) as JsonObject) };
+ if (value === undefined) delete panel[name];
+ else panel[name] = value;
+ panels[pane] = panel;
+ return { ...page, panels };
 }

@@ -10,7 +10,7 @@
  import { findPane, isLeaf } from '$lib/wpi/layout';
  import type { JsonObject, PaneSpec } from '$lib/wpi/types';
  import { valueText, withAttribute } from './element-attributes';
- import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelConfig } from './pane-edit';
+ import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelAttr, setPanelConfig } from './pane-edit';
  import { flowFields, flowOptions, flowValue, setFlowValue, validFlowValue, type FlowField } from './flow-config';
 
  let { page, mode, width, selectedPane, pageLayouters, onUpdate, onLayouterChange, onSelectPane, onSplit, onAdd, onDelete, onRename, onMerge }: {
@@ -30,6 +30,7 @@
  const pageFields = pageGroups.flatMap((group) => group.fields);
  // Fields are labelled with their attribute names, as in the descriptor.
  const PANE_ID = 'pane_id';
+ const colorFields = ['background_color', 'foreground_color'];
 
  const root = $derived(rootOf(page));
  const pane = $derived(selectedPane ? findPane(root, selectedPane) : undefined);
@@ -52,13 +53,14 @@
   if (mode === 'panes') return (pane ?? {}) as unknown as JsonObject;
   return ownConfig ?? copyConfig;
  }
- function fieldText(key: string): string { return editing?.key === key ? editing.text : valueText(source()[key]); }
+ function fieldSource(): JsonObject { return mode === 'panel' ? (panel ?? {}) : source(); }
+ function fieldText(key: string): string { return editing?.key === key ? editing.text : valueText(fieldSource()[key]); }
  function commit(key: string, text: string) {
   editing = null;
-  const next = withAttribute(source(), key, text);
+  const next = withAttribute(fieldSource(), key, text);
   if (mode === 'page') onUpdate(next);
   else if (mode === 'panes' && pane) onUpdate(setPaneAttr(page, pane.pane_id, key, next[key]));
-  else if (mode === 'panel' && pane) onUpdate(setPanelConfig(page, pane.pane_id, next));
+  else if (mode === 'panel' && pane) onUpdate(setPanelAttr(page, pane.pane_id, key, next[key]));
  }
  function commitRename() {
   if (pane && renaming !== null && !renameError && renaming !== pane.pane_id) onRename(pane.pane_id, renaming);
@@ -146,7 +148,6 @@
 {#snippet field(key: string)}
  <label for={`wpi-page-field-${key}`}>{key}</label>
  <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
-  placeholder={mode === 'panel' && !ownConfig ? valueText(copyConfig[key]) : undefined}
   oninput={(event) => editing = { key, text: event.currentTarget.value }}
   onchange={(event) => commit(key, event.currentTarget.value)}
   onblur={(event) => { if (editing?.key === key) commit(key, event.currentTarget.value); }}></textarea>
@@ -203,6 +204,7 @@
     </details>
    {/each}
   {:else if pane && mode === 'panel' && isLeaf(pane)}
+   {#each colorFields as key (key)}{@render field(key)}{/each}
    {#each flowFields as key (key)}{@render flowField(key)}{/each}
   {:else if pane && mode === 'panes'}
    {#each fields as key (key)}{@render field(key)}{/each}

@@ -4,6 +4,8 @@
 	import { overwriteGetLocale } from '../../src/lib/paraglide/runtime';
 	import type { JsonObject } from '../../src/lib/wpi/types';
 	let locale = $state<'en' | 'zh-cn'>('en');
+ let mode = $state<'panel' | 'panes'>('panel');
+ let darkMode = $state(false);
 	overwriteGetLocale(() => locale);
 	let page = $state<JsonObject>({
 		descriptor_id: 'demo',
@@ -26,9 +28,11 @@
 </script>
 
 <button id="locale" onclick={() => (locale = locale === 'en' ? 'zh-cn' : 'en')}>Locale</button>
+<button id="mode" onclick={() => (mode = mode === 'panel' ? 'panes' : 'panel')}>Mode</button>
+<button id="theme" onclick={() => (darkMode = !darkMode)}>Theme</button>
 <PageConfigPanel
 	{page}
-	mode="panel"
+	{mode}
 	width={400}
 	selectedPane="main"
 	pageLayouters={[]}
@@ -43,7 +47,7 @@
 />
 <pre id="page">{JSON.stringify(page)}</pre>
 <div style="position:relative; width:1100px; height:400px">
-	<PagePreview descriptor={page} {nodes} selectedId={null} selectedPane={null} size={{ width: 1100, height: 400 }} zoom={1}
+	<PagePreview {darkMode} descriptor={page} {nodes} selectedId={null} selectedPane={null} size={{ width: 1100, height: 400 }} zoom={1}
 		onResizeStart={noop} onResize={noop} onSelect={noop} onSelectPane={noop} onMeasure={noop}
 		onPaneResize={noop} onOuterResize={noop} onOuterShift={noop} onMeasurePanes={noop} />
 </div>

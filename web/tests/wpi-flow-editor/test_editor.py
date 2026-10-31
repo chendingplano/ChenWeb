@@ -74,6 +74,27 @@ with tempfile.TemporaryFile(mode='w+') as log:
    expect(page.get_by_label('每行最多元素数')).to_have_value('0')
    expect(page.get_by_label('行分隔线').locator('option:checked')).to_have_text('粗虚线')
    assert page.locator('aside').evaluate("e=>getComputedStyle(e).userSelect") == 'text'
+   background = page.locator('#wpi-page-field-background_color')
+   background.fill('{"light":"#ffffff","dark":"#000000"}'); background.blur()
+   panel = page.locator('[data-flow-layout]')
+   assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(255, 255, 255)'
+   page.locator('#theme').click()
+   assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 0, 0)'
+   page.locator('#mode').click()
+   background = page.locator('#wpi-page-field-background_color')
+   background.fill('red'); background.blur()
+   foreground = page.locator('#wpi-page-field-foreground_color')
+   foreground.fill('white'); foreground.blur()
+   descriptor = json.loads(page.locator('#page').inner_text())
+   assert descriptor['page_layouter']['root']['background_color'] == 'red'
+   assert descriptor['panels']['main']['background_color'] == {'light':'#ffffff', 'dark':'#000000'}
+   assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgba(0, 0, 0, 0)'
+   assert panel.evaluate('(e) => getComputedStyle(e).color') == 'rgb(255, 255, 255)'
+   page.locator('#mode').click()
+   foreground = page.locator('#wpi-page-field-foreground_color')
+   foreground.fill('blue'); foreground.blur()
+   assert json.loads(page.locator('#page').inner_text())['panels']['main']['foreground_color'] == 'blue'
+   assert panel.evaluate('(e) => getComputedStyle(e).color') == 'rgb(0, 0, 255)'
    assert not errors, errors
    browser.close()
  finally:
