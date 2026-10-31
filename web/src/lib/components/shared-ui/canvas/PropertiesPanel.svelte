@@ -337,9 +337,7 @@
         <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:8px;">{m.propertiespanel_properties()}</div>
       {/if}
       {#if elementClass !== undefined}
-        {@const elementName = String(node.data.label ?? nodeType.label)}
-        {@const descriptorId = String(node.data.element ?? '')}
-        <div style="font-size:14px; font-weight:700; color:var(--cv-text); margin-bottom:10px;">{m.propertiespanel_element_title({ name: elementName })}{#if descriptorId && descriptorId !== elementName} ({descriptorId}){/if}</div>
+        <div style="font-size:14px; font-weight:700; color:var(--cv-text); margin-bottom:10px;">{m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}</div>
       {:else}
       <!-- Node name -->
       <div style="margin-bottom:10px;">
