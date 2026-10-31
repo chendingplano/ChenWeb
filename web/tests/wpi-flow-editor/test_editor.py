@@ -1,0 +1,51 @@
+"""Run from the repository root; requires Bun and Python Playwright/Chromium."""
+import json
+import socket
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+from playwright.sync_api import sync_playwright, expect
+
+web = Path(__file__).resolve().parents[2]
+with tempfile.TemporaryFile(mode='w+') as log:
+ process = subprocess.Popen([str(web / 'node_modules/.bin/vite'), '--config', 'tests/wpi-flow-editor/vite.config.ts'], cwd=web, stdout=log, stderr=log)
+ try:
+  deadline = time.monotonic() + 30
+  while True:
+   try:
+    with socket.create_connection(('127.0.0.1', 5197), timeout=0.5): break
+   except OSError:
+    if process.poll() is not None or time.monotonic() > deadline:
+     log.seek(0); raise RuntimeError(log.read())
+    time.sleep(0.2)
+  with sync_playwright() as p:
+   browser = p.chromium.launch(headless=True)
+   page = browser.new_page(viewport={'width': 1000, 'height': 800})
+   errors=[]
+   page.on('pageerror', lambda err: errors.append(str(err)))
+   page.goto('http://127.0.0.1:5197/', wait_until='networkidle')
+   count = page.locator('#wpi-flow-max_num_elems')
+   expect(count).to_have_value('50')
+   expect(page.locator('#wpi-flow-column_gap')).to_have_value('2rem')
+   expect(page.locator('#wpi-flow-max_row_height')).to_have_value('200px')
+   count.fill('0'); count.blur()
+   config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
+   assert config == {'column_gap':'2rem', 'custom':'retained', 'max_num_elems':0}, config
+   page.locator('#wpi-flow-row_separator').select_option('bold_dash_line')
+   config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
+   assert config['row_separator'] == 'bold_dash_line'
+   gap = page.locator('#wpi-flow-row_gap'); gap.fill('-1px'); gap.blur()
+   expect(gap).to_have_attribute('aria-invalid','true')
+   assert 'row_gap' not in json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
+   gap.fill('1rem'); gap.blur()
+   assert json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']['row_gap'] == '1rem'
+   page.locator('#locale').click()
+   expect(page.get_by_label('每行最多元素数')).to_have_value('0')
+   expect(page.get_by_label('行分隔线').locator('option:checked')).to_have_text('粗虚线')
+   assert page.locator('aside').evaluate("e=>getComputedStyle(e).userSelect") == 'text'
+   assert not errors, errors
+   browser.close()
+ finally:
+  process.terminate(); process.wait(timeout=10)
+print('flow property editor browser checks passed')

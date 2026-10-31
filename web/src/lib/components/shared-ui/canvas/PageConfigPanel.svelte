@@ -11,6 +11,7 @@
  import type { JsonObject, PaneSpec } from '$lib/wpi/types';
  import { valueText, withAttribute } from './element-attributes';
  import { LEAF_PANE_ATTRS, PANE_ATTRS, renameProblem, rootOf, setPaneAttr, setPanelConfig } from './pane-edit';
+ import { flowFields, flowOptions, flowValue, setFlowValue, validFlowValue, type FlowField } from './flow-config';
 
  let { page, mode, width, selectedPane, pageLayouters, onUpdate, onLayouterChange, onSelectPane, onSplit, onAdd, onDelete, onRename, onMerge }: {
   page: JsonObject; pageLayouters: JsonObject[]; mode: ConfigMode; width: number; selectedPane: string | null;
@@ -27,7 +28,6 @@
   { title: () => m.wpi_page_group_misc(), fields: ['access_controls', 'page_policy', 'page_style', 'binding_mode', 'input'] },
  ];
  const pageFields = pageGroups.flatMap((group) => group.fields);
- const flowFields = ['column_gap', 'row_gap', 'horizontal_alignment', 'vertical_alignment', 'rows_alignment'];
  // Fields are labelled with their attribute names, as in the descriptor.
  const PANE_ID = 'pane_id';
 
@@ -62,6 +62,36 @@
   if (pane && renaming !== null && !renameError && renaming !== pane.pane_id) onRename(pane.pane_id, renaming);
   renaming = null;
  }
+ function flowLabel(key: FlowField): string {
+  const labels = {
+   column_gap: m.wpi_flow_column_gap, row_gap: m.wpi_flow_row_gap,
+   horizontal_alignment: m.wpi_flow_horizontal_alignment, vertical_alignment: m.wpi_flow_vertical_alignment,
+   rows_alignment: m.wpi_flow_rows_alignment, min_row_height: m.wpi_flow_min_row_height,
+   max_row_height: m.wpi_flow_max_row_height, min_elem_width: m.wpi_flow_min_elem_width,
+   max_elem_width: m.wpi_flow_max_elem_width, max_num_elems: m.wpi_flow_max_num_elems,
+   row_separator: m.wpi_flow_row_separator, elem_separator: m.wpi_flow_elem_separator
+  };
+  return labels[key]();
+ }
+ function optionLabel(value: string): string {
+  const labels: Record<string, () => string> = {
+   start: m.wpi_flow_start, center: m.wpi_flow_center, end: m.wpi_flow_end,
+   top: m.wpi_flow_top, bottom: m.wpi_flow_bottom, stretch: m.wpi_flow_stretch,
+   'space-between': m.wpi_flow_space_between, none: m.wpi_flow_none,
+   thin_solid_line: m.wpi_flow_thin_solid, norm_solid_line: m.wpi_flow_normal_solid,
+   bold_solid_line: m.wpi_flow_bold_solid, thin_dash_line: m.wpi_flow_thin_dashed,
+   norm_dash_line: m.wpi_flow_normal_dashed, bold_dash_line: m.wpi_flow_bold_dashed
+  };
+  return labels[value]?.() ?? value;
+ }
+ function flowText(key: FlowField): string {
+  return editing?.key === key ? editing.text : String(flowValue(key, ownConfig, copyConfig));
+ }
+ function commitFlow(key: FlowField, text: string) {
+  if (!pane || !validFlowValue(key, text)) { editing = { key, text }; return; }
+  editing = null;
+  onUpdate(setPanelConfig(page, pane.pane_id, setFlowValue(ownConfig ?? copyConfig, key, text)));
+ }
  // The tree as a list, each pane with its depth.
  function flat(p: PaneSpec, depth = 0): { pane: PaneSpec; depth: number }[] {
   return [{ pane: p, depth }, ...(p.children ?? []).flatMap((c) => flat(c, depth + 1))];
@@ -79,6 +109,28 @@
     {/if}
     {#each pageLayouters as cls (String(cls.descriptor_id))}<option value={String(cls.descriptor_id)}>{String(cls.descriptor_id)}</option>{/each}
    </select>
+{/snippet}
+
+{#snippet flowField(key: FlowField)}
+ <label for={`wpi-flow-${key}`}>{flowLabel(key)}</label>
+ {#if flowOptions[key]}
+  <select id={`wpi-flow-${key}`} value={flowText(key)} onchange={(event) => commitFlow(key, event.currentTarget.value)}>
+   {#if !flowOptions[key]?.includes(flowText(key))}<option value={flowText(key)}>{flowText(key)}</option>{/if}
+   {#each flowOptions[key] ?? [] as option}<option value={option}>{optionLabel(option)}</option>{/each}
+  </select>
+ {:else}
+  <input id={`wpi-flow-${key}`} type="text" inputmode={key === 'max_num_elems' ? 'numeric' : 'text'} value={flowText(key)}
+   aria-invalid={editing?.key === key && !validFlowValue(key, editing.text)}
+   aria-describedby={editing?.key === key && !validFlowValue(key, editing.text) ? `wpi-flow-${key}-error` : key === 'max_num_elems' ? 'wpi-flow-count-hint' : undefined}
+   oninput={(event) => editing = { key, text: event.currentTarget.value }}
+   onchange={(event) => commitFlow(key, event.currentTarget.value)}
+   onblur={(event) => { if (editing?.key === key) commitFlow(key, event.currentTarget.value); }} />
+  {#if editing?.key === key && !validFlowValue(key, editing.text)}
+   <p class="error" id={`wpi-flow-${key}-error`} role="alert">{key === 'max_num_elems' ? m.wpi_flow_invalid_count() : m.wpi_flow_invalid_length()}</p>
+  {:else if key === 'max_num_elems'}
+   <p class="field-hint" id="wpi-flow-count-hint">{m.wpi_flow_unlimited_hint()}</p>
+  {/if}
+ {/if}
 {/snippet}
 
 {#snippet field(key: string)}
@@ -140,13 +192,15 @@
      {/each}
     </details>
    {/each}
-  {:else if pane && (mode === 'panes' || isLeaf(pane))}
+  {:else if pane && mode === 'panel' && isLeaf(pane)}
+   {#each flowFields as key (key)}{@render flowField(key)}{/each}
+  {:else if pane && mode === 'panes'}
    {#each fields as key (key)}{@render field(key)}{/each}
   {/if}
  </div>
 </aside>
 <style>
- .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); }
+ .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); user-select:text; }
  .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
  .fields { overflow:auto; padding:10px 12px; }
  .group + .group { margin-top:6px; }
@@ -166,4 +220,5 @@
  .actions .danger { color:#dc2626; }
  .hint { font-size:11px; color:var(--cv-text-muted); margin:0 0 12px; }
  .error { font-size:10px; color:#dc2626; margin:-8px 0 12px; }
+ .field-hint { font-size:10px; color:var(--cv-text-muted); margin:-8px 0 12px; }
 </style>
