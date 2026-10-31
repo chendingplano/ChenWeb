@@ -1429,6 +1429,8 @@
 	"wpi_toolbar_create_element": "Create Element",
 	"wpi_toolbar_create_action": "Create Action",
 	"wpi_toolbar_load_page": "Load Page",
+	"wpi_toolbar_code": "Code",
+	"wpi_toolbar_view_tree": "View element tree",
 	"wpi_toolbar_view_json": "View JSON",
 	"wpi_view_json_node_title": "Node JSON: {name}",
 	"wpi_view_json_page_title": "Page JSON",

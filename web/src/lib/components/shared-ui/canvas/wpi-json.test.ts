@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { JsonObject } from '$lib/wpi/types';
 import type { Node } from '@xyflow/svelte';
-import { nodeData, nodeJson, pageJson, pageNodes } from './wpi-json';
+import { elementTree, nodeData, nodeJson, pageJson, pageNodes } from './wpi-json';
 
 function element(id: string, cls: string, x: number, y: number, attrs?: Record<string, unknown>, pane = 'main'): Node {
 	return { id, type: 'wpi-element', position: { x, y }, data: { label: `name of ${id}`, element: cls, pane, ...(attrs ? { attrs } : {}) } };
@@ -100,4 +100,9 @@ test('JSON editing accepts objects and reports invalid syntax or non-objects', a
 test('a table-backed list serializes its default load and list settings', () => {
  const node = element('list', 'list', 0, 0, { source: { table: 'kb.people', fields: [{ column: 'id', attribute: 'id' }] } });
  assert.deepEqual(nodeJson(node), { element: 'list', source: { table: 'kb.people', fields: [{ column: 'id', attribute: 'id' }], action: 'load', result: 'list' } });
+});
+
+test('element tree follows the page pane hierarchy and element reading order', () => {
+	const nodes = [element('b', 'button', 20, 10, undefined, 'list'), element('a', 'input', 0, 0, undefined, 'list'), element('c', 'text', 0, 0, undefined, 'detail')];
+	assert.equal(elementTree(nodes, twoPanes), 'page\n  list\n    input\n    button\n  detail\n    text');
 });

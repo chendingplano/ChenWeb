@@ -28,6 +28,8 @@
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
+	import WpiTreeDialog from './canvas/WpiTreeDialog.svelte';
+	import { elementTree } from './canvas/wpi-json';
 	import PagePreview from './canvas/PagePreview.svelte';
 	import WpiApp from '$lib/wpi/WpiApp.svelte';
 	import PageControl from './canvas/PageControl.svelte';
@@ -156,6 +158,7 @@
 	let editClassId = $state<string | null>(null);
 	// View JSON shows the selected node's descriptor JSON, else the page's.
 	let showJson = $state(false);
+	let showTree = $state(false);
 	let previewBundle = $state<Bundle | null>(null);
 	let previewLoading = $state(false);
 	let previewIsDraft = $state(false);
@@ -912,7 +915,7 @@
 		if (!active || previewBundle) return;
 		// The element class forms have their own fields, and View JSON covers the canvas; undo
 		// and save belong to the canvas.
-		if (showCreateElement || editClassId !== null || showJson || showLoadPage || showCreatePage) return;
+		if (showCreateElement || editClassId !== null || showJson || showTree || showLoadPage || showCreatePage) return;
 		const mod = e.ctrlKey || e.metaKey;
 		const key = e.key.toLowerCase();
 		if (mod && key === 'z' && !e.shiftKey) {
@@ -992,6 +995,7 @@
 			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
 			onLoadPage={() => (showLoadPage = true)}
 			onViewJson={() => (showJson = true)}
+			onViewTree={() => (showTree = true)}
 			onPreview={togglePreview}
 			previewing={!!previewBundle}
 			onUndo={undo}
@@ -1383,4 +1387,8 @@
 {#if showCreatePage}
  <CreatePageDialog {darkMode} onClose={() => (showCreatePage = false)} onCreate={(id, name, description, keywords, tags) =>
   save(newPageMetadata(name, description, keywords, tags, id))} />
+{/if}
+
+{#if showTree}
+	<WpiTreeDialog {darkMode} tree={elementTree(nodes, loadedPage ?? {})} onClose={() => (showTree = false)} />
 {/if}

@@ -7,7 +7,7 @@
 // out of the node's JSON and put back in the page.
 import type { Node } from '@xyflow/svelte';
 import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
-import type { Json, JsonObject, PageDescriptor } from '$lib/wpi/types';
+import type { Json, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
 import { withListSourceDefaults } from './element-attributes';
 
 export const PAGE_SCHEMA_VERSION = '0.5';
@@ -103,4 +103,17 @@ export function parseJsonObject(text: string): JsonObject {
 	const value: unknown = JSON.parse(text);
 	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected an object');
 	return value as JsonObject;
+}
+
+// The same pane assignment and reading order as the page descriptor.
+export function elementTree(nodes: Node[], page: JsonObject): string {
+ const root = effectiveRoot(page as unknown as PageDescriptor);
+ const assembled = pageJson(nodes, page);
+ const panels = assembled.panels as Record<string, { elem_list?: JsonObject[] }>;
+ function lines(pane: PaneSpec, depth: number): string[] {
+  const indent = '  '.repeat(depth);
+  if (pane.split) return [indent + pane.pane_id, ...(pane.children ?? []).flatMap(child => lines(child, depth + 1))];
+  return [indent + pane.pane_id, ...(panels[pane.pane_id]?.elem_list ?? []).map(element => indent + '  ' + String(element.element ?? ''))];
+ }
+ return lines(root, 0).join('\n');
 }

@@ -1429,6 +1429,8 @@
 	"wpi_toolbar_create_element": "创建元素",
 	"wpi_toolbar_create_action": "创建动作",
 	"wpi_toolbar_load_page": "加载页面",
+	"wpi_toolbar_code": "代码",
+	"wpi_toolbar_view_tree": "查看元素树",
 	"wpi_toolbar_view_json": "查看 JSON",
 	"wpi_view_json_node_title": "节点 JSON：{name}",
 	"wpi_view_json_page_title": "页面 JSON",
