@@ -58,7 +58,7 @@
  }
 </script>
 
-<div class="container"><div class:horizontal class:reverse={placement === 'right' || placement === 'bottom'} class="field" style:--hgap={d.label_horizontal_gap ?? '10px'} style:--vgap={d.label_vertical_gap ?? '10px'}>
+<div class="container" class:fixed-height={d.height !== undefined && d.height !== 'auto' && d.height !== 'elastic'}><div class:horizontal class:reverse={placement === 'right' || placement === 'bottom'} class="field" style:--hgap={d.label_horizontal_gap ?? '10px'} style:--vgap={d.label_vertical_gap ?? '10px'}>
  <div class="caption" title={truncated ? localized(d.label) : undefined} style:max-width={d.label_max_width ?? '160px'} style:min-height={horizontal ? '36px' : undefined} style:align-items={horizontal ? ({top:'start',center:'center',bottom:'end'}[d.label_vertical_align ?? 'center']) : undefined}>
   <label for={id} class="label" style:text-align={d.label_horizontal_align ?? 'right'} style:font-family={d.label_font_family} style:font-size={d.label_font_size ?? '14px'} style:color={d.label_color} style:font-weight={d.label_font_weight ?? '500'} style:font-style={d.label_font_style ?? 'normal'}>
    <span bind:this={labelBox} class="label-text" style:--lines={d.label_max_lines ?? 1}>{localized(d.label)}</span>{#if d.required}<span aria-hidden="true"> *</span>{/if}
@@ -78,6 +78,10 @@
 
 <style>
  .container { container-type:inline-size; min-width:0; }
+ .container.fixed-height, .fixed-height .field { height:100%; }
+ .fixed-height .control { display:flex; flex-direction:column; min-height:0; }
+ .fixed-height .field.horizontal .control { align-self:stretch; }
+ .fixed-height .control > :global([data-slot="input"]) { flex:1; min-height:0; }
  .field { display:flex; flex-direction:column; gap:var(--vgap); min-width:0; }
  .field.horizontal { flex-direction:row; gap:var(--hgap); align-items:start; }
  .field.reverse { flex-direction:column-reverse; }

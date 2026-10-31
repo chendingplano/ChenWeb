@@ -1,4 +1,5 @@
 {
+  "wpi_element_width_limits_hint": "The rendered width is also constrained by the element and panel width limits.",
   "wpi_instance_id_note": "Instance ID identifies this element in the current editor session and is not saved in the page.",
   "wpi_preview_element_issue": "Pane {pane}, element {number} (counting from 1; index {index} counting from 0), instance ID {id}, field {field}: {detail}",
   "wpi_element_actions": "Element actions",

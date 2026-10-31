@@ -1,4 +1,5 @@
 {
+  "wpi_element_width_limits_hint": "实际显示宽度还受元素和面板的宽度限制。",
   "wpi_instance_id_note": "实例 ID 用于在当前编辑会话中标识此元素，不会保存到页面中。",
   "wpi_preview_element_issue": "窗格 {pane}，第 {number} 个元素（从 1 开始计数；从 0 开始的索引为 {index}），实例 ID {id}，字段 {field}：{detail}",
   "wpi_element_actions": "元素操作",

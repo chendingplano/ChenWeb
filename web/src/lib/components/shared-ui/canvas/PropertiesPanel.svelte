@@ -293,7 +293,6 @@
   function attrText(n: FlowNode, name: string, attr: ElementAttribute): string {
     if (typing && typing.nodeId === n.id && typing.name === name) return typing.text;
     const value = attrsOf(n)[name] ?? attr.default_value;
-    if ((name === 'width' || name === 'height') && measuredSize && (value === undefined || value === null || value === 'auto')) return `${measuredSize[name]}px`;
     return valueText(value ?? undefined);
   }
 
@@ -533,6 +532,9 @@
                     {/if}
                   {/each}
                 {/if}
+              {/if}
+              {#if name === 'width' && (module === 'input' || module === 'button')}
+                <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{m.wpi_element_width_limits_hint()}</div>
               {/if}
               {#if attr.help_tip}
                 <div style="font-size:9px; color:var(--cv-text-faint); margin-top:2px;">{localized(attr.help_tip)}</div>

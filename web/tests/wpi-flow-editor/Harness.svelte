@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SizingHarness from './SizingHarness.svelte';
 	import { resizePageDimension } from '../../src/lib/components/shared-ui/canvas/page-resize';
  import { setNodeActions } from '../../src/lib/components/shared-ui/canvas/node-actions';
  import WpiApp from '../../src/lib/wpi/WpiApp.svelte';
@@ -7,6 +8,7 @@
 	import PagePreview from '../../src/lib/components/shared-ui/canvas/PagePreview.svelte';
 	import { overwriteGetLocale } from '../../src/lib/paraglide/runtime';
 	import type { JsonObject } from '../../src/lib/wpi/types';
+	let showSizing = $state(false);
 	let selectedId = $state<string | null>(null);
  let action = $state('');
  let previewSize = $state({ width: 1100, height: 400 });
@@ -81,3 +83,6 @@
  :global(.flex-wrap) { flex-wrap:wrap; }
  :global(.min-w-0) { min-width:0; }
 </style>
+
+<button id="sizing-open" onclick={() => showSizing = true}>Sizing test</button>
+{#if showSizing}<div id="sizing-fixture"><SizingHarness /></div>{/if}

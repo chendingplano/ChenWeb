@@ -218,6 +218,35 @@ with tempfile.TemporaryFile(mode='w+') as log:
    runtime_bounds = runtime_items.evaluate_all('xs => xs.slice(0, 2).map(x => x.getBoundingClientRect().toJSON())')
    runtime_box = runtime_pane.bounding_box()
    assert abs((runtime_bounds[0]['left'] + runtime_bounds[1]['right']) / 2 - (runtime_box['x'] + runtime_box['width'] / 2)) < 2, (runtime_bounds, runtime_box)
+   page.locator('#sizing-open').click()
+   sizing = page.locator('#sizing-fixture')
+   for element in ['button', 'input']:
+    sizing.locator('#select-' + element).click()
+    width_field = sizing.locator('#prop-attr-width')
+    height_field = sizing.locator('#prop-attr-height')
+    item = sizing.locator('[data-flow-item]').nth(0 if element == 'button' else 1)
+    width_field.fill('230px'); width_field.blur()
+    if element == 'input':
+     expect(item).to_have_css('width', '200px')
+     sizing.locator('#prop-attr-max_width').fill('280px')
+     sizing.locator('#prop-attr-max_width').blur()
+    expect(item).to_have_css('width', '230px')
+    if element == 'button':
+     expect(item.locator('[data-slot="button"]')).to_have_css('width', '230px')
+    height_field.fill('100px'); height_field.blur()
+    expect(item).to_have_css('height', '100px')
+    visible = item.locator('[data-slot="button"]' if element == 'button' else '.container')
+    expect(visible).to_have_css('height', '100px')
+    if element == 'input':
+     assert item.locator('[data-slot="input"]').bounding_box()['height'] > 36
+     sizing.locator('#prop-attr-max_width').fill('300px')
+     width_field.fill('300px'); width_field.blur()
+     assert item.locator('[data-slot="input"]').bounding_box()['height'] > 36
+    width_field.fill('auto'); width_field.blur()
+    expect(width_field).to_have_value('auto')
+   sizing.locator('#select-button').click()
+   sizing.locator('#prop-attr-width').fill('400px')
+   expect(sizing.locator('[data-flow-item]').first).to_have_css('width', '300px')
    assert not errors, errors
    browser.close()
  finally:
