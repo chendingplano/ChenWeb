@@ -62,6 +62,43 @@
   else if (mode === 'panes' && pane) onUpdate(setPaneAttr(page, pane.pane_id, key, next[key]));
   else if (mode === 'panel' && pane) onUpdate(setPanelAttr(page, pane.pane_id, key, next[key]));
  }
+ function colorMode(key: string): 'none' | 'single' | 'theme' {
+  const value = fieldSource()[key];
+  return !value ? 'none' : typeof value === 'object' ? 'theme' : 'single';
+ }
+ function colorValue(key: string, variant: 'single' | 'light' | 'dark'): string {
+  const value = fieldSource()[key];
+  if (variant === 'single') return typeof value === 'string' ? value : '';
+  return value && typeof value === 'object' && !Array.isArray(value) && typeof value[variant] === 'string' ? value[variant] as string : '';
+ }
+ function setColor(key: string, value: string | { light: string; dark: string } | undefined) {
+  if (!pane) return;
+  if (mode === 'panes') onUpdate(setPaneAttr(page, pane.pane_id, key, value));
+  else if (mode === 'panel') onUpdate(setPanelAttr(page, pane.pane_id, key, value));
+ }
+ function setColorMode(key: string, next: string) {
+  const current = fieldSource()[key];
+  const first = typeof current === 'string' ? current : colorValue(key, 'light');
+  if (next === 'none') setColor(key, undefined);
+  else if (next === 'single') setColor(key, first || '#000000');
+  else setColor(key, { light: first || '#ffffff', dark: colorValue(key, 'dark') || first || '#000000' });
+ }
+ function setColorValue(key: string, variant: 'single' | 'light' | 'dark', value: string) {
+  if (variant === 'single') setColor(key, value || undefined);
+  else setColor(key, { light: variant === 'light' ? value : colorValue(key, 'light'), dark: variant === 'dark' ? value : colorValue(key, 'dark') });
+ }
+ // The native picker accepts opaque hex; keep the original CSS text until changed.
+ function pickerValue(value: string): string {
+  if (typeof document === 'undefined') return '#000000';
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (!ctx) return '#000000';
+  ctx.fillStyle = '#000000';
+  ctx.fillStyle = value;
+  const color = ctx.fillStyle;
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color;
+  const rgb = color.match(/^rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+  return rgb ? '#' + rgb.slice(1, 4).map((n) => Number(n).toString(16).padStart(2, '0')).join('') : '#000000';
+ }
  function commitRename() {
   if (pane && renaming !== null && !renameError && renaming !== pane.pane_id) onRename(pane.pane_id, renaming);
   renaming = null;
@@ -145,6 +182,23 @@
  {/if}
 {/snippet}
 
+{#snippet colorControl(key: string)}
+ <label for={`wpi-color-${key}-mode`}>{key}</label>
+ <select id={`wpi-color-${key}-mode`} value={colorMode(key)} onchange={(event) => setColorMode(key, event.currentTarget.value)}>
+  <option value="none">{m.wpi_color_none()}</option>
+  <option value="single">{m.wpi_color_single()}</option>
+  <option value="theme">{m.wpi_color_theme()}</option>
+ </select>
+ {#each colorMode(key) === 'theme' ? ['light', 'dark'] as const : ['single'] as const as variant}
+  {@const variantLabel = variant === 'light' ? m.wpi_color_light() : variant === 'dark' ? m.wpi_color_dark() : m.wpi_color_single()}
+  <div class="color-row">
+   {#if variant !== 'single'}<span class="color-variant">{variantLabel}</span>{/if}
+   <input class="color-picker" type="color" id={`wpi-color-${key}-${variant}-picker`} aria-label={m.wpi_color_picker_label({field: key, variant: variantLabel})} value={pickerValue(colorValue(key, variant))} oninput={(event) => setColorValue(key, variant, event.currentTarget.value)} />
+   <input class="color-value" type="text" id={`wpi-color-${key}-${variant}-value`} aria-label={m.wpi_color_value_label({field: key, variant: variantLabel})} value={colorValue(key, variant)} onchange={(event) => setColorValue(key, variant, event.currentTarget.value)} />
+  </div>
+ {/each}
+{/snippet}
+
 {#snippet field(key: string)}
  <label for={`wpi-page-field-${key}`}>{key}</label>
  <textarea id={`wpi-page-field-${key}`} rows="1" value={fieldText(key)} readonly={mode === 'page' && (key === 'descriptor_id' || key === 'schema_version')}
@@ -204,10 +258,10 @@
     </details>
    {/each}
   {:else if pane && mode === 'panel' && isLeaf(pane)}
-   {#each colorFields as key (key)}{@render field(key)}{/each}
+   {#each colorFields as key (key)}{@render colorControl(key)}{/each}
    {#each flowFields as key (key)}{@render flowField(key)}{/each}
   {:else if pane && mode === 'panes'}
-   {#each fields as key (key)}{@render field(key)}{/each}
+   {#each fields as key (key)}{#if colorFields.includes(key)}{@render colorControl(key)}{:else}{@render field(key)}{/if}{/each}
   {/if}
  </div>
 </aside>
@@ -230,6 +284,10 @@
  .actions button { border:1px solid var(--cv-border); border-radius:4px; background:var(--cv-surface); color:var(--cv-text-2); font-size:10px; padding:4px 8px; cursor:pointer; }
  .actions button:hover { background:var(--cv-hover); }
  .actions .danger { color:#dc2626; }
+ .color-row { display:flex; align-items:center; gap:6px; margin:-4px 0 12px; }
+ .color-row .color-picker { width:36px; height:30px; flex:none; padding:2px; margin:0; cursor:pointer; }
+ .color-row .color-value { flex:1; min-width:0; margin:0; }
+ .color-variant { width:38px; flex:none; font-size:10px; color:var(--cv-text-muted); }
  .hint { font-size:11px; color:var(--cv-text-muted); margin:0 0 12px; }
  .error { font-size:10px; color:#dc2626; margin:-8px 0 12px; }
  .field-hint { font-size:10px; color:var(--cv-text-muted); margin:-8px 0 12px; }

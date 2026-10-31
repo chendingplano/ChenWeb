@@ -8112,5 +8112,12 @@
 	"wpi_text_choice_justify": "两端对齐",
 	"wpi_text_choice_pre_wrap": "保留空格和换行",
 	"wpi_text_empty_help": "不显示提示",
-  "wpi_pane_merge": "合并窗格"
+  "wpi_pane_merge": "合并窗格",
+	"wpi_color_none": "无",
+	"wpi_color_single": "单一颜色",
+	"wpi_color_theme": "浅色和深色",
+	"wpi_color_light": "浅色",
+	"wpi_color_dark": "深色",
+	"wpi_color_picker_label": "选择{field}（{variant}）",
+	"wpi_color_value_label": "{field}颜色值（{variant}）"
 }

@@ -74,27 +74,37 @@ with tempfile.TemporaryFile(mode='w+') as log:
    expect(page.get_by_label('每行最多元素数')).to_have_value('0')
    expect(page.get_by_label('行分隔线').locator('option:checked')).to_have_text('粗虚线')
    assert page.locator('aside').evaluate("e=>getComputedStyle(e).userSelect") == 'text'
-   background = page.locator('#wpi-page-field-background_color')
-   background.fill('{"light":"#ffffff","dark":"#000000"}'); background.blur()
+   background_mode = page.locator('#wpi-color-background_color-mode')
+   expect(background_mode).to_have_value('none')
+   background_mode.select_option('theme')
+   page.locator('#wpi-color-background_color-light-picker').fill('#ffffff')
+   page.locator('#wpi-color-background_color-dark-picker').fill('#000000')
    panel = page.locator('[data-flow-layout]')
    assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(255, 255, 255)'
    page.locator('#theme').click()
    assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgb(0, 0, 0)'
    page.locator('#mode').click()
-   background = page.locator('#wpi-page-field-background_color')
-   background.fill('red'); background.blur()
-   foreground = page.locator('#wpi-page-field-foreground_color')
-   foreground.fill('white'); foreground.blur()
+   page.locator('#wpi-color-background_color-mode').select_option('single')
+   page.locator('#wpi-color-background_color-single-picker').fill('#ff0000')
+   page.locator('#wpi-color-foreground_color-mode').select_option('single')
+   page.locator('#wpi-color-foreground_color-single-picker').fill('#ffffff')
    descriptor = json.loads(page.locator('#page').inner_text())
-   assert descriptor['page_layouter']['root']['background_color'] == 'red'
+   assert descriptor['page_layouter']['root']['background_color'] == '#ff0000'
    assert descriptor['panels']['main']['background_color'] == {'light':'#ffffff', 'dark':'#000000'}
    assert panel.evaluate('(e) => getComputedStyle(e).backgroundColor') == 'rgba(0, 0, 0, 0)'
    assert panel.evaluate('(e) => getComputedStyle(e).color') == 'rgb(255, 255, 255)'
    page.locator('#mode').click()
-   foreground = page.locator('#wpi-page-field-foreground_color')
-   foreground.fill('blue'); foreground.blur()
-   assert json.loads(page.locator('#page').inner_text())['panels']['main']['foreground_color'] == 'blue'
-   assert panel.evaluate('(e) => getComputedStyle(e).color') == 'rgb(0, 0, 255)'
+   page.locator('#wpi-color-foreground_color-mode').select_option('single')
+   page.locator('#wpi-color-foreground_color-single-value').fill('rgba(0,0,255,0.5)')
+   page.locator('#wpi-color-foreground_color-single-value').blur()
+   assert json.loads(page.locator('#page').inner_text())['panels']['main']['foreground_color'] == 'rgba(0,0,255,0.5)'
+   expect(page.locator('#wpi-color-foreground_color-single-picker')).to_have_value('#0000ff')
+   page.locator('#wpi-color-foreground_color-mode').select_option('none')
+   assert 'foreground_color' not in json.loads(page.locator('#page').inner_text())['panels']['main']
+   page.locator('#wpi-color-background_color-mode').select_option('single')
+   assert json.loads(page.locator('#page').inner_text())['panels']['main']['background_color'] == '#ffffff'
+   page.locator('#wpi-color-background_color-mode').select_option('none')
+   assert 'background_color' not in json.loads(page.locator('#page').inner_text())['panels']['main']
    assert not errors, errors
    browser.close()
  finally:

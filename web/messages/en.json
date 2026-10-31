@@ -8112,5 +8112,12 @@
 	"wpi_text_choice_justify": "Justify",
 	"wpi_text_choice_pre_wrap": "Preserve spaces and line breaks",
 	"wpi_text_empty_help": "No tooltip",
-  "wpi_pane_merge": "Merge panes"
+  "wpi_pane_merge": "Merge panes",
+	"wpi_color_none": "None",
+	"wpi_color_single": "Single color",
+	"wpi_color_theme": "Light and dark",
+	"wpi_color_light": "Light",
+	"wpi_color_dark": "Dark",
+	"wpi_color_picker_label": "Choose {field} ({variant})",
+	"wpi_color_value_label": "{field} value ({variant})"
 }
