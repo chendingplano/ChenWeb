@@ -52,13 +52,24 @@ with tempfile.TemporaryFile(mode='w+') as log:
     edge.scroll_into_view_if_needed()
     rect = edge.bounding_box()
     x, y = rect['x'] + rect['width'] / 2, rect['y'] + rect['height'] / 2
-    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + dx, y + dy); page.mouse.up()
+    original_size = preview.bounding_box()
+    original_value = field.input_value()
+    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + dx, y + dy)
+    assert preview.bounding_box()['width'] == original_size['width']
+    assert preview.bounding_box()['height'] == original_size['height']
+    expect(field).to_have_value(original_value)
+    page.mouse.up()
     expect(field).to_have_value(expected)
    handle = preview.locator('.resize-handle')
    handle.scroll_into_view_if_needed()
    rect = handle.bounding_box()
    x, y = rect['x'] + rect['width'] / 2, rect['y'] + rect['height'] / 2
-   page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + 40, y + 20); page.mouse.up()
+   original_size = preview.bounding_box()
+   page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + 40, y + 20)
+   assert preview.bounding_box()['width'] == original_size['width']
+   assert preview.bounding_box()['height'] == original_size['height']
+   expect(width).to_have_value('560px'); expect(height).to_have_value('330px')
+   page.mouse.up()
    expect(width).to_have_value('600px'); expect(height).to_have_value('350px')
    left, right, bottom = gaps()
    assert abs(left - right) < 2 and abs(left - bottom) < 2, gaps()

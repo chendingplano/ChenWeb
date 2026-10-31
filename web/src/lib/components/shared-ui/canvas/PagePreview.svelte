@@ -56,9 +56,11 @@
   });
  }
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number; pageWidth: number; pageHeight: number; original: JsonObject; movedX: boolean; movedY: boolean } | null = null;
+ let resizeOutline = $state<{ width: number; height: number } | null>(null);
  function startResize(event: PointerEvent) {
   if (event.button !== 0) return;
   drag = { id: event.pointerId, x: event.clientX, y: event.clientY, ...size, zoom: zoom || 1, pageWidth: size.width, pageHeight: size.height, original: JSON.parse(JSON.stringify(descriptor)), movedX: false, movedY: false };
+  resizeOutline = { ...size };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   onResizeStart();
   event.stopPropagation();
@@ -67,11 +69,19 @@
  function resize(event: PointerEvent) {
   if (!drag || drag.id !== event.pointerId) return;
   const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-  onResize({ width: Math.max(240, Math.round(drag.width + dx / drag.zoom)), height: Math.max(160, Math.round(drag.height + dy / drag.zoom)) });
+  resizeOutline = { width: Math.max(240, Math.round(drag.width + dx / drag.zoom)), height: Math.max(160, Math.round(drag.height + dy / drag.zoom)) };
   drag.movedX ||= dx !== 0; drag.movedY ||= dy !== 0;
-  if (drag.movedX) onPageResize('width', Math.max(240, pageDragSize(drag.pageWidth, dx, drag.zoom, 'right')));
-  if (drag.movedY) onPageResize('height', Math.max(160, pageDragSize(drag.pageHeight, dy, drag.zoom, 'bottom')));
   event.stopPropagation();
+ }
+ function endResize(event: PointerEvent, cancel = false) {
+  if (!drag || drag.id !== event.pointerId) return;
+  if (!cancel && resizeOutline) {
+   onResize(resizeOutline);
+   if (drag.movedX) onPageResize('width', resizeOutline.width);
+   if (drag.movedY) onPageResize('height', resizeOutline.height);
+   measurePanes();
+  }
+  drag = null; resizeOutline = null; event.stopPropagation();
  }
  function resizeKey(event: KeyboardEvent) {
   let dx = 0, dy = 0; const step = event.shiftKey ? 50 : 10;
@@ -118,6 +128,7 @@
   if (event.button !== 0) return;
   const axis = side === 'left' || side === 'right' ? 'width' : 'height';
   outerDrag = { pointer: event.pointerId, side, axis, start: axis === 'width' ? event.clientX : event.clientY, initial: size[axis], zoom: zoom || 1, original: JSON.parse(JSON.stringify(descriptor)) };
+  resizeOutline = { ...size };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   onResizeStart(); event.stopPropagation(); event.preventDefault();
  }
@@ -126,15 +137,15 @@
   if (!d || d.pointer !== event.pointerId) return;
   const movement = (d.axis === 'width' ? event.clientX : event.clientY) - d.start;
   const value = Math.max(d.axis === 'width' ? 240 : 160, pageDragSize(d.initial, movement, d.zoom, d.side));
-  onResize({ ...size, [d.axis]: value });
-  onPageResize(d.axis, value);
+  resizeOutline = { ...size, [d.axis]: value };
   event.stopPropagation();
  }
  function endOuter(event: PointerEvent, cancel = false) {
   const d = outerDrag;
   if (!d || d.pointer !== event.pointerId) return;
   outerDrag = null;
-  if (cancel) { onResize({ ...size, [d.axis]: d.initial }); onPageCancel(d.original); } else measurePanes();
+  if (!cancel && resizeOutline && resizeOutline[d.axis] !== d.initial) { onResize(resizeOutline); onPageResize(d.axis, resizeOutline[d.axis]); measurePanes(); }
+  resizeOutline = null;
   event.stopPropagation();
  }
  const page = $derived(descriptor as unknown as PageDescriptor);
@@ -256,11 +267,15 @@
    <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
   </div>
  {/if}
- <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => { if (drag?.id === event.pointerId) { drag = null; measurePanes(); } event.stopPropagation(); }} onpointercancel={() => { if (drag) { onResize({ width: drag.width, height: drag.height }); onPageCancel(drag.original); drag = null; } }} onkeydown={resizeKey}></button>
+ <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => endResize(event)} onpointercancel={(event) => endResize(event, true)} onkeydown={resizeKey}></button>
 </div>
+{#if resizeOutline}
+ <div class="resize-outline" style:width="{resizeOutline.width}px" style:height="{resizeOutline.height}px" aria-hidden="true"></div>
+{/if}
 
 <style>
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
+ .resize-outline { position:absolute; left:0; top:0; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:6; }
  .element-toolbar { position:absolute; z-index:10; transform:translateX(-50%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }
  .element-toolbar button { background:none; border:0; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; display:flex; align-items:center; }
  .element-toolbar button:last-child { color:#ef4444; }
