@@ -148,6 +148,7 @@
 </script>
 
 {#snippet pageLayouterSelector()}
+   <div class="identity">{m.wpi_config_layouter_identity({ id: String((page.page_layouter as JsonObject | undefined)?.layouter ?? '') })}</div>
    <label for="wpi-page-layouter-id">{m.wpi_page_layouter_type()}</label>
    <select id="wpi-page-layouter-id" value={String((page.page_layouter as JsonObject | undefined)?.layouter ?? '')} onchange={(event) => {
     const cls = pageLayouters.find((item) => item.descriptor_id === event.currentTarget.value);
@@ -208,7 +209,12 @@
 {/snippet}
 
 <aside class="panel select-text" style="width:{width}px">
- <div class="heading">{mode === 'page' ? m.wpi_page_config_title() : mode === 'panes' ? m.wpi_panes_title() : m.wpi_panel_title()}</div>
+ <div class="heading">
+  {#if mode === 'page'}{m.wpi_config_page_identity({ id: String(page.descriptor_id ?? '') })}
+  {:else if mode === 'panes' && pane}{m.wpi_config_pane_identity({ id: pane.pane_id })}
+  {:else if mode === 'panel' && pane && isLeaf(pane)}{m.wpi_config_panel_identity({ id: pane.pane_id })}
+  {:else}{mode === 'panes' ? m.wpi_panes_title() : m.wpi_panel_title()}{/if}
+ </div>
  <div class="fields">
   {#if mode === 'panes'}
    {@render pageLayouterSelector()}
@@ -243,6 +249,7 @@
    {#if !pane || !isLeaf(pane)}
     <p class="hint">{m.wpi_panel_select_leaf()}</p>
    {:else}
+    <div class="identity">{m.wpi_config_layouter_identity({ id: String(layouter.layouter ?? '') })}</div>
     <label for="wpi-layouter-id">{m.wpi_layouter_type()}</label>
     <input id="wpi-layouter-id" value={String(layouter.layouter ?? '')} readonly />
    {/if}
@@ -267,7 +274,8 @@
 </aside>
 <style>
  .panel { flex-shrink:0; display:flex; flex-direction:column; height:100%; background:var(--cv-panel); border-left:1px solid var(--cv-divider); color:var(--cv-text); user-select:text; }
- .heading { padding:10px 12px; border-bottom:1px solid var(--cv-divider); font-size:11px; font-weight:600; }
+ .heading { padding:12px; border-bottom:1px solid var(--cv-divider); font-size:14px; font-weight:700; }
+ .identity { font-size:14px; font-weight:700; margin:0 0 10px; }
  .fields { overflow:auto; padding:10px 12px; }
  .group + .group { margin-top:6px; }
  .group summary { padding:10px 8px; margin-bottom:8px; border:1px solid var(--cv-border); border-radius:4px; background:var(--cv-group-header); font-size:11px; font-weight:600; color:#101827; cursor:pointer; }
