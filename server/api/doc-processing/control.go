@@ -849,6 +849,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	} else if len(s.DefaultProcessors) > 0 {
 		processors = s.selectProcessors(s.defaultProcessorNames())
 	}
+	if err := metricProcessorConflict(processors); err != nil {
+		if s.Logger != nil {
+			s.Logger.Warn("doc processor request refused", "record_id", evt.RecordID, "error", err)
+		}
+		return err
+	}
 	var routingResult RoutingEnforcementResult
 	var routingFinalized bool
 	if planErr == nil && len(evt.Operations) == 0 {
@@ -2364,6 +2370,7 @@ func requiresChunkingDependency(op string) bool {
 		"extract_entity_relation",
 		"extract_inventory_items",
 		"extract_metrics",
+		"extract_metrics_simple",
 		"extract_provisions",
 		"extract_references",
 		"extract_metric_definitions",

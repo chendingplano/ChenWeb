@@ -78,6 +78,21 @@ func metricsExtractionContract() llmclients.StructuredOutputContract {
 	))
 }
 
+// metricsSimpleExtractionContract is extract_metrics_simple's compact response: rows in m,
+// set-aside statements in x (spec metric-simple-extraction).
+func metricsSimpleExtractionContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_metrics_simple_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"lang": schemaString(),
+			"m":    schemaArray(),
+			"x":    schemaArray(),
+		},
+		"required":             []string{"m"},
+		"additionalProperties": true,
+	})
+}
+
 func summaryExtractionContract() llmclients.StructuredOutputContract {
 	return newDocProcessingContract("chenweb_summary_extraction", map[string]any{
 		"type": "object",

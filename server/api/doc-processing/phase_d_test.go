@@ -36,7 +36,7 @@ func TestSemanticAssociationEnabledFromEnvInvalidIsEnabled(t *testing.T) {
 // has finished for that record.
 func TestNormalizeAssertionsProcessorDependsOnExtractMetrics(t *testing.T) {
 	deps := NewNormalizeAssertionsProcessor().PostProcessDependsOn()
-	if len(deps) != 1 || deps[0] != "extract_metrics" {
-		t.Fatalf("PostProcessDependsOn() = %v, want [extract_metrics]", deps)
+	if len(deps) != 2 || deps[0] != "extract_metrics" || deps[1] != "extract_metrics_simple" {
+		t.Fatalf("PostProcessDependsOn() = %v, want [extract_metrics extract_metrics_simple]", deps)
 	}
 }

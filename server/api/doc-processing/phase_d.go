@@ -58,12 +58,12 @@ func (p *NormalizeAssertionsProcessor) Name() string                            
 func (p *NormalizeAssertionsProcessor) HandleEvent(context.Context, []byte) error { return nil }
 
 // PostProcessDependsOn (ADR 2026081401 DR6 ordering requirement): waits for
-// extract_metrics's Phase C mapping check (when invoked this run) to finish
+// the metric processor's Phase C mapping check (when invoked this run) to finish
 // before reading kb.metrics rows, so it never observes a row before its
 // value_range_type_error flag or kb.metric_value_range_type_map proposal
 // exists -- the two Phase C passes would otherwise race.
 func (p *NormalizeAssertionsProcessor) PostProcessDependsOn() []string {
-	return []string{"extract_metrics"}
+	return []string{"extract_metrics", "extract_metrics_simple"}
 }
 
 func (p *NormalizeAssertionsProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {

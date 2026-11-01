@@ -72,6 +72,7 @@ func llmCallStagger() time.Duration {
 // the seed should plant each chunk's prefix with a single clean call.
 var multiPassProcessors = map[string]struct{}{
 	"extract_metrics":              {},
+	"extract_metrics_simple":       {}, // one call per chunk, but task-first: plants no chunk prefix
 	"extract_semantic_projections": {},
 	"extract_products":             {},
 }

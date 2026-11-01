@@ -421,6 +421,10 @@ var productionProcessorSpecs = []ProcessorSpec{
 	{Name: "extract_relation", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"relations"}},
 	{Name: "extract_inventory_items", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"inventory_items"}},
 	{Name: "extract_metrics", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metrics"}},
+	// extract_metrics_simple: the cheaper one-call-per-chunk variant (openspec change
+	// extract-metrics-simple). Opt-in only; a run may not select both metric processors
+	// (metricProcessorConflict).
+	{Name: "extract_metrics_simple", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"metrics"}},
 	{Name: "extract_provisions", Phase: "B", DependsOn: []string{"chunking"}, Requires: []string{"chunks"}, Produces: []string{"provisions"}},
 	// extract_references is the lower reference layer (openspec change extract-references-processor):
 	// it reads only chunks; artifact extractors resolve its references, never the other way round.

@@ -94,6 +94,11 @@ type MetricsProcessor struct {
 	// OpenValueProvisionMinP: below it, provision_only vetoes a no_named_quantity drop.
 	OpenValueProvisionMinP float64
 
+	// name overrides Name(); simple selects extract_metrics_simple's one call per chunk instead
+	// of the two passes (openspec change extract-metrics-simple, extract-metrics-simple.go).
+	name   string
+	simple bool
+
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID  int64
 	batchChunks    []Chunk
@@ -107,6 +112,12 @@ type MetricsProcessor struct {
 	batchSkip            bool
 	batchForceClear      bool
 	batchExistingMetrics []map[string]any
+
+	// extract_metrics_simple batch state: rows, drop-tagged rows and set-aside items of the
+	// chunks processed so far (under batchMu), and the run's warm-up gate.
+	batchSimple      metricSimpleResult
+	simpleWarmup     *metricWarmupGate
+	simpleWarmupWait time.Duration
 }
 
 type metricsProgressTracker struct {
@@ -635,7 +646,12 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	return p
 }
 
-func (p *MetricsProcessor) Name() string { return "extract_metrics" }
+func (p *MetricsProcessor) Name() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "extract_metrics"
+}
 
 func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	p.forceDisableThinking()
@@ -1034,6 +1050,7 @@ func (p *MetricsProcessor) saveMetricsToFile(recordID int64, rec DocMetadataInpu
 }
 
 type metricsStatusParams struct {
+	Operation     string // processor name; empty means extract_metrics
 	RecordID      int64
 	FileType      string
 	InputFilename string
@@ -1057,6 +1074,7 @@ func detectMetricsFileType(rec DocMetadataInputRecord) string {
 func (p *MetricsProcessor) persistMetricsInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
 	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
 		statusRaw, err := appendMetricsStatus(current, metricsStatusParams{
+			Operation:     p.Name(),
 			RecordID:      rec.ID,
 			FileType:      detectMetricsFileType(rec),
 			InputFilename: strings.TrimSpace(rec.ResultFilename),
@@ -1082,6 +1100,7 @@ func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMeta
 	}
 	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
 		statusRaw, err := appendMetricsStatus(current, metricsStatusParams{
+			Operation:     p.Name(),
 			RecordID:      rec.ID,
 			FileType:      detectMetricsFileType(rec),
 			InputFilename: strings.TrimSpace(rec.ResultFilename),
@@ -1101,6 +1120,7 @@ func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMeta
 func (p *MetricsProcessor) stopAndPersistMetrics(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
 	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
 		statusRaw, err := appendMetricsStatus(current, metricsStatusParams{
+			Operation:     p.Name(),
 			RecordID:      rec.ID,
 			FileType:      detectMetricsFileType(rec),
 			InputFilename: strings.TrimSpace(rec.ResultFilename),
@@ -1120,10 +1140,11 @@ func (p *MetricsProcessor) stopAndPersistMetrics(ctx context.Context, rec DocMet
 
 func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
+	operation := firstNonEmptyTrimmed(p.Operation, "extract_metrics")
 	entry := map[string]any{
 		"record_id":      strconv.FormatInt(p.RecordID, 10),
 		"file_type":      strings.ToLower(strings.TrimSpace(p.FileType)),
-		"operation":      "extract_metrics",
+		"operation":      operation,
 		"input_filename": strings.TrimSpace(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
@@ -1147,7 +1168,7 @@ func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 	out := make([]map[string]any, 0, len(entries)+1)
 	for _, e := range entries {
 		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
-		if op != "extract_metrics" && op != "extract-metrics" {
+		if op != operation && (operation != "extract_metrics" || op != "extract-metrics") {
 			out = append(out, e)
 			continue
 		}
@@ -1188,6 +1209,10 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	record_id int64,
 	chunks []Chunk,
 	docCtx string) (metricExtractionResult, error) {
+
+	if p.simple {
+		return p.extractMetricsSimple(ctx, record_id, chunks, docCtx)
+	}
 
 	// Convert to blocks for internal output mapping; chunksToBlocks is 1:1 so
 	// chunks[i] and blocks[i] correspond to the same logical unit.
@@ -2367,7 +2392,12 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 	start, end time.Time,
 	progress string,
 ) {
+	activity := "extract_metric_candidates"
 	candidates, _ := payload["candidates"].([]any)
+	if p.simple {
+		activity = p.Name()
+		candidates, _ = payload["m"].([]any)
+	}
 	numMetrics := len(candidates)
 	extraInfo := map[string]any{
 		"chunk":        chunkIdx,
@@ -2391,7 +2421,6 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 		s := callErr.Error()
 		errStr = &s
 	}
-	activity := "extract_metric_candidates"
 	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
 		CallReason:            p.Name(),
@@ -3794,6 +3823,18 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 			detectedLanguage = r.language
 		}
 	}
+	metrics, dropped := p.finishMetricRows(ctx, recordID, metrics, tagged, candidateDrops, chunks)
+	if pass2Err != nil {
+		return metrics, uncertain, dropped, pass2Err
+	}
+	return metrics, uncertain, dropped, nil
+}
+
+// finishMetricRows runs every deterministic step that follows the LLM calls: frames, condition
+// inheritance, dedup, value notation and the set-aside stages, in that order. extract_metrics
+// calls it after its enrich batches, extract_metrics_simple after its per-chunk calls. dropped
+// holds the rows the LLM already set aside; tagged the rows it emitted with a drop-reason tag.
+func (p *MetricsProcessor) finishMetricRows(ctx context.Context, recordID int64, metrics, tagged []map[string]any, dropped []droppedMetricRow, chunks []Chunk) ([]map[string]any, []droppedMetricRow) {
 	p.applyMetricFrames(recordID, "metrics", metrics)
 	p.applyMetricFrames(recordID, "tagged", tagged)
 	if n := inheritClauseConditions(metrics, chunks); n > 0 {
@@ -3811,7 +3852,6 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 	p.logMultiValueMetricRows(ctx, recordID, metrics)
 
 	// Set-aside rows, in stage order (spec metric-row-soft-drop, design D2).
-	dropped := candidateDrops
 	metrics, specDrops := dropResourceSpecRows(metrics)
 	if len(specDrops) > 0 {
 		p.Logger.Info("pass2: set aside rows that only state a resource's spec",
@@ -3834,10 +3874,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		metrics, judgedOut = p.judgeOpenValueRows(ctx, recordID, metrics)
 		dropped = append(dropped, judgedOut...)
 	}
-	if pass2Err != nil {
-		return metrics, uncertain, dropped, pass2Err
-	}
-	return metrics, uncertain, dropped, nil
+	return metrics, dropped
 }
 
 func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
@@ -3886,6 +3923,10 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 	p.batchMentions = nil
 	p.batchLang = "unknown"
 	p.batchModelName = strings.TrimSpace(p.MentionModelName)
+	if p.simple {
+		p.batchSimple = metricSimpleResult{}
+		p.simpleWarmup = newMetricWarmupGate(p.Now, p.simpleWarmupWait)
+	}
 	return nil
 }
 
@@ -3898,6 +3939,9 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 	}
 	if isCtxStopped(ctx) {
 		return ErrPipelineStopped
+	}
+	if p.simple {
+		return p.processSimpleChunk(ctx, chunkIdx)
 	}
 	chunk := p.batchChunks[chunkIdx]
 	block := chunksToBlocks([]Chunk{chunk})[0]
@@ -3959,7 +4003,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		return nil
 	}
 	candidates := mentionsAsCandidates(p.batchMentions)
-	if len(candidates) == 0 {
+	if (!p.simple && len(candidates) == 0) || (p.simple && p.batchSimple.empty()) {
 		if p.batchForceClear {
 			deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
 			p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
@@ -3972,7 +4016,19 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if isCtxStopped(ctx) {
 		return ErrPipelineStopped
 	}
-	metrics, _, dropped, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchChunks, p.batchDocCtx)
+	var (
+		metrics []map[string]any
+		dropped []droppedMetricRow
+		err     error
+	)
+	if p.simple {
+		metrics, dropped = p.finishMetricRows(ctx, p.batchRecordID, p.batchSimple.rows, p.batchSimple.tagged, p.batchSimple.dropped, p.batchChunks)
+		if p.batchSimple.language != "" {
+			p.batchLang = p.batchSimple.language
+		}
+	} else {
+		metrics, _, dropped, err = p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchChunks, p.batchDocCtx)
+	}
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			return ErrPipelineStopped

@@ -175,6 +175,7 @@ func processorRequiresLLM(processorName string) bool {
 	switch canonicalOperationName(processorName) {
 	case "extract_doc_metadata",
 		"extract_metrics",
+		"extract_metrics_simple",
 		"extract_provisions",
 		"extract_semantic_projections",
 		"generate_summaries",

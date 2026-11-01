@@ -74,6 +74,7 @@ func defaultProductionRuntimeComponents(logger ApiTypes.JimoLogger) productionRu
 		NewRelationProcessor(inputStore, EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewInventoryItemsProcessor(inputStore, InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewMetricsProcessor(inputStore, newResolvingMetricsStore(ApiTypes.ProjectDBHandle), newClient(), logger),
+		NewMetricsSimpleProcessor(inputStore, newResolvingMetricsStore(ApiTypes.ProjectDBHandle), newClient(), logger),
 		NewProductsProcessor(inputStore, ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 		NewMetricDefinitionsProcessor(newClient(), logger),
 		NewProductStructureProcessor(),
@@ -254,7 +255,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}, plan: plan}
 	for _, p := range control.Processors {
 		if m, ok := p.(*MetricsProcessor); ok {
-			r.services["extract_metrics"] = m.RuntimeConfig()
+			r.services[m.Name()] = m.RuntimeConfig()
 		}
 		if p, ok := p.(*ExtractSummariesProcessor); ok {
 			r.services[p.Name()] = map[string]any{"algorithm": p.Config.Algorithm, "sentence_count": p.Config.SentenceCount, "timeout": p.Config.Timeout.String()}
@@ -310,9 +311,25 @@ func processorInitError(p Processor) error {
 	return nil
 }
 
+// metricsTwoPassOverrides are extract_metrics' own keys; extract_metrics_simple ignores them, and
+// extract_metrics ignores the EXTRACT_METRICS_SIMPLE_* keys. Merge-resolve and task keys apply to both.
+var metricsTwoPassOverrides = map[string]bool{
+	"EXTRACT_METRIC_CANDIDATES_PROMPT": true, "ENRICH_METRICS_PROMPT": true, "EXTRACT_METRICS_PROMPT": true,
+	"EXTRACT_METRIC_CANDIDATES_MODEL_NAME": true, "ENRICH_METRICS_MODEL_NAME": true, "EXTRACT_METRICS_MODEL_NAME": true,
+	"EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK": true, "METRIC_ENRICH_GROUP_SIZE": true,
+}
+
 func applyMetricsRuntimeOverrides(p *MetricsProcessor, o map[string]string) error {
 	for k, v := range o {
-		switch strings.ToUpper(k) {
+		key := strings.ToUpper(k)
+		if (p.simple && metricsTwoPassOverrides[key]) || (!p.simple && strings.HasPrefix(key, "EXTRACT_METRICS_SIMPLE_")) {
+			continue
+		}
+		switch key {
+		case "EXTRACT_METRICS_SIMPLE_PROMPT":
+			p.setSimplePrompt(loadPromptByRef(v))
+		case "EXTRACT_METRICS_SIMPLE_MODEL_NAME":
+			p.setSimpleModel(loadModelConfigByRef(v, "MODEL_DEF_FILE"))
 		case "EXTRACT_METRIC_CANDIDATES_PROMPT":
 			p.MentionPromptText, p.MentionPromptRef, p.MentionPromptPath, p.MentionPromptErr = loadPromptByRef(v)
 		case "ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT":
@@ -455,8 +472,9 @@ func normalizeRuntimeName(s string) string {
 
 func (r *ProductionRuntime) AllowedOverrides() map[string][]string {
 	return map[string][]string{
-		"chunking":        {"CHUNK_SIZE", "CHUNK_OVERLAP_PERCENT"},
-		"extract_metrics": {"EXTRACT_METRIC_CANDIDATES_PROMPT", "EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK", "ENRICH_METRICS_PROMPT", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME", "METRIC_MERGE_RESOLVE_PROMPT", "METRIC_MERGE_RESOLVE_MODEL_NAME", "METRIC_MERGE_RESOLVE_MODEL_FALLBACK", "METRIC_ENRICH_GROUP_SIZE", "EXTRACT_METRICS_MAX_TASKS"},
+		"chunking":               {"CHUNK_SIZE", "CHUNK_OVERLAP_PERCENT"},
+		"extract_metrics":        {"EXTRACT_METRIC_CANDIDATES_PROMPT", "EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK", "ENRICH_METRICS_PROMPT", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME", "METRIC_MERGE_RESOLVE_PROMPT", "METRIC_MERGE_RESOLVE_MODEL_NAME", "METRIC_MERGE_RESOLVE_MODEL_FALLBACK", "METRIC_ENRICH_GROUP_SIZE", "EXTRACT_METRICS_MAX_TASKS"},
+		"extract_metrics_simple": {"EXTRACT_METRICS_SIMPLE_PROMPT", "EXTRACT_METRICS_SIMPLE_MODEL_NAME", "METRIC_MERGE_RESOLVE_PROMPT", "METRIC_MERGE_RESOLVE_MODEL_NAME", "METRIC_MERGE_RESOLVE_MODEL_FALLBACK", "EXTRACT_METRICS_MAX_TASKS"},
 	}
 }
 
