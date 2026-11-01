@@ -334,7 +334,6 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 					/* no-op — handled by parent navigation */
 				}}
 			/>
-		{:else if activeMenu?.childId === 'wpi-editor'}
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}

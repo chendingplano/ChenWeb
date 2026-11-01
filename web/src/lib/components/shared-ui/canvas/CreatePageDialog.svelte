@@ -15,7 +15,7 @@
 <dialog bind:this={dialog} onclose={onClose} class="select-text" style={canvasThemeVars(darkMode)} aria-labelledby="create-page-title">
  <form onsubmit={async (event) => { event.preventDefault(); if (busy || !name.trim() || !id.trim()) return; busy = true; try { if (await onCreate(id.trim(), name, description, keywords, tags)) onClose(); } finally { busy = false; } }}>
   <h2 id="create-page-title">{m.wpi_create_page_title()}</h2>
-  <label>{m.wpi_create_page_id()}<input bind:value={id} required maxlength="128" pattern="[a-z0-9][a-z0-9-]*" title={m.wpi_create_page_id_hint()} autofocus /></label>
+  <label>{m.wpi_create_page_id()}<input bind:value={id} required maxlength="128" pattern="[a-z0-9][a-z0-9-]*" title={m.wpi_create_page_id_hint()} /></label>
   <label>{m.wpi_create_page_name()}<input bind:value={name} required maxlength="100" /></label>
   <label>{m.wpi_create_page_description()}<textarea bind:value={description} maxlength="1000"></textarea></label>
   <label>{m.wpi_create_page_keywords()}<input bind:value={keywords} placeholder={m.wpi_create_page_comma_separated()} /></label>

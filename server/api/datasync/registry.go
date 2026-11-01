@@ -79,6 +79,22 @@ type TableSyncItem struct {
 	// Origin is only meaningful for DB-backed items (empty for compiled
 	// Registry items, which aren't stored in kb.data_sync_items at all).
 	Origin SyncOrigin
+
+	// References lists the columns that point at another compiled item's row
+	// by surrogate id. Surrogate ids differ per deployment, so the source sends
+	// the parent's NaturalKey values instead and the target resolves them to its
+	// own id. Every referenced item must be a compiled Registry item, and must
+	// be synced before this one.
+	References []SyncReference
+}
+
+// SyncReference is one foreign-key column whose value travels as the parent
+// row's natural key. The parent table must have a surrogate `id` column.
+type SyncReference struct {
+	// Column is one of Columns; it holds the surrogate id on each instance.
+	Column string
+	// ItemID is the id of the compiled Registry item whose table it points into.
+	ItemID string
 }
 
 // Registry lists every sync item known to this binary. Both the source pull
@@ -103,6 +119,48 @@ var Registry = []TableSyncItem{
 		// manually-added names. Locally-generated proposed rows remain excluded.
 		Filter: "status = 'approved'",
 	},
+	// Holiday calendars. Each item's natural key is stable across instances;
+	// surrogate ids never cross the wire (see SyncReference). Sync order:
+	// calendar and holiday_info before holidays.
+	{
+		ID:         "calendar",
+		Table:      "public.calendars",
+		CursorCol:  "updated_at",
+		NaturalKey: []string{"year", "country", "calendar_type"},
+		Columns:    []string{"year", "country", "calendar_type", "created_at", "updated_at"},
+	},
+	{
+		ID:         "holiday_info",
+		Table:      "public.holiday_info",
+		CursorCol:  "updated_at",
+		NaturalKey: []string{"country", "calendar_type", "name"},
+		Columns: []string{
+			"country", "calendar_type", "name", "display_seqno", "description", "note",
+			"created_at", "updated_at",
+		},
+	},
+	{
+		ID:         "holidays",
+		Table:      "public.calendar_holidays",
+		CursorCol:  "updated_at",
+		NaturalKey: []string{"calendar_id", "holiday_date"},
+		Columns: []string{
+			"calendar_id", "holiday_info_id", "holiday_date", "day_kind", "created_at", "updated_at",
+		},
+		References: []SyncReference{
+			{Column: "calendar_id", ItemID: "calendar"},
+			{Column: "holiday_info_id", ItemID: "holiday_info"},
+		},
+	},
+	// Singleton: CHECK (id = 1) pins the primary key to the same value on every
+	// instance, so id is a stable natural key here, not a surrogate.
+	{
+		ID:         "calendar_default_country",
+		Table:      "public.calendar_default_country",
+		CursorCol:  "updated_at",
+		NaturalKey: []string{"id"},
+		Columns:    []string{"id", "country", "updated_at"},
+	},
 }
 
 // ItemByID looks up a registered sync item by its stable id.
@@ -122,6 +180,15 @@ func (t TableSyncItem) isJSONColumn(col string) bool {
 		}
 	}
 	return false
+}
+
+func (t TableSyncItem) referenceFor(col string) (SyncReference, bool) {
+	for _, ref := range t.References {
+		if ref.Column == col {
+			return ref, true
+		}
+	}
+	return SyncReference{}, false
 }
 
 func (t TableSyncItem) isNaturalKeyColumn(col string) bool {

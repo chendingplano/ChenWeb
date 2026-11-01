@@ -99,7 +99,18 @@ func HandlePullChanges(c echo.Context) error {
 // deterministic pagination boundaries.
 func fetchChangesPage(db *sql.DB, item TableSyncItem, since string, limit int) (changesResponse, error) {
 	selectCols := make([]string, len(item.Columns))
-	copy(selectCols, item.Columns)
+	for i, col := range item.Columns {
+		selectCols[i] = col
+		ref, ok := item.referenceFor(col)
+		if !ok {
+			continue
+		}
+		expr, err := referenceSelectExpr(item, ref)
+		if err != nil {
+			return changesResponse{}, err
+		}
+		selectCols[i] = expr
+	}
 
 	var whereClauses []string
 	if item.Filter != "" {
@@ -148,6 +159,27 @@ func fetchChangesPage(db *sql.DB, item TableSyncItem, since string, limit int) (
 	return resp, nil
 }
 
+// referenceSelectExpr selects a reference column's parent natural key as a
+// JSON array of text values, in the parent's NaturalKey order, in place of the
+// local surrogate id.
+func referenceSelectExpr(item TableSyncItem, ref SyncReference) (string, error) {
+	parent, ok := ItemByID(ref.ItemID)
+	if !ok {
+		return "", fmt.Errorf("reference %s.%s: parent item %q is not a compiled item", item.ID, ref.Column, ref.ItemID)
+	}
+	parts := make([]string, len(parent.NaturalKey))
+	for i, col := range parent.NaturalKey {
+		parts[i] = fmt.Sprintf("p.%s::text", col)
+	}
+	return fmt.Sprintf(
+		"(SELECT json_build_array(%s) FROM %s p WHERE p.id = %s.%s)",
+		strings.Join(parts, ", "),
+		parent.Table,
+		item.Table,
+		ref.Column,
+	), nil
+}
+
 // scanRow scans one row of item.Columns into a Row and also returns the raw
 // text value of the cursor column (for tracking NextCursor without a JSON
 // round trip).
@@ -156,7 +188,7 @@ func scanRow(rows *sql.Rows, item TableSyncItem) (Row, string, error) {
 	jsonDests := make([]json.RawMessage, len(item.Columns))
 	strDests := make([]sql.NullString, len(item.Columns))
 	for i, col := range item.Columns {
-		if item.isJSONColumn(col) {
+		if _, isRef := item.referenceFor(col); isRef || item.isJSONColumn(col) {
 			dests[i] = &jsonDests[i]
 		} else {
 			dests[i] = &strDests[i]
@@ -170,7 +202,7 @@ func scanRow(rows *sql.Rows, item TableSyncItem) (Row, string, error) {
 	var cursorValue string
 	for i, col := range item.Columns {
 		var value json.RawMessage
-		if item.isJSONColumn(col) {
+		if _, isRef := item.referenceFor(col); isRef || item.isJSONColumn(col) {
 			if len(jsonDests[i]) == 0 {
 				value = nullJSON
 			} else {

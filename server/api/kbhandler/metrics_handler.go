@@ -1943,6 +1943,7 @@ func DeleteInput(c echo.Context) error {
 				Status: false, ErrorMsg: fmt.Sprintf("refused to delete kb input: %v; nothing was deleted (CWB_KB_M_420)", err),
 			})
 		}
+		report.SkippedFiles = append(report.SkippedFiles, plan.SkippedFiles...)
 		archived, missing, err := archiveInputPDF(archiveRoot, id, plan.PDFPath)
 		if err != nil {
 			logger.Error("archive kb input pdf failed", "id", id, "err", err)
@@ -2082,6 +2083,9 @@ func CleanInputArtifacts(c echo.Context) error {
 		})
 	}
 
+	report := newInputDeleteReport()
+	report.SkippedFiles = append(report.SkippedFiles, plan.SkippedFiles...)
+
 	if err := deleteInputRelatedRows(tx, id); err != nil {
 		logger.Error("clean kb input related rows failed", "id", id, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -2115,7 +2119,6 @@ func CleanInputArtifacts(c echo.Context) error {
 		})
 	}
 
-	report := newInputDeleteReport()
 	if found {
 		deleteInputFiles(plan.filesWithPDF(), &report)
 	}
@@ -2135,6 +2138,7 @@ func CleanInputArtifacts(c echo.Context) error {
 		"status":               true,
 		"record_id":            id,
 		"record_found":         found,
+		"skipped_files":        report.SkippedFiles,
 		"artifact_web_cleanup": webStats,
 	})
 }

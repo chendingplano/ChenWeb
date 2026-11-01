@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -88,7 +90,11 @@ func upsertRows(ctx context.Context, db *sql.DB, item TableSyncItem, rows []Row)
 	}
 	defer tx.Rollback()
 
-	for _, row := range rows {
+	for _, sourceRow := range rows {
+		row, err := resolveReferences(ctx, tx, item, sourceRow)
+		if err != nil {
+			return err
+		}
 		args, err := rowArgs(item, row)
 		if err != nil {
 			return fmt.Errorf("build upsert args for %s: %w", item.ID, err)
@@ -113,6 +119,56 @@ func upsertRows(ctx context.Context, db *sql.DB, item TableSyncItem, rows []Row)
 	}
 
 	return tx.Commit()
+}
+
+// resolveReferences replaces each reference column's natural-key array (as
+// sent by referenceSelectExpr) with this instance's surrogate id for that
+// parent row, looked up inside tx. It returns a copy and leaves row untouched.
+func resolveReferences(ctx context.Context, tx *sql.Tx, item TableSyncItem, row Row) (Row, error) {
+	if len(item.References) == 0 {
+		return row, nil
+	}
+	resolved := make(Row, len(row))
+	for col, raw := range row {
+		resolved[col] = raw
+	}
+	for _, ref := range item.References {
+		raw, ok := row[ref.Column]
+		if !ok || isNullJSON(raw) {
+			continue
+		}
+		parent, ok := ItemByID(ref.ItemID)
+		if !ok {
+			return nil, fmt.Errorf("reference %s.%s: parent item %q is not a compiled item", item.ID, ref.Column, ref.ItemID)
+		}
+		var key []string
+		if err := json.Unmarshal(raw, &key); err != nil {
+			return nil, fmt.Errorf("decode %s.%s natural key: %w", item.ID, ref.Column, err)
+		}
+		if len(key) != len(parent.NaturalKey) {
+			return nil, fmt.Errorf("%s.%s: natural key has %d values, want %d", item.ID, ref.Column, len(key), len(parent.NaturalKey))
+		}
+		conditions := make([]string, len(parent.NaturalKey))
+		args := make([]any, len(key))
+		for i, col := range parent.NaturalKey {
+			conditions[i] = fmt.Sprintf("%s = $%d", col, i+1)
+			args[i] = key[i]
+		}
+		var id int64
+		query := fmt.Sprintf("SELECT id FROM %s WHERE %s", parent.Table, strings.Join(conditions, " AND "))
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("%s.%s: no %s row for %v; sync %s first", item.ID, ref.Column, parent.ID, key, parent.ID)
+			}
+			return nil, fmt.Errorf("resolve %s.%s: %w", item.ID, ref.Column, err)
+		}
+		encoded, err := json.Marshal(strconv.FormatInt(id, 10))
+		if err != nil {
+			return nil, err
+		}
+		resolved[ref.Column] = encoded
+	}
+	return resolved, nil
 }
 
 // rowArgs decodes one Row into the []any bind parameters expected by the

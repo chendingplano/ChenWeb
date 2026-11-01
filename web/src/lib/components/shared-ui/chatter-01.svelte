@@ -547,7 +547,7 @@
 					<DropdownMenu.Content class="max-h-96 overflow-y-auto">
 						{#each harnessSessionList as entry (entry.sessionId)}
 							<DropdownMenu.Item onclick={() => openHarnessSession(entry)}>
-								<div class="flex max-w-[360px] flex-col">
+								<div class="flex max-w-90 flex-col">
 									<span class="truncate">{entry.title || entry.firstPrompt || entry.sessionId}</span>
 									<span class="text-[10px] opacity-60">{new Date(entry.lastModified).toLocaleString()}</span>
 								</div>
@@ -577,7 +577,7 @@
 						if (!session.harness) loadDialogs(session.id);
 					}}
 				>
-					<span class="max-w-[140px] truncate">{session.title}</span>
+					<span class="max-w-35 truncate">{session.title}</span>
 					<XIcon
 						class="h-3 w-3"
 						onclick={(e) => {
@@ -631,7 +631,7 @@
 
 			{#if slashMatches.length > 0}
 				<div
-					class="absolute bottom-[86px] left-4 z-20 w-[320px] rounded-xl p-1"
+					class="absolute bottom-21.5 left-4 z-20 w-80 rounded-xl p-1"
 					style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 10px 24px rgba(0,0,0,0.2);"
 				>
 					{#each slashMatches as command}
@@ -971,7 +971,7 @@
 			style="background:rgba(0,0,0,0.45);"
 		>
 			<div
-				class="w-[640px] max-w-[92vw] rounded-xl p-4"
+				class="w-160 max-w-[92vw] rounded-xl p-4"
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
 				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">
@@ -984,7 +984,7 @@
 					class="mb-3 w-full rounded-lg px-3 py-2 text-sm outline-none"
 					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
 				/>
-				<div class="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+				<div class="max-h-80 space-y-2 overflow-y-auto pr-1">
 					{#each filteredPrompts as prompt (prompt.id)}
 						<button
 							class="w-full cursor-pointer rounded-lg px-3 py-2 text-left"
@@ -1015,7 +1015,7 @@
 			style="background:rgba(0,0,0,0.45);"
 		>
 			<div
-				class="w-[720px] max-w-[95vw] rounded-xl p-4"
+				class="w-180 max-w-[95vw] rounded-xl p-4"
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
 				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">

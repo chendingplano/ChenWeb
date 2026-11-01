@@ -43,7 +43,8 @@ func inputDeleteAuditInfo(deleteFiles bool, report inputDeleteReport, tables []i
 	return map[string]any{
 		"operation": "delete_input", "delete_file": deleteFiles, "cleanup_status": status,
 		"archived_file": report.ArchivedFile, "deleted_files": report.DeletedFiles,
-		"missing_files": report.MissingFiles, "deleted_tables": tables, "artifact_web_cleanup": stats,
+		"missing_files": report.MissingFiles, "skipped_files": report.SkippedFiles,
+		"deleted_tables": tables, "artifact_web_cleanup": stats,
 	}
 }
 

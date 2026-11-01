@@ -152,14 +152,14 @@ func updateHolidayInfo(ctx context.Context, db *sql.DB, id int64, h HolidayInfo)
 	}
 	if oldCountry == h.Country && oldType == h.CalendarType {
 		if h.DisplaySeqno < oldSeqno {
-			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno >= $3 AND display_seqno < $4 AND id <> $5`, oldCountry, oldType, h.DisplaySeqno, oldSeqno, id)
+			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1, updated_at = NOW() WHERE country = $1 AND calendar_type = $2 AND display_seqno >= $3 AND display_seqno < $4 AND id <> $5`, oldCountry, oldType, h.DisplaySeqno, oldSeqno, id)
 		} else if h.DisplaySeqno > oldSeqno {
-			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno > $3 AND display_seqno <= $4 AND id <> $5`, oldCountry, oldType, oldSeqno, h.DisplaySeqno, id)
+			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1, updated_at = NOW() WHERE country = $1 AND calendar_type = $2 AND display_seqno > $3 AND display_seqno <= $4 AND id <> $5`, oldCountry, oldType, oldSeqno, h.DisplaySeqno, id)
 		}
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno > $3`, oldCountry, oldType, oldSeqno)
+		_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno - 1, updated_at = NOW() WHERE country = $1 AND calendar_type = $2 AND display_seqno > $3`, oldCountry, oldType, oldSeqno)
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1 WHERE country = $1 AND calendar_type = $2 AND display_seqno >= $3`, h.Country, h.CalendarType, h.DisplaySeqno)
+			_, err = tx.ExecContext(ctx, `UPDATE public.holiday_info SET display_seqno = display_seqno + 1, updated_at = NOW() WHERE country = $1 AND calendar_type = $2 AND display_seqno >= $3`, h.Country, h.CalendarType, h.DisplaySeqno)
 		}
 	}
 	if err != nil {

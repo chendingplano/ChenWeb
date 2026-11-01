@@ -118,6 +118,10 @@ func HandleListSyncItems(c echo.Context) error {
 		views = append(views, toSyncItemView(item, originCompiled, state))
 	}
 	for _, item := range dbItems {
+		if _, compiled := ItemByID(item.ID); compiled {
+			// A compiled item with the same id wins in ResolveItem, so this row is shadowed.
+			continue
+		}
 		state, err := getSyncState(ctx, db, item.ID)
 		if err != nil {
 			adminLogger.Error("failed to load sync state", "item_id", item.ID, "error", err)

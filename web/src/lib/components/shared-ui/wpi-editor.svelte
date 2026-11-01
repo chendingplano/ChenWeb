@@ -213,7 +213,7 @@
 	let detached = $state(false);
 	let panelPosition = $state({ x: 0, y: 0 });
 	let panelHeight = $state(500);
-	let panelElement: HTMLElement;
+	let panelElement = $state<HTMLElement>();
 	let dragging: { id: number; dx: number; dy: number; startX: number; startY: number } | null = null;
 	let floatingResize: { id: number; x: number; y: number; width: number; height: number } | null = null;
 	function togglePanel() {
@@ -230,7 +230,7 @@
 	}
 	function startPanelDrag(event: PointerEvent) {
 		if (event.button !== 0) return;
-		const rect = panelElement.getBoundingClientRect();
+		const rect = panelElement!.getBoundingClientRect();
 		dragging = { id: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top, startX: event.clientX, startY: event.clientY };
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 		event.preventDefault();
@@ -1128,6 +1128,8 @@
 				<Controls />
 				{#if loadedPage}
 					<Panel position="bottom-right" class="svelte-flow__minimap" style="background:var(--cv-raised);">
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 						<svg width="200" height="150" viewBox={`${pageOverview.bounds.x - 40} ${pageOverview.bounds.y - 40} ${pageOverview.bounds.width + 80} ${pageOverview.bounds.height + 80}`} role="application" tabindex="0" aria-label={m.mesh_minimap()}
 							onpointerdown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); movePageOverview(event); }}
 							onpointermove={(event) => { if (event.buttons === 1) movePageOverview(event); }}
@@ -1233,7 +1235,7 @@
 			role="separator"
 			aria-orientation="vertical"
 			aria-label={m.wpi_editor_resize_properties()}
-			class="relative z-10 -mx-[3px] w-1.5 flex-shrink-0 cursor-col-resize select-none hover:bg-(--cv-accent)/40"
+			class="relative z-10 -mx-0.75 w-1.5 shrink-0 cursor-col-resize select-none hover:bg-(--cv-accent)/40"
 			onpointerdown={startResize}
 			onpointermove={resize}
 			onpointerup={endResize}
@@ -1285,7 +1287,7 @@
 	{#if editorError}
 		<div role="alert" class="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-start gap-3 rounded-lg px-4 py-2 text-sm shadow-xl select-text"
 			style="background:{darkMode ? '#422b0b' : '#fff3cd'}; border:1px solid var(--cv-warn); color:var(--cv-text); z-index:61; width:min(640px, calc(100vw - 32px)); max-height:40vh; overflow:auto; user-select:text; overflow-wrap:anywhere;">
-			<span class="min-w-0 break-words">{editorError}</span>
+			<span class="min-w-0 wrap-break-word">{editorError}</span>
 			<button type="button" class="ml-auto shrink-0" onclick={() => (editorError = '')} aria-label={m.home3_agent_services_dismiss_error()} title={m.home3_agent_services_dismiss_error()}><XIcon class="w-4 h-4" /></button>
 		</div>
 	{/if}

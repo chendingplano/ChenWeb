@@ -312,7 +312,7 @@
 </script>
 
 <aside
-  class="flex flex-col h-full overflow-hidden flex-shrink-0"
+  class="flex flex-col h-full overflow-hidden shrink-0"
   style="width:{width}px; background:var(--cv-panel); border-left:1px solid var(--cv-divider);"
 >
   {#if nodeTab}
@@ -617,7 +617,6 @@
   .source-properties { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 4px; align-items: center; font-size: 9px; color: var(--cv-text-muted); }
   .order-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 25px; gap: 3px; margin-bottom: 4px; }
   .column-input { min-width: 0; width: 100%; box-sizing: border-box; background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px; font-size: 10px; color: var(--cv-text); }
-  .column-remove, .column-add { background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px 7px; font-size: 10px; color: var(--cv-text); cursor: pointer; }
-  .column-add { margin-top: 5px; }
-  .column-add:disabled, .column-remove:disabled { opacity: 0.5; cursor: default; }
+  .column-remove { background: var(--cv-surface); border: 1px solid var(--cv-border); border-radius: 4px; padding: 4px 7px; font-size: 10px; color: var(--cv-text); cursor: pointer; }
+  .column-remove:disabled { opacity: 0.5; cursor: default; }
 </style>

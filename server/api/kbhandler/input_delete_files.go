@@ -17,9 +17,10 @@ import (
 // checked before the database transaction changes anything, so a refused plan leaves the
 // record intact.
 type inputDeletePlan struct {
-	PDFPath string   // uploaded PDF in the data home; archived by DeleteInput, deleted by CleanInputArtifacts
-	Files   []string // backup copy and result file
-	Dirs    []string // record artifact folders, each named after the record id
+	PDFPath      string   // uploaded PDF in the data home; archived by DeleteInput, deleted by CleanInputArtifacts
+	Files        []string // backup copy and owned result file
+	Dirs         []string // record artifact folders, each named after the record id
+	SkippedFiles []string // files whose parent folder is not owned by this record
 }
 
 // filesWithPDF returns every planned file, including the uploaded PDF.
@@ -36,6 +37,7 @@ type inputDeleteReport struct {
 	DeletedFiles []string `json:"deleted_files"`
 	ArchivedFile string   `json:"archived_file"`
 	MissingFiles []string `json:"missing_files"`
+	SkippedFiles []string `json:"skipped_files"`
 	Failures     []string `json:"failures"`
 }
 
@@ -43,6 +45,7 @@ func newInputDeleteReport() inputDeleteReport {
 	return inputDeleteReport{
 		DeletedFiles: []string{},
 		MissingFiles: []string{},
+		SkippedFiles: []string{},
 		Failures:     []string{},
 	}
 }
@@ -66,7 +69,6 @@ func planInputDeletePaths(recordID int64, assets inputDeleteAssets) (inputDelete
 		plan.Files = append(plan.Files, path)
 	}
 	addFile(pathutil.ResolveBackupPath(assets.BackupFileName))
-	addFile(pathutil.ResolveDataHomePath(assets.ResultFileName))
 
 	seenDirs := map[string]struct{}{}
 	addDir := func(dir string) error {
@@ -120,10 +122,15 @@ func planInputDeletePaths(recordID int64, assets inputDeleteAssets) (inputDelete
 			}
 		}
 		if !approved {
-			return inputDeletePlan{}, fmt.Errorf("refusing to remove folder %s: not the configured artifact folder for record %s", dir, recordKey)
-		}
-		if err := addDir(dir); err != nil {
-			return inputDeletePlan{}, err
+			// Duplicate input rows can copy result_filename from their original
+			// record. Preserve both the foreign file and its directory, while still
+			// allowing deletion of this record and its own artifact directory.
+			plan.SkippedFiles = append(plan.SkippedFiles, resolved)
+		} else {
+			addFile(resolved)
+			if err := addDir(dir); err != nil {
+				return inputDeletePlan{}, err
+			}
 		}
 	}
 	return plan, nil
