@@ -5006,3 +5006,8 @@ sudo networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 dig +short onto.bzton.cn        # should print 210.5.158.91
 ```
+
+# How to update deepseek API key
+- Update the api key in 'ChenWeb/.models.toml'
+- In 'ChenWeb/development, System Admin => LLM => LLM Accounts', find the 
+  model ('deepseek-flash-processor'), update its API key.
