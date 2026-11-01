@@ -201,7 +201,11 @@ $fn$ LANGUAGE plpgsql;
 
 -- +goose StatementBegin
 INSERT INTO kb.frontend_pages (descriptor_id, version, schema_version, body, status, created_by, updated_by)
-SELECT l.descriptor_id, l.version + 1, '0.5', pg_temp.wpi_page(pg_temp.wpi_page_05(l.body)), 'active',
+SELECT l.descriptor_id,
+       (SELECT COALESCE(MAX(f.version), 0) + 1
+        FROM kb.frontend_pages f
+        WHERE f.descriptor_id = l.descriptor_id),
+       '0.5', pg_temp.wpi_page(pg_temp.wpi_page_05(l.body)), 'active',
        'migration:wpi-pages-own-panes', 'migration:wpi-pages-own-panes'
 FROM (
     SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body
