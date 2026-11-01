@@ -433,6 +433,14 @@
 	const canRedo = $derived(redoStack.length > 0);
 
 	const selectedNode = $derived(nodes.find((n) => n.id === selectedNodeId) ?? null);
+	const selectedFlowConfig = $derived.by(() => {
+		if (!loadedPage || selectedNode?.type !== 'wpi-element') return undefined;
+		const pane = String(selectedNode.data.pane ?? '');
+		const panel = (loadedPage as unknown as PageDescriptor).panels?.[pane];
+		const layouter = panel?.elem_layouter;
+		if (layouter?.layouter && layouter.layouter !== 'flow-layouter') return undefined;
+		return layouter?.config ?? layouter?.class?.config ?? {};
+	});
 	const selectedNodeType = $derived(
 		selectedNode
 			? ([...nodeTypes, ...Object.values(WPI_NODE_TYPES)].find((t) => t.id === selectedNode.type) ??
@@ -1253,6 +1261,7 @@
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
 			elementClass={selectedElementClass}
+			flowConfig={selectedFlowConfig}
 			{triggerActions}
 			measuredSize={selectedNodeId ? measuredSizes[selectedNodeId] : undefined}
 			panes={loadedPage && selectedNode?.type === 'wpi-element' ? leaves : undefined}

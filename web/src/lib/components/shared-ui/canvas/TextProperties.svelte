@@ -8,7 +8,7 @@
 		validTextAttribute
 	} from '$lib/wpi/text-attributes';
 	import type { ElementAttribute } from '$lib/wpi/api';
-	import type { Json, JsonObject } from '$lib/wpi/types';
+	import type { FlowLayouterConfig, Json, JsonObject } from '$lib/wpi/types';
 	import { valueText, withAttribute } from './element-attributes';
 	import {
 		textAttributeLabel,
@@ -20,11 +20,13 @@
 		attributes,
 		attrs,
 		pane,
+		flowConfig,
 		onChange
 	}: {
 		attributes: Record<string, ElementAttribute>;
 		attrs: JsonObject;
 		pane: string;
+		flowConfig?: FlowLayouterConfig;
 		onChange: (attrs: JsonObject) => void;
 	} = $props();
 	const definitions = $derived({
@@ -51,6 +53,22 @@
 		const a = length.exec(value);
 		const b = length.exec(maximum);
 		return !!a && !!b && a[2] === b[2] && Number(a[1]) > Number(b[1]);
+	}
+	function flowLimit(name: string): string | undefined {
+		if (!flowConfig || (name !== 'width' && name !== 'height')) return;
+		const limit = name === 'width' ? flowConfig.max_elem_width ?? '300px' : flowConfig.max_row_height ?? '200px';
+		const value = get(name);
+		if (typeof value !== 'string') return;
+		const length = /^(\d+(?:\.\d+)?)(px|rem|em|%)$/;
+		const actual = length.exec(value);
+		const maximum = length.exec(limit);
+		if (!actual || !maximum) return;
+		if (actual[2] === maximum[2] && Number(actual[1]) > Number(maximum[1])) return limit;
+		if (typeof window !== 'undefined' && ['px', 'rem'].includes(actual[2]) && ['px', 'rem'].includes(maximum[2])) {
+			const rootSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
+			const pixels = (match: RegExpExecArray) => Number(match[1]) * (match[2] === 'rem' ? rootSize : 1);
+			if (pixels(actual) > pixels(maximum)) return limit;
+		}
 	}
 	function reset(name: string) {
 		const next = { ...attrs };
@@ -101,7 +119,8 @@
 					{@const languageMap =
 						value !== null && typeof value === 'object' && !Array.isArray(value)}
 					{@const exceeds = editing?.name !== name && editing?.name !== `max_${name}` && exceedsMaximum(name)}
-					{@const invalid = editing?.name !== name && ((value !== undefined && !validTextAttribute(name, value)) || exceeds)}
+					{@const limit = editing?.name !== name ? flowLimit(name) : undefined}
+					{@const invalid = editing?.name !== name && ((value !== undefined && !validTextAttribute(name, value)) || exceeds || !!limit)}
 					<div
 						class="attribute"
 						role={localizedField ? 'group' : undefined}
@@ -212,7 +231,7 @@
 								}}
 							/>
 						{/if}
-						{#if invalid}<p class="error" role="alert">{exceeds ? m.wpi_text_exceeds_maximum() : ['width', 'height', 'min_width', 'max_width'].includes(name) ? m.wpi_text_invalid_size() : m.wpi_text_invalid()}</p>{/if}
+						{#if invalid}<p class="error" role="alert">{limit ? (name === 'width' ? m.wpi_text_flow_width_limit({ limit }) : m.wpi_text_flow_height_limit({ limit })) : exceeds ? m.wpi_text_exceeds_maximum() : ['width', 'height', 'min_width', 'max_width'].includes(name) ? m.wpi_text_invalid_size() : m.wpi_text_invalid()}</p>{/if}
 						{#if group === 'other'}<p class="hint" role="status">{m.wpi_text_unsupported()}</p>{/if}
 						{#if def.help_tip}<p class="hint">{localized(def.help_tip)}</p>{/if}
 						{#if !fixed}<p class="origin">

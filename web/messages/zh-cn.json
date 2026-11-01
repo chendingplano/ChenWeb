@@ -8072,6 +8072,8 @@
 	"wpi_text_invalid": "此属性的值无效。",
 	"wpi_text_invalid_size": "请输入带 px、rem、em 或 % 单位的非负数，或使用 auto 或 elastic。",
 	"wpi_text_exceeds_maximum": "该值超过最大尺寸。",
+	"wpi_text_flow_width_limit": "宽度超过面板的最大元素宽度（{limit}）。请在面板设置中更改。",
+	"wpi_text_flow_height_limit": "高度超过面板的最大行高（{limit}）。请在面板设置中更改。",
 	"wpi_text_hint_content": "文本和数据绑定只能设置其一。",
 	"wpi_text_hint_caption": "标题完整换行显示，不截断。",
 	"wpi_text_hint_icon": "仅作装饰；请用文字表达含义。",

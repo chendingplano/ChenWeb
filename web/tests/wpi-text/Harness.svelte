@@ -86,7 +86,7 @@
 	</div>
 </div>
 <div id="editor" style="width:340px">
-	<TextProperties attributes={definitions} {attrs} pane="main" onChange={edit} />
+	<TextProperties attributes={definitions} {attrs} pane="main" flowConfig={{ max_elem_width: '300px', max_row_height: '200px' }} onChange={edit} />
 </div>
 <pre id="attrs">{JSON.stringify(attrs)}</pre>
 

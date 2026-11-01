@@ -3,7 +3,7 @@
 	import { m } from '$lib/paraglide/messages.js';
   import type { FlowNode, NodeType } from '$lib/types/flow';
   import type { ElementAttribute, ElementClassSummary } from '$lib/wpi/api';
-  import type { JsonObject } from '$lib/wpi/types';
+  import type { FlowLayouterConfig, JsonObject } from '$lib/wpi/types';
   import { localized } from '$lib/wpi/text';
   import { CHAT_AGENTS } from '$lib/wpi/chat-agents';
   import { valueText, withAttribute, withSourceFields, withSourceProperty, withListSourceDefaults, withSelectedTable } from './element-attributes';
@@ -16,6 +16,7 @@
     node,
     nodeType,
     elementClass,
+    flowConfig,
     measuredSize,
     triggerActions = [],
     panes,
@@ -31,6 +32,7 @@
     // instead of nodeType's: null when the class is not in the class list,
     // left out for other nodes.
     elementClass?: ElementClassSummary | null;
+    flowConfig?: FlowLayouterConfig;
     measuredSize?: { width: number; height: number };
     triggerActions?: string[];
     // The leaf panes of the page, for moving an element node to another one.
@@ -362,7 +364,7 @@
           </div>
           <div style="font-size:10px; color:var(--cv-text-faint);">{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</div>
         {:else if module === 'text'}
-          {#key node.id}<TextProperties attributes={elementClass.attributes} attrs={attrsOf(node)} pane={String(node.data.pane ?? '')} onChange={(attrs) => update('attrs', attrs)} />{/key}
+          {#key node.id}<TextProperties attributes={elementClass.attributes} attrs={attrsOf(node)} pane={String(node.data.pane ?? '')} {flowConfig} onChange={(attrs) => update('attrs', attrs)} />{/key}
         {:else}
           {#each orderedAttributes(elementClass.attributes) as [name, attr] (name)}
             {#if name === '__pane'}

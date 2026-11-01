@@ -8072,6 +8072,8 @@
 	"wpi_text_invalid": "Invalid value for this attribute.",
 	"wpi_text_invalid_size": "Use a nonnegative number with px, rem, em, or %, or use auto or elastic.",
 	"wpi_text_exceeds_maximum": "Value exceeds the maximum size.",
+	"wpi_text_flow_width_limit": "Width exceeds the panel’s Maximum element width ({limit}). Change it in Panel settings.",
+	"wpi_text_flow_height_limit": "Height exceeds the panel’s Maximum row height ({limit}). Change it in Panel settings.",
 	"wpi_text_hint_content": "Set text or a binding, never both.",
 	"wpi_text_hint_caption": "The full caption wraps without truncation.",
 	"wpi_text_hint_icon": "Decorative; keep meaning in text.",
