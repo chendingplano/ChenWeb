@@ -121,7 +121,8 @@ deepseek = "deepseek-flash-processor"
 
 The DeepSeek reconciliation adapter passes this name to the shared balance client
 for successful and failed reads. The usage sink resolves the model profile within
-the account using this name; a matching `llm_account_model_profile.model_name`
-is needed for profile linkage. An absent setting preserves the empty model name.
+the account using this name, first matching `model_name` and then `profile_name`.
+A matching `llm_account_model_profile` row is needed for profile linkage. An
+absent setting preserves the empty model name.
 Restart the API after changing this configuration. This setting controls usage
 attribution; the provider request remains `GET /user/balance`.

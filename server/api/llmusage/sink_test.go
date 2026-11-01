@@ -2,6 +2,7 @@ package llmusage
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -689,5 +690,24 @@ LIMIT 1`)).
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestBalanceProfileResolvesConfiguredProfileName(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT id, provider FROM llm_account").WithArgs("https://api.deepseek.com", "key").WillReturnRows(sqlmock.NewRows([]string{"id", "provider"}).AddRow("acct", "deepseek"))
+	mock.ExpectQuery("SELECT id FROM llm_account_model_profile.*LOWER\\(model_name\\)").WithArgs("acct", "deepseek-flash-processor").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT id FROM llm_account_model_profile.*LOWER\\(profile_name\\)").WithArgs("acct", "deepseek-flash-processor").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("profile"))
+	sink := &Sink{DB: db}
+	_, profile, _, err := sink.resolveAccountProfileIDs(context.Background(), sharedllm.UsageCaptureRecord{BaseURL: "https://api.deepseek.com", APIKey: "key", ModelName: "deepseek-flash-processor", CallReason: "provider_balance"})
+	if err != nil || profile != "profile" {
+		t.Fatalf("profile = %q, error = %v", profile, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -284,6 +284,14 @@ LIMIT 1`
 
 	if err := s.DB.QueryRowContext(ctx, modelQuery, accountID, modelName).Scan(&profileID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Balance attribution is configured with a model reference, which may
+			// be a profile name rather than the provider's model name.
+			if record.CallReason == "provider_balance" && profileName == "" {
+				if err := s.DB.QueryRowContext(ctx, profileNameQuery, accountID, modelName).Scan(&profileID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return accountID, "", provider, err
+				}
+				return accountID, profileID, provider, nil
+			}
 			return accountID, "", provider, nil
 		}
 		return accountID, "", provider, err
