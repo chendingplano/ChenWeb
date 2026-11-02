@@ -123,13 +123,13 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc, run_id
+    record_id, call_reason, call_loc, run_id, event_kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
     $18, $19, $20, $21, $22, $23::jsonb,
-    $24, $25, $26, $27
+    $24, $25, $26, $27, $28
 )`
 
 	var recordID any
@@ -183,6 +183,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		record.CallReason,
 		record.CallLoc,
 		runID,
+		usageEventKind(record.EventKind),
 	)
 	if err != nil {
 		return "", err
@@ -191,6 +192,15 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		s.alarmForMissingUserID(ctx, record)
 	}
 	return eventID, nil
+}
+
+// usageEventKind is the llm_usage_event.event_kind of a captured record: a
+// provider request unless the record names a lifecycle kind.
+func usageEventKind(kind string) string {
+	if kind = strings.TrimSpace(kind); kind != "" {
+		return kind
+	}
+	return "request"
 }
 
 func isLocalModelHost(host any) bool {

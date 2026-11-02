@@ -302,9 +302,6 @@ func TestExtractSummaryStoreRejectsStaleSourceBeforeDelete(t *testing.T) {
 }
 
 func TestExtractSummariesIsLocalAndKeepsControllerStatusDetails(t *testing.T) {
-	if processorUsesLLM("extract_summaries") {
-		t.Fatal("local extraction must not wait for LLM off-peak window")
-	}
 	p, in, sink, ctx := exSummaryFixture(t)
 	control := ControlService{InputStore: in}
 	result := control.runSingleProcessorCollect(ctx, []byte(`{"record_id":42}`), p, 42)

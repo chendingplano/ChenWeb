@@ -121,6 +121,17 @@
 		}
 	}
 
+	// eventKindLabel names a peak-control lifecycle row (llm_usage_event.event_kind);
+	// '' for an ordinary provider request.
+	function eventKindLabel(kind: string | undefined): string {
+		switch (kind) {
+			case 'llm_hold': return m.llm_usage_event_kind_llm_hold();
+			case 'llm_resume': return m.llm_usage_event_kind_llm_resume();
+			case 'llm_hold_cancelled': return m.llm_usage_event_kind_llm_hold_cancelled();
+			default: return '';
+		}
+	}
+
 	// Pure calendar-date helpers: dates are handled as UTC-midnight `Date`
 	// instants purely as a day-count/formatting convenience, never read back
 	// via local getters. That keeps day arithmetic (add/subtract days, start
@@ -883,6 +894,9 @@
 								<td>{event.call_reason || ''}</td>
 								<td>
 									<div class="cell-primary">{event.prompt_name}</div>
+									{#if eventKindLabel(event.event_kind)}
+										<div class="cell-secondary">{eventKindLabel(event.event_kind)}</div>
+									{/if}
 								</td>
 								<td>
 									<div class="cell-primary">{event.model_name}</div>

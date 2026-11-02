@@ -37,7 +37,8 @@
 		{ label: 'prompt_cache_hit_tokens', key: 'prompt_cache_hit_tokens' },
 		{ label: 'prompt_cache_miss_tokens', key: 'prompt_cache_miss_tokens' },
 		{ label: 'latency_ms', key: 'latency_ms' },
-		{ label: 'error_message', key: 'error_message' }
+		{ label: 'error_message', key: 'error_message' },
+		{ label: 'event_kind', key: 'event_kind' }
 	];
 
 	function displayValue(value: unknown): string {

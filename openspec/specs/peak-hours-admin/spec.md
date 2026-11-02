@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change peak-hours-admin. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: Admin-only access
 The Peak Hours admin page and its backend endpoints SHALL be accessible only to users who are
 owner, admin, or have role `admin` or `root`. All other users SHALL receive 401 (unauthenticated)
@@ -66,7 +64,8 @@ more of: weekends, holidays, or specific dates/date ranges — ORed together), a
 The system SHALL provide a read endpoint that resolves whether a named peak-hours definition is
 active at a given instant (default: the current server time), applying `applicable_days` first,
 then `exclude_days`, then checking the instant's time-of-day against `hours`, all evaluated in the
-record's `timezone`.
+record's `timezone`. A date bound as an adjusted working day (`calendar_holidays.day_kind =
+'adjusted'`) for the record's `country` SHALL be treated as a workday.
 
 #### Scenario: Active within an hour range on an applicable day
 - **WHEN** the evaluation instant, converted to the record's timezone, falls on a day matched by
@@ -81,19 +80,25 @@ record's `timezone`.
 
 #### Scenario: Inactive on a non-applicable day
 - **WHEN** the evaluation instant's day does not match `applicable_days` (e.g. `applicable_days`
-  is `workdays` and the instant falls on a Saturday)
+  is `workdays` and the instant falls on a Saturday that is not an adjusted working day)
 - **THEN** the system returns `{"active": false}` without evaluating `hours`
 
 #### Scenario: Inactive due to weekend exclusion
 - **WHEN** `exclude_days` includes `"weekends"` and the evaluation instant falls on a Saturday or
-  Sunday (in the record's timezone)
+  Sunday (in the record's timezone) that is not an adjusted working day
 - **THEN** the system returns `{"active": false}` regardless of `applicable_days` or `hours`
+
+#### Scenario: Adjusted working day
+- **WHEN** the record has a non-empty `country` and the evaluation instant's date is bound with
+  `day_kind = 'adjusted'` in that country's `holidays` calendar for the instant's year
+- **THEN** the date matches `applicable_days` mode `workdays`, is not excluded by `"weekends"` or
+  `"holidays"`, and the system evaluates `hours` as on any workday
 
 #### Scenario: Inactive due to holiday exclusion
 - **WHEN** `exclude_days` includes `"holidays"`, the record has a non-empty `country`, and the
-  evaluation instant's date (in the record's timezone) matches a bound date in
-  `public.calendar_holidays` for that `country` and the instant's year with
-  `calendar_type = 'holidays'`
+  evaluation instant's date (in the record's timezone) matches a date bound with
+  `day_kind = 'holiday'` in `public.calendar_holidays` for that `country` and the instant's year
+  with `calendar_type = 'holidays'`
 - **THEN** the system returns `{"active": false}` regardless of `applicable_days` or `hours`
 
 #### Scenario: Holiday exclusion with no country configured
@@ -119,3 +124,4 @@ record's `timezone`.
 #### Scenario: Default instant
 - **WHEN** the evaluation endpoint is called without an `at` query parameter
 - **THEN** the system evaluates against the current server time
+

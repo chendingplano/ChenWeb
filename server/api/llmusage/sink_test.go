@@ -47,13 +47,13 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc, run_id
+    record_id, call_reason, call_loc, run_id, event_kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
     $18, $19, $20, $21, $22, $23::jsonb,
-    $24, $25, $26, $27
+    $24, $25, $26, $27, $28
 )`)).
 		WithArgs(
 			"evt-test-1",
@@ -83,6 +83,7 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 			"extract_products",
 			"MID-CWB-TEST-SINK",
 			int64(902),
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -158,6 +159,7 @@ func TestSinkCapturePersistsRecordUserID(t *testing.T) {
 			startedAt, finishedAt, time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
 			int64(0), int64(0), int64(0), int64(0), int64(0), int64(1000), 0,
 			"", "", "", "", "", `{"capture_source":"shared_llm"}`, nil, "", "", nil,
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -165,6 +167,38 @@ func TestSinkCapturePersistsRecordUserID(t *testing.T) {
 	_, err = sink.Capture(context.Background(), sharedllm.UsageCaptureRecord{
 		AccountID: "acct_1", ProfileID: "prof_1", UserID: "user_123", Provider: sharedllm.ProviderOpenAI,
 		ModelName: "gpt-4o-mini", PromptName: "user-attributed", RequestStartedAt: startedAt, RequestFinishedAt: finishedAt,
+	})
+	if err != nil {
+		t.Fatalf("Capture() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSinkCapturePersistsLifecycleEventKind(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	startedAt := time.Date(2026, 11, 2, 9, 5, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (`)).
+		WithArgs(
+			"evt-hold", "acct_1", "prof_1", "user_123", "openai", "gpt-4o-mini", "held-prompt",
+			startedAt, startedAt, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
+			int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), 0,
+			"", "", "", "", "", `{"capture_source":"shared_llm"}`, int64(7), "", "", int64(9),
+			"llm_hold",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	sink := &Sink{DB: db, WorkspaceTZ: time.UTC, NewID: func() string { return "evt-hold" }}
+	_, err = sink.Capture(context.Background(), sharedllm.UsageCaptureRecord{
+		AccountID: "acct_1", ProfileID: "prof_1", UserID: "user_123", Provider: sharedllm.ProviderOpenAI,
+		ModelName: "gpt-4o-mini", PromptName: "held-prompt", RequestStartedAt: startedAt, RequestFinishedAt: startedAt,
+		RecordID: 7, RunID: 9, EventKind: "llm_hold",
 	})
 	if err != nil {
 		t.Fatalf("Capture() error = %v", err)
@@ -190,13 +224,13 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc, run_id
+    record_id, call_reason, call_loc, run_id, event_kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
     $18, $19, $20, $21, $22, $23::jsonb,
-    $24, $25, $26, $27
+    $24, $25, $26, $27, $28
 )`)).
 		WithArgs(
 			"evt-test-meta",
@@ -226,6 +260,7 @@ func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
 			"review-provision",
 			"MID-20260706-0001",
 			nil,
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -281,6 +316,7 @@ func TestSinkCapturePersistsWithoutAccountProfileLinkage(t *testing.T) {
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-input.json.gz"),
 			filepath.Join("2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-output.json.gz"),
 			"", `{"capture_source":"shared_llm"}`, nil, "", "", nil,
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -347,13 +383,13 @@ LIMIT 1`)).
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc, run_id
+    record_id, call_reason, call_loc, run_id, event_kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
     $18, $19, $20, $21, $22, $23::jsonb,
-    $24, $25, $26, $27
+    $24, $25, $26, $27, $28
 )`)).
 		WithArgs(
 			"evt-test-3",
@@ -383,6 +419,7 @@ LIMIT 1`)).
 			"",
 			"",
 			nil,
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -503,13 +540,13 @@ LIMIT 1`)).
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc, run_id
+    record_id, call_reason, call_loc, run_id, event_kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
     $18, $19, $20, $21, $22, $23::jsonb,
-    $24, $25, $26, $27
+    $24, $25, $26, $27, $28
 )`)).
 		WithArgs(
 			"evt-test-4",
@@ -539,6 +576,7 @@ LIMIT 1`)).
 			"",
 			"",
 			nil,
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -618,13 +656,13 @@ LIMIT 1`)).
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, raw_response, input_body_ref, output_body_ref, provider_request_id, metadata_json,
-    record_id, call_reason, call_loc, run_id
+    record_id, call_reason, call_loc, run_id, event_kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17,
     $18, $19, $20, $21, $22, $23::jsonb,
-    $24, $25, $26, $27
+    $24, $25, $26, $27, $28
 )`)).
 		WithArgs(
 			"evt-test-5",
@@ -654,6 +692,7 @@ LIMIT 1`)).
 			"",
 			"",
 			nil,
+			"request",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

@@ -139,3 +139,15 @@ topic_types = ["封面/cover", "事实/fact", "范围/scope", "条款/compliance
 # supported_languages = ["en", "zh-cn", "ja", "ko"]
 supported_languages = ["en", "zh-cn"]
 default_language = ["zh-cn"]
+
+# Doc-processor peak-hour control (spec doc-processor-peak-controls). At most
+# one entry. default_mode applies to tasks without their own mode (an
+# "Auto - off-peak only" upload's task has auto_offpeak):
+#   none (peak control off) | auto_peak (work only in peak) | auto_offpeak
+# cross_peak_mode decides what an active task does when its span ends:
+#   ignore (continue) | pause-llm (hold new LLM requests) | abort (stop the task)
+# The peak window is the Peak Hours record named by
+# DOC_PROCESS_OFFPEAK_PEAK_HOURS_NAME (default "deepseek peak hours").
+[[task-engines.doc-processor]]
+default_mode = "none"
+cross_peak_mode = "ignore"

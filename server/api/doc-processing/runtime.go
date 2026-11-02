@@ -232,7 +232,25 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	// environment with no classifier model configured behaves exactly as
 	// before -- ControlService simply carries no Resolver.
 	control.Resolver = buildProductionResolver(ApiTypes.ProjectDBHandle, logger)
-	control.OffPeak = NewOffPeakGateFromEnv(ApiTypes.ProjectDBHandle, logger)
+	engineConfig, err := appconfig.GetDocProcessorTaskEngine()
+	if err != nil {
+		return nil, err
+	}
+	// The window is built even for default_mode none: an auto_offpeak upload
+	// still gives its task its own mode.
+	control.TaskPolicy = taskEnginePolicy{
+		DefaultMode: engineConfig.DefaultMode,
+		CrossPeak:   engineConfig.CrossPeakMode,
+		Window:      NewPeakWindowFromEnv(ApiTypes.ProjectDBHandle, logger),
+		Logger:      logger,
+		Events:      llmclients.DefaultUsageCaptureSink,
+	}
+	if logger != nil {
+		logger.Info("doc-processor peak-hour control",
+			"default_mode", engineConfig.DefaultMode,
+			"cross_peak_mode", engineConfig.CrossPeakMode,
+			"peak_hours_name", control.TaskPolicy.Window.Name)
+	}
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err

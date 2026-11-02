@@ -39,6 +39,7 @@ SELECT
 FROM llm_usage_event
 WHERE workspace_day = $1
   AND account_id IS NOT NULL
+  AND event_kind = 'request'
 GROUP BY account_id
 ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     timezone_name = EXCLUDED.timezone_name,

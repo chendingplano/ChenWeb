@@ -46,6 +46,7 @@ type UsageEvent struct {
 	PromptCacheMissTokens int64     `json:"prompt_cache_miss_tokens"`
 	LatencyMS             int64     `json:"latency_ms"`
 	ErrorMessage          string    `json:"error_message"`
+	EventKind             string    `json:"event_kind"`
 }
 
 type CurrentBalance struct {
@@ -174,7 +175,8 @@ LIMIT $1`
 
 func (s *Store) ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error) {
 	const query = `SELECT evt.id, evt.account_id, acct.account_name, COALESCE(evt.profile_id, ''), evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
-evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message
+evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message,
+evt.event_kind
 FROM llm_usage_event evt
 JOIN llm_account acct ON acct.id = evt.account_id
 ORDER BY evt.request_started_at DESC
@@ -207,6 +209,7 @@ LIMIT $1`
 			&row.PromptCacheMissTokens,
 			&row.LatencyMS,
 			&row.ErrorMessage,
+			&row.EventKind,
 		); err != nil {
 			return nil, err
 		}
@@ -416,6 +419,7 @@ model_usage AS (
     JOIN recent_days days ON days.workspace_day = evt.workspace_day
     WHERE ($4 = '' OR acct.api_key_ref = $4)
       AND ($5::text[] IS NULL OR evt.model_name = ANY($5::text[]))
+      AND evt.event_kind = 'request'
     GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name, acct.api_key_ref
 )
 SELECT
@@ -530,6 +534,7 @@ type UsageEventAdmin struct {
 	InputBodyRef          string          `json:"input_body_ref"`
 	OutputBodyRef         string          `json:"output_body_ref"`
 	MetadataJSON          json.RawMessage `json:"metadata_json"`
+	EventKind             string          `json:"event_kind"`
 }
 
 // UsageEventAdminFilters holds optional server-side filters for ListUsageEventsAdmin.
@@ -624,7 +629,8 @@ func (s *Store) ListUsageEventsAdmin(ctx context.Context, page, pageSize int, fi
 evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
 evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
-COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb),
+evt.event_kind
 FROM llm_usage_event evt
 LEFT JOIN llm_account acct ON acct.id = evt.account_id%s
 ORDER BY evt.request_started_at DESC
@@ -647,7 +653,7 @@ LIMIT $%d OFFSET $%d`, where, limitArg, offsetArg)
 			&row.Provider, &row.ModelName, &row.PromptName, &row.CallReason, &row.CallLoc,
 			&row.RequestStartedAt, &row.InputTokens, &row.OutputTokens, &row.TotalTokens,
 			&row.PromptCacheHitTokens, &row.PromptCacheMissTokens, &row.LatencyMS, &row.ErrorMessage,
-			&row.InputBodyRef, &row.OutputBodyRef, &metadataJSON,
+			&row.InputBodyRef, &row.OutputBodyRef, &metadataJSON, &row.EventKind,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -683,7 +689,8 @@ func (s *Store) ListUsageEventsByIDs(ctx context.Context, ids []string) ([]Usage
 evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
 evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
-COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb),
+evt.event_kind
 FROM llm_usage_event evt
 LEFT JOIN llm_account acct ON acct.id = evt.account_id
 WHERE evt.id = ANY($1)
@@ -705,7 +712,7 @@ ORDER BY evt.request_started_at DESC`
 			&row.Provider, &row.ModelName, &row.PromptName, &row.CallReason, &row.CallLoc,
 			&row.RequestStartedAt, &row.InputTokens, &row.OutputTokens, &row.TotalTokens,
 			&row.PromptCacheHitTokens, &row.PromptCacheMissTokens, &row.LatencyMS, &row.ErrorMessage,
-			&row.InputBodyRef, &row.OutputBodyRef, &metadataJSON,
+			&row.InputBodyRef, &row.OutputBodyRef, &metadataJSON, &row.EventKind,
 		); err != nil {
 			return nil, err
 		}
@@ -754,7 +761,8 @@ COALESCE(COUNT(*), 0),
 COALESCE(SUM(total_tokens), 0),
 COALESCE(SUM(CASE WHEN NULLIF(error_message, '') IS NOT NULL THEN 1 ELSE 0 END), 0)
 FROM llm_usage_event
-WHERE workspace_day = $1`
+WHERE workspace_day = $1
+  AND event_kind = 'request'`
 	if err := s.db.QueryRowContext(ctx, usageQuery, workspaceDay).Scan(&summary.RequestCount, &summary.TotalTokens, &summary.ErrorCount); err != nil {
 		return TodaySummary{}, err
 	}
@@ -784,6 +792,7 @@ SELECT
 FROM llm_usage_event
 WHERE workspace_day = $1
   AND account_id IS NOT NULL
+  AND event_kind = 'request'
 GROUP BY account_id
 ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     timezone_name = EXCLUDED.timezone_name,

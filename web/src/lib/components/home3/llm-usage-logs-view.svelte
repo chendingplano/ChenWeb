@@ -44,6 +44,7 @@
 		input_body_ref: string;
 		output_body_ref: string;
 		metadata_json: Record<string, unknown> | null;
+		event_kind: string;
 	};
 
 	// --- Filter state ---
@@ -176,6 +177,17 @@
 			modalError = err instanceof Error ? err.message : String(err);
 		} finally {
 			modalLoading = false;
+		}
+	}
+
+	// eventKindLabel names a peak-control lifecycle row (llm_usage_event.event_kind);
+	// '' for an ordinary provider request.
+	function eventKindLabel(kind: string | undefined): string {
+		switch (kind) {
+			case 'llm_hold': return m.llm_usage_event_kind_llm_hold();
+			case 'llm_resume': return m.llm_usage_event_kind_llm_resume();
+			case 'llm_hold_cancelled': return m.llm_usage_event_kind_llm_hold_cancelled();
+			default: return '';
 		}
 	}
 
@@ -542,7 +554,7 @@
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
-									title={row.prompt_name}>{row.prompt_name || '—'}</td>
+									title={row.prompt_name}>{row.prompt_name || '—'}{#if eventKindLabel(row.event_kind)}<div style="color:{accent}; font-size:11px;">{eventKindLabel(row.event_kind)}</div>{/if}</td>
 
 								<!-- Metadata -->
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">

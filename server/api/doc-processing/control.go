@@ -67,10 +67,11 @@ type ControlService struct {
 	// tier-3 classifier observations before pipeline binding and processor
 	// gate evaluation. When nil, behavior is unchanged (base facts only).
 	Resolver *ApplicabilityResolver
-	// OffPeak holds the LLM processors of auto_offpeak inputs around the
-	// configured peak-hours window (offpeak_gate.go). Nil disables holding.
-	OffPeak *OffPeakGate
-	Now     func() time.Time
+	// TaskPolicy is the engine's peak-hour control: when tasks may start and
+	// what an active task does at a peak boundary (task_engine_policy.go).
+	// The zero value disables it.
+	TaskPolicy taskEnginePolicy
+	Now        func() time.Time
 
 	DocProcessorMode       string
 	MaxDocProcessPipelines int
@@ -718,6 +719,35 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		return errors.New("(MID_26042404) preflight input failed")
 	}
+
+	// One cancellation covers the whole task, routing included: a user stop
+	// (pollForStop, cause ErrPipelineStopped) or a cross-peak abort (cause
+	// errPipelineAborted) interrupts in-flight LLM calls and ends the work.
+	ctx, cancelTask := context.WithCancelCause(ctx)
+	defer cancelTask(nil) // ensures the polling goroutines exit when the task ends
+	if s.StopStore != nil {
+		// Clear any stale stop_requested flag left over from a previous run that was
+		// killed before the deferred ClearStopRequested could execute. Without this,
+		// pollForStop would cancel the new context within 1 s of startup.
+		if err := s.StopStore.ClearStopRequested(ctx, evt.RecordID); err != nil && s.Logger != nil {
+			s.Logger.Warn("failed to clear stale stop_requested flag at pipeline start", "record_id", evt.RecordID, "error", err)
+		}
+		go s.pollForStop(ctx, evt.RecordID, cancelTask)
+	}
+	// Peak-hour control (spec doc-processor-peak-controls): wait until the
+	// task's mode permits work, then arm the engine's cross-peak rule.
+	peakMode := s.TaskPolicy.modeFor(s.taskPeakMode(ctx, evt.RecordID))
+	if err := s.admitTask(ctx, evt.RecordID, peakMode); err != nil {
+		if isCtxStopped(ctx) {
+			if s.Logger != nil {
+				s.Logger.Info("task stopped while waiting for its peak-hour span", "record_id", evt.RecordID, "peak_mode", peakMode)
+			}
+			s.finishStoppedEarly(ctx, evt.RecordID, requestStart)
+			return nil
+		}
+		return err
+	}
+	ctx = s.applyCrossPeakRule(ctx, cancelTask, evt.RecordID, peakMode)
 	// ADR 2026081001 DR3: the "active policy pointer that can fail to load"
 	// failure mode (spec 2026080102 section 11) no longer exists -- bindings/
 	// rules are read from the in-process cache loaded at startup, not a
@@ -872,6 +902,13 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			// (spec 2026080102 section 11) instead of firing unscoped here.
 		}
 	}
+	if isCtxStopped(ctx) {
+		if s.Logger != nil {
+			s.Logger.Info("task stopped during routing", "record_id", evt.RecordID, "cause", context.Cause(ctx).Error())
+		}
+		s.finishStoppedEarly(ctx, evt.RecordID, requestStart)
+		return nil
+	}
 	var runID int64
 	var runCreated bool
 	if s.RunStore != nil {
@@ -966,25 +1003,6 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	ctx, _ = withBlockBufferHolder(ctx)
 	ctx, _ = withChunkBufferHolder(ctx)
 
-	// Clear any stale stop_requested flag left over from a previous run that was
-	// killed before the deferred ClearStopRequested could execute. Without this,
-	// pollForStop would cancel the new context within 1 s of startup.
-	if s.StopStore != nil {
-		if err := s.StopStore.ClearStopRequested(ctx, evt.RecordID); err != nil && s.Logger != nil {
-			s.Logger.Warn("failed to clear stale stop_requested flag at pipeline start", "record_id", evt.RecordID, "error", err)
-		}
-	}
-
-	// Wrap with a cancellable context so a user stop request can interrupt
-	// in-flight LLM calls. pollForStop cancels the context (with cause
-	// ErrPipelineStopped) when it detects the stop flag in the database.
-	if s.StopStore != nil {
-		var cancelCause context.CancelCauseFunc
-		ctx, cancelCause = context.WithCancelCause(ctx)
-		defer cancelCause(nil) // ensures polling goroutine exits when pipeline completes
-		go s.pollForStop(ctx, evt.RecordID, cancelCause)
-	}
-
 	requestFailed := false
 	requestStopped := false
 	var firstErr error
@@ -993,6 +1011,10 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		status := "success"
 		if requestStopped {
 			status = "stopped"
+			// A cross-peak abort keeps its reason on the status entry and run row.
+			if cause := context.Cause(ctx); errors.Is(cause, errPipelineAborted) {
+				firstErr = cause
+			}
 		} else if requestFailed {
 			status = "failed"
 		}
@@ -1011,14 +1033,6 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			}
 		}
 	}()
-
-	if s.offPeakOnly(ctx, evt.RecordID) {
-		ctx = withOffPeakHold(ctx)
-		if s.Logger != nil {
-			s.Logger.Info("auto_offpeak input: LLM processors wait for off-peak hours",
-				"record_id", evt.RecordID, "peak_hours_name", s.OffPeak.WindowName)
-		}
-	}
 
 	var allProcResults []procResult
 
@@ -1053,18 +1067,12 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// The event's force/force_clear ride along on the context the same way the
 	// chunk-batch coordinator threads them, so phase_d.go can honor "Force Run"
 	// (a Phase A/B processor instead re-parses the payload it is handed).
-	if hasPostProcessIndexers(processors) {
-		if err := s.holdForOffPeak(ctx, evt.RecordID); err != nil {
-			if isCtxStopped(ctx) {
-				requestStopped = true
-				return nil
-			}
-			requestFailed = true
-			firstErr = err
-			return err
-		}
-	}
 	s.runPostProcessIndexing(withDocProcessorFlags(ctx, evt.Force, evt.ForceClear), processors, evt.RecordID)
+	if isCtxStopped(ctx) {
+		// Stopped or aborted during Phase C: its indexing did not complete.
+		requestStopped = true
+		return nil
+	}
 
 	pipelineMSUsed := time.Since(requestStart).Milliseconds()
 	status := "success"
@@ -1260,14 +1268,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 	}
 	s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "active", "")
 	s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
-	var err error
-	if processorUsesLLM(p.Name()) {
-		err = s.holdForOffPeak(ctx, recordID, processorName)
-		procStart = s.now() // ms_used excludes time spent held
-	}
-	if err == nil {
-		err = p.HandleEvent(ctx, payload)
-	}
+	err := p.HandleEvent(ctx, payload)
 	if err != nil {
 		res := procResult{failed: true, err: err, operation: processorName, msUsed: time.Since(procStart).Milliseconds()}
 		procStatus := "failed"

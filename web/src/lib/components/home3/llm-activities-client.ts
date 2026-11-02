@@ -56,6 +56,7 @@ export type LLMUsageEvent = {
 	total_tokens: number;
 	latency_ms: number;
 	error_message: string;
+	event_kind: string;
 };
 
 // LLMUsageEventDetail mirrors the backend UsageEventAdmin shape, returned by
@@ -83,6 +84,7 @@ export type LLMUsageEventDetail = {
 	input_body_ref: string;
 	output_body_ref: string;
 	metadata_json: unknown;
+	event_kind: string;
 };
 
 export type LLMCurrentBalance = {

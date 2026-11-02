@@ -55,16 +55,18 @@ func TestStoreListUsageEvents(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"id", "account_id", "account_name", "profile_id", "record_id", "provider", "model_name", "prompt_name", "call_reason", "call_loc",
 		"request_started_at", "input_tokens", "output_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "latency_ms", "error_message",
+		"event_kind",
 	}).AddRow(
 		"evt_1", "acct_1", "deepseek:api.deepseek.com", "prof_1", 88, "deepseek", "deepseek-v4-flash", "extract-products-v2", "extract_products", "MID-CWB-TEST",
-		time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "",
+		time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "", "request",
 	).AddRow(
 		"evt_2", "acct_1", "deepseek:api.deepseek.com", "", nil, "deepseek", "deepseek-v4-flash", "extract-products-v2", "extract_products", "MID-CWB-TEST",
-		time.Date(2026, 6, 19, 11, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "",
+		time.Date(2026, 6, 19, 11, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "", "request",
 	)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, COALESCE(evt.profile_id, ''), evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
-evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message
+evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message,
+evt.event_kind
 FROM llm_usage_event evt
 JOIN llm_account acct ON acct.id = evt.account_id
 ORDER BY evt.request_started_at DESC
@@ -99,18 +101,19 @@ func TestStoreListUsageEventsAdminNoFilters(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"id", "account_id", "account_name", "profile_id", "record_id", "run_id", "provider", "model_name", "prompt_name", "call_reason", "call_loc",
 		"request_started_at", "input_tokens", "output_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "latency_ms", "error_message",
-		"input_body_ref", "output_body_ref", "metadata_json",
+		"input_body_ref", "output_body_ref", "metadata_json", "event_kind",
 	}).AddRow(
 		"evt_1", "acct_1", "deepseek:api.deepseek.com", "prof_1", 88, 902, "deepseek", "deepseek-v4-flash", "extract-products-v2", "extract_products", "MID-CWB-TEST",
 		time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "",
-		"llm-abc-input.json.gz", "llm-abc-output.json.gz", []byte(`{"capture_source":"shared_llm"}`),
+		"llm-abc-input.json.gz", "llm-abc-output.json.gz", []byte(`{"capture_source":"shared_llm"}`), "llm_hold",
 	)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id, evt.run_id,
 evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
 evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
-COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb),
+evt.event_kind
 FROM llm_usage_event evt
 LEFT JOIN llm_account acct ON acct.id = evt.account_id
 ORDER BY evt.request_started_at DESC
@@ -126,6 +129,9 @@ LIMIT $1 OFFSET $2`)).WithArgs(50, 0).WillReturnRows(rows)
 	}
 	if got[0].ModelName != "deepseek-v4-flash" || string(got[0].MetadataJSON) != `{"capture_source":"shared_llm"}` {
 		t.Fatalf("unexpected admin usage event = %+v", got[0])
+	}
+	if got[0].EventKind != "llm_hold" {
+		t.Fatalf("unexpected admin usage event kind = %q", got[0].EventKind)
 	}
 	if got[0].RunID == nil || *got[0].RunID != 902 {
 		t.Fatalf("unexpected admin usage event RunID = %+v", got[0].RunID)
@@ -158,7 +164,8 @@ func TestStoreListUsageEventsAdminWithFilters(t *testing.T) {
 evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
 evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
-COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb),
+evt.event_kind
 FROM llm_usage_event evt
 LEFT JOIN llm_account acct ON acct.id = evt.account_id`+whereClause+`
 ORDER BY evt.request_started_at DESC
@@ -167,7 +174,7 @@ LIMIT $6 OFFSET $7`)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "account_id", "account_name", "profile_id", "record_id", "run_id", "provider", "model_name", "prompt_name", "call_reason", "call_loc",
 			"request_started_at", "input_tokens", "output_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "latency_ms", "error_message",
-			"input_body_ref", "output_body_ref", "metadata_json",
+			"input_body_ref", "output_body_ref", "metadata_json", "event_kind",
 		}))
 
 	store := NewStore(db)
@@ -228,7 +235,7 @@ func TestStoreListModelActivityReportsHourly(t *testing.T) {
 	)
 
 	from := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`WITH recent_days AS`).WithArgs(30, from, from, "", nil, "").WillReturnRows(rows)
+	mock.ExpectQuery(`(?s)WITH recent_days AS.*AND evt\.event_kind = 'request'`).WithArgs(30, from, from, "", nil, "").WillReturnRows(rows)
 
 	store := NewStore(db)
 	got, err := store.ListModelActivityReports(context.Background(), 30, ModelActivityReportFilters{
@@ -308,7 +315,8 @@ COALESCE(COUNT(*), 0),
 COALESCE(SUM(total_tokens), 0),
 COALESCE(SUM(CASE WHEN NULLIF(error_message, '') IS NOT NULL THEN 1 ELSE 0 END), 0)
 FROM llm_usage_event
-WHERE workspace_day = $1`)).
+WHERE workspace_day = $1
+  AND event_kind = 'request'`)).
 		WithArgs(workspaceDay).
 		WillReturnRows(sqlmock.NewRows([]string{"request_count", "total_tokens", "error_count"}).AddRow(7, 4567, 2))
 
@@ -357,6 +365,7 @@ SELECT
 FROM llm_usage_event
 WHERE workspace_day = $1
   AND account_id IS NOT NULL
+  AND event_kind = 'request'
 GROUP BY account_id
 ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     timezone_name = EXCLUDED.timezone_name,
