@@ -9,6 +9,19 @@ panes select their page layouter class; panels select their element layouter cla
 Pages, flow-only nodes and multiple selections SHALL show no class editor. Action
 boxes SHALL offer a selector populated from all active stored action classes.
 The node toolbar's Edit class SHALL open the same Class tab.
+The Class header SHALL display the stored record version and descriptor schema
+version separately from the class's draft/implemented status.
+
+### Class body JSON
+
+With Class selected, Code → View JSON SHALL show the selected class body, including
+unsaved edits in its attribute forms, without adding instance IDs or other instance
+values. Applying edited JSON SHALL update that same class draft; Save class SHALL
+persist it through the existing class-update endpoint. Descriptor identity and schema
+version SHALL retain their read-only constraints. With Properties selected, View JSON
+SHALL retain its existing instance/page behavior. The dialog's title and note SHALL
+identify the edited class and explain that Apply changes the draft rather than the
+stored body.
 
 ### Attribute tree
 
@@ -42,6 +55,9 @@ The selector SHALL contain the devdoc's complete value-editor list. Configuratio
 SHALL include relevant fields for number bounds, whole numbers, choices, length
 units/keywords, rows, theme colours, validation type and date/time range, plus a
 JSON object form for full options. Editors documented as unbuilt SHALL be marked.
+The JSON options disclosure SHALL identify its content as the selected value editor's
+options, explain that an empty object uses default options, and distinguish it from
+the class-body JSON and attribute default value.
 Standalone table/field/sort controls SHALL explain their JSON fallback.
 Stored editor choices SHALL override code defaults for element property editors
 and panel layouter configuration when the instance copy includes that metadata.

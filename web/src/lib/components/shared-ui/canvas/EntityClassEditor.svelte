@@ -3,29 +3,40 @@
 	import { getEntityClass, updateEntityClass, WpiError, type ElementClassRow } from '$lib/wpi/api';
 	import type { JsonObject } from '$lib/wpi/types';
 	import ClassAttributeTree from './ClassAttributeTree.svelte';
+	import WpiJsonDialog from './WpiJsonDialog.svelte';
 	import type { ClassTarget } from './class-editor';
 
 	let {
 		target,
 		active,
 		onSaved,
-		onDirty
+		onDirty,
+		darkMode = true
 	}: {
 		target: ClassTarget | null;
 		active: boolean;
 		onSaved: () => void;
 		onDirty?: (dirty: boolean) => void;
+		darkMode?: boolean;
 	} = $props();
 	type Draft = {
 		row: JsonObject;
 		baseline: string;
 		status: ElementClassRow['status'];
+		version: number;
 		loading: boolean;
 		saving: boolean;
 		error: string;
 		warnings: string[];
 	};
 	let drafts = $state<Record<string, Draft>>({});
+	let showJson = $state(false);
+	export function viewJson(): boolean {
+		if (!target || !draft || draft.loading || draft.saving || !Object.keys(draft.row).length)
+			return false;
+		showJson = true;
+		return true;
+	}
 	const key = $derived(target ? `${target.kind}/${target.id}` : '');
 	const draft = $derived(drafts[key]);
 	const dirty = $derived(!!draft && JSON.stringify(draft.row) !== draft.baseline);
@@ -39,6 +50,7 @@
 			row: {},
 			baseline: '{}',
 			status: 'active',
+			version: 0,
 			loading: true,
 			saving: false,
 			error: '',
@@ -51,6 +63,7 @@
 				row: result.class,
 				baseline: JSON.stringify(result.class),
 				status: result.status,
+				version: result.version,
 				loading: false
 			};
 		} catch (e) {
@@ -69,12 +82,14 @@
 		if (!target || !draft || draft.loading || draft.saving || !dirty) return;
 		const selection = { ...target },
 			cacheKey = key,
-			row = structuredClone($state.snapshot(draft.row));
+			row = JSON.parse(JSON.stringify(draft.row)) as JsonObject;
 		drafts[cacheKey].saving = true;
 		drafts[cacheKey].error = '';
 		try {
 			const result = await updateEntityClass(selection.kind, selection.id, row);
 			drafts[cacheKey].baseline = JSON.stringify(row);
+			drafts[cacheKey].version = result.version;
+			drafts[cacheKey].status = result.status;
 			drafts[cacheKey].warnings = result.warnings.map((i) => `${i.path}: ${i.message}`);
 			onSaved();
 		} catch (e) {
@@ -105,6 +120,18 @@
 				>{draft.status === 'draft' ? m.wpi_class_draft() : m.wpi_class_active()}</span
 			>
 		</div>
+		{#if Object.keys(draft.row).length}
+			<dl class="metadata">
+				<div>
+					<dt>{m.wpi_class_record_version()}</dt>
+					<dd data-class-version>{draft.version}</dd>
+				</div>
+				<div>
+					<dt>{m.wpi_class_schema_version()}</dt>
+					<dd data-class-schema-version>{String(draft.row.schema_version ?? '')}</dd>
+				</div>
+			</dl>
+		{/if}
 		<p class="hint">{m.wpi_class_saved_copies_hint()}</p>
 		{#if draft.error}<p class="error" role="alert">{draft.error}</p>{/if}
 		{#if !Object.keys(draft.row).length}
@@ -145,6 +172,24 @@
 	{/if}
 </div>
 
+{#if showJson && target && draft}
+	<WpiJsonDialog
+		{darkMode}
+		title={m.wpi_class_json_title({ id: target.id })}
+		note={m.wpi_class_json_note()}
+		json={draft.row}
+		onApply={(row) => {
+			if (row.descriptor_id !== target.id || row.schema_version !== draft.row.schema_version)
+				return false;
+			draft.row = row;
+			draft.error = '';
+			draft.warnings = [];
+			return true;
+		}}
+		onClose={() => (showJson = false)}
+	/>
+{/if}
+
 <style>
 	.class-editor {
 		padding: 12px;
@@ -163,6 +208,24 @@
 	.state {
 		color: var(--cv-text-muted);
 		font-size: 10px;
+	}
+	.metadata {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 20px;
+		margin: 8px 0;
+		font-size: 11px;
+	}
+	.metadata div {
+		display: flex;
+		gap: 6px;
+	}
+	.metadata dt {
+		color: var(--cv-text-muted);
+	}
+	.metadata dd {
+		margin: 0;
+		color: var(--cv-text);
 	}
 	.hint,
 	.empty {

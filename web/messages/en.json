@@ -8273,7 +8273,7 @@
 	"wpi_class_range": "Allow a range",
 	"wpi_class_commit_blur": "Apply when leaving the field",
 	"wpi_class_one_per_line": "One value per line.",
-	"wpi_class_advanced_options": "All configuration as JSON",
+	"wpi_class_advanced_options": "Editor options as JSON",
 	"wpi_class_options_object": "Configuration must be a JSON object.",
 	"wpi_class_pending_editor": "{id} (not built yet)",
 	"wpi_class_editor_pending": "This editor can be configured, but its runtime control is not built yet.",
@@ -8296,5 +8296,10 @@
 	"wpi_class_action_class": "Action class",
 	"wpi_class_select_action": "Select an action class",
 	"wpi_class_scope_metadata_hint": "For nested attributes and action or layouter classes, this flag records authoring scope. It does not prevent runtime overrides.",
-	"wpi_class_nested_editor_hint": "This control is used inside the data-source editor. As a standalone property editor it currently uses JSON."
+	"wpi_class_nested_editor_hint": "This control is used inside the data-source editor. As a standalone property editor it currently uses JSON.",
+	"wpi_class_record_version": "Version",
+	"wpi_class_schema_version": "Schema version",
+	"wpi_class_json_title": "Class JSON: {id}",
+	"wpi_class_json_note": "Class descriptor body, including unsaved edits. Apply updates the class draft; Save class writes it to the database.",
+	"wpi_class_options_json_hint": "Options for the {editor} value editor only. An empty object uses its defaults."
 }

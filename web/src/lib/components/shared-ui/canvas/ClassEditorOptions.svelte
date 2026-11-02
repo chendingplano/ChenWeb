@@ -118,6 +118,7 @@
 	{/each}
 	<details>
 		<summary>{m.wpi_class_advanced_options()}</summary>
+		<p>{m.wpi_class_options_json_hint({ editor })}</p>
 		<JsonEditor
 			id={`${id}-json`}
 			label={m.wpi_class_editor_options()}

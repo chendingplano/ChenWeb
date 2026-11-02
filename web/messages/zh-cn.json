@@ -8273,7 +8273,7 @@
 	"wpi_class_range": "允许范围",
 	"wpi_class_commit_blur": "离开字段时应用",
 	"wpi_class_one_per_line": "每行一个值。",
-	"wpi_class_advanced_options": "以 JSON 编辑全部配置",
+	"wpi_class_advanced_options": "以 JSON 编辑值编辑器选项",
 	"wpi_class_options_object": "配置必须为 JSON 对象。",
 	"wpi_class_pending_editor": "{id}（尚未实现）",
 	"wpi_class_editor_pending": "可配置此编辑器，但其运行时控件尚未实现。",
@@ -8296,5 +8296,10 @@
 	"wpi_class_action_class": "动作类",
 	"wpi_class_select_action": "选择动作类",
 	"wpi_class_scope_metadata_hint": "对于嵌套属性、动作类和布局器类，此标志用于记录编写范围，不限制运行时覆盖。",
-	"wpi_class_nested_editor_hint": "此控件用于数据源编辑器内部。作为独立属性编辑器时，目前使用 JSON。"
+	"wpi_class_nested_editor_hint": "此控件用于数据源编辑器内部。作为独立属性编辑器时，目前使用 JSON。",
+	"wpi_class_record_version": "记录版本",
+	"wpi_class_schema_version": "模式版本",
+	"wpi_class_json_title": "类 JSON：{id}",
+	"wpi_class_json_note": "类描述符正文，包含尚未保存的修改。应用后更新类草稿；点击“保存类”才会写入数据库。",
+	"wpi_class_options_json_hint": "这里只配置 {editor} 值编辑器的选项。空对象表示使用默认选项。"
 }

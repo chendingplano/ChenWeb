@@ -4,6 +4,10 @@ The WPI Editor replaces its Node tab with a Class tab. It reads the latest store
 class, independently of an instance's frozen class copy. A selected element uses
 its element class, an action uses its action class, a pane uses the page layouter,
 and a panel uses its element layouter. Pages and flow-only nodes have no class.
+The Class header shows record version and schema version. Code → View JSON delegates
+to the active class editor when Class is selected, so the dialog and attribute forms
+share one class-body draft. JSON Apply preserves descriptor identity and schema
+version; Save class writes the body. Properties retains instance/page JSON.
 
 Attribute names are disclosure buttons in a recursive tree. Their inline forms
 edit name, description, class/instance scope, default value, value editor and its
@@ -34,6 +38,8 @@ The Class/Instance flag records authoring scope for nested fields and non-elemen
 classes. It does not impose new runtime constraints on action or layouter copies.
 For top-level element attributes it also uses the existing fixed-default mechanism.
 The UI explains this distinction beside the scope control.
+Editor options as JSON edits only the selected value editor's options. Its help text
+names that editor and explains the empty object's default-options meaning.
 
 ## Implementation plan
 

@@ -11,7 +11,8 @@
 		tab = $bindable<'properties' | 'class'>('properties'),
 		actionClass,
 		actionClasses = [],
-		onActionClass
+		onActionClass,
+		darkMode = true
 	}: {
 		target: ClassTarget | null;
 		onSaved: () => void;
@@ -21,7 +22,12 @@
 		actionClass?: string;
 		actionClasses?: string[];
 		onActionClass?: (id: string) => void;
+		darkMode?: boolean;
 	} = $props();
+	let classEditor = $state<{ viewJson: () => boolean }>();
+	export function viewClassJson(): boolean {
+		return classEditor?.viewJson() ?? false;
+	}
 </script>
 
 <section class="class-panel select-text">
@@ -75,7 +81,14 @@
 				</select>
 			</div>
 		{/if}
-		<EntityClassEditor {target} active={tab === 'class'} {onSaved} {onDirty} />
+		<EntityClassEditor
+			bind:this={classEditor}
+			{target}
+			active={tab === 'class'}
+			{onSaved}
+			{onDirty}
+			{darkMode}
+		/>
 	</div>
 </section>
 

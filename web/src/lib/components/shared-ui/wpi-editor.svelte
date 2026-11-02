@@ -165,6 +165,7 @@
 	);
 	let showCreateElement = $state(false);
 	let propertiesTab = $state<'properties' | 'class'>('properties');
+	let classPanel = $state<{ viewClassJson: () => boolean }>();
 	let hasClassChanges = $state(false);
 	beforeNavigate(({ cancel }) => {
 		if (hasClassChanges && !confirm(m.wpi_class_leave_confirm())) cancel();
@@ -1042,7 +1043,11 @@
 			selectedCount={selectedTotal}
 			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
 			onLoadPage={() => (showLoadPage = true)}
-			onViewJson={() => (showJson = true)}
+			onViewJson={() => {
+				if (propertiesTab === 'class') {
+					if (!classPanel?.viewClassJson()) showError(m.wpi_class_no_class());
+				} else showJson = true;
+			}}
 			onViewTree={() => (showTree = true)}
 			onPreview={togglePreview}
 			previewing={!!previewBundle}
@@ -1283,7 +1288,7 @@
 				<button type="button" class="panel-toggle" onclick={togglePanel} aria-label={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{detached ? '↪' : '↗'}</button>
 			</div>
 			<div class="properties-content">
-		<WpiClassPanel bind:tab={propertiesTab} onDirty={(dirty) => hasClassChanges = dirty}
+		<WpiClassPanel bind:this={classPanel} bind:tab={propertiesTab} {darkMode} onDirty={(dirty) => hasClassChanges = dirty}
 			actionClass={selectedTotal <= 1 && selectedNode?.type === 'wpi-action' ? String(selectedNode.data.action ?? '') : undefined} {actionClasses}
 			onActionClass={(id) => { if (selectedNode?.type === 'wpi-action') updateNodeData(selectedNode.id, { ...selectedNode.data, action: id }); }}
 			target={selectedTotal > 1 ? null : classTarget(selectedNode, loadedPage, configMode, selectedPane)} onSaved={() => {
