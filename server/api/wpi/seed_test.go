@@ -35,6 +35,10 @@ const pagesSeedMigration = "../../../project_migrations/20261027000005_seed_wpi_
 // stores their classes.
 const chatElementsMigration = "../../../project_migrations/20261030000005_wpi_chat_elements.sql"
 
+// valueEditorElementsMigration registers the value-editor module and stores one
+// class per value editor.
+const valueEditorElementsMigration = "../../../project_migrations/20261102000003_wpi_value_editor_elements.sql"
+
 // customersDemoMigration stores the customers-demo app and its page.
 const customersDemoMigration = "../../../project_migrations/20261028000005_isolate_wpi_customers_demo.sql"
 
@@ -76,7 +80,7 @@ func TestSeedLayouterModules(t *testing.T) {
 func seededModules(t *testing.T) map[string][]string {
 	t.Helper()
 	var ids []string
-	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration)+readFile(t, chatElementsMigration), -1) {
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration)+readFile(t, chatElementsMigration)+readFile(t, valueEditorElementsMigration), -1) {
 		if m[2] == "element" {
 			ids = append(ids, m[1])
 		}
@@ -92,7 +96,7 @@ func seededModules(t *testing.T) map[string][]string {
 // document, and every seeded element module has code.
 func TestSeedCodeModules(t *testing.T) {
 	seeded := map[string]string{}
-	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration)+readFile(t, chatElementsMigration), -1) {
+	for _, m := range moduleSeedRow.FindAllStringSubmatch(readFile(t, codeModulesMigration)+readFile(t, chatElementsMigration)+readFile(t, valueEditorElementsMigration), -1) {
 		if m[2] == "element" {
 			seeded[m[1]] = m[3]
 		}

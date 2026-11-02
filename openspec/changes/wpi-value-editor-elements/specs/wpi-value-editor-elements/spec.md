@@ -30,8 +30,10 @@ Chinese. Code module `value-editor` SHALL be registered in `kb.code_modules` wit
 - **THEN** the page is rejected, as for any draft class
 
 ### Requirement: Value-editor code module attributes
-Code module `value-editor` SHALL require `editor`, `label`, `data_binding` and `binding_mode`.
-It SHALL accept `editor_options` and the shared size attributes. `editor` SHALL be one of the
+Code module `value-editor` SHALL require `editor`, `label` and `binding_mode`. It SHALL
+accept `data_binding`, `editor_options` and the shared size attributes. Each class SHALL give
+`label` a default (the editor's name) and leave `data_binding` without one, so a dropped
+instance is drawn at once and keeps its value locally until it is bound. `editor` SHALL be one of the
 28 value-editor IDs. In an active class or a page instance, it SHALL be one of the 23 that
 are drawn (the built editors and the variants). `editor_options` SHALL be a JSON object.
 Validation SHALL report any other value as an issue at its path.
@@ -56,10 +58,13 @@ written to that path. A value the editor unsets SHALL be written as `null`. With
 `read-only`, the value SHALL be shown with the read-only value editor. Without a binding, the
 editor SHALL keep its value locally. Server field errors for the binding SHALL be shown under
 the editor.
-- `font-picker` SHALL draw the text editor.
-- `alignment-picker`, `icon-picker`, `action-picker` and `layouter-picker` SHALL draw the
-  value-picker. Without `editor_options.choices`, `action-picker` SHALL offer every active
-  action class and `layouter-picker` every page layouter class.
+- `font-picker` SHALL draw the text editor and SHALL apply only `inherit` or a CSS
+  font-family list.
+- `alignment-picker`, `action-picker` and `layouter-picker` SHALL draw the value-picker.
+  Without `editor_options.choices`, `action-picker` SHALL offer every active action class
+  and `layouter-picker` every page layouter class.
+- `icon-picker` SHALL draw the icon library's search picker, in the page's language. It
+  SHALL store the chosen icon's name and SHALL show the stored icon.
 - `table-picker`, `field-picker` and `sort-order-editor` SHALL draw the Pick Table, Pick
   Fields and sort-order controls. `field-picker` SHALL list the fields of
   `editor_options.table`.
@@ -84,25 +89,46 @@ the editor.
 - **WHEN** the user clears a bound `number-editor` read-write
 - **THEN** `null` is written to the bound path
 
-### Requirement: VALUE EDITORS palette sub-folder
-The WPI Editor's palette SHALL show a VALUE EDITORS sub-folder inside the ELEMENTS folder. It
-SHALL list every element class whose `code_module_id` is `value-editor`, with drafts marked
-as drafts. ELEMENTS SHALL list all other element classes.
-- The sub-folder SHALL start folded and fold or unfold when its heading is clicked.
-- It SHALL be hidden while ELEMENTS is folded.
-- The count beside ELEMENTS SHALL include the classes in VALUE EDITORS.
-- A search matching a class in VALUE EDITORS SHALL show both folders open.
-- Dragging a class from VALUE EDITORS onto a pane SHALL add an element of that class, as from
-  ELEMENTS.
+#### Scenario: Pick an icon by meaning
+- **WHEN** an `icon-picker` instance is bound read-write to `$input_doc.icon`, and the user types `reload` (or `刷新`) and picks the refresh icon
+- **THEN** the input doc becomes `{"icon": "refresh-cw"}`, and the picker shows that icon
+
+#### Scenario: Font family rule
+- **WHEN** the user types `Arial; color: red` into a bound `font-picker`
+- **THEN** the value is not applied, and the editor says why
+
+### Requirement: Icon picker editor ID
+The value editor ID `icon-picker` SHALL draw the icon library's search picker wherever it is
+used. This includes an attribute that a class configures with `icon-picker` in the
+Properties panel. Its search box, empty result and error SHALL be shown in English and
+Chinese.
+
+#### Scenario: Class attribute configured with icon-picker
+- **WHEN** a class sets an attribute's value editor to `icon-picker` and the author selects an instance of that class
+- **THEN** the Properties panel shows the icon search picker for that attribute, not a pulldown
+
+### Requirement: VALUE EDITORS palette folder
+The WPI Editor's palette SHALL show a VALUE EDITORS folder directly after the ELEMENTS
+folder. It SHALL list every element class whose `code_module_id` is `value-editor`, with
+drafts marked as drafts. ELEMENTS SHALL list all other element classes.
+- VALUE EDITORS SHALL start folded and SHALL fold, count and open on search like the other
+  folders.
+- Classes in VALUE EDITORS SHALL be treated as element classes. Dragging one onto a pane
+  SHALL add an element of that class. Selecting it SHALL show its properties and its Class
+  tab.
 - The Flow page's palette SHALL be unchanged.
 
-#### Scenario: Sub-folder contents
-- **WHEN** the editor opens and the author unfolds ELEMENTS, then VALUE EDITORS
-- **THEN** VALUE EDITORS lists the 28 value-editor classes, with the five unbuilt ones marked as drafts, and ELEMENTS lists the other classes beside the folded or open sub-folder
+#### Scenario: Folder contents
+- **WHEN** the editor opens and the author unfolds VALUE EDITORS
+- **THEN** it lists the 28 value-editor classes, with the five unbuilt ones marked as drafts, and ELEMENTS does not list them
 
-#### Scenario: Search opens both folders
+#### Scenario: Folder order
+- **WHEN** the editor opens
+- **THEN** the palette's folders end with PAGES, ELEMENTS, VALUE EDITORS, in that order
+
+#### Scenario: Search
 - **WHEN** the author types `color` in the palette search
-- **THEN** ELEMENTS and VALUE EDITORS are open and `color-picker` is shown
+- **THEN** VALUE EDITORS is open and shows `color-picker`
 
 #### Scenario: Drop a value editor
 - **WHEN** the author drags `length-editor` from VALUE EDITORS into a pane of a loaded page

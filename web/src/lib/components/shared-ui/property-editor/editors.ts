@@ -5,6 +5,8 @@ import type { ValueEditorProps } from '../value-editors/types';
 import ColorPicker from '../value-editors/ColorPicker.svelte';
 import ColumnListEditor from '../value-editors/ColumnListEditor.svelte';
 import DataSourceEditor from '../value-editors/DataSourceEditor.svelte';
+import FieldPickerEditor from '../value-editors/FieldPickerEditor.svelte';
+import IconPickerEditor from '../value-editors/IconPickerEditor.svelte';
 import JsonEditor from '../value-editors/JsonEditor.svelte';
 import LengthEditor from '../value-editors/LengthEditor.svelte';
 import LocalizedTextEditor from '../value-editors/LocalizedTextEditor.svelte';
@@ -12,8 +14,10 @@ import MultilineTextEditor from '../value-editors/MultilineTextEditor.svelte';
 import NumberEditor from '../value-editors/NumberEditor.svelte';
 import OrderedMultiPicker from '../value-editors/OrderedMultiPicker.svelte';
 import ReadOnlyValue from '../value-editors/ReadOnlyValue.svelte';
+import SortOrderEditor from '../value-editors/SortOrderEditor.svelte';
 import StringListEditor from '../value-editors/StringListEditor.svelte';
 import SwitchEditor from '../value-editors/SwitchEditor.svelte';
+import TablePickerEditor from '../value-editors/TablePickerEditor.svelte';
 import TextEditor from '../value-editors/TextEditor.svelte';
 import ValidationEditor from '../value-editors/ValidationEditor.svelte';
 import ValuePicker from '../value-editors/ValuePicker.svelte';
@@ -29,8 +33,12 @@ export const valueEditors: Record<ValueEditorId, Component<ValueEditorProps>> = 
 	'string-list': StringListEditor,
 	color: ColorPicker,
 	length: LengthEditor,
+	'icon-picker': IconPickerEditor,
+	'table-picker': TablePickerEditor,
+	'field-picker': FieldPickerEditor,
 	'data-source': DataSourceEditor,
 	'column-list': ColumnListEditor,
+	'sort-order-editor': SortOrderEditor,
 	validation: ValidationEditor,
 	'read-only': ReadOnlyValue,
 	json: JsonEditor

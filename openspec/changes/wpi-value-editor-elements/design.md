@@ -23,14 +23,19 @@ rejected (`wpi-element-class-authoring`).
 **Goals:**
 - An author can drag any built or variant value editor onto a page, bind it to an
   input-doc field, preview it and save the page.
-- The palette shows them in an ELEMENTS → VALUE EDITORS sub-folder.
+- The palette shows them in a VALUE EDITORS folder after ELEMENTS.
 - The Properties panel and the Class tab work on them as on any element.
+- `icon-picker` searches the shared icon library (hand-off 2026110202, Issues 1 and 2).
 
 **Non-Goals:**
 - Building the five unbuilt editors (date, time, button-type, database, schema pickers).
+- Font management. font-picker keeps the font-family rule until it exists ("Follow-up: font
+  management").
 - Field rules such as `required` or input validation on value-editor elements.
-- Changing how the Properties panel itself uses the value editors.
-- Nested sub-folders anywhere except under ELEMENTS, and on the Flow page.
+- Changing the text element's own `icon` attribute. It keeps its fixed icon list, which
+  `TextElement` draws and `text_attributes.go` checks. Moving it to the library is a
+  follow-up.
+- Changing the Flow page's palette.
 
 ## Decisions
 
@@ -52,8 +57,11 @@ rejected (`wpi-element-class-authoring`).
   `text`). `editor` holds the ID used in definitions (`text`, `color`, `font-picker`, …).
   These are the 28 IDs in `VALUE_EDITOR_IDS`.
 
-- **D3 Attributes.** The module requires `editor`, `label`, `data_binding` and
-  `binding_mode`, like `input`, and accepts `editor_options` plus the shared size attributes.
+- **D3 Attributes.** The module requires `editor`, `label` and `binding_mode`, and accepts
+  `data_binding`, `editor_options` and the shared size attributes. Unlike `input`, whose
+  class makes every instance set `label` and `data_binding`, each value-editor class gives
+  `label` a default (the editor's name) and no `data_binding`: a dropped editor is drawn at
+  once and keeps its value locally until the author binds it.
   - `editor` is class scope and fixed.
   - `label` is localized text, drawn above the editor.
   - `data_binding` and `binding_mode` follow the Data binding requirement. An unbound editor
@@ -69,23 +77,32 @@ rejected (`wpi-element-class-authoring`).
 - **D4 One resolver for editor IDs.** A small pure module, `wpi/properties/editor-ids.ts`,
   maps a catalogue ID to what draws it:
   - a built editor → its component in `valueEditors`;
-  - `font-picker`, `alignment-picker`, `icon-picker`, `action-picker`, `layouter-picker` → the
-    base editor (today's `aliases`);
-  - `table-picker`, `field-picker`, `sort-order-editor` → thin adapters over `TablePicker`,
-    `FieldPicker` and `SortOrderEditor` that follow the `ValueEditorProps` contract;
+  - `font-picker`, `alignment-picker`, `action-picker`, `layouter-picker` → the base editor
+    (today's `aliases`, without `icon-picker`);
+  - `icon-picker`, `table-picker`, `field-picker`, `sort-order-editor` → thin adapters over
+    `IconSearchPicker` (from `@chendingplano/shared`), `TablePicker`, `FieldPicker` and
+    `SortOrderEditor` that follow the `ValueEditorProps` contract;
   - an unbuilt ID → none.
 
-  `class-definition.ts` and the new element both use it, so the two cannot disagree.
-  *Alternative:* a second mapping in the element. It would drift from `class-definition.ts`,
-  which is the drift the property-editors change removed.
+  `class-definition.ts` and the new element both use it, so the two cannot disagree. So an
+  attribute that a class configures with `icon-picker` also gets the library picker in the
+  Properties panel. *Alternative:* a second mapping in the element. It would drift from
+  `class-definition.ts`, which is the drift the property-editors change removed.
 
 - **D5 Variant choices.** `alignment-picker` defaults to `{"choices": ["left", "center",
   "right"]}`, and an instance may switch to `top`/`center`/`bottom`. `action-picker` and
   `layouter-picker` load their choices when drawn, from the existing
   `/api/v1/wpi/classes/action?scope=all` and `/api/v1/wpi/classes/page-layouter` endpoints,
   unless `editor_options.choices` is given. `field-picker` reads its table from
-  `editor_options.table`. `font-picker` is the text editor. `icon-picker` is the value-picker
-  with whatever choices its options give (Open Questions).
+  `editor_options.table`. `font-picker` is the text editor with the existing font-family
+  rule (`text-attributes.ts`): a CSS family list, or `inherit`.
+
+- **D5a Icon picker.** The adapter renders `IconSearchPicker` with `locale={getLocale()}` and
+  `labels` from new messages `icon_search_placeholder`, `icon_search_empty` and
+  `icon_search_error`. The value is the icon **name**, for example `refresh-cw`. The adapter
+  shows the chosen icon with `Icon`, so a saved page shows the icon when reopened. It has no
+  options. Search uses the existing `/shared_api/v1/icons/*` endpoints, which require a
+  login.
 
 - **D6 Unbuilt editors are drafts.** The five unbuilt editors are `draft` rows that name the
   `value-editor` module and fix `editor`. The existing draft rules apply unchanged. They are
@@ -94,16 +111,16 @@ rejected (`wpi-element-class-authoring`).
   update endpoint. Backend validation lets an active class or a page instance use only a
   built `editor`. A draft may name any of the 28.
 
-- **D7 Palette sub-folders.** `NodePalette` gets an optional `subCategories` prop
-  (`{ Elements: ['Value editors'] }`). The editor gives every element class whose
-  `code_module_id` is `value-editor` the category `Value editors`. All other element classes
-  keep `Elements`.
-  - A sub-folder is drawn inside its parent, indented, and starts folded.
-  - A parent's count includes its sub-folders.
-  - While searching, a match opens the sub-folder and its parent.
-  - Dropping works unchanged, because a node type's ID, not its category, decides what is
-    created.
-  - The Flow page passes no `subCategories`, so it is unchanged.
+- **D7 Palette folder.** `WPI_PALETTE_CATEGORIES` becomes `['Pages', 'Elements',
+  'Value editors']`, so VALUE EDITORS is a top-level folder right after ELEMENTS. The editor
+  gives every element class whose `code_module_id` is `value-editor` the category
+  `Value editors`. All other element classes keep `Elements`.
+  - `NodePalette.categoryLabel` gets the new folder's label. Nothing else in `NodePalette`
+    changes: folding, counts and search already work per folder.
+  - Dropping and selecting work unchanged, because a node type's ID (`wpi-element:<class>`),
+    not its category, decides what is created. A value-editor instance is an ordinary
+    `wpi-element` node.
+  - The Flow page does not list WPI folders, so it is unchanged.
 
   *Alternative:* a `palette_folder` attribute in the class row. That would add a descriptor
   attribute just for the editor's layout, while `code_module_id` already says what the class
@@ -121,6 +138,15 @@ rejected (`wpi-element-class-authoring`).
   implementation time. If `20261102000002_wpi_inline_attribute_definitions.sql` has landed,
   that means inline `scope` and `value_editor` on each attribute.
 
+- **D10 Bound reads subscribe to missing attributes (found during implementation).**
+  `AppRuntime.read` used `getPath`, whose `Object.hasOwn` check does not subscribe to a key
+  that the Svelte state proxy has not seen. An element bound to an attribute the input doc
+  did not have yet never saw later writes to it. Inputs hid this, because their text box
+  keeps what was typed. Value editors redraw from the stored value, so they showed it at
+  once. `read` now reads each attribute on the path as a property first, which subscribes,
+  and then returns `getPath`'s result. This is the behaviour the existing Data binding
+  requirement already demands.
+
 ## Risks / Trade-offs
 
 - [The value editors are styled for the 390 px Properties panel (11 px text, `--cv-*`
@@ -134,6 +160,11 @@ rejected (`wpi-element-class-authoring`).
   starts from the chat-elements version. Archive in order: chat-elements first.
 - [Function-valued options cannot be stored] → Picker choices show raw values on pages. A
   `choice_labels` option can be added later if authors need it.
+- [`shared.icon_library` is only in the dev database] → icon-picker shows the picker's
+  error text in production until the table is migrated and seeded there (hand-off
+  2026110202). The rest of the change does not depend on it.
+- [`IconSearchPicker` has not yet been rendered in ChenWeb's shell] → The browser check
+  (task 5.2) covers it. Its root already sets `select-text`.
 
 ## Migration Plan
 
@@ -141,9 +172,21 @@ Apply the migration with `doc-service --migrate-only` (air does not watch `.sql`
 is the migration's Down plus reverting the frontend and backend commits. No existing page or
 class changes.
 
-## Open Questions
+## Follow-up: font management
 
-- **icon-picker choices:** no icon set exists in code. The class starts with no choices, so
-  each instance must give `editor_options.choices` until an icon set is chosen.
-- **font-picker:** the devdoc mentions a "font grammar", but none exists in code. This change
-  uses the plain text editor.
+Nothing loads fonts today. `font_family` accepts any CSS family list, so a font shows only if
+the viewer's device has it installed. The user decided on 2026-11-02 that font management is
+a **separate change, after this one**. Until it lands, font-picker is the text editor with
+the font-family rule. Decisions for that change:
+- **Delivery:** the catalogue holds both system font stacks (nothing downloaded) and hosted
+  web fonts. Hosted fonts are woff2 files served by our own server, because Google Fonts is
+  unreliable in China, where production runs. Chinese fonts are split by character range,
+  so a page downloads only the characters it shows.
+- **Location:** `shared/`, like the icon library: a `shared.font_library` table holding
+  metadata and files, with Chinese and English names and tags; endpoints under
+  `/shared_api/v1/fonts`; a Svelte font picker that previews each font.
+- **Stored value:** a CSS family list, for example `"Noto Sans SC", sans-serif`. Existing
+  values and the font-family rule keep working. A page loads the hosted fonts it finds in
+  the catalogue.
+- **Hook into this change:** add a font-picker adapter to the editor-ID resolver (D4), the
+  same way `icon-picker` uses the icon library.

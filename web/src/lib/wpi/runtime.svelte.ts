@@ -319,7 +319,13 @@ export class AppRuntime {
 
 	read(instanceId: string, binding: string | undefined): Json | undefined {
 		const path = bindingPath(binding);
-		return path ? getPath(this.pages[instanceId]?.doc, path) : undefined;
+		if (!path) return undefined;
+		const doc = this.pages[instanceId]?.doc;
+		// Read each attribute on the path as a property first: that subscribes to one the doc
+		// does not have yet, which getPath's Object.hasOwn does not, so a later write shows.
+		let cur: unknown = doc;
+		for (const seg of path) cur = cur !== null && typeof cur === 'object' ? (cur as JsonObject)[seg] : undefined;
+		return getPath(doc, path);
 	}
 
 	// Writes an edit to the input doc and clears that attribute's save errors.

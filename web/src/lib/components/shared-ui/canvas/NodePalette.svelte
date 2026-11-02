@@ -42,6 +42,7 @@
       case 'Actions':  return m.nodepalette_category_actions();
       case 'Pages':    return m.nodepalette_category_pages();
       case 'Elements': return m.nodepalette_category_elements();
+      case 'Value editors': return m.nodepalette_category_value_editors();
       default:         return cat.toUpperCase();
     }
   }

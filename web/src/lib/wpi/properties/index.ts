@@ -5,7 +5,7 @@ import { m } from '$lib/paraglide/messages.js';
 import { textDefaults } from '../text-attributes';
 import type { JsonObject } from '../types';
 import { chatComposer, chatPanel } from './chat';
-import { button, list, menu, select } from './elements';
+import { button, list, menu, select, valueEditor } from './elements';
 import { input, inputDefaults } from './input';
 import { text } from './text';
 import { elementPlacement } from './shared';
@@ -21,7 +21,8 @@ export const elementEditors: Record<string, EditorDef> = {
 	list,
 	menu,
 	'chat-composer': chatComposer,
-	'chat-panel': chatPanel
+	'chat-panel': chatPanel,
+	'value-editor': valueEditor
 };
 
 // The definition for a code module; an unknown module shows its placement only,

@@ -140,6 +140,9 @@ export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
 	default_model?: string;
 	tabs?: string[];
 	initial_tab?: string;
+	// value-editor (code_modules/interpreter-value-editor.md).
+	editor?: string;
+	editor_options?: JsonObject;
 };
 
 // A class row: class attributes, and for each instance attribute either its

@@ -76,6 +76,8 @@ var codeModules = map[string]codeAttrs{
 	// chat_attributes.go
 	"chat-composer": {nil, chatComposerAttributes},
 	"chat-panel":    {nil, chatPanelAttributes},
+	// value_editor_attributes.go
+	"value-editor": {[]string{"editor", "label", "binding_mode"}, valueEditorAttributes},
 }
 
 // actionAttrs is keyed by action class ID, which is also the name of the code
@@ -844,9 +846,12 @@ func validateElementClass(body map[string]any, draft bool) []Issue {
 	}
 	v.text(body, "description", "")
 	v.text(body, "implement_notes", "")
-	v.codeModule(body, !draft)
+	module, _, _ := v.codeModule(body, !draft)
 	defaults, _, _ := v.elementClassAttrs(body)
 	v.sharedAttrs(defaults, "")
+	if module == "value-editor" {
+		v.valueEditorClassDefaults(defaults, draft)
+	}
 	return v.issues
 }
 
@@ -967,6 +972,8 @@ func (v *validator) element(module string, all map[string]any, path string) {
 		v.chatComposerAttributes(e, path)
 	case "chat-panel":
 		v.chatPanelAttributes(e, path)
+	case "value-editor":
+		v.valueEditorAttributes(e, path)
 	}
 }
 

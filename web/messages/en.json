@@ -8299,7 +8299,6 @@
 	"wpi_class_action_class": "Action class",
 	"wpi_class_select_action": "Select an action class",
 	"wpi_class_scope_metadata_hint": "For nested attributes and action or layouter classes, this flag records authoring scope. It does not prevent runtime overrides.",
-	"wpi_class_nested_editor_hint": "This control is used inside the data-source editor. As a standalone property editor it currently uses JSON.",
 	"wpi_class_record_version": "Version",
 	"wpi_class_schema_version": "Schema version",
 	"wpi_class_json_title": "Class JSON: {id}",
@@ -8307,5 +8306,17 @@
 	"wpi_class_options_json_hint": "Options for the {editor} value editor only. An empty object uses its defaults.",
 	"wpi_class_definitions_pending": "This descriptor is missing explicit attribute definitions. Save class to store the scope, value editor and configuration shown here in its body.",
 	"wpi_class_not_configured": "Not configured",
-	"wpi_class_save_mismatch": "The saved class body differs from the submitted body. Your draft has been kept."
+	"wpi_class_save_mismatch": "The saved class body differs from the submitted body. Your draft has been kept.",
+	"nodepalette_category_value_editors": "VALUE EDITORS",
+	"icon_search_placeholder": "Search icons by keyword or description",
+	"icon_search_empty": "No icons found",
+	"icon_search_error": "Icon search failed",
+	"wpi_icon_picker_choose": "Choose an icon",
+	"wpi_icon_picker_clear": "Clear",
+	"wpi_value_editor_group_editor": "Editor",
+	"wpi_value_editor_attr_editor": "Value editor",
+	"wpi_value_editor_attr_options": "Editor options",
+	"wpi_value_editor_font_invalid": "Enter inherit or a CSS font-family list, such as \"Noto Sans SC\", sans-serif.",
+	"wpi_value_editor_choices_failed": "The choices could not be loaded.",
+	"wpi_value_editor_not_built": "Value editor \"{editor}\" is not built yet."
 }

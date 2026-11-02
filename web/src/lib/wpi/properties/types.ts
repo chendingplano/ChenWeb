@@ -16,8 +16,12 @@ export type ValueEditorId =
 	| 'string-list'
 	| 'color'
 	| 'length'
+	| 'icon-picker'
+	| 'table-picker'
+	| 'field-picker'
 	| 'data-source'
 	| 'column-list'
+	| 'sort-order-editor'
 	| 'validation'
 	| 'read-only'
 	| 'json';

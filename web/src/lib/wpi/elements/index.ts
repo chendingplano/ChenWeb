@@ -13,6 +13,7 @@ import ListElement from './ListElement.svelte';
 import MenuElement from './MenuElement.svelte';
 import SelectElement from './SelectElement.svelte';
 import TextElement from './TextElement.svelte';
+import ValueEditorElement from './ValueEditorElement.svelte';
 
 export type ElementProps = { instanceId: string; element: ResolvedElement };
 
@@ -24,5 +25,6 @@ export const codeModules: Record<string, Component<ElementProps>> = {
 	list: ListElement,
 	menu: MenuElement,
 	'chat-composer': ChatComposerElement,
-	'chat-panel': ChatPanelElement
+	'chat-panel': ChatPanelElement,
+	'value-editor': ValueEditorElement
 };

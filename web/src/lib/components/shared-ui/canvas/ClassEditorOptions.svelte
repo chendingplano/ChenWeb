@@ -18,7 +18,6 @@
 						'value-picker',
 						'ordered-multi-picker',
 						'alignment-picker',
-						'icon-picker',
 						'button-type-picker',
 						'action-picker',
 						'layouter-picker'

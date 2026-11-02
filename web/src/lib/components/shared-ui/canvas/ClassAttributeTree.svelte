@@ -161,11 +161,6 @@
 								>{/each}
 						</select>
 						{#if PENDING_EDITORS.has(editor)}<p class="hint">{m.wpi_class_editor_pending()}</p>{/if}
-						{#if ['table-picker', 'field-picker', 'sort-order-editor'].includes(editor)}<p
-								class="hint"
-							>
-								{m.wpi_class_nested_editor_hint()}
-							</p>{/if}
 						{#if editor}<ClassEditorOptions
 								id={`class-options-${node.path}`}
 								{editor}

@@ -29,6 +29,7 @@
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
 	import WpiClassPanel from './canvas/WpiClassPanel.svelte';
 	import { classTarget } from './canvas/class-editor';
+	import { ELEMENT_CLASS_PREFIX, elementPaletteTypes } from './canvas/element-palette';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
@@ -138,30 +139,20 @@
 	let selectionGeometry = $state<{ element?: { x: number; y: number }; pane?: { x: number; y: number } }>({});
 	let showPicker = $state(false);
 	let nodeTypes = $state<NodeType[]>([]);
-	// Palette folders for WPI building blocks; no node types belong to them yet.
-	const WPI_PALETTE_CATEGORIES = ['Pages', 'Elements'];
+	// Palette folders for WPI building blocks, after the server's node-type folders.
+	const WPI_PALETTE_CATEGORIES = ['Pages', 'Elements', 'Value editors'];
 	// Node types the tool bar creates. They are not in the server's palette list.
 	const WPI_NODE_TYPES = $derived<Record<WpiNodeKind, NodeType>>({
 		page: { id: 'wpi-page', label: m.wpi_editor_page(), category: 'Pages', icon: 'file', inputs: ['in'], outputs: ['out'], defaultData: {} },
 		element: { id: 'wpi-element', label: m.wpi_editor_element(), category: 'Elements', icon: 'square-mouse-pointer', inputs: [], outputs: [], defaultData: {} },
 		action: { id: 'wpi-action', label: m.wpi_editor_action(), category: 'Actions', icon: 'zap', inputs: ['in'], outputs: ['out'], defaultData: {} }
 	});
-	// Element classes, listed in the palette's ELEMENTS folder. Their palette IDs carry a
-	// prefix, so they are unique; dropping one adds a wpi-element node of that class.
-	const ELEMENT_CLASS_PREFIX = 'wpi-element:';
+	// Element classes, listed in the palette's ELEMENTS and VALUE EDITORS folders.
 	let elementClasses = $state<ElementClassSummary[]>([]);
 	let pageLayouters = $state<JsonObject[]>([]);
 	let actionClasses = $state<string[]>([]);
 	const elementClassTypes = $derived<NodeType[]>(
-		elementClasses.map((c) => ({
-			id: ELEMENT_CLASS_PREFIX + c.descriptor_id,
-			label: c.status === 'draft' ? m.wpi_editor_draft_class({ id: c.descriptor_id }) : c.descriptor_id,
-			category: 'Elements',
-			icon: 'square-mouse-pointer',
-			inputs: [],
-			outputs: [],
-			defaultData: {}
-		}))
+		elementPaletteTypes(elementClasses, (id) => m.wpi_editor_draft_class({ id }))
 	);
 	let showCreateElement = $state(false);
 	let propertiesTab = $state<'properties' | 'class'>('properties');

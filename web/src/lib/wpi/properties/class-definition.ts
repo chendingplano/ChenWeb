@@ -4,32 +4,9 @@ import { m } from '$lib/paraglide/messages.js';
 import type { ValueEditorOptions } from '$lib/components/shared-ui/value-editors/types';
 import type { JsonObject } from '../types';
 import type { ElementClassSummary } from '../api';
+import { drawingEditor } from './editor-ids';
 import type { EditorDef, PropertyDef, ValueEditorId } from './types';
 
-const implemented = new Set([
-	'text',
-	'multiline-text',
-	'localized-text',
-	'number',
-	'switch',
-	'value-picker',
-	'ordered-multi-picker',
-	'string-list',
-	'color',
-	'length',
-	'data-source',
-	'column-list',
-	'validation',
-	'read-only',
-	'json'
-]);
-const aliases: Record<string, ValueEditorId> = {
-	'font-picker': 'text',
-	'alignment-picker': 'value-picker',
-	'icon-picker': 'value-picker',
-	'action-picker': 'value-picker',
-	'layouter-picker': 'value-picker'
-};
 const reserved = new Set([
 	'descriptor_id',
 	'schema_version',
@@ -80,8 +57,7 @@ export function withClassEditors(
 		const setting = configured.get(p.name);
 		if (!setting) return p;
 		const id = String(setting.id);
-		const editor: ValueEditorId =
-			aliases[id] ?? (implemented.has(id) ? (id as ValueEditorId) : 'json');
+		const editor: ValueEditorId = drawingEditor(id) ?? 'json';
 		const options = (setting.options as ValueEditorOptions | undefined) ?? {};
 		const base = p.options;
 		return {

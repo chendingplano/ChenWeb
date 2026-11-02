@@ -28,6 +28,8 @@ export type ValueEditorOptions = {
 	rows?: number;
 	// validation: number rules (min, max, step) instead of text rules.
 	numberRules?: boolean;
+	// field-picker: the table whose fields are offered, as database.schema.table.
+	table?: string;
 };
 
 export type ValueEditorProps = {

@@ -8299,7 +8299,6 @@
 	"wpi_class_action_class": "动作类",
 	"wpi_class_select_action": "选择动作类",
 	"wpi_class_scope_metadata_hint": "对于嵌套属性、动作类和布局器类，此标志用于记录编写范围，不限制运行时覆盖。",
-	"wpi_class_nested_editor_hint": "此控件用于数据源编辑器内部。作为独立属性编辑器时，目前使用 JSON。",
 	"wpi_class_record_version": "记录版本",
 	"wpi_class_schema_version": "模式版本",
 	"wpi_class_json_title": "类 JSON：{id}",
@@ -8307,5 +8306,17 @@
 	"wpi_class_options_json_hint": "这里只配置 {editor} 值编辑器的选项。空对象表示使用默认选项。",
 	"wpi_class_definitions_pending": "此描述符缺少显式属性定义。请点击“保存类”，将这里显示的属性范围、值编辑器及配置存入其正文。",
 	"wpi_class_not_configured": "未配置",
-	"wpi_class_save_mismatch": "数据库中的类正文与提交的正文不一致。已保留您的草稿。"
+	"wpi_class_save_mismatch": "数据库中的类正文与提交的正文不一致。已保留您的草稿。",
+	"nodepalette_category_value_editors": "值编辑器",
+	"icon_search_placeholder": "按关键词或描述搜索图标",
+	"icon_search_empty": "未找到图标",
+	"icon_search_error": "图标搜索失败",
+	"wpi_icon_picker_choose": "选择图标",
+	"wpi_icon_picker_clear": "清除",
+	"wpi_value_editor_group_editor": "编辑器",
+	"wpi_value_editor_attr_editor": "值编辑器",
+	"wpi_value_editor_attr_options": "编辑器选项",
+	"wpi_value_editor_font_invalid": "请输入 inherit 或 CSS font-family 列表，例如 \"Noto Sans SC\", sans-serif。",
+	"wpi_value_editor_choices_failed": "无法加载可选项。",
+	"wpi_value_editor_not_built": "值编辑器“{editor}”尚未实现。"
 }

@@ -1,6 +1,6 @@
-// The property editors of the select, button, list and menu elements (code
-// modules of the same names; KnowledgeStore code_modules/interpreter-*.md,
-// Property editor).
+// The property editors of the select, button, list, menu and value-editor
+// elements (code modules of the same names; KnowledgeStore
+// code_modules/interpreter-*.md, Property editor).
 import { m } from '$lib/paraglide/messages.js';
 import type { Json } from '../types';
 import { bindingModeLabel, elementPlacement, elementSize } from './shared';
@@ -98,6 +98,26 @@ export const menu: EditorDef = {
 			properties: [
 				{ name: 'items', label: m.wpi_prop_attr_items, editor: 'json', options: { rows: 4 } },
 				{ name: 'initial_item', label: m.wpi_prop_attr_initial_item, editor: 'value-picker', options: (ctx) => ({ choices: menuLeaves(ctx.get('items')), emptyLabel: m.wpi_chat_choice_first }) }
+			]
+		},
+		elementSize()
+	]
+};
+
+export const valueEditor: EditorDef = {
+	groups: [
+		elementPlacement,
+		{
+			id: 'general',
+			label: m.wpi_input_group_general,
+			properties: [{ name: 'label', label: m.propertiespanel_attr_label, editor: 'localized-text' }, ...binding]
+		},
+		{
+			id: 'editor',
+			label: m.wpi_value_editor_group_editor,
+			properties: [
+				{ name: 'editor', label: m.wpi_value_editor_attr_editor, readOnly: true },
+				{ name: 'editor_options', label: m.wpi_value_editor_attr_options, editor: 'json', options: { rows: 3 } }
 			]
 		},
 		elementSize()
