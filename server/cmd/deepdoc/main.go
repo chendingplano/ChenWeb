@@ -290,6 +290,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("search backend verified", "loc", "CWB_DDM_201")
+	kbhandler.RegisterIconSearchEmbedder()
 
 	// Prompt Optimizer initialization: load the AES-GCM key used to encrypt
 	// per-user API keys at rest, then seed the built-in templates so every
