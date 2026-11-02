@@ -30,7 +30,7 @@ export function elementSource(
 	return {
 		get: (name) => attrs[name] ?? defaultValue(name) ?? undefined,
 		isSet: (name) => name in attrs,
-		fixed: (name) => def(name)?.instance_modifiable === false,
+		fixed: (name) => def(name)?.scope === 'class' || def(name)?.instance_modifiable === false,
 		required: (name) => def(name)?.default_value === null,
 		helpTip: (name) => localized(def(name)?.help_tip),
 		defaultValue: (name) => defaultValue(name) ?? undefined,

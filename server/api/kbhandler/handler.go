@@ -938,6 +938,7 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 		whereParts = append(whereParts, "i.parse_state = 'parsing'")
 	case "parsed_success":
 		whereParts = append(whereParts, "i.parse_state = 'parsed_success'")
+
 	case "parsed_failed":
 		whereParts = append(whereParts, "i.parse_state = 'parsed_failed'")
 	default:
@@ -1049,6 +1050,16 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 				}
 			}
 		}
+	case "peak_waiting":
+		whereParts = append(whereParts, `i.pipeline_state = 'running' AND (
+			EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS s(entry)
+				WHERE s.entry->>'operation' = 'doc_processing'
+				AND (s.entry->>'progress' LIKE 'waiting for off-peak hours (%' OR s.entry->>'progress' LIKE 'waiting for peak hours (%'))
+			OR EXISTS (SELECT 1 FROM llm_usage_event h
+				WHERE h.record_id = i.id AND h.event_kind = 'llm_hold'
+				AND ((h.run_id IS NULL AND h.request_started_at >= COALESCE((SELECT MAX(r.start_time) FROM kb.doc_process_runs r WHERE r.record_id = i.id), '-infinity'::timestamptz)) OR h.run_id = (SELECT r.id FROM kb.doc_process_runs r WHERE r.record_id = i.id AND r.status = 'running' ORDER BY r.id DESC LIMIT 1))
+				AND NOT EXISTS (SELECT 1 FROM llm_usage_event c WHERE c.event_kind IN ('llm_resume', 'llm_hold_cancelled') AND c.metadata_json->>'hold_id' = h.metadata_json->>'hold_id'))
+		)`)
 	case "parsed_success":
 		whereParts = append(whereParts, "i.parse_state = 'parsed_success'")
 	case "parse_failed":

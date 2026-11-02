@@ -3,6 +3,7 @@
 import { m } from '$lib/paraglide/messages.js';
 import type { ValueEditorOptions } from '$lib/components/shared-ui/value-editors/types';
 import type { JsonObject } from '../types';
+import type { ElementClassSummary } from '../api';
 import type { EditorDef, PropertyDef, ValueEditorId } from './types';
 
 const implemented = new Set([
@@ -37,6 +38,20 @@ const reserved = new Set([
 	'implement_notes',
 	'attribute_definitions'
 ]);
+
+export function elementClassDefinitions(
+	cls: ElementClassSummary | null | undefined
+): JsonObject | undefined {
+	if (!cls) return undefined;
+	const definitions = { ...cls.attribute_definitions };
+	for (const [name, attribute] of Object.entries(cls.attributes)) {
+		if (attribute.value_editor)
+			definitions['/' + name.replace(/~/g, '~0').replace(/\//g, '~1')] = {
+				value_editor: attribute.value_editor
+			} as JsonObject;
+	}
+	return definitions;
+}
 
 export function withClassEditors(
 	def: EditorDef,

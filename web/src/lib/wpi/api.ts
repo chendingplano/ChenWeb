@@ -83,7 +83,7 @@ export async function previewList(source: ActionInstance, args: JsonObject, sign
 // An instance attribute of an element class row (format 0.4). default_value
 // null: every instance must set it; left out: optional, no default.
 // instance_modifiable false: the class fixes default_value for every instance.
-export type ElementAttribute = { help_tip?: Text; default_value?: Json; instance_modifiable?: boolean };
+export type ElementAttribute = { help_tip?: Text; default_value?: Json; instance_modifiable?: boolean; scope?: 'class' | 'instance'; value_editor?: { id: string; options?: JsonObject } };
 
 // The latest draft or active version of an element class, for the editor's
 // palette and properties panel. A draft is defined but has no code yet.

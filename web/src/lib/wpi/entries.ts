@@ -24,9 +24,9 @@ export function mergeElement<T extends object>(row: ClassRow | undefined, own: T
 	const fixed: Record<string, unknown> = {};
 	for (const [k, v] of Object.entries(row ?? {})) {
 		if (CLASS_ATTRS.has(k) || v === null || typeof v !== 'object') continue;
-		const attr = v as { default_value?: unknown; instance_modifiable?: unknown };
+		const attr = v as { default_value?: unknown; instance_modifiable?: unknown; scope?: unknown };
 		if (attr.default_value === undefined || attr.default_value === null) continue;
-		(attr.instance_modifiable === false ? fixed : defaults)[k] = attr.default_value;
+		(attr.scope === 'class' || attr.instance_modifiable === false ? fixed : defaults)[k] = attr.default_value;
 	}
 	return { ...defaults, ...own, ...fixed } as T;
 }
@@ -34,7 +34,7 @@ export function mergeElement<T extends object>(row: ClassRow | undefined, own: T
 // Whether an element class row fixes an attribute for all its instances.
 export function isFixed(row: ClassRow, attr: string): boolean {
 	const v = row[attr];
-	return v !== null && typeof v === 'object' && (v as { instance_modifiable?: unknown }).instance_modifiable === false;
+	return v !== null && typeof v === 'object' && ((v as { scope?: unknown }).scope === 'class' || (v as { instance_modifiable?: unknown }).instance_modifiable === false);
 }
 
 export type ResolvedElement = {

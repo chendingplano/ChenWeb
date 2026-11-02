@@ -16,6 +16,14 @@ fixtures = {
  'action/save': {'descriptor_id': 'save', 'schema_version': '0.2', 'table': None, 'mode': 'insert'}
 }
 
+# These are stored descriptor fields, not values supplied by the renderer.
+for key, body in fixtures.items():
+ if key.startswith('element/'):
+  for name, settings in body.items():
+   if name in ('descriptor_id','schema_version','code_module_id'): continue
+   settings['scope'] = 'instance'
+   settings['value_editor'] = {'id': {'label':'localized-text','width':'length','custom_count':'number','required':'text','source':'data-source'}.get(name,'text'), 'options': {}}
+
 with tempfile.TemporaryFile(mode='w+') as log:
  process = subprocess.Popen([str(web / 'node_modules/.bin/vite'), '--config', 'tests/wpi-class-editor/vite.config.ts'], cwd=web, stdout=log, stderr=log)
  try:
@@ -53,14 +61,13 @@ with tempfile.TemporaryFile(mode='w+') as log:
    page.get_by_role('tab', name='Class', exact=True).click()
    expect(page.get_by_role('heading', name='Class: input')).to_be_visible()
    save = page.get_by_role('button', name='Save class', exact=True)
-   expect(save).to_be_enabled()
-   expect(page.locator('.class-editor').get_by_role('status')).to_contain_text('missing explicit attribute definitions')
+   expect(save).to_be_disabled()
    page.locator('#view-class-json').click()
    initial_body = json.loads(page.get_by_role('dialog').locator('pre.json-text').inner_text())
-   assert initial_body['attribute_definitions']['/label'] == {'scope': 'instance', 'description': {'en': 'Caption', 'zh-cn': '标题'}, 'value_editor': {'id': 'localized-text', 'options': {}}}, initial_body
+   assert initial_body == fixtures['element/input'], initial_body
+   assert initial_body['label']['scope'] == 'instance', initial_body
+   assert initial_body['label']['value_editor'] == {'id': 'localized-text', 'options': {}}, initial_body
    page.get_by_role('dialog').get_by_role('button', name='Close', exact=True).click()
-   save.click(); expect(save).to_be_disabled()
-   assert writes[-1][1] == initial_body, writes
 
    def attribute(name):
     return page.locator('button.attribute').filter(has=page.locator('span.name', has_text=name)).filter(has_text=name)
@@ -131,10 +138,10 @@ with tempfile.TemporaryFile(mode='w+') as log:
    assert writes[-1][1]['label']['help_tip'] == {'en': 'Full caption', 'zh-cn': '标题'}, writes
    assert 'custom_count' not in writes[-1][1], writes
    assert writes[-1][1]['counter']['default_value'] == 2, writes
-   assert writes[-1][1]['attribute_definitions']['/counter']['value_editor'] == {'id': 'number', 'options': {'min': 1, 'max': 10, 'integer': True}}, writes
-   assert writes[-1][1]['attribute_definitions']['/label']['value_editor'] == {'id': 'value-picker', 'options': {'choices': ['Full name', 'Nickname']}}, writes
-   expect(page.locator('#saves')).to_have_text('2')
-   assert writes[-1][1]['attribute_definitions']['/label']['scope'] == 'class', writes
+   assert writes[-1][1]['counter']['value_editor'] == {'id': 'number', 'options': {'min': 1, 'max': 10, 'integer': True}}, writes
+   assert writes[-1][1]['label']['value_editor'] == {'id': 'value-picker', 'options': {'choices': ['Full name', 'Nickname']}}, writes
+   expect(page.locator('#saves')).to_have_text('1')
+   assert writes[-1][1]['label']['scope'] == 'class', writes
    page.locator('#view-class-json').click()
    saved_body = json.loads(page.get_by_role('dialog').locator('pre.json-text').inner_text())
    assert saved_body == writes[-1][1], (saved_body, writes[-1][1])
@@ -152,7 +159,7 @@ with tempfile.TemporaryFile(mode='w+') as log:
    field('scope', '/label').select_option(label='Instance attribute')
    save.click(); expect(save).to_be_disabled()
    assert 'instance_modifiable' not in writes[-1][1]['label'], writes
-   assert writes[-1][1]['attribute_definitions']['/label']['scope'] == 'instance', writes
+   assert writes[-1][1]['label']['scope'] == 'instance', writes
    field('scope', '/label').select_option(label='Class attribute')
    save.click(); expect(save).to_be_disabled()
    assert writes[-1][1]['label']['instance_modifiable'] is False, writes
@@ -163,13 +170,13 @@ with tempfile.TemporaryFile(mode='w+') as log:
    page.locator('[id="class-description-/label-text"]').blur()
    save.click(); expect(save).to_be_disabled()
    assert 'help_tip' not in writes[-1][1]['label'], writes
-   assert 'description' not in writes[-1][1]['attribute_definitions']['/label'], writes
+   assert '/label' not in writes[-1][1].get('attribute_definitions', {}), writes
    page.locator('button.attribute').filter(has=page.locator('span.name', has_text='width')).click()
    field('description', '/width').select_option('localized')
    page.locator('[id="class-description-/width-en"]').fill('Width in the page')
    page.locator('[id="class-description-/width-en"]').blur()
    save.click(); expect(save).to_be_disabled()
-   assert writes[-1][1]['attribute_definitions']['/width']['description'] == {'en': 'Width in the page'}, writes
+   assert writes[-1][1]['width']['help_tip'] == {'en': 'Width in the page'}, writes
 
    # Server rejection retains the draft and gives the author the field issue.
    field('default', '/label').fill('Still editing'); field('default', '/label').blur()

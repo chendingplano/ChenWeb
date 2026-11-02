@@ -64,7 +64,7 @@
 	<ul class:children={!!parent}>
 		{#each nodes as node (node.path)}
 			{@const definition = definitionAt(kind, row, node.path)}
-			{@const editor = definition.value_editor?.id ?? 'text'}
+			{@const editor = definition.value_editor?.id ?? ''}
 			{@const identity = node.path === '/descriptor_id' || node.path === '/schema_version'}
 			{@const builtin = !parent && CLASS_KEYS.has(node.name)}
 			<li>
@@ -78,9 +78,11 @@
 					<span class="chevron" aria-hidden="true">{open[node.path] ? '▾' : '▸'}</span>
 					<span class="name">{node.name}</span>
 					<span class="scope"
-						>{definition.scope === 'class'
-							? m.wpi_class_scope_class()
-							: m.wpi_class_scope_instance()}</span
+						>{!definition.scope
+							? m.wpi_class_not_configured()
+							: definition.scope === 'class'
+								? m.wpi_class_scope_class()
+								: m.wpi_class_scope_instance()}</span
 					>
 				</button>
 				{#if open[node.path]}
@@ -109,16 +111,20 @@
 						<label for={`class-scope-${node.path}`}>{m.wpi_class_attribute_scope()}</label>
 						<select
 							id={`class-scope-${node.path}`}
-							value={definition.scope}
-							disabled={CLASS_KEYS.has(node.path.slice(1).split('/')[0])}
+							value={definition.scope ?? ''}
+							disabled={CLASS_KEYS.has(node.path.slice(1).split('/')[0]) &&
+								definition.scope === 'class'}
 							onchange={(e) => {
 								if (!meta(node.path, { scope: e.currentTarget.value as 'class' | 'instance' })) {
 									e.currentTarget.value = definition.scope ?? 'instance';
 								}
 							}}
 						>
+							<option value="" disabled>{m.wpi_class_not_configured()}</option>
 							<option value="class">{m.wpi_class_scope_class()}</option>
-							<option value="instance">{m.wpi_class_scope_instance()}</option>
+							<option value="instance" disabled={CLASS_KEYS.has(node.path.slice(1).split('/')[0])}
+								>{m.wpi_class_scope_instance()}</option
+							>
 						</select>
 						{#if parent || kind !== 'element'}<p class="hint">
 								{m.wpi_class_scope_metadata_hint()}
@@ -149,6 +155,7 @@
 							onchange={(e) =>
 								meta(node.path, { value_editor: { id: e.currentTarget.value, options: {} } })}
 						>
+							<option value="" disabled>{m.wpi_class_not_configured()}</option>
 							{#each VALUE_EDITOR_IDS as id}<option value={id}
 									>{PENDING_EDITORS.has(id) ? m.wpi_class_pending_editor({ id }) : id}</option
 								>{/each}
@@ -159,12 +166,12 @@
 							>
 								{m.wpi_class_nested_editor_hint()}
 							</p>{/if}
-						<ClassEditorOptions
-							id={`class-options-${node.path}`}
-							{editor}
-							options={definition.value_editor?.options ?? {}}
-							onChange={(options) => meta(node.path, { value_editor: { id: editor, options } })}
-						/>
+						{#if editor}<ClassEditorOptions
+								id={`class-options-${node.path}`}
+								{editor}
+								options={definition.value_editor?.options ?? {}}
+								onChange={(options) => meta(node.path, { value_editor: { id: editor, options } })}
+							/>{/if}
 						{#if errors[node.path]}<p class="error" role="alert">{errors[node.path]}</p>{/if}
 					</fieldset>
 					{#if node.children.length}{@render branches(node.children, node)}{/if}

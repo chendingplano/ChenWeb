@@ -70,6 +70,11 @@ SHALL wait again if its span is no longer permitted once the slot is acquired. A
 waiting SHALL end the task with `doc_processing` status `stopped` without routing or running any
 processor.
 
+The document processor dashboard SHALL show a Waiting Pipelines section below Active Pipelines
+when at least one running pipeline is waiting for admission or has an unclosed peak-hour AI-call
+hold. It SHALL omit the section when there are no such pipelines and retrieve all matching records,
+independent of the active-pipeline card limit. Each record SHALL offer detail and stop actions.
+
 #### Scenario: Plain task not blocked by waiting tasks
 - **WHEN** as many tasks wait as there are pipeline slots and a task with mode `none` arrives
 - **THEN** that task starts without waiting

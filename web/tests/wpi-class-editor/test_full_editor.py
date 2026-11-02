@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, expect
 
 web = Path(__file__).resolve().parents[2]
-text_class = {'descriptor_id': 'text', 'schema_version': '0.4', 'code_module_id': 'text', 'text': {'default_value': 'Original class value'}}
+text_class = {'descriptor_id': 'text', 'schema_version': '0.4', 'code_module_id': 'text', 'text': {'default_value': 'Original class value', 'scope': 'instance', 'value_editor': {'id': 'localized-text', 'options': {'rows': 2}}}}
 page_descriptor = {
  'descriptor_id': '', 'schema_version': '0.5',
  'page_layouter': {'layouter': 'single-pane', 'root': {'pane_id': 'main'}},
@@ -48,14 +48,14 @@ with tempfile.TemporaryFile(mode='w+') as log:
     if path == '/api/v1/flow-node-types': body = {'nodeTypes': []}
     elif path == '/api/v1/flows/default': body = {'flow': flow}
     elif path == '/api/v1/wpi/recoveries/unsaved': body = {'recoveries': []}
-    elif path == '/api/v1/wpi/classes/element': body = {'classes': [{'descriptor_id': 'text', 'version': 1, 'status': 'active', 'description': None, 'code_module_id': 'text', 'attributes': {'text': {'default_value': 'Original class value'}}}]}
+    elif path == '/api/v1/wpi/classes/element': body = {'classes': [{'descriptor_id': 'text', 'version': 1, 'status': 'active', 'description': None, 'code_module_id': 'text', 'attributes': {'text': {'default_value': 'Original class value', 'scope': 'instance', 'value_editor': {'id': 'localized-text', 'options': {'rows': 2}}}}}]}
     elif path == '/api/v1/wpi/classes/action': body = {'actions': ['save', 'open-page', 'load']}
     elif path == '/api/v1/wpi/classes/page-layouter': body = {'classes': [{'descriptor_id': 'single-pane', 'schema_version': '0.5', 'code_module_id': 'page-layouter', 'root': {'pane_id': 'main'}}]}
     elif path == '/api/v1/wpi/classes/element/text':
      if route.request.method == 'PUT':
       saved_classes.append(route.request.post_data_json)
       body = {'version': 7, 'status': 'active', 'warnings': []}
-     else: body = {'version': 7, 'status': 'active', 'class': text_class}
+     else: body = {'version': 7, 'status': 'active', 'class': saved_classes[-1] if saved_classes else text_class}
     elif path == '/api/v1/wpi/classes/action/save': body = {'version': 1, 'status': 'active', 'class': {'descriptor_id': 'save', 'schema_version': '0.2', 'table': None, 'mode': 'insert'}}
     elif path == '/api/v1/wpi/pages/preview': body = preview_bundle
     elif path == '/api/v1/flows': body = {'flows': []}

@@ -5,8 +5,7 @@ import {
 	renameAttribute,
 	setAttributeDefault,
 	setAttributeDefinition,
-	definitionAt,
-	materializeClassDefinitions
+	definitionAt
 } from './class-editor';
 import type { JsonObject } from '$lib/wpi/types';
 
@@ -20,94 +19,83 @@ const element: JsonObject = {
 	fixed: { default_value: 3, instance_modifiable: false }
 };
 
-test('legacy label settings shown in Class are explicit in the serializable body', () => {
-	const original: JsonObject = {
+test('Class reads label scope and editor directly from the attribute object', () => {
+	const row: JsonObject = {
 		descriptor_id: 'button',
 		schema_version: '0.4',
 		code_module_id: 'button',
-		label: { default_value: 'Button', help_tip: { en: 'Caption' } }
+		label: {
+			default_value: 'Button',
+			help_tip: { en: 'Caption', 'zh-cn': '标题' },
+			scope: 'instance',
+			value_editor: { id: 'localized-text', options: {} }
+		}
 	};
-	const body = materializeClassDefinitions('element', original);
-	expect((body.attribute_definitions as JsonObject)['/label']).toEqual({
-		description: { en: 'Caption' },
+	expect(definitionAt('element', row, '/label')).toEqual({
+		description: { en: 'Caption', 'zh-cn': '标题' },
 		scope: 'instance',
 		value_editor: { id: 'localized-text', options: {} }
 	});
-	expect(original.attribute_definitions).toBeUndefined();
-	expect(materializeClassDefinitions('element', JSON.parse(JSON.stringify(body)))).toEqual(body);
-	for (const attribute of attributeTree('element', body)) {
-		const definition = (body.attribute_definitions as JsonObject)[attribute.path] as JsonObject;
-		expect(['class', 'instance'].includes(String(definition.scope))).toBe(true);
-		expect(typeof (definition.value_editor as JsonObject).id).toBe('string');
-		expect((definition.value_editor as JsonObject).options).toBeDefined();
-	}
+	expect(row.attribute_definitions).toBeUndefined();
 });
 
-test('fixed label scope comes from the descriptor flag, including stale metadata', () => {
-	const row: JsonObject = {
-		descriptor_id: 'button',
-		schema_version: '0.4',
-		label: { default_value: 'Fixed', instance_modifiable: false },
-		attribute_definitions: { '/label': { scope: 'instance', value_editor: { id: 'text' } } }
-	};
-	expect(definitionAt('element', row, '/label').scope).toBe('class');
-	const normalized = materializeClassDefinitions('element', row);
-	expect((normalized.attribute_definitions as JsonObject)['/label']).toMatchObject({
-		scope: 'class',
-		value_editor: { id: 'text', options: {} }
-	});
-});
-
-test('changing one field stores the complete definition and clearing description removes both copies', () => {
+test('Class does not invent missing values from code or rewrite the loaded body', () => {
 	const row: JsonObject = {
 		descriptor_id: 'button',
 		schema_version: '0.4',
 		code_module_id: 'button',
-		label: { default_value: 'Button', help_tip: 'Old help' }
+		label: { default_value: 'Button' }
 	};
-	const next = setAttributeDefinition('element', row, '/label', { scope: 'class' });
-	expect((next.attribute_definitions as JsonObject)['/label']).toEqual({
-		description: 'Old help',
-		scope: 'class',
-		value_editor: { id: 'localized-text', options: {} }
-	});
-	const cleared = setAttributeDefinition('element', next, '/label', { description: '' });
-	expect((cleared.label as JsonObject).help_tip).toBeUndefined();
-	expect(
-		((cleared.attribute_definitions as JsonObject)['/label'] as JsonObject).description
-	).toBeUndefined();
+	const before = JSON.stringify(row);
+	expect(definitionAt('element', row, '/label').scope).toBeUndefined();
+	expect(definitionAt('element', row, '/label').value_editor).toBeUndefined();
+	expect(JSON.stringify(row)).toBe(before);
 });
 
-test('a blank bilingual description keeps its language mode while the author fills it in', () => {
+test('scope and editor changes are written inline beside help_tip and default_value', () => {
 	const row: JsonObject = {
 		descriptor_id: 'button',
 		schema_version: '0.4',
-		label: { default_value: 'Button' }
+		label: {
+			default_value: 'Button',
+			help_tip: 'Caption',
+			scope: 'instance',
+			value_editor: { id: 'localized-text', options: {} }
+		}
 	};
-	const next = setAttributeDefinition('element', row, '/label', { description: { en: '' } });
-	expect(
-		definitionAt('element', materializeClassDefinitions('element', next), '/label').description
-	).toEqual({ en: '' });
+	let next = setAttributeDefinition('element', row, '/label', {
+		scope: 'class',
+		value_editor: { id: 'number', options: { min: 1 } }
+	});
+	expect(next.label).toEqual({
+		default_value: 'Button',
+		help_tip: 'Caption',
+		scope: 'class',
+		instance_modifiable: false,
+		value_editor: { id: 'number', options: { min: 1 } }
+	});
+	expect(next.attribute_definitions).toBeUndefined();
+	next = setAttributeDefinition('element', next, '/label', { scope: 'instance', description: '' });
+	expect((next.label as JsonObject).scope).toBe('instance');
+	expect((next.label as JsonObject).instance_modifiable).toBeUndefined();
+	expect((next.label as JsonObject).help_tip).toBeUndefined();
 });
 
-test('explicit editor options stay authoritative, including an intentionally empty object', () => {
+test('explicit empty editor options are shown exactly as stored', () => {
 	const row: JsonObject = {
 		descriptor_id: 'input',
 		schema_version: '0.4',
 		code_module_id: 'input',
-		width: { default_value: '200px' },
-		attribute_definitions: {
-			'/width': { scope: 'instance', value_editor: { id: 'length', options: {} } }
+		width: {
+			default_value: '200px',
+			scope: 'instance',
+			value_editor: { id: 'length', options: {} }
 		}
 	};
-	expect(definitionAt('element', row, '/width').value_editor?.options).toEqual({});
-	expect(
-		(
-			(materializeClassDefinitions('element', row).attribute_definitions as JsonObject)[
-				'/width'
-			] as JsonObject
-		).value_editor
-	).toEqual({ id: 'length', options: {} });
+	expect(definitionAt('element', row, '/width').value_editor).toEqual({
+		id: 'length',
+		options: {}
+	});
 });
 
 test('Class selection resolves elements, actions, panes and panel layouters, never a page or flow node', () => {
@@ -217,8 +205,10 @@ test('editing accepts reactive proxies without attempting to clone the proxy its
 		instance_modifiable: false
 	});
 	expect(
-		setAttributeDefinition('element', reactive, '/fixed', { description: 'Fixed' })
-			.attribute_definitions
-	).toBeDefined();
+		(
+			setAttributeDefinition('element', reactive, '/fixed', { description: 'Fixed' })
+				.fixed as JsonObject
+		).help_tip
+	).toBe('Fixed');
 	expect(renameAttribute('element', reactive, '/fixed', 'renamed').renamed).toEqual(element.fixed);
 });

@@ -762,9 +762,16 @@ func (v *validator) elementClassAttrs(b map[string]any) (defaults map[string]any
 			v.errf(p, "must be an object with an optional %q, %q and %q", "help_tip", "default_value", "instance_modifiable")
 			continue
 		}
-		v.keys(attr, p, nil, "help_tip", "default_value", "instance_modifiable")
+		v.keys(attr, p, nil, "help_tip", "default_value", "instance_modifiable", "scope", "value_editor")
 		v.text(attr, "help_tip", p)
 		v.boolean(attr, "instance_modifiable", p)
+		v.oneOf(attr, "scope", p, []string{"class", "instance"})
+		if scope, ok := attr["scope"].(string); ok {
+			if flag, present := attr["instance_modifiable"].(bool); present && (scope == "class") == flag {
+				v.errf(p+"/scope", "scope must agree with instance_modifiable")
+			}
+		}
+		v.valueEditor(attr, p)
 		dv, has := attr["default_value"]
 		if isFixed(b, k) {
 			fixed[k] = true
@@ -794,6 +801,9 @@ func (v *validator) elementClassAttrs(b map[string]any) (defaults map[string]any
 // instances ("instance_modifiable": false).
 func isFixed(row map[string]any, k string) bool {
 	attr, _ := row[k].(map[string]any)
+	if scope, ok := attr["scope"].(string); ok && (scope == "class" || scope == "instance") {
+		return scope == "class"
+	}
 	return attr["instance_modifiable"] == false
 }
 

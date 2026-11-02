@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+	retainUnchangedData,
 	buildStageDefs,
 	computeStages,
 	isActiveRecord,
@@ -349,4 +350,11 @@ test('isMappingTriageFailure is false for a different processor with the same-sh
 
 test('isMappingTriageFailure is false when there is no error text', () => {
 	assert.equal(isMappingTriageFailure({ operation: 'extract_metrics', proc_status: 'failed' }), false);
+});
+
+test('refresh retains unchanged data and replaces changed data', () => {
+	const current = [{ id: 1, status: [{ progress: '25%' }] }];
+	assert.equal(retainUnchangedData(current, [{ id: 1, status: [{ progress: '25%' }] }]), current);
+	const changed = [{ id: 1, status: [{ progress: '50%' }] }];
+	assert.equal(retainUnchangedData(current, changed), changed);
 });

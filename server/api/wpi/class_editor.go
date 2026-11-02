@@ -164,19 +164,25 @@ func (v *validator) attributeDefinitions(body map[string]any) {
 		v.text(definition, "description", path)
 		v.oneOf(definition, "scope", path, []string{"class", "instance"})
 		v.elementDefinitionScope(body, pointer, definition, path)
-		if value, present := definition["value_editor"]; present {
-			editor, ok := v.object(value, path+"/value_editor")
-			if !ok {
-				continue
-			}
-			v.keys(editor, path+"/value_editor", []string{"id"}, "options")
-			v.oneOf(editor, "id", path+"/value_editor", classValueEditorIDs)
-			if value, present := editor["options"]; present {
-				options, ok := v.object(value, path+"/value_editor/options")
-				if ok {
-					v.editorOptions(options, path+"/value_editor/options")
-				}
-			}
+		v.valueEditor(definition, path)
+	}
+}
+
+// valueEditor validates both inline element settings and pointer definitions.
+func (v *validator) valueEditor(attribute map[string]any, path string) {
+	value, present := attribute["value_editor"]
+	if !present {
+		return // Legacy frozen copies need no editor configuration to run.
+	}
+	editor, ok := v.object(value, path+"/value_editor")
+	if !ok {
+		return
+	}
+	v.keys(editor, path+"/value_editor", []string{"id"}, "options")
+	v.oneOf(editor, "id", path+"/value_editor", classValueEditorIDs)
+	if value, present := editor["options"]; present {
+		if options, ok := v.object(value, path+"/value_editor/options"); ok {
+			v.editorOptions(options, path+"/value_editor/options")
 		}
 	}
 }
@@ -206,7 +212,7 @@ func (v *validator) elementDefinitionScope(body map[string]any, pointer string, 
 	if !ok {
 		return // The attribute's structural validation reports this.
 	}
-	fixed := attr["instance_modifiable"] == false
+	fixed := isFixed(body, name)
 	if scope == "class" && (!fixed || attr["default_value"] == nil) {
 		v.errf(path+"/scope", "a class attribute must be fixed with a non-null default_value")
 	}

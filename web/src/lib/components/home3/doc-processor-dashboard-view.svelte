@@ -28,6 +28,7 @@
 		entityExtractionSucceeded,
 		isActiveRecord,
 		isMappingTriageFailure,
+		retainUnchangedData,
 		visibleStages,
 		processorSelectionForPackage,
 		type ProcessorPackages,
@@ -81,6 +82,7 @@
 	// ── Active pipelines state ─────────────────────────────────────────────
 
 	let activePipelines = $state<KbInputRecord[]>([]);
+	let waitingPipelines = $state<KbInputRecord[]>([]);
 	let pipelinesLoading = $state(true);
 	let pipelinesError = $state('');
 	let lastPoll = $state('');
@@ -98,6 +100,7 @@
 	let stageProgressCache = $state<Record<string, string | null>>({});
 
 	// ── Sync control state ────────────────────────────────────────────────
+	const SYNC_INTERVAL_SECONDS = 5;
 	let autoSync = $state(true);
 	let syncInterval: ReturnType<typeof setInterval> | null = null;
 	let pdfPollInterval: ReturnType<typeof setInterval> | null = null;
@@ -108,7 +111,6 @@
 
 	const PDF_ACTIVE_LIMIT = 20;
 	let pdfActiveParsing = $state<KbInputRecord[]>([]);
-	let pdfParsingLoading = $state(true);
 	let pdfParsingError = $state('');
 	let pdfStats = $state({ total: 0, success: 0, failed: 0, active: 0, waiting: 0 });
 
@@ -214,21 +216,19 @@
 				listKbInputs({ ...base, parseState: 'pending' }),
 				listKbInputs({ ...base })
 			]);
-			pdfActiveParsing = (activeRes.results ?? []).filter(
+			pdfActiveParsing = retainUnchangedData(pdfActiveParsing, (activeRes.results ?? []).filter(
 				(r) => !r.file_name?.toLowerCase().endsWith('.zip')
-			);
-			pdfStats = {
+			));
+			pdfStats = retainUnchangedData(pdfStats, {
 				total: totalRes.total ?? 0,
 				success: successRes.total ?? 0,
 				failed: failedRes.total ?? 0,
 				active: activeRes.total ?? 0,
 				waiting: waitingRes.total ?? 0
-			};
+			});
 			pdfParsingError = '';
 		} catch (err) {
 			pdfParsingError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pdf_parsing();
-		} finally {
-			pdfParsingLoading = false;
 		}
 		// If active parses detected while pipeline sync is paused, wake it back up.
 		if (pdfStats.active > 0 && !autoSync) {
@@ -372,7 +372,7 @@
 		if (syncInterval !== null) return;
 		autoSync = true;
 		emptyPollCount = 0;
-		syncInterval = setInterval(pollPipelines, 5000);
+		syncInterval = setInterval(pollPipelines, SYNC_INTERVAL_SECONDS * 1000);
 		// Cancel the PDF-only keepalive — full sync covers it now.
 		if (pdfPollInterval !== null) {
 			clearInterval(pdfPollInterval);
@@ -389,7 +389,7 @@
 		// Keep the PDF section live with a dedicated interval so active parses
 		// continue to update (and can wake full sync back up) even while paused.
 		if (pdfPollInterval === null) {
-			pdfPollInterval = setInterval(pollPdfParsing, 5000);
+			pdfPollInterval = setInterval(pollPdfParsing, SYNC_INTERVAL_SECONDS * 1000);
 		}
 	}
 
@@ -402,6 +402,17 @@
 	async function pollPipelines() {
 		const prevCount = prevActivePipelinesCount;
 		try {
+			const waiting: KbInputRecord[] = [];
+			let page = 1;
+			let total = 0;
+			do {
+				const result = await listKbInputs({ docType: 'all', parseState: 'all', fileName: '', startTime: '', endTime: '', page, pageSize: 500, pipelineFilter: 'peak_waiting' });
+				const records = result.results ?? [];
+				waiting.push(...records);
+				total = result.total;
+				page++;
+				if (records.length === 0) break;
+			} while (waiting.length < total);
 			const res = await listKbInputs({
 				docType: 'all',
 				parseState: 'all',
@@ -419,7 +430,8 @@
 				.filter(r => isActiveRecord(r, ids))
 				.slice(0, activePipelineLimit);
 			const newCount = newPipelines.length;
-			activePipelines = newPipelines;
+			activePipelines = retainUnchangedData(activePipelines, newPipelines);
+			waitingPipelines = retainUnchangedData(waitingPipelines, waiting);
 			prevActivePipelinesCount = newCount;
 			lastPoll = new Date().toLocaleTimeString();
 			pipelinesError = '';
@@ -430,7 +442,7 @@
 			}
 			// Track consecutive empty polls; disable sync after 5 with no active tasks.
 			// Keep syncing as long as PDF parsing is active (pdfStats from previous poll).
-			if (newCount === 0 && pdfStats.active === 0) {
+			if (newCount === 0 && waitingPipelines.length === 0 && pdfStats.active === 0) {
 				emptyPollCount++;
 				if (emptyPollCount >= 5 && autoSync) stopAutoSync();
 			} else {
@@ -672,7 +684,7 @@
 				pageSize: FAILED_PAGE_SIZE,
 				procStatus: 'failed'
 			});
-			failedRecords = res.results ?? [];
+			failedRecords = retainUnchangedData(failedRecords, res.results ?? []);
 			failedTotal = res.total ?? 0;
 			failedLoaded = true;
 		} catch (err) {
@@ -834,7 +846,7 @@
 		});
 
 		pollPipelines();
-		syncInterval = setInterval(pollPipelines, 5000);
+		syncInterval = setInterval(pollPipelines, SYNC_INTERVAL_SECONDS * 1000);
 		return () => {
 			if (syncInterval !== null) clearInterval(syncInterval);
 			if (pdfPollInterval !== null) clearInterval(pdfPollInterval);
@@ -845,7 +857,7 @@
 <!-- ══════════════════════════════════════════════════════════════
      Root
 ══════════════════════════════════════════════════════════════ -->
-<div class="flex flex-col" style="min-height:100%;">
+<div class="flex select-text flex-col" style="min-height:100%;">
 
 	<!-- ── Toast ─────────────────────────────────────────────── -->
 	{#if launchToast}
@@ -911,14 +923,13 @@
 		<div class="mb-4 flex items-start justify-between">
 			<div>
 				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_active_pipelines()}</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">
-				{autoSync ? m.doc_processor_dashboard_live_processing_threads_refreshes_every() : m.doc_processor_dashboard_live_processing_threads_auto_sync()}
-			</p>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_live_processing_threads()}</p>
 			</div>
 			<div class="flex items-center gap-3">
 				{#if lastPoll}
 					<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{m.doc_processor_dashboard_updated({ lastPoll })}</span>
 				{/if}
+				<span style="font-size:11px; color:{textMuted};">{autoSync ? m.doc_processor_dashboard_live_processing_threads_refreshes_every({ seconds: SYNC_INTERVAL_SECONDS }) : m.doc_processor_dashboard_live_processing_threads_auto_sync()}</span>
 				<!-- Stop Sync / Start Sync toggle -->
 				<button
 					onclick={toggleSync}
@@ -1115,6 +1126,27 @@
 				{/each}
 			</div>
 		{/if}
+		{#if !pipelinesLoading && !pipelinesError && waitingPipelines.length > 0}
+			<div class="mt-6 w-full md:w-1/2">
+				<h3 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">{m.doc_processor_dashboard_waiting_pipelines()} ({waitingPipelines.length})</h3>
+				<p style="font-size:12px; color:{textMuted}; margin:0 0 12px;">{m.doc_processor_dashboard_peak_wait_description()}</p>
+				<div class="space-y-2">
+					{#each waitingPipelines as record (record.id)}
+						<div class="flex items-center justify-between gap-3 rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
+							<div class="flex min-w-0 items-center gap-2">
+								<ClockIcon class="h-4 w-4 flex-shrink-0" style="color:{colorWarning};" />
+								<span style="color:{accent}; font-size:12px;">#{record.id}</span>
+								<span class="truncate" style="color:{textPrimary}; font-size:13px;" title={recordTitle(record)}>{recordTitle(record)}</span>
+							</div>
+							<div class="flex flex-shrink-0 gap-2">
+								<button onclick={() => openDetail(record)} class="rounded-lg px-2.5 py-1.5" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;">{m.doc_processor_dashboard_detail()}</button>
+								<button onclick={() => doStop(record)} disabled={stoppingIds.has(record.id)} class="rounded-lg px-2.5 py-1.5" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;">{stoppingIds.has(record.id) ? m.doc_processor_dashboard_stopping() : m.doc_processor_dashboard_stop()}</button>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 	</section>
 
 	<!-- ── Section divider ────────────────────────────────────── -->
@@ -1160,11 +1192,10 @@
 		{/if}
 
 		<!-- Charts -->
-		<div class="mb-5 grid gap-4" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr);">
-
-			<!-- Pie / donut chart -->
-			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
-				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">{m.doc_processor_dashboard_parse_state_distribution()}</div>
+		<div class="mb-5 rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
+			<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">{m.doc_processor_dashboard_parse_state_distribution()}</div>
+			<div class="flex flex-wrap items-center gap-8">
+				<!-- Pie / donut chart -->
 				<div class="flex items-center gap-5">
 					<div class="relative flex-shrink-0" style="width:120px; height:120px;">
 						<svg viewBox="0 0 120 120" style="width:120px; height:120px; transform:rotate(-90deg);">
@@ -1185,7 +1216,7 @@
 							<span style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.06em;">{m.doc_processor_dashboard_total()}</span>
 						</div>
 					</div>
-					<div class="flex-1 space-y-1.5">
+					<div class="w-48 space-y-1.5">
 						{#each pieData as d (d.key)}
 							<div class="flex items-center justify-between gap-2">
 								<div class="flex items-center gap-2 min-w-0">
@@ -1202,14 +1233,11 @@
 						{/each}
 					</div>
 				</div>
-			</div>
 
-			<!-- Bar chart -->
-			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
-				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">{m.doc_processor_dashboard_throughput()}</div>
-				<div class="flex items-end justify-around gap-3" style="height:120px;">
+				<!-- Throughput bars -->
+				<div class="flex items-end gap-5" style="height:120px;">
 					{#each barData as b (b.label)}
-						<div class="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
+						<div class="flex h-full w-20 flex-col items-center justify-end gap-1.5">
 							<span style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;">{b.value}</span>
 							<div
 								class="w-full rounded-t-md"
@@ -1223,27 +1251,13 @@
 		</div>
 
 		<!-- Active PDF parsing list -->
+		{#if pdfActiveParsing.length > 0}
+		<div class="w-full md:w-1/2">
 		<div class="mb-2" style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
 			{m.doc_processor_dashboard_active_pdf_parsing()}
 			<span style="color:{accent}; margin-left:4px;">({pdfStats.active})</span>
 		</div>
 
-		{#if pdfParsingLoading}
-			<div class="space-y-2">
-				{#each Array(2) as _, i}
-					<div class="rounded-xl" style="height:64px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 - i * 0.3};"></div>
-				{/each}
-			</div>
-		{:else if pdfActiveParsing.length === 0}
-			<div
-				class="flex flex-col items-center rounded-xl py-10"
-				style="background:{surface2}; border:1px solid {borderColor};"
-			>
-				<FileTextIcon class="mb-3 h-8 w-8" style="color:{textMuted}; opacity:0.4;" />
-				<p style="font-size:13px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">{m.doc_processor_dashboard_no_pdfs_parsing_right_now()}</p>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_records_currently_in_the_pdf()}</p>
-			</div>
-		{:else}
 			<div class="space-y-2">
 				{#each pdfActiveParsing as record (record.id)}
 					{@const pct = parseProgressPercent(record)}
@@ -1254,7 +1268,7 @@
 						class="rounded-xl p-3.5"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
 					>
-						<div class="flex items-center justify-between gap-3">
+						<div class="flex flex-wrap items-center justify-between gap-3">
 							<div class="flex items-center gap-2 min-w-0">
 								<span
 									style="font-family:monospace; font-size:10px; font-weight:600; color:{accent};
@@ -1356,6 +1370,7 @@
 					</div>
 				{/each}
 			</div>
+		</div>
 		{/if}
 	</section>
 
@@ -1691,7 +1706,7 @@
 			<div class="mt-4">
 
 				<!-- Loading -->
-				{#if failedLoading}
+				{#if failedLoading && !failedLoaded}
 					<div class="space-y-2">
 						{#each Array(4) as _, i}
 							<div

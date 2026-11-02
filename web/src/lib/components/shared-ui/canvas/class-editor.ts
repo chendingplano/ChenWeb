@@ -1,8 +1,6 @@
 // Logical attributes of stored classes. Element default_value wrappers are a
 // storage detail: paths and editor metadata refer to the values authors see.
 import type { Json, JsonObject, Text } from '$lib/wpi/types';
-import { commonSenseEditor } from '$lib/wpi/properties/common-sense';
-import { elementEditor } from '$lib/wpi/properties';
 
 export type ClassKind = 'element' | 'action' | 'page-layouter' | 'element-layouter';
 export type ClassTarget = { kind: ClassKind; id: string };
@@ -129,15 +127,6 @@ export function attributeTree(kind: ClassKind, row: JsonObject): AttributeNode[]
 	return nodes(logicalRow(kind, row));
 }
 
-function valueAt(kind: ClassKind, row: JsonObject, path: string): Json | undefined {
-	let value: Json | undefined = logicalRow(kind, row);
-	for (const part of segments(path)) {
-		if (value === null || typeof value !== 'object') return undefined;
-		value = (value as JsonObject)[part];
-	}
-	return value;
-}
-
 // All edits clone the row; no class copy or live instance is mutated.
 export function setAttributeDefault(
 	kind: ClassKind,
@@ -167,49 +156,16 @@ export function setAttributeDefault(
 export function definitionAt(kind: ClassKind, row: JsonObject, path: string): AttributeDefinition {
 	const [head, ...rest] = segments(path);
 	const attr = object(row[head]);
-	const property =
-		kind === 'element' && rest.length === 0
-			? elementEditor(String(row.code_module_id ?? ''))
-					.groups.flatMap((g) => g.properties)
-					.find((p) => p.name === head)
-			: undefined;
-	const options =
-		property?.options && typeof property.options !== 'function'
-			? JSON.parse(JSON.stringify(property.options))
-			: {};
-	const base: AttributeDefinition = {
-		scope:
-			CLASS_KEYS.has(head) || (kind === 'element' && attr.instance_modifiable === false)
-				? 'class'
-				: 'instance',
-		...(kind === 'element' && rest.length === 0 && attr.help_tip !== undefined
-			? { description: attr.help_tip as Text }
-			: {}),
-		value_editor: {
-			id: property?.editor ?? commonSenseEditor(head, valueAt(kind, row, path)),
-			options
-		}
-	};
-	const stored = object(object(row.attribute_definitions)[path]);
-	const storedEditor = object(stored.value_editor);
-	const id = typeof storedEditor.id === 'string' ? storedEditor.id : base.value_editor!.id;
-	const definition = {
-		...base,
-		...stored,
-		// The descriptor's fixed flag is authoritative for top-level element attributes.
-		scope:
-			CLASS_KEYS.has(head) || (kind === 'element' && rest.length === 0)
-				? base.scope
-				: (stored.scope ?? base.scope),
-		value_editor: {
-			id,
-			options: typeof storedEditor.id === 'string' ? object(storedEditor.options) : options
-		}
-	} as AttributeDefinition;
-	const description = cleanDescription(definition.description);
-	if (description === undefined) delete definition.description;
-	else definition.description = description;
-	return definition;
+	if (kind === 'element' && !CLASS_KEYS.has(head) && rest.length === 0) {
+		return {
+			...(attr.help_tip !== undefined ? { description: attr.help_tip as Text } : {}),
+			...(attr.scope !== undefined ? { scope: attr.scope as AttributeDefinition['scope'] } : {}),
+			...(attr.value_editor !== undefined
+				? { value_editor: attr.value_editor as AttributeDefinition['value_editor'] }
+				: {})
+		};
+	}
+	return object(object(row.attribute_definitions)[path]) as AttributeDefinition;
 }
 
 function cleanDescription(value: Text | undefined): Text | undefined {
@@ -223,22 +179,6 @@ function cleanDescription(value: Text | undefined): Text | undefined {
 	return Object.keys(texts).length ? texts : undefined;
 }
 
-// Store the definitions used by the form in the body itself, including legacy
-// defaults, so View JSON and Save class contain exactly the displayed settings.
-export function materializeClassDefinitions(kind: ClassKind, row: JsonObject): JsonObject {
-	const next = clone(row);
-	const definitions = object(next.attribute_definitions);
-	function visit(nodes: AttributeNode[]) {
-		for (const node of nodes) {
-			definitions[node.path] = definitionAt(kind, next, node.path) as JsonObject;
-			visit(node.children);
-		}
-	}
-	visit(attributeTree(kind, next));
-	next.attribute_definitions = definitions;
-	return next;
-}
-
 export function setAttributeDefinition(
 	kind: ClassKind,
 	row: JsonObject,
@@ -249,6 +189,9 @@ export function setAttributeDefinition(
 	const [head, ...rest] = segments(path);
 	const attr = object(next[head]);
 	if (kind === 'element' && !CLASS_KEYS.has(head) && rest.length === 0) {
+		if (patch.scope !== undefined) attr.scope = patch.scope;
+		if (patch.value_editor !== undefined)
+			attr.value_editor = clone(patch.value_editor as JsonObject);
 		if (patch.scope === 'class') {
 			if (attr.default_value === undefined || attr.default_value === null)
 				throw new Error('fixed_default');
@@ -259,6 +202,10 @@ export function setAttributeDefinition(
 			if (description === undefined) delete attr.help_tip;
 			else attr.help_tip = description as Json;
 		}
+		next[head] = attr;
+		// Top-level element definitions live together in the attribute, not in a second map.
+		if (next.attribute_definitions) delete object(next.attribute_definitions)[path];
+		return next;
 	}
 	const definitions = object(next.attribute_definitions);
 	const definition = { ...definitionAt(kind, next, path), ...patch } as JsonObject;

@@ -12,7 +12,7 @@
 	import type { ElementClassSummary } from '$lib/wpi/api';
 	import type { FlowLayouterConfig, JsonObject, PageDescriptor } from '$lib/wpi/types';
 	import { elementEditor, moduleFallbacks, page as pageDef, pane as paneDef, panel as panelDef } from '$lib/wpi/properties';
-	import { withClassEditors } from '$lib/wpi/properties/class-definition';
+	import { withClassEditors, elementClassDefinitions } from '$lib/wpi/properties/class-definition';
 	import { elementSource, pageSource, paneIsLeaf, panelSource, paneSource } from '$lib/wpi/properties/sources';
 	import PropertyEditor from '../property-editor/PropertyEditor.svelte';
 	import PaneStructure from './PaneStructure.svelte';
@@ -94,7 +94,7 @@
 			<div class="scroll">
 				<PropertyEditor
 					title={m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}
-					def={withClassEditors(elementEditor(module), elementClass?.attribute_definitions)}
+					def={withClassEditors(elementEditor(module), elementClassDefinitions(elementClass))}
 					source={elementSource(attrs, elementClass ?? null, moduleFallbacks(module), (next) => onNode(node.id, { ...node.data, attrs: next }))}
 					context={{ ...common, pane: String(node.data.pane ?? ''), flowConfig, position: positions.element }}
 					idPrefix={`prop-${node.id}`}

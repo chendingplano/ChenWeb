@@ -1,3 +1,7 @@
+export function retainUnchangedData<T>(current: T, next: T): T {
+	return JSON.stringify(current) === JSON.stringify(next) ? current : next;
+}
+
 export type StageStatus = 'pending' | 'in-progress' | 'success' | 'failed';
 
 export type StatusEntry = {
