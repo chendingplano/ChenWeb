@@ -23,7 +23,7 @@
  import { MIN_PANE_SIZE } from './pane-edit';
  import { pageDragSize, type PageSide } from './page-resize';
 
- let { darkMode, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes }: {
+ let { darkMode, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry }: {
   darkMode: boolean; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
@@ -33,6 +33,8 @@
   onPageResize: (axis: 'width' | 'height', value: number) => void;
   onPageCancel: (original: JsonObject) => void;
   onMeasure: (id: string, size: { width: number; height: number }) => void;
+  // The selected element's and pane's top-left corner, in page pixels from the page's.
+  onSelectionGeometry?: (geometry: { element?: { x: number; y: number }; pane?: { x: number; y: number } }) => void;
  } = $props();
  const actions = getNodeActions();
  let previewElement: HTMLElement;
@@ -46,9 +48,27 @@
   if (rect.bottom <= root.top || rect.top >= root.bottom || rect.right <= root.left || rect.left >= root.right) { toolbarPosition = null; return; }
   toolbarPosition = { left: Math.max(55, Math.min(size.width - 55, (rect.left + rect.width / 2 - root.left) / scale)), top: Math.max(2, (rect.top - root.top) / scale - 30) };
  }
+ let lastGeometry = '';
+ function reportGeometry() {
+  const box = previewElement?.querySelector<HTMLElement>('[data-page-box]')?.getBoundingClientRect();
+  const scale = zoom || 1;
+  const at = (el: Element | null | undefined) => {
+   if (!box || !el) return undefined;
+   const r = el.getBoundingClientRect();
+   return { x: Math.round((r.left - box.left) / scale), y: Math.round((r.top - box.top) / scale) };
+  };
+  const geometry = {
+   element: at(previewElement?.querySelector('.overlay.selected')?.parentElement),
+   pane: selectedPane ? at(previewElement?.querySelector(`[data-pane-id="${CSS.escape(selectedPane)}"]`)) : undefined
+  };
+  const key = JSON.stringify(geometry);
+  if (key === lastGeometry) return;
+  lastGeometry = key;
+  onSelectionGeometry?.(geometry);
+ }
  $effect(() => {
-  selectedId; nodes; descriptor; size; zoom; ready;
-  void tick().then(positionToolbar);
+  selectedId; selectedPane; nodes; descriptor; size; zoom; ready;
+  void tick().then(() => { positionToolbar(); reportGeometry(); });
  });
  function measurePanes() {
   requestAnimationFrame(() => {
@@ -202,7 +222,7 @@
   if (ready) fetchClasses();
  });
  onMount(() => {
-  const observer = new ResizeObserver(positionToolbar);
+  const observer = new ResizeObserver(() => { positionToolbar(); reportGeometry(); });
   observer.observe(previewElement);
   previewElement.addEventListener('scroll', positionToolbar, true);
   rt.start();

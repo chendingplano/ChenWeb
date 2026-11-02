@@ -1,7 +1,7 @@
 <script lang="ts">
  import { m } from '$lib/paraglide/messages.js';
  import GripIcon from '@lucide/svelte/icons/grip';
- import type { ConfigMode } from './PageConfigPanel.svelte';
+ import type { ConfigMode } from './WpiProperties.svelte';
  let { mode, onChoose }: { mode: ConfigMode | null; onChoose: (mode: ConfigMode) => void } = $props();
  let x = $state(0);
  let y = $state(0);

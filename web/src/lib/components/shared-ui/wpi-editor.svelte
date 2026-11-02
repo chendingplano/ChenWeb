@@ -35,7 +35,8 @@
 	import WpiApp from '$lib/wpi/WpiApp.svelte';
 	import PageControl from './canvas/PageControl.svelte';
 	import CenterPage from './canvas/CenterPage.svelte';
-	import PageConfigPanel, { type ConfigMode } from './canvas/PageConfigPanel.svelte';
+	import WpiProperties, { type ConfigMode } from './canvas/WpiProperties.svelte';
+	import { EditSession } from './canvas/edit-session';
 	import LoadPageDialog from './canvas/LoadPageDialog.svelte';
 	import CreatePageDialog from './canvas/CreatePageDialog.svelte';
 	import { newPageMetadata } from './canvas/new-page';
@@ -44,7 +45,7 @@
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 	import { elementIssueLocation, isElementNode, nodeData, nodeViewJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
 	import { resizePageDimension } from './canvas/page-resize';
-	import { addPane, deletePane, mergePane, resizePane, adjustPaneLimits, moveNode, nodesUnder, renamePane, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
+	import { addPane, deletePane, mergePane, resizePane, adjustPaneLimits, nodesUnder, renamePane, rootOf, setPageLayouter, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
@@ -129,6 +130,8 @@
 	let edges = $state<Edge[]>([]);
 	let selectedNodeId = $state<string | null>(null);
 	let measuredSizes = $state<Record<string, { width: number; height: number }>>({});
+	// Where the selected element and pane are on the page, for their property editors.
+	let selectionGeometry = $state<{ element?: { x: number; y: number }; pane?: { x: number; y: number } }>({});
 	let showPicker = $state(false);
 	let nodeTypes = $state<NodeType[]>([]);
 	// Palette folders for WPI building blocks; no node types belong to them yet.
@@ -433,6 +436,12 @@
 	const canRedo = $derived(redoStack.length > 0);
 
 	const selectedNode = $derived(nodes.find((n) => n.id === selectedNodeId) ?? null);
+	// Choosing the page, a pane or a panel leaves no node selected, so the Properties
+	// panel shows that one entity (OpenSpec wpi-property-editors, design D6).
+	function deselectNodes() {
+		selectedNodeId = null;
+		if (nodes.some((n) => n.selected)) nodes = nodes.map((n) => (n.selected ? { ...n, selected: false } : n));
+	}
 	const selectedFlowConfig = $derived.by(() => {
 		if (!loadedPage || selectedNode?.type !== 'wpi-element') return undefined;
 		const pane = String(selectedNode.data.pane ?? '');
@@ -455,8 +464,8 @@
 		if (selectedNode?.type !== 'wpi-element') return undefined;
 		const copy = selectedNode.data.class as ClassRow | undefined;
 		if (copy) {
-			const { descriptor_id, schema_version: _v, description, implement_notes: _n, code_module_id: _c, ...attributes } = copy;
-			return { descriptor_id, version: 0, status: 'active', description, attributes } as unknown as ElementClassSummary;
+			const { descriptor_id, schema_version: _v, description, implement_notes: _n, code_module_id, ...attributes } = copy;
+			return { descriptor_id, version: 0, status: 'active', description, code_module_id, attributes } as unknown as ElementClassSummary;
 		}
 		return elementClasses.find((c) => c.descriptor_id === selectedNode.data.element) ?? null;
 	});
@@ -475,7 +484,17 @@
 	}
 
 	// ── Snapshot helpers ────────────────────────────────────────────────────
+	// A property edit records one undo step per focus (OpenSpec wpi-property-editors,
+	// design D7); every other snapshot ends that step.
+	const editSession = new EditSession();
 	function takeSnapshot() {
+		editSession.interrupt();
+		pushSnapshot();
+	}
+	function recordEdit() {
+		if (editSession.takesSnapshot()) pushSnapshot();
+	}
+	function pushSnapshot() {
 		const snap: PageSnapshot = {
 			page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
 			previewSize: { ...previewSize },
@@ -488,6 +507,7 @@
 
 	function undo() {
 		if (!undoStack.length) return;
+		editSession.interrupt();
 		const [top, ...rest] = undoStack;
 		redoStack = [
 			{
@@ -507,6 +527,7 @@
 
 	function redo() {
 		if (!redoStack.length) return;
+		editSession.interrupt();
 		const [top, ...rest] = redoStack;
 		undoStack = [
 			{
@@ -693,10 +714,6 @@
 		rename(pane: string, to: string) {
 			paneEdit((e) => renamePane(e, pane, to));
 			selectedPane = to;
-		},
-		move(nodeId: string, pane: string) {
-			takeSnapshot();
-			nodes = moveNode(nodes, nodeId, pane);
 		}
 	};
 
@@ -857,7 +874,7 @@
 	function updateNodeData(nodeId: string, data: Record<string, unknown>) {
 		const node = nodes.find((n) => n.id === nodeId);
 		if (!node || JSON.stringify(node.data) === JSON.stringify(data)) return;
-		takeSnapshot();
+		recordEdit();
 		nodes = nodes.map((n) => (n.id === nodeId ? { ...n, data } : n));
 	}
 
@@ -1114,7 +1131,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview {darkMode} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; selectedNodeId = null; if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} />
+							<PagePreview {darkMode} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; deselectNodes(); if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} onSelectionGeometry={(g) => (selectionGeometry = g)} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -1149,7 +1166,7 @@
 					style="display:flex; flex-direction:column; align-items:flex-end; gap:4px; margin:6px;"
 				>
 					<div style="display:flex; align-items:center; gap:4px;">
-						{#if loadedPage}<PageControl mode={configMode} onChoose={(mode) => { configMode = mode; selectedNodeId = null; }} />{/if}
+						{#if loadedPage}<PageControl mode={configMode} onChoose={(mode) => { configMode = mode; deselectNodes(); if (mode === 'panes' && !selectedPane && loadedPage) selectedPane = rootOf(loadedPage).pane_id; }} />{/if}
 					<button
 						onclick={() => {
 							showConfig = !showConfig;
@@ -1252,27 +1269,27 @@
 				<button type="button" class="panel-toggle" onclick={togglePanel} aria-label={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{detached ? '↪' : '↗'}</button>
 			</div>
 			<div class="properties-content">
-		{#if loadedPage && configMode}
-			<PageConfigPanel page={loadedPage} mode={configMode} width={propsWidth} {selectedPane} {pageLayouters}
-				onUpdate={(page) => { takeSnapshot(); loadedPage = page; }}
-				onLayouterChange={(cls) => { paneEdit((edit) => setPageLayouter(edit, cls)); selectedPane = null; }}
-				onSelectPane={(pane) => (selectedPane = pane)}
-				onSplit={paneActions.split} onMerge={paneActions.merge} onAdd={paneActions.add} onDelete={paneActions.remove} onRename={paneActions.rename} />
-		{:else}
+		{#if selectedNode && selectedNode.type !== 'wpi-element'}
 		<PropertiesPanel
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
-			elementClass={selectedElementClass}
-			flowConfig={selectedFlowConfig}
-			{triggerActions}
 			measuredSize={selectedNodeId ? measuredSizes[selectedNodeId] : undefined}
-			panes={loadedPage && selectedNode?.type === 'wpi-element' ? leaves : undefined}
-			onMovePane={paneActions.move}
 			nodeTab
 			width={propsWidth}
 			{darkMode}
 			onUpdate={updateNodeData}
 		/>
+		{:else}
+		<WpiProperties page={loadedPage} mode={configMode} {selectedPane} node={selectedNode}
+			elementClass={selectedElementClass} flowConfig={selectedFlowConfig} {triggerActions} {pageLayouters}
+			positions={selectionGeometry}
+			onPage={(page) => { recordEdit(); loadedPage = page; }}
+			onNode={updateNodeData}
+			onLayouter={(cls) => { paneEdit((edit) => setPageLayouter(edit, cls)); selectedPane = null; }}
+			onRename={paneActions.rename}
+			onSelectPane={(pane) => (selectedPane = pane)}
+			onSplit={paneActions.split} onMerge={paneActions.merge} onAdd={paneActions.add} onDelete={paneActions.remove}
+			onEditStart={() => editSession.start()} onEditEnd={() => editSession.end()} />
 		{/if}
 			</div>
 			{#if detached}

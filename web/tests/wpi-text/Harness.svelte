@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { AppRuntime, setRuntime } from '../../src/lib/wpi/runtime.svelte';
 	import PanelView from '../../src/lib/wpi/PanelView.svelte';
-	import TextProperties from '../../src/lib/components/shared-ui/canvas/TextProperties.svelte';
+	import PropertyEditor from '../../src/lib/components/shared-ui/property-editor/PropertyEditor.svelte';
+	import { elementEditor, moduleFallbacks } from '../../src/lib/wpi/properties';
+	import { elementSource } from '../../src/lib/wpi/properties/sources';
 	import { overwriteGetLocale } from '../../src/lib/paraglide/runtime';
 	import bundleData from './bundle.json';
 	const cls = bundleData.pages['text-r2-example'].panels.main.elem_list[0].class;
 	import type { Bundle, JsonObject } from '../../src/lib/wpi/types';
-	import type { ElementAttribute } from '../../src/lib/wpi/api';
+	import type { ElementAttribute, ElementClassSummary } from '../../src/lib/wpi/api';
 	let locale = $state<'en' | 'zh-cn'>('en');
 	overwriteGetLocale(() => locale);
 	const bundle = $state(bundleData as unknown as Bundle);
@@ -45,6 +47,8 @@
 		future_option: { help_tip: { en: 'Future option', 'zh-cn': '未来选项' } },
 		max_height: { default_value: '150px' }
 	} as Record<string, ElementAttribute>;
+	const summary = { descriptor_id, version: 1, status: 'active', description, code_module_id, attributes: definitions } as unknown as ElementClassSummary;
+	const flowConfig = { max_elem_width: '300px', max_row_height: '200px' };
 	function edit(v: JsonObject) {
 		attrs = v;
 		bundle.pages['text-r2-example'].panels!.main.elem_list![0] = {
@@ -86,7 +90,13 @@
 	</div>
 </div>
 <div id="editor" style="width:340px">
-	<TextProperties attributes={definitions} {attrs} pane="main" flowConfig={{ max_elem_width: '300px', max_row_height: '200px' }} onChange={edit} />
+	<PropertyEditor
+		title="text"
+		def={elementEditor('text')}
+		source={elementSource(attrs, summary, moduleFallbacks('text'), edit)}
+		context={{ triggerActions: [], pageLayouters: [], pane: 'main', flowConfig }}
+		idPrefix="text-prop"
+	/>
 </div>
 <pre id="attrs">{JSON.stringify(attrs)}</pre>
 

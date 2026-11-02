@@ -4,7 +4,7 @@
  import { setNodeActions } from '../../src/lib/components/shared-ui/canvas/node-actions';
  import WpiApp from '../../src/lib/wpi/WpiApp.svelte';
  import type { Bundle } from '../../src/lib/wpi/types';
- import PageConfigPanel from '../../src/lib/components/shared-ui/canvas/PageConfigPanel.svelte';
+ import WpiProperties from '../../src/lib/components/shared-ui/canvas/WpiProperties.svelte';
 	import PagePreview from '../../src/lib/components/shared-ui/canvas/PagePreview.svelte';
 	import { overwriteGetLocale } from '../../src/lib/paraglide/runtime';
 	import type { JsonObject } from '../../src/lib/wpi/types';
@@ -52,21 +52,11 @@
 <button id="locale" onclick={() => (locale = locale === 'en' ? 'zh-cn' : 'en')}>Locale</button>
 <button id="mode" onclick={() => (mode = mode === 'panel' ? 'panes' : 'panel')}>Mode</button>
 <button id="theme" onclick={() => (darkMode = !darkMode)}>Theme</button>
-<PageConfigPanel
-	{page}
-	{mode}
-	width={400}
-	selectedPane="main"
-	pageLayouters={[]}
-	onUpdate={(value) => (page = value)}
-	onLayouterChange={() => {}}
-	onSelectPane={() => {}}
-	onSplit={() => {}}
-	onAdd={() => {}}
-	onDelete={() => {}}
-	onRename={() => {}}
-	onMerge={() => {}}
-/>
+<div style="width:400px; height:640px">
+	<WpiProperties {page} {mode} selectedPane="main" node={null} elementClass={undefined} triggerActions={[]} pageLayouters={[]} positions={{}}
+		onPage={(value) => (page = value)} onNode={noop} onLayouter={noop} onRename={noop} onSelectPane={noop}
+		onSplit={noop} onAdd={noop} onMerge={noop} onDelete={noop} onEditStart={noop} onEditEnd={noop} />
+</div>
 {#each rootFixtures as fixture}
  <div data-fixture={fixture.id} style="width:600px; height:300px"><WpiApp bundle={fixture.bundle} editorPreview /></div>
 {/each}

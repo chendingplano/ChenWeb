@@ -1,0 +1,129 @@
+/* Shared look of the value editors (OpenSpec wpi-property-editors). Colours come
+   from the canvas theme variables, with plain fallbacks outside the canvas. */
+.ve-input {
+	display: block;
+	width: 100%;
+	min-width: 0;
+	box-sizing: border-box;
+	border: 1px solid var(--cv-border, #d1d5db);
+	background: var(--cv-surface, transparent);
+	color: var(--cv-text, inherit);
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 11px;
+	margin: 0;
+}
+textarea.ve-input {
+	resize: vertical;
+	field-sizing: content;
+}
+.ve-input[readonly] {
+	background: transparent;
+	color: var(--cv-text-2, inherit);
+}
+.ve-input[aria-invalid='true'] {
+	border-color: #dc2626;
+}
+.ve-error {
+	font-size: 10px;
+	color: #dc2626;
+	margin: 3px 0 0;
+}
+.ve-sub {
+	display: block;
+	font-size: 10px;
+	color: var(--cv-text-muted, inherit);
+	margin: 4px 0 2px;
+}
+.ve-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.ve-row + .ve-row {
+	margin-top: 4px;
+}
+.ve-grid {
+	display: grid;
+	gap: 3px;
+	margin-bottom: 4px;
+}
+.ve-button {
+	flex: none;
+	border: 1px solid var(--cv-border, #d1d5db);
+	border-radius: 4px;
+	background: var(--cv-surface, transparent);
+	color: var(--cv-text, inherit);
+	font-size: 10px;
+	padding: 3px 7px;
+	cursor: pointer;
+}
+.ve-button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.ve-switch {
+	appearance: none;
+	width: 30px;
+	height: 17px;
+	flex: none;
+	padding: 0;
+	margin: 0;
+	border-radius: 999px;
+	background: var(--cv-border, #d1d5db);
+	cursor: pointer;
+}
+.ve-switch::before {
+	content: '';
+	display: block;
+	width: 13px;
+	height: 13px;
+	margin: 2px;
+	border-radius: 50%;
+	background: var(--cv-text, #111827);
+	transition: transform 0.15s;
+}
+.ve-switch:checked {
+	background: #6366f1;
+}
+.ve-switch:checked::before {
+	transform: translateX(13px);
+	background: white;
+}
+.ve-switch:focus-visible {
+	outline: 2px solid #818cf8;
+	outline-offset: 2px;
+}
+.ve-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.ve-list li {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11px;
+	color: var(--cv-text, inherit);
+	margin-bottom: 2px;
+}
+.ve-list label {
+	flex: 1;
+}
+.ve-color {
+	width: 34px;
+	height: 26px;
+	flex: none;
+	padding: 2px;
+	margin: 0;
+	cursor: pointer;
+	border: 1px solid var(--cv-border, #d1d5db);
+	border-radius: 4px;
+	background: var(--cv-surface, transparent);
+}
+.ve-variant {
+	width: 38px;
+	flex: none;
+	font-size: 10px;
+	color: var(--cv-text-muted, inherit);
+}
