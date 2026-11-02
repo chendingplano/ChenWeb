@@ -46,7 +46,7 @@
   const rect = target.getBoundingClientRect();
   const scale = zoom || 1;
   if (rect.bottom <= root.top || rect.top >= root.bottom || rect.right <= root.left || rect.left >= root.right) { toolbarPosition = null; return; }
-  toolbarPosition = { left: Math.max(55, Math.min(size.width - 55, (rect.left + rect.width / 2 - root.left) / scale)), top: Math.max(2, (rect.top - root.top) / scale - 30) };
+  toolbarPosition = { left: Math.max(55, Math.min(size.width - 55, (rect.left + rect.width / 2 - root.left) / scale)), top: (rect.top - root.top) / scale - 4 };
  }
  let lastGeometry = '';
  function reportGeometry() {
@@ -286,6 +286,8 @@
     {#each ['bottom', 'right'] as side}
      <div role="separator" aria-label={m.wpi_resize_preview()} aria-orientation={side === 'left' || side === 'right' ? 'vertical' : 'horizontal'} class="outer-edge nodrag nopan {side}" onpointerdown={(event) => startOuter(event, side as Side)} onpointermove={moveOuter} onpointerup={(event) => endOuter(event)} onpointercancel={(event) => endOuter(event, true)}></div>
     {/each}
+ <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => endResize(event)} onpointercancel={(event) => endResize(event, true)} onkeydown={resizeKey}></button>
+</div>
  {#if actions && selectedId && toolbarPosition}
   <div class="element-toolbar nodrag nopan" role="group" aria-label={m.wpi_element_actions()} style:left="{toolbarPosition.left}px" style:top="{toolbarPosition.top}px" onpointerdown={(event) => event.stopPropagation()}>
    {#if actions.editClass}<button title={m.basenode_edit_class()} aria-label={m.basenode_edit_class()} onclick={(event) => { event.stopPropagation(); actions.editClass?.(selectedId!); }}><PencilIcon class="w-3 h-3" /></button>{/if}
@@ -293,8 +295,6 @@
    <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
   </div>
  {/if}
- <button type="button" class="resize-handle nodrag nopan select-none" aria-label={m.wpi_resize_preview()} title={m.wpi_resize_preview()} onpointerdown={startResize} onpointermove={resize} onpointerup={(event) => endResize(event)} onpointercancel={(event) => endResize(event, true)} onkeydown={resizeKey}></button>
-</div>
 {#if resizeOutline}
  <div class="resize-outline" style:width="{resizeOutline.width}px" style:height="{resizeOutline.height}px" aria-hidden="true"></div>
 {/if}
@@ -303,7 +303,7 @@
  .page-status { position:absolute; left:0; top:-32px; height:32px; display:flex; align-items:center; gap:16px; padding:0 10px; box-sizing:border-box; overflow:auto; white-space:nowrap; background:var(--cv-surface); color:var(--cv-text); border:1px solid var(--cv-border); font-size:11px; pointer-events:auto; }
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
  .resize-outline { position:absolute; left:0; top:0; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:6; }
- .element-toolbar { position:absolute; z-index:10; transform:translateX(-50%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }
+ .element-toolbar { position:absolute; z-index:10; transform:translate(-50%, -100%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }
  .element-toolbar button { background:none; border:0; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; display:flex; align-items:center; }
  .element-toolbar button:last-child { color:#ef4444; }
  .resize-handle { position:absolute; right:0; bottom:0; width:18px; height:18px; z-index:5; border:0; background: linear-gradient(135deg, transparent 45%, var(--cv-accent) 46%, var(--cv-accent) 52%, transparent 53%, transparent 64%, var(--cv-accent) 65%, var(--cv-accent) 71%, transparent 72%); cursor:nwse-resize; touch-action:none; }
