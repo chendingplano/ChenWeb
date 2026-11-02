@@ -27,4 +27,8 @@ describe('drawingEditor', () => {
 		expect(drawingEditor('slider')).toBeUndefined();
 	});
 
+	test('emoji-picker resolves to its own editor', () => {
+		expect(drawingEditor('emoji-picker')).toBe('emoji-picker');
+		expect(valueEditors['emoji-picker']).toBeDefined();
+	});
 });

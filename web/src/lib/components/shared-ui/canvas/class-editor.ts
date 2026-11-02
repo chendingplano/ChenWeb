@@ -39,6 +39,7 @@ export const VALUE_EDITOR_IDS = [
 	'font-picker',
 	'alignment-picker',
 	'icon-picker',
+	'emoji-picker',
 	'button-type-picker',
 	'database-picker',
 	'schema-picker',

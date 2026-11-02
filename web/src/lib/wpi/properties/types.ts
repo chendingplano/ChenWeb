@@ -17,6 +17,7 @@ export type ValueEditorId =
 	| 'color'
 	| 'length'
 	| 'icon-picker'
+	| 'emoji-picker'
 	| 'table-picker'
 	| 'field-picker'
 	| 'data-source'

@@ -16,6 +16,7 @@ const drawn = new Set<string>([
 	'color',
 	'length',
 	'icon-picker',
+	'emoji-picker',
 	'table-picker',
 	'field-picker',
 	'data-source',

@@ -2,13 +2,13 @@
 
 ### Requirement: Value-editor element classes
 The system SHALL store one element class in `kb.wpi_descriptors` for each value editor in
-devdoc 2026102701 §1.3.9, 28 in all, each naming code module `value-editor`. The following
-23 classes SHALL be `active`:
+devdoc 2026102701 §1.3.9, 29 in all, each naming code module `value-editor`. The following
+24 classes SHALL be `active`:
 - the built editors: `text-editor`, `multiline-text-editor`, `localized-text-editor`,
   `number-editor`, `switch`, `value-picker`, `ordered-multi-picker`, `string-list`,
   `color-picker`, `length-editor`, `data-source-editor`, `column-list-editor`,
   `validation-editor`, `read-only-value`, `json-editor`;
-- the variants: `font-picker`, `alignment-picker`, `icon-picker`, `action-picker`,
+- the variants: `font-picker`, `alignment-picker`, `icon-picker`, `emoji-picker`, `action-picker`,
   `layouter-picker`, `table-picker`, `field-picker`, `sort-order-editor`.
 
 `date-picker`, `time-picker`, `button-type-picker`, `database-picker` and `schema-picker`
@@ -34,7 +34,7 @@ Code module `value-editor` SHALL require `editor`, `label` and `binding_mode`. I
 accept `data_binding`, `editor_options` and the shared size attributes. Each class SHALL give
 `label` a default (the editor's name) and leave `data_binding` without one, so a dropped
 instance is drawn at once and keeps its value locally until it is bound. `editor` SHALL be one of the
-28 value-editor IDs. In an active class or a page instance, it SHALL be one of the 23 that
+29 value-editor IDs. In an active class or a page instance, it SHALL be one of the 24 that
 are drawn (the built editors and the variants). `editor_options` SHALL be a JSON object.
 Validation SHALL report any other value as an issue at its path.
 
@@ -65,6 +65,8 @@ the editor.
   and `layouter-picker` every page layouter class.
 - `icon-picker` SHALL draw the icon library's search picker, in the page's language. It
   SHALL store the chosen icon's name and SHALL show the stored icon.
+- `emoji-picker` SHALL draw the shared emoji search picker in the page's language and SHALL
+  store and display the complete Unicode emoji string.
 - `table-picker`, `field-picker` and `sort-order-editor` SHALL draw the Pick Table, Pick
   Fields and sort-order controls. `field-picker` SHALL list the fields of
   `editor_options.table`.
@@ -93,6 +95,10 @@ the editor.
 - **WHEN** an `icon-picker` instance is bound read-write to `$input_doc.icon`, and the user types `reload` (or `刷新`) and picks the refresh icon
 - **THEN** the input doc becomes `{"icon": "refresh-cw"}`, and the picker shows that icon
 
+#### Scenario: Pick an emoji by meaning
+- **WHEN** an `emoji-picker` instance is bound read-write to `$input_doc.emoji` and a user finds `🎉` using `庆祝` and selects it
+- **THEN** the input doc becomes `{"emoji": "🎉"}` and the picker shows that emoji
+
 #### Scenario: Font family rule
 - **WHEN** the user types `Arial; color: red` into a bound `font-picker`
 - **THEN** the value is not applied, and the editor says why
@@ -120,7 +126,7 @@ drafts marked as drafts. ELEMENTS SHALL list all other element classes.
 
 #### Scenario: Folder contents
 - **WHEN** the editor opens and the author unfolds VALUE EDITORS
-- **THEN** it lists the 28 value-editor classes, with the five unbuilt ones marked as drafts, and ELEMENTS does not list them
+- **THEN** it lists the 29 value-editor classes, with the five unbuilt ones marked as drafts, and ELEMENTS does not list them
 
 #### Scenario: Folder order
 - **WHEN** the editor opens

@@ -63,7 +63,8 @@ Each property SHALL be edited with a reusable value editor: text, multi-line tex
 multi-picker, color picker (none, one color, or separate light and dark colors), length (`auto` and
 `elastic` where the property allows them, or a non-negative number in px, rem, em or % as the
 property allows; a bare number means px), data source, sort order, column list, validation rules,
-read-only value or JSON. A property with a fixed set of values SHALL use a pulldown, never a text
+read-only value, emoji picker or JSON. The emoji picker SHALL search the shared local library in
+English or Chinese and store a Unicode string. A property with a fixed set of values SHALL use a pulldown, never a text
 field. A value editor SHALL apply only values that are valid for the property. Invalid typed
 text SHALL be kept, unapplied and unflagged, while the field has focus, so a half-typed value is
 not reported. When the author leaves the field (or presses Enter) with invalid text, the text
@@ -75,6 +76,10 @@ example a width above `max_width`) SHALL be shown while the value is applied.
 #### Scenario: Length typed without a unit
 - **WHEN** the author types `240` into a pane's `width`
 - **THEN** the pane's width becomes `240px` and the preview shows it at once
+
+#### Scenario: Emoji property selection
+- **WHEN** an author selects `🎉` in an `emoji-picker` property editor
+- **THEN** the property stores the full Unicode string and the picker displays it
 
 #### Scenario: Invalid length not applied
 - **WHEN** the author types `12xy` into a page's `min_width` and leaves the field

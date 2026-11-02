@@ -6,6 +6,7 @@ import ColorPicker from '../value-editors/ColorPicker.svelte';
 import ColumnListEditor from '../value-editors/ColumnListEditor.svelte';
 import DataSourceEditor from '../value-editors/DataSourceEditor.svelte';
 import FieldPickerEditor from '../value-editors/FieldPickerEditor.svelte';
+import EmojiPickerEditor from '../value-editors/EmojiPickerEditor.svelte';
 import IconPickerEditor from '../value-editors/IconPickerEditor.svelte';
 import JsonEditor from '../value-editors/JsonEditor.svelte';
 import LengthEditor from '../value-editors/LengthEditor.svelte';
@@ -34,6 +35,7 @@ export const valueEditors: Record<ValueEditorId, Component<ValueEditorProps>> = 
 	color: ColorPicker,
 	length: LengthEditor,
 	'icon-picker': IconPickerEditor,
+	'emoji-picker': EmojiPickerEditor,
 	'table-picker': TablePickerEditor,
 	'field-picker': FieldPickerEditor,
 	'data-source': DataSourceEditor,

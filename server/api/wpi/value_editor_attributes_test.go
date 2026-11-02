@@ -11,6 +11,7 @@ func TestValueEditorAttributes(t *testing.T) {
 	for _, tc := range []struct{ attrs, want string }{
 		{`"editor": "color", "label": {"en": "Accent", "zh-cn": "强调色"}, "data_binding": "$input_doc.theme.accent", "binding_mode": "read-write", "editor_options": {"theme": true}`, ""},
 		{`"editor": "icon-picker", "binding_mode": "read-only"`, ""},
+		{`"editor": "emoji-picker", "binding_mode": "read-write"`, ""},
 		{`"editor": "slider"`, "/editor"},
 		{`"editor": "date-picker"`, "/editor"},
 		{`"editor_options": ["a", "b"]`, "/editor_options"},
@@ -73,7 +74,7 @@ func TestValueEditorPages(t *testing.T) {
 // offers: drafts for those without code, valid active rows whose attributes the
 // module supports for the rest, and their instances run with the defaults.
 func TestSeedValueEditorClasses(t *testing.T) {
-	rows := regexp.MustCompile(`(?s)\('([a-z0-9-]+)', '(active|draft)', \$wpi\$(\{.*?\})\$wpi\$`).FindAllStringSubmatch(readFile(t, valueEditorElementsMigration), -1)
+	rows := regexp.MustCompile(`(?s)\('([a-z0-9-]+)', '(active|draft)', \$wpi\$(\{.*?\})\$wpi\$`).FindAllStringSubmatch(readFile(t, valueEditorElementsMigration)+readFile(t, "../../../project_migrations/20261102000004_wpi_emoji_picker.sql"), -1)
 	if len(rows) != len(classValueEditorIDs) {
 		t.Fatalf("found %d classes, want %d", len(rows), len(classValueEditorIDs))
 	}
