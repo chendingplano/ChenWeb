@@ -23,8 +23,8 @@
  import { MIN_PANE_SIZE } from './pane-edit';
  import { pageDragSize, type PageSide } from './page-resize';
 
- let { darkMode, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry }: {
-  darkMode: boolean; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
+ let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry }: {
+  darkMode: boolean; pageName: string; dirty: boolean; openedAt: number | null; autoSavedAt: number | null; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
@@ -268,6 +268,12 @@
  </section>
 {/snippet}
 
+<div class="page-status nodrag nopan select-text" style:width="{size.width}px" data-wpi-page-status>
+ <span>{m.wpi_status_page_name({ name: pageName })}</span>
+ <span>{dirty ? m.wpi_status_dirty() : m.wpi_status_clean()}</span>
+ <span>{m.wpi_status_auto_saved({ time: autoSavedAt ? new Date(autoSavedAt).toLocaleString() : m.wpi_status_never() })}</span>
+ <span>{m.wpi_status_opened({ time: openedAt ? new Date(openedAt).toLocaleString() : m.wpi_status_never() })}</span>
+</div>
 <div bind:this={previewElement} class="preview select-text" style="width:{size.width}px; height:{size.height}px; color-scheme:{darkMode ? 'dark' : 'light'}" data-wpi-page-preview>
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
@@ -294,6 +300,7 @@
 {/if}
 
 <style>
+ .page-status { position:absolute; left:0; top:-32px; height:32px; display:flex; align-items:center; gap:16px; padding:0 10px; box-sizing:border-box; overflow:auto; white-space:nowrap; background:var(--cv-surface); color:var(--cv-text); border:1px solid var(--cv-border); font-size:11px; pointer-events:auto; }
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
  .resize-outline { position:absolute; left:0; top:0; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:6; }
  .element-toolbar { position:absolute; z-index:10; transform:translateX(-50%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }

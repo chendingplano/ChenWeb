@@ -326,7 +326,7 @@
 	type CanvasTab = {
 		id: number; flow: Flow | null; savedName: string; snapshot: PageSnapshot; saved: PageSnapshot | null;
 		undo: PageSnapshot[]; redo: PageSnapshot[]; viewport: { x: number; y: number; zoom: number };
-		selected: string | null; config: ConfigMode | null; dirty: boolean;
+		selected: string | null; config: ConfigMode | null; dirty: boolean; openedAt: number; autoSavedAt: number | null;
 	};
 	let tabs = $state<CanvasTab[]>([]);
 	let nextTabId = 1;
@@ -360,7 +360,7 @@
 		lastRecovery.set(id, Date.now());
 		if (recoveryID) { recoveryIDs.set(id, recoveryID); claimedRecoveryIDs.add(recoveryID); }
 		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.wpi_unnamed()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false };
+		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false, openedAt: Date.now(), autoSavedAt: null };
 		tabs = [...tabs, tab];
 		switchTab(id);
 		if (page) {
@@ -413,7 +413,7 @@
 			const recovery = pageJson(tab.snapshot.nodes, { ...page, descriptor_id: id });
 			if (!needsRecovery(recovery, recoveryContent.get(tab.id))) continue;
 			lastRecovery.set(tab.id, Date.now());
-			const pending = savePageRecovery(id, version, recovery, version === 0 && !claimedRecoveryIDs.has(id)).then(() => { if (version === 0) claimedRecoveryIDs.add(id); if (tabs.some((item) => item.id === tab.id)) recoveryContent.set(tab.id, JSON.stringify(recovery)); lastRecovery.set(tab.id, Date.now()); }).catch((error) => {
+			const pending = savePageRecovery(id, version, recovery, version === 0 && !claimedRecoveryIDs.has(id)).then(() => { if (version === 0) claimedRecoveryIDs.add(id); if (tabs.some((item) => item.id === tab.id)) { recoveryContent.set(tab.id, JSON.stringify(recovery)); tabs = tabs.map((item) => item.id === tab.id ? { ...item, autoSavedAt: Date.now() } : item); } lastRecovery.set(tab.id, Date.now()); }).catch((error) => {
 				if (version === 0 && !page.descriptor_id && error instanceof WpiError && error.status === 409) recoveryIDs.delete(tab.id);
 				console.error('WPI auto-save failed', error); showError(m.wpi_autosave_failed());
 			}).finally(() => recovering.delete(tab.id));
@@ -1131,7 +1131,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview {darkMode} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; deselectNodes(); if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} onSelectionGeometry={(g) => (selectionGeometry = g)} />
+							<PagePreview {darkMode} pageName={tabTitle(tabs.find((tab) => tab.id === activeTabId)!)} dirty={isDirty} openedAt={tabs.find((tab) => tab.id === activeTabId)?.openedAt ?? null} autoSavedAt={tabs.find((tab) => tab.id === activeTabId)?.autoSavedAt ?? null} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; }} onSelectPane={(pane) => { selectedPane = pane; deselectNodes(); if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} onSelectionGeometry={(g) => (selectionGeometry = g)} />
 						{/key}
 					</ViewportPortal>
 				{/if}
