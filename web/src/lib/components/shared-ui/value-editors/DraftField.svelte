@@ -1,8 +1,9 @@
 <!-- A text field whose text stays as typed while the author edits it. Valid
      text is applied at once (or on leaving the field with commitOnBlur).
-     Invalid text is not applied; a half-typed value is not flagged while the
-     author types, but on leaving the field it shows the stored value again
-     and says why the text was not applied (OpenSpec wpi-property-editors, D4). -->
+     Invalid text is never applied. A half-typed value is not flagged while the
+     author types; on leaving the field (or Enter) the text stays, and under it
+     the reason with Abandon Edit (show the stored value again) and Stay Edit
+     (back into the field) (OpenSpec wpi-property-editors, D4). -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
@@ -45,6 +46,7 @@
 	let error = $state<string | null>(null);
 	let rejected = $state(false);
 	let emitted = '';
+	let field = $state<HTMLInputElement | HTMLTextAreaElement>();
 
 	// A change from elsewhere (undo, the canvas) replaces the text being typed.
 	$effect(() => {
@@ -53,6 +55,7 @@
 			if (draft !== null && key !== emitted) {
 				draft = null;
 				error = null;
+				rejected = false;
 			}
 		});
 	});
@@ -74,17 +77,31 @@
 		error = 'error' in r ? r.error : null;
 		if ('value' in r && !commitOnBlur) emit(r.value);
 	}
+	// Leaving with invalid text keeps it, unapplied, until the author abandons or fixes it.
 	function leave() {
 		if (draft === null) return;
 		const r = read(draft);
-		if ('error' in r) rejected = true;
-		else if (commitOnBlur) emit(r.value);
+		if ('error' in r) {
+			rejected = true;
+			return;
+		}
+		if (commitOnBlur) emit(r.value);
 		draft = null;
+	}
+	function abandon() {
+		draft = null;
+		error = null;
+		rejected = false;
+	}
+	function stay() {
+		rejected = false;
+		field?.focus();
 	}
 </script>
 
 {#if multiline}
 	<textarea
+		bind:this={field}
 		{id}
 		class="ve-input"
 		{rows}
@@ -98,6 +115,7 @@
 	></textarea>
 {:else}
 	<input
+		bind:this={field}
 		{id}
 		class="ve-input"
 		type="text"
@@ -117,4 +135,12 @@
 		}}
 	/>
 {/if}
-{#if rejected && error}<p id={`${id}-error`} class="ve-error" role="alert">{error}&nbsp;{m.wpi_flow_value_not_applied()}</p>{/if}
+{#if rejected && error}
+	<div id={`${id}-error`} role="alert">
+		<p class="ve-error">{error}&nbsp;{m.wpi_prop_not_applied()}</p>
+		<div class="ve-row" style="margin-top:4px">
+			<button type="button" class="ve-button" onclick={abandon}>{m.wpi_prop_abandon_edit()}</button>
+			<button type="button" class="ve-button" onclick={stay}>{m.wpi_prop_stay_edit()}</button>
+		</div>
+	</div>
+{/if}

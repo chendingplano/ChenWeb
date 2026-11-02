@@ -154,9 +154,17 @@ with tempfile.TemporaryFile(mode='w+') as log:
    config = json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
    assert config['row_separator'] == 'bold_dash_line'
    gap = page.locator('#prop-panel-main-row_gap'); gap.fill('-1px'); gap.blur()
-   expect(gap).to_have_value('0.75rem')
-   expect(page.locator('#prop-panel-main-row_gap-error')).to_be_visible()
+   error = page.locator('#prop-panel-main-row_gap-error')
+   expect(error).to_be_visible()
+   expect(gap).to_have_value('-1px')
    assert 'row_gap' not in json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']
+   error.get_by_role('button', name='Stay Edit').click()
+   expect(gap).to_be_focused()
+   expect(error).to_have_count(0)
+   gap.blur()
+   error.get_by_role('button', name='Abandon Edit').click()
+   expect(gap).to_have_value('0.75rem')
+   expect(error).to_have_count(0)
    gap.fill('1rem'); gap.blur()
    assert json.loads(page.locator('#page').inner_text())['panels']['main']['elem_layouter']['config']['row_gap'] == '1rem'
    page.locator('#locale').click()

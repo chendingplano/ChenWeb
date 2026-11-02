@@ -115,8 +115,11 @@ length; name ends `color` → color picker; name is `label`,
 undefined) }`. `undefined` means unset. Editors that hold typed text (text, length, number,
 JSON, localized) keep the text as typed while focused and call `onChange` only with values that
 pass the editor's own grammar and the definition's `validate`. Invalid text is not flagged while
-the author types (a half-typed `200p` on the way to `200px` is normal); on blur the editor restores
-the stored value and shows why the text was not applied (`aria-invalid`, `role="alert"`).
+the author types (a half-typed `200p` on the way to `200px` is normal). On blur or Enter with
+invalid text, the text stays in the field, unapplied, and under it the editor shows why
+(`aria-invalid`, `role="alert"`) with two buttons (user decision, 2026-11-02): *Abandon Edit*
+drops the typed text and shows the stored value; *Stay Edit* hides the message and puts focus
+back in the field. A change from elsewhere (undo, the canvas) also drops the typed text.
 Warnings (`warn`) describe an applied value and are shown at once (`role="status"`). Built: text, multiline-text,
 localized-text, number, switch, value-picker, ordered-multi-picker, string-list (comma-separated
 words: keywords, tags, access controls), color-picker, length, data-source (uses the existing

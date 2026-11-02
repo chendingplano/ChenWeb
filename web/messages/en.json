@@ -8237,5 +8237,8 @@
 	"wpi_prop_vert_scrollbar": "Vertical scroll bar",
 	"wpi_prop_whole_number": "Enter a whole number. {limits}",
 	"wpi_prop_yes": "Yes",
-	"wpi_prop_other_element": "This element's code module does not use these; they are kept and reported as warnings when the page is saved."
+	"wpi_prop_other_element": "This element's code module does not use these; they are kept and reported as warnings when the page is saved.",
+	"wpi_prop_not_applied": "This value is not applied.",
+	"wpi_prop_abandon_edit": "Abandon Edit",
+	"wpi_prop_stay_edit": "Stay Edit"
 }

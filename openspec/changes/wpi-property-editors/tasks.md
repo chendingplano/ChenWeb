@@ -33,3 +33,7 @@
 - [x] 5.1 Code module documents: a *Property editor* table (group, attribute, value editor, data source) in each element module document and in `interpreter-page.md`, `interpreter-layouter-page.md`, `interpreter-layouter-flow.md`
 - [x] 5.2 Reusable-module catalogue entries (design D9)
 - [x] 5.3 Devdoc 2026102701: §1.2 right panel, §1.3.1 files, §1.3.3 undo, §1.3.9 (drawn from definitions, no Svelte file per entity; help tip icon; undo per focus), §1.4
+
+## 6. Invalid values (user decision, 2026-11-02)
+
+- [x] 6.1 `DraftField.svelte`: on leaving a field with invalid text keep the text, show the reason under the value editor with *Abandon Edit* and *Stay Edit*; Paraglide keys; harness tests and spec updated

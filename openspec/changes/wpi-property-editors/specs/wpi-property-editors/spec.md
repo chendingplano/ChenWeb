@@ -66,8 +66,10 @@ property allows; a bare number means px), data source, sort order, column list, 
 read-only value or JSON. A property with a fixed set of values SHALL use a pulldown, never a text
 field. A value editor SHALL apply only values that are valid for the property. Invalid typed
 text SHALL be kept, unapplied and unflagged, while the field has focus, so a half-typed value is
-not reported; on leaving the field the editor SHALL restore the stored value and say why the text
-was not applied. A warning that does not make the value invalid (for
+not reported. When the author leaves the field (or presses Enter) with invalid text, the text
+SHALL stay in the field, still unapplied, and under the value editor the editor SHALL show why it
+is invalid and two buttons: *Abandon Edit*, which shows the stored value again, and *Stay Edit*,
+which returns focus to the field to continue editing. A warning that does not make the value invalid (for
 example a width above `max_width`) SHALL be shown while the value is applied.
 
 #### Scenario: Length typed without a unit
@@ -76,7 +78,13 @@ example a width above `max_width`) SHALL be shown while the value is applied.
 
 #### Scenario: Invalid length not applied
 - **WHEN** the author types `12xy` into a page's `min_width` and leaves the field
-- **THEN** the page keeps its previous `min_width`, and the editor says the value is not a valid length and was not applied
+- **THEN** the page keeps its previous `min_width`, the field still shows `12xy`, and under it the editor says the value is not a valid length and is not applied, with the buttons Abandon Edit and Stay Edit
+
+#### Scenario: Abandon or continue an invalid edit
+- **WHEN** the author clicks Stay Edit under the message for `12xy`
+- **THEN** the field has focus with `12xy` in it and the message is gone until the author leaves the field again
+- **WHEN** the author then leaves the field and clicks Abandon Edit
+- **THEN** the field shows the stored `min_width` and the message is gone
 
 #### Scenario: Pulldown for a fixed set of values
 - **WHEN** the author edits a pane's `hori_align`

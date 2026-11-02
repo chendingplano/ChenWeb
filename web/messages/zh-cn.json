@@ -8237,5 +8237,8 @@
 	"wpi_prop_vert_scrollbar": "垂直滚动条",
 	"wpi_prop_whole_number": "请输入整数。{limits}",
 	"wpi_prop_yes": "是",
-	"wpi_prop_other_element": "此元素的代码模块不使用这些属性；它们会被保留，并在保存页面时作为警告报告。"
+	"wpi_prop_other_element": "此元素的代码模块不使用这些属性；它们会被保留，并在保存页面时作为警告报告。",
+	"wpi_prop_not_applied": "此值未应用。",
+	"wpi_prop_abandon_edit": "放弃编辑",
+	"wpi_prop_stay_edit": "继续编辑"
 }
