@@ -10,7 +10,8 @@ share one class-body draft. JSON Apply preserves descriptor identity and schema
 version; Save class writes the body. Properties retains instance/page JSON.
 
 Attribute names are disclosure buttons in a recursive tree. Their inline forms
-edit name, description, class/instance scope, default value, value editor and its
+edit name, description, a Class attribute/Instance attribute scope dropdown,
+default value, value editor and its
 configuration. Descriptor IDs and schema versions retain their identity rules.
 Defaults retain their JSON types and optional/required distinctions. Editor choices
 include the documented editors, including those whose runtime implementation is
@@ -20,7 +21,13 @@ Optional `attribute_definitions` metadata maps JSON pointers into the logical
 attribute tree to `{description, scope, value_editor: {id, options}}`. It is editor
 metadata, excluded from runtime defaults. Top-level element attributes marked class are
 fixed through `instance_modifiable: false`; existing class identity attributes
-stay class attributes. Existing descriptors without metadata keep their behavior.
+stay class attributes. Existing descriptors without metadata are completed in the
+local draft, preserving their defaults and editor choices. Save class stores the
+explicit definitions in the body; a pending-definitions note explains why Save is
+enabled on a legacy descriptor. All displayed scopes, value-editor IDs and options
+are present in View JSON. Scope agrees with the top-level element's fixed flag;
+description edits update its help tip and metadata together. Canonical JSON dirty
+checks tolerate PostgreSQL JSONB key ordering.
 Nested element defaults use logical paths, e.g. `/source/table`, rather than exposing
 the `default_value` storage wrapper. Renaming moves the subtree's metadata.
 
@@ -56,7 +63,7 @@ names that editor and explains the empty object's default-options meaning.
 
 - `go test ./server/api/wpi` and `go vet ./server/api/wpi` pass.
 - `go test ./server/api -run '^$'` compiles the API routes.
-- Targeted WPI/canvas/value-editor Bun suite: 196 tests pass.
+- Targeted WPI/canvas/value-editor Bun suite: 201 tests pass.
 - `bun run check`: no Svelte errors or warnings; English/Chinese checks pass.
 - Both `web/tests/wpi-class-editor/test_editor.py` and `test_full_editor.py` pass
   against mocked HTTP APIs, including actual editor action assignment and preview

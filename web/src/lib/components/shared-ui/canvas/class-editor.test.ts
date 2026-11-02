@@ -5,7 +5,8 @@ import {
 	renameAttribute,
 	setAttributeDefault,
 	setAttributeDefinition,
-	definitionAt
+	definitionAt,
+	materializeClassDefinitions
 } from './class-editor';
 import type { JsonObject } from '$lib/wpi/types';
 
@@ -18,6 +19,96 @@ const element: JsonObject = {
 	optional: {},
 	fixed: { default_value: 3, instance_modifiable: false }
 };
+
+test('legacy label settings shown in Class are explicit in the serializable body', () => {
+	const original: JsonObject = {
+		descriptor_id: 'button',
+		schema_version: '0.4',
+		code_module_id: 'button',
+		label: { default_value: 'Button', help_tip: { en: 'Caption' } }
+	};
+	const body = materializeClassDefinitions('element', original);
+	expect((body.attribute_definitions as JsonObject)['/label']).toEqual({
+		description: { en: 'Caption' },
+		scope: 'instance',
+		value_editor: { id: 'localized-text', options: {} }
+	});
+	expect(original.attribute_definitions).toBeUndefined();
+	expect(materializeClassDefinitions('element', JSON.parse(JSON.stringify(body)))).toEqual(body);
+	for (const attribute of attributeTree('element', body)) {
+		const definition = (body.attribute_definitions as JsonObject)[attribute.path] as JsonObject;
+		expect(['class', 'instance'].includes(String(definition.scope))).toBe(true);
+		expect(typeof (definition.value_editor as JsonObject).id).toBe('string');
+		expect((definition.value_editor as JsonObject).options).toBeDefined();
+	}
+});
+
+test('fixed label scope comes from the descriptor flag, including stale metadata', () => {
+	const row: JsonObject = {
+		descriptor_id: 'button',
+		schema_version: '0.4',
+		label: { default_value: 'Fixed', instance_modifiable: false },
+		attribute_definitions: { '/label': { scope: 'instance', value_editor: { id: 'text' } } }
+	};
+	expect(definitionAt('element', row, '/label').scope).toBe('class');
+	const normalized = materializeClassDefinitions('element', row);
+	expect((normalized.attribute_definitions as JsonObject)['/label']).toMatchObject({
+		scope: 'class',
+		value_editor: { id: 'text', options: {} }
+	});
+});
+
+test('changing one field stores the complete definition and clearing description removes both copies', () => {
+	const row: JsonObject = {
+		descriptor_id: 'button',
+		schema_version: '0.4',
+		code_module_id: 'button',
+		label: { default_value: 'Button', help_tip: 'Old help' }
+	};
+	const next = setAttributeDefinition('element', row, '/label', { scope: 'class' });
+	expect((next.attribute_definitions as JsonObject)['/label']).toEqual({
+		description: 'Old help',
+		scope: 'class',
+		value_editor: { id: 'localized-text', options: {} }
+	});
+	const cleared = setAttributeDefinition('element', next, '/label', { description: '' });
+	expect((cleared.label as JsonObject).help_tip).toBeUndefined();
+	expect(
+		((cleared.attribute_definitions as JsonObject)['/label'] as JsonObject).description
+	).toBeUndefined();
+});
+
+test('a blank bilingual description keeps its language mode while the author fills it in', () => {
+	const row: JsonObject = {
+		descriptor_id: 'button',
+		schema_version: '0.4',
+		label: { default_value: 'Button' }
+	};
+	const next = setAttributeDefinition('element', row, '/label', { description: { en: '' } });
+	expect(
+		definitionAt('element', materializeClassDefinitions('element', next), '/label').description
+	).toEqual({ en: '' });
+});
+
+test('explicit editor options stay authoritative, including an intentionally empty object', () => {
+	const row: JsonObject = {
+		descriptor_id: 'input',
+		schema_version: '0.4',
+		code_module_id: 'input',
+		width: { default_value: '200px' },
+		attribute_definitions: {
+			'/width': { scope: 'instance', value_editor: { id: 'length', options: {} } }
+		}
+	};
+	expect(definitionAt('element', row, '/width').value_editor?.options).toEqual({});
+	expect(
+		(
+			(materializeClassDefinitions('element', row).attribute_definitions as JsonObject)[
+				'/width'
+			] as JsonObject
+		).value_editor
+	).toEqual({ id: 'length', options: {} });
+});
 
 test('Class selection resolves elements, actions, panes and panel layouters, never a page or flow node', () => {
 	const page: JsonObject = {

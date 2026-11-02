@@ -5,10 +5,12 @@
 	let target = $state<ClassTarget | null>({ kind: 'element', id: 'input' });
 	let locale = $state<'en' | 'zh-cn'>('en');
 	let saves = $state(0);
+	let panel = $state<{ viewClassJson: () => boolean }>();
 	overwriteGetLocale(() => locale);
 </script>
 
 <nav>
+	<button id="view-class-json" onclick={() => panel?.viewClassJson()}>View class JSON</button>
 	<button id="select-input" onclick={() => target = { kind: 'element', id: 'input' }}>Input</button>
 	<button id="select-list" onclick={() => target = { kind: 'element', id: 'list' }}>List</button>
 	<button id="select-pane" onclick={() => target = { kind: 'page-layouter', id: 'single-pane' }}>Pane</button>
@@ -19,7 +21,7 @@
 	<button id="language-zh" onclick={() => locale = 'zh-cn'}>中文</button>
 </nav>
 <output id="saves">{saves}</output>
-<div class="panel"><WpiClassPanel {target} onSaved={() => saves++}><p id="instance-properties">Instance properties remain separate.</p></WpiClassPanel></div>
+<div class="panel"><WpiClassPanel bind:this={panel} {target} onSaved={() => saves++}><p id="instance-properties">Instance properties remain separate.</p></WpiClassPanel></div>
 
 <style>
 	:global(body) { font-family: sans-serif; margin: 16px; background: #151718; color: white; }

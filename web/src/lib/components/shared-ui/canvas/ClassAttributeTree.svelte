@@ -41,12 +41,14 @@
 		try {
 			onChange(fn());
 			errors = { ...errors, [path]: '' };
+			return true;
 		} catch (e) {
 			errors = { ...errors, [path]: error(e) };
+			return false;
 		}
 	}
 	function meta(path: string, patch: AttributeDefinition) {
-		change(path, () => setAttributeDefinition(kind, row, path, patch));
+		return change(path, () => setAttributeDefinition(kind, row, path, patch));
 	}
 	function rename(node: AttributeNode, name: string) {
 		const nextPath = node.path.slice(0, node.path.lastIndexOf('/') + 1) + name.trim();
@@ -104,23 +106,20 @@
 									description: (value as AttributeDefinition['description']) ?? ''
 								})}
 						/>
-						<div class="label">{m.wpi_class_attribute_scope()}</div>
-						<div class="segmented" role="group" aria-label={m.wpi_class_attribute_scope()}>
-							<button
-								type="button"
-								aria-pressed={definition.scope === 'class'}
-								disabled={builtin}
-								onclick={() => meta(node.path, { scope: 'class' })}
-								>{m.wpi_class_scope_class()}</button
-							>
-							<button
-								type="button"
-								aria-pressed={definition.scope === 'instance'}
-								disabled={builtin}
-								onclick={() => meta(node.path, { scope: 'instance' })}
-								>{m.wpi_class_scope_instance()}</button
-							>
-						</div>
+						<label for={`class-scope-${node.path}`}>{m.wpi_class_attribute_scope()}</label>
+						<select
+							id={`class-scope-${node.path}`}
+							value={definition.scope}
+							disabled={CLASS_KEYS.has(node.path.slice(1).split('/')[0])}
+							onchange={(e) => {
+								if (!meta(node.path, { scope: e.currentTarget.value as 'class' | 'instance' })) {
+									e.currentTarget.value = definition.scope ?? 'instance';
+								}
+							}}
+						>
+							<option value="class">{m.wpi_class_scope_class()}</option>
+							<option value="instance">{m.wpi_class_scope_instance()}</option>
+						</select>
 						{#if parent || kind !== 'element'}<p class="hint">
 								{m.wpi_class_scope_metadata_hint()}
 							</p>{/if}
@@ -229,8 +228,7 @@
 		border-top: 0;
 		border-radius: 0 0 4px 4px;
 	}
-	label,
-	.label {
+	label {
 		display: block;
 		margin: 8px 0 4px;
 		color: var(--cv-text-2);
@@ -254,22 +252,6 @@
 	}
 	[readonly] {
 		color: var(--cv-text-muted);
-	}
-	.segmented {
-		display: flex;
-	}
-	.segmented button {
-		flex: 1;
-		padding: 5px;
-		color: var(--cv-text-muted);
-		background: var(--cv-surface);
-		border: 1px solid var(--cv-border);
-		cursor: pointer;
-		font-size: 11px;
-	}
-	.segmented button[aria-pressed='true'] {
-		color: var(--cv-accent);
-		border-color: var(--cv-accent);
 	}
 	.hint {
 		font-size: 10px;

@@ -8253,8 +8253,8 @@
 	"wpi_class_attribute_name": "属性名称",
 	"wpi_class_attribute_description": "属性说明",
 	"wpi_class_attribute_scope": "属性范围",
-	"wpi_class_scope_class": "类",
-	"wpi_class_scope_instance": "实例",
+	"wpi_class_scope_class": "类属性",
+	"wpi_class_scope_instance": "实例属性",
 	"wpi_class_default_value": "默认值",
 	"wpi_class_default_hint": "输入 JSON 或文本。留空表示无默认值；null 表示实例必填；\"\" 表示空字符串。",
 	"wpi_class_value_editor": "值编辑器",
@@ -8301,5 +8301,6 @@
 	"wpi_class_schema_version": "模式版本",
 	"wpi_class_json_title": "类 JSON：{id}",
 	"wpi_class_json_note": "类描述符正文，包含尚未保存的修改。应用后更新类草稿；点击“保存类”才会写入数据库。",
-	"wpi_class_options_json_hint": "这里只配置 {editor} 值编辑器的选项。空对象表示使用默认选项。"
+	"wpi_class_options_json_hint": "这里只配置 {editor} 值编辑器的选项。空对象表示使用默认选项。",
+	"wpi_class_definitions_pending": "此描述符缺少显式属性定义。请点击“保存类”，将这里显示的属性范围、值编辑器及配置存入其正文。"
 }

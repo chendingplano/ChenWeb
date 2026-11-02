@@ -27,7 +27,8 @@ stored body.
 
 Every descriptor attribute SHALL be represented by a button labeled with its name.
 Selecting the button SHALL fold or unfold an inline form and its nested attributes.
-The form SHALL expose name, localized description, Class/Instance toggles, default
+The form SHALL expose name, localized description, an Attribute scope dropdown
+with Class attribute and Instance attribute choices, default
 value, a value-editor selector, and an inline configuration form for that editor.
 Element `default_value` wrappers SHALL be hidden from the logical tree. Nested
 objects and arrays SHALL be traversable. Identity fields SHALL remain read-only;
@@ -44,6 +45,16 @@ optional `description`, `scope` (`class` or `instance`), and `value_editor`
 (`{id, options?}`). It SHALL be validated independently and SHALL NOT become an
 instance attribute or runtime default. Metadata SHALL survive class copying.
 Known editor IDs and configuration option types SHALL be validated by the server.
+Every attribute displayed in Class SHALL have explicit scope and value-editor ID
+and options in `body.attribute_definitions`, so the form and class JSON share the
+same values. Legacy descriptors missing definitions SHALL receive them in the
+local draft and offer Save class to persist them; reading SHALL NOT silently
+write the database. Existing explicit editor choices and options SHALL be kept.
+Top-level element scope SHALL agree with the descriptor's fixed flag, correcting
+stale metadata in the draft. Description edits SHALL update the help tip and
+metadata together; clearing a plain description SHALL remove both fields.
+Completeness and dirty checks SHALL ignore JSON object key order, including order
+changes when PostgreSQL reads a JSONB body.
 
 For top-level element attributes, Class SHALL set `instance_modifiable: false`,
 require a non-null default and thereby retain the existing fixed-default behavior;
@@ -72,7 +83,9 @@ matching identity and a valid descriptor, retaining version, status and creation
 audit fields. Validation errors SHALL leave both the stored row and local edits
 intact. Existing element endpoints SHALL retain their behavior.
 
-Save class SHALL remain disabled while unchanged, loading or saving. A successful
+Save class SHALL remain disabled while unchanged with complete definitions, loading
+or saving. Missing explicit definitions SHALL enable Save class with an explanation;
+discarding user edits SHALL retain those definitions in the local draft. A successful
 save SHALL clear only the submitted class's dirty marker and refresh the editor's
 class lists without rewriting existing instance copies. Unsaved drafts SHALL be
 retained while changing selection, editor/canvas tabs, sidebar views and preview.

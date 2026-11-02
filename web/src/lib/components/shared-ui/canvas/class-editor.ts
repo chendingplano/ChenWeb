@@ -179,8 +179,7 @@ export function definitionAt(kind: ClassKind, row: JsonObject, path: string): At
 			: {};
 	const base: AttributeDefinition = {
 		scope:
-			(CLASS_KEYS.has(head) && rest.length === 0) ||
-			(kind === 'element' && attr.instance_modifiable === false)
+			CLASS_KEYS.has(head) || (kind === 'element' && attr.instance_modifiable === false)
 				? 'class'
 				: 'instance',
 		...(kind === 'element' && rest.length === 0 && attr.help_tip !== undefined
@@ -191,7 +190,53 @@ export function definitionAt(kind: ClassKind, row: JsonObject, path: string): At
 			options
 		}
 	};
-	return { ...base, ...object(object(row.attribute_definitions)[path]) } as AttributeDefinition;
+	const stored = object(object(row.attribute_definitions)[path]);
+	const storedEditor = object(stored.value_editor);
+	const id = typeof storedEditor.id === 'string' ? storedEditor.id : base.value_editor!.id;
+	const definition = {
+		...base,
+		...stored,
+		// The descriptor's fixed flag is authoritative for top-level element attributes.
+		scope:
+			CLASS_KEYS.has(head) || (kind === 'element' && rest.length === 0)
+				? base.scope
+				: (stored.scope ?? base.scope),
+		value_editor: {
+			id,
+			options: typeof storedEditor.id === 'string' ? object(storedEditor.options) : options
+		}
+	} as AttributeDefinition;
+	const description = cleanDescription(definition.description);
+	if (description === undefined) delete definition.description;
+	else definition.description = description;
+	return definition;
+}
+
+function cleanDescription(value: Text | undefined): Text | undefined {
+	if (typeof value === 'string') return value.trim() ? value : undefined;
+	if (!value) return undefined;
+	const texts = Object.fromEntries(
+		Object.entries(value).filter(
+			([language, text]) => typeof text === 'string' && (language === 'en' || text.trim())
+		)
+	);
+	return Object.keys(texts).length ? texts : undefined;
+}
+
+// Store the definitions used by the form in the body itself, including legacy
+// defaults, so View JSON and Save class contain exactly the displayed settings.
+export function materializeClassDefinitions(kind: ClassKind, row: JsonObject): JsonObject {
+	const next = clone(row);
+	const definitions = object(next.attribute_definitions);
+	function visit(nodes: AttributeNode[]) {
+		for (const node of nodes) {
+			definitions[node.path] = definitionAt(kind, next, node.path) as JsonObject;
+			visit(node.children);
+		}
+	}
+	visit(attributeTree(kind, next));
+	next.attribute_definitions = definitions;
+	return next;
 }
 
 export function setAttributeDefinition(
@@ -209,10 +254,18 @@ export function setAttributeDefinition(
 				throw new Error('fixed_default');
 			attr.instance_modifiable = false;
 		} else if (patch.scope === 'instance') delete attr.instance_modifiable;
-		if (patch.description !== undefined) attr.help_tip = patch.description as Json;
+		if ('description' in patch) {
+			const description = cleanDescription(patch.description);
+			if (description === undefined) delete attr.help_tip;
+			else attr.help_tip = description as Json;
+		}
 	}
 	const definitions = object(next.attribute_definitions);
-	definitions[path] = { ...object(definitions[path]), ...patch } as JsonObject;
+	const definition = { ...definitionAt(kind, next, path), ...patch } as JsonObject;
+	const description = cleanDescription(definition.description as Text | undefined);
+	if (description === undefined) delete definition.description;
+	else definition.description = description as Json;
+	definitions[path] = definition;
 	next.attribute_definitions = definitions;
 	return next;
 }

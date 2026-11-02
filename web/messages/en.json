@@ -8253,8 +8253,8 @@
 	"wpi_class_attribute_name": "Attribute name",
 	"wpi_class_attribute_description": "Attribute description",
 	"wpi_class_attribute_scope": "Attribute scope",
-	"wpi_class_scope_class": "Class",
-	"wpi_class_scope_instance": "Instance",
+	"wpi_class_scope_class": "Class attribute",
+	"wpi_class_scope_instance": "Instance attribute",
 	"wpi_class_default_value": "Default value",
 	"wpi_class_default_hint": "JSON or text. Empty removes the default; null requires an instance value; \"\" is an empty string.",
 	"wpi_class_value_editor": "Value editor",
@@ -8301,5 +8301,6 @@
 	"wpi_class_schema_version": "Schema version",
 	"wpi_class_json_title": "Class JSON: {id}",
 	"wpi_class_json_note": "Class descriptor body, including unsaved edits. Apply updates the class draft; Save class writes it to the database.",
-	"wpi_class_options_json_hint": "Options for the {editor} value editor only. An empty object uses its defaults."
+	"wpi_class_options_json_hint": "Options for the {editor} value editor only. An empty object uses its defaults.",
+	"wpi_class_definitions_pending": "This descriptor is missing explicit attribute definitions. Save class to store the scope, value editor and configuration shown here in its body."
 }

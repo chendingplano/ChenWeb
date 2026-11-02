@@ -2,9 +2,10 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getEntityClass, updateEntityClass, WpiError, type ElementClassRow } from '$lib/wpi/api';
 	import type { JsonObject } from '$lib/wpi/types';
+	import { canonical } from '$lib/wpi/dirty';
 	import ClassAttributeTree from './ClassAttributeTree.svelte';
 	import WpiJsonDialog from './WpiJsonDialog.svelte';
-	import type { ClassTarget } from './class-editor';
+	import { materializeClassDefinitions, type ClassTarget } from './class-editor';
 
 	let {
 		target,
@@ -22,6 +23,7 @@
 	type Draft = {
 		row: JsonObject;
 		baseline: string;
+		pendingDefinitions: boolean;
 		status: ElementClassRow['status'];
 		version: number;
 		loading: boolean;
@@ -39,9 +41,13 @@
 	}
 	const key = $derived(target ? `${target.kind}/${target.id}` : '');
 	const draft = $derived(drafts[key]);
-	const dirty = $derived(!!draft && JSON.stringify(draft.row) !== draft.baseline);
+	const dirty = $derived(
+		!!draft && (draft.pendingDefinitions || canonical(draft.row) !== draft.baseline)
+	);
 	const anyDirty = $derived(
-		Object.values(drafts).some((d) => !d.loading && JSON.stringify(d.row) !== d.baseline)
+		Object.values(drafts).some(
+			(d) => !d.loading && (d.pendingDefinitions || canonical(d.row) !== d.baseline)
+		)
 	);
 	$effect(() => onDirty?.(anyDirty));
 
@@ -49,6 +55,7 @@
 		drafts[cacheKey] = {
 			row: {},
 			baseline: '{}',
+			pendingDefinitions: false,
 			status: 'active',
 			version: 0,
 			loading: true,
@@ -58,10 +65,13 @@
 		};
 		try {
 			const result = await getEntityClass(selection.kind, selection.id);
+			const row = materializeClassDefinitions(selection.kind, result.class);
+			const baseline = canonical(row);
 			drafts[cacheKey] = {
 				...drafts[cacheKey],
-				row: result.class,
-				baseline: JSON.stringify(result.class),
+				row,
+				baseline,
+				pendingDefinitions: baseline !== canonical(result.class),
 				status: result.status,
 				version: result.version,
 				loading: false
@@ -87,7 +97,8 @@
 		drafts[cacheKey].error = '';
 		try {
 			const result = await updateEntityClass(selection.kind, selection.id, row);
-			drafts[cacheKey].baseline = JSON.stringify(row);
+			drafts[cacheKey].baseline = canonical(row);
+			drafts[cacheKey].pendingDefinitions = false;
 			drafts[cacheKey].version = result.version;
 			drafts[cacheKey].status = result.status;
 			drafts[cacheKey].warnings = result.warnings.map((i) => `${i.path}: ${i.message}`);
@@ -133,6 +144,9 @@
 			</dl>
 		{/if}
 		<p class="hint">{m.wpi_class_saved_copies_hint()}</p>
+		{#if draft.pendingDefinitions}<p class="hint" role="status">
+				{m.wpi_class_definitions_pending()}
+			</p>{/if}
 		{#if draft.error}<p class="error" role="alert">{draft.error}</p>{/if}
 		{#if !Object.keys(draft.row).length}
 			<button type="button" onclick={() => target && load({ ...target }, key)}
@@ -145,7 +159,7 @@
 				>
 				<button
 					type="button"
-					disabled={!dirty || draft.saving}
+					disabled={canonical(draft.row) === draft.baseline || draft.saving}
 					onclick={() => {
 						if (confirm(m.wpi_class_discard_confirm())) {
 							draft.row = JSON.parse(draft.baseline);
@@ -162,7 +176,7 @@
 					row={draft.row}
 					disabled={draft.saving}
 					onChange={(row) => {
-						draft.row = row;
+						draft.row = materializeClassDefinitions(target!.kind, row);
 						draft.error = '';
 						draft.warnings = [];
 					}}
@@ -181,7 +195,7 @@
 		onApply={(row) => {
 			if (row.descriptor_id !== target.id || row.schema_version !== draft.row.schema_version)
 				return false;
-			draft.row = row;
+			draft.row = materializeClassDefinitions(target.kind, row);
 			draft.error = '';
 			draft.warnings = [];
 			return true;
