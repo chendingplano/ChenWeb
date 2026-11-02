@@ -3,7 +3,7 @@
 // rule as mergeInstance in server/api/wpi. The stored class is never read.
 import type { ActionInstance, ActionRef, ClassRow, ElementInstance, Input, InputSpec, JsonObject, PageDescriptor, Text } from './types';
 
-const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description', 'implement_notes', 'code_module_id', 'class']);
+const CLASS_ATTRS = new Set(['descriptor_id', 'schema_version', 'description', 'implement_notes', 'code_module_id', 'class', 'attribute_definitions']);
 
 // An action class row holds each instance attribute's default itself.
 export function mergeInstance<T extends object>(row: ClassRow | undefined, own: T): T {

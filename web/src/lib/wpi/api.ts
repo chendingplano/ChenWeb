@@ -95,6 +95,7 @@ export type ElementClassSummary = {
 	// The code module that draws the class; the properties panel groups by it.
 	code_module_id?: string;
 	attributes: Record<string, ElementAttribute>;
+	attribute_definitions?: JsonObject;
 };
 
 export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise<ElementClassSummary[]> {
@@ -108,6 +109,13 @@ export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise
 
 export async function listTriggerActions(fetchFn: typeof fetch = fetch): Promise<string[]> {
  const res = await fetchFn('/api/v1/wpi/classes/action', { credentials: 'same-origin' });
+ const body = await parse(res);
+ if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+ return (body.actions as string[]) ?? [];
+}
+
+export async function listActionClasses(fetchFn: typeof fetch = fetch): Promise<string[]> {
+ const res = await fetchFn('/api/v1/wpi/classes/action?scope=all', { credentials: 'same-origin' });
  const body = await parse(res);
  if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
  return (body.actions as string[]) ?? [];
@@ -162,6 +170,22 @@ export async function createElementClass(classRow: JsonObject, fetchFn: typeof f
 // The latest draft or active version of an element class, whole, for the
 // editor's edit form.
 export type ElementClassRow = { version: number; status: 'draft' | 'active'; class: JsonObject };
+
+export async function getEntityClass(kind: string, id: string, fetchFn: typeof fetch = fetch): Promise<ElementClassRow> {
+	const res = await fetchFn(`/api/v1/wpi/classes/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return body as unknown as ElementClassRow;
+}
+
+export async function updateEntityClass(kind: string, id: string, row: JsonObject, fetchFn: typeof fetch = fetch): Promise<{ version: number; status: 'draft' | 'active'; warnings: Issue[] }> {
+	const res = await fetchFn(`/api/v1/wpi/classes/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, {
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(row)
+	});
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+	return body as unknown as { version: number; status: 'draft' | 'active'; warnings: Issue[] };
+}
 
 export async function getElementClass(classId: string, fetchFn: typeof fetch = fetch): Promise<ElementClassRow> {
 	const res = await fetchFn(`/api/v1/wpi/classes/element/${encodeURIComponent(classId)}`, { credentials: 'same-origin' });

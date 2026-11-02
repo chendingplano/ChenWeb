@@ -92,7 +92,7 @@ var actionAttrs = map[string]codeAttrs{
 
 // classAttrs are shared by every instance of a class and set only in its row.
 // code_module_id is set only in element class rows.
-var classAttrs = []string{"descriptor_id", "schema_version", "description", "implement_notes", "code_module_id"}
+var classAttrs = []string{"descriptor_id", "schema_version", "description", "implement_notes", "code_module_id", "attribute_definitions"}
 
 // copyKey is the attribute in which an instance or layouter copy holds the
 // whole class row it was copied from (devdoc 2026102601 §3.5.1), so no class row
@@ -450,11 +450,12 @@ func (v *validator) elementLayouterCopy(val any, path string) {
 // tree, root) or an element layouter class row (a code module and its default
 // parameters, config).
 func (v *validator) layouterClass(b map[string]any) {
+	v.attributeDefinitions(b)
 	registry, tree := pageLayouterModules, "root"
 	if v.kind == KindElementLayouter {
 		registry, tree = slices.Sorted(maps.Keys(elementLayouterModules)), "config"
 	}
-	v.keys(b, "", []string{"descriptor_id", "schema_version", "code_module_id", tree}, "description")
+	v.keys(b, "", []string{"descriptor_id", "schema_version", "code_module_id", tree}, "description", "attribute_definitions")
 	v.text(b, "description", "")
 	module, ok := v.matching(b, "code_module_id", "", idPattern)
 	if ok && !slices.Contains(registry, module) {
@@ -640,6 +641,7 @@ func (v *validator) classCopy(kind Kind, m map[string]any, nameKey, path string)
 // hold actions cannot have defaults. An element class row is checked by
 // elementClassRow.
 func (v *validator) classRow(b map[string]any) {
+	v.attributeDefinitions(b)
 	v.text(b, "description", "")
 	v.text(b, "implement_notes", "")
 	if v.kind == KindElement {
@@ -822,6 +824,7 @@ func ValidateDraftClass(body map[string]any) []Issue {
 func validateElementClass(body map[string]any, draft bool) []Issue {
 	id, _ := body["descriptor_id"].(string)
 	v := &validator{kind: KindElement, id: id}
+	v.attributeDefinitions(body)
 	if !idPattern.MatchString(id) {
 		v.errf("/descriptor_id", "descriptor ID %q must match %s", id, idPattern)
 	}

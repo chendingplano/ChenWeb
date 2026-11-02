@@ -10,11 +10,11 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import type { Node } from '@xyflow/svelte';
 	import type { ElementClassSummary } from '$lib/wpi/api';
-	import type { FlowLayouterConfig, JsonObject } from '$lib/wpi/types';
+	import type { FlowLayouterConfig, JsonObject, PageDescriptor } from '$lib/wpi/types';
 	import { elementEditor, moduleFallbacks, page as pageDef, pane as paneDef, panel as panelDef } from '$lib/wpi/properties';
+	import { withClassEditors } from '$lib/wpi/properties/class-definition';
 	import { elementSource, pageSource, paneIsLeaf, panelSource, paneSource } from '$lib/wpi/properties/sources';
 	import PropertyEditor from '../property-editor/PropertyEditor.svelte';
-	import NodeDescriptorEditor from './NodeDescriptorEditor.svelte';
 	import PaneStructure from './PaneStructure.svelte';
 	import { renameProblem } from './pane-edit';
 
@@ -64,11 +64,11 @@
 		onEditEnd: () => void;
 	} = $props();
 
-	let tab = $state<'properties' | 'node'>('properties');
 	const layouterIds = $derived(pageLayouters.map((c) => String(c.descriptor_id)));
 	const common = $derived({ triggerActions, pageLayouters: layouterIds });
 	const module = $derived(String(elementClass?.code_module_id ?? node?.data.element ?? ''));
 	const leaf = $derived(!!page && !!selectedPane && paneIsLeaf(page, selectedPane));
+	const panelClassDefinitions = $derived((page as unknown as PageDescriptor | null)?.panels?.[selectedPane ?? '']?.elem_layouter?.class?.attribute_definitions as JsonObject | undefined);
 
 	function chooseLayouter(id: string) {
 		const cls = pageLayouters.find((c) => c.descriptor_id === id);
@@ -84,14 +84,8 @@
 <div class="wpi-properties">
 {#if node}
 	{@const attrs = (node.data.attrs as JsonObject | undefined) ?? {}}
-	<div role="tablist" class="tabs">
-		<button type="button" role="tab" aria-selected={tab === 'properties'} onclick={() => (tab = 'properties')}>{m.propertiespanel_tab_properties()}</button>
-		<button type="button" role="tab" aria-selected={tab === 'node'} onclick={() => (tab = 'node')}>{m.propertiespanel_tab_node()}</button>
-	</div>
 	{#key node.id}
-		{#if tab === 'node'}
-			<NodeDescriptorEditor {node} onUpdate={onNode} />
-		{:else if elementClass === null}
+		{#if elementClass === null}
 			<div class="missing select-text">
 				<h2>{m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}</h2>
 				<p>{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</p>
@@ -100,7 +94,7 @@
 			<div class="scroll">
 				<PropertyEditor
 					title={m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}
-					def={elementEditor(module)}
+					def={withClassEditors(elementEditor(module), elementClass?.attribute_definitions)}
 					source={elementSource(attrs, elementClass ?? null, moduleFallbacks(module), (next) => onNode(node.id, { ...node.data, attrs: next }))}
 					context={{ ...common, pane: String(node.data.pane ?? ''), flowConfig, position: positions.element }}
 					idPrefix={`prop-${node.id}`}
@@ -143,7 +137,7 @@
 		<div class="scroll">
 			<PropertyEditor
 				title={m.wpi_config_panel_identity({ id: selectedPane })}
-				def={panelDef}
+				def={withClassEditors(panelDef, panelClassDefinitions, '/config')}
 				source={panelSource(page, selectedPane, onPage)}
 				context={common}
 				idPrefix={`prop-panel-${selectedPane}`}
@@ -161,28 +155,6 @@
 		flex-direction: column;
 		height: 100%;
 		border-left: 1px solid var(--cv-divider);
-	}
-	.tabs {
-		display: flex;
-		gap: 16px;
-		padding: 0 12px;
-		border-bottom: 1px solid var(--cv-divider);
-		flex-shrink: 0;
-	}
-	.tabs button {
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -1px;
-		padding: 9px 0 7px;
-		font-size: 11px;
-		font-weight: 500;
-		color: var(--cv-text-muted);
-		cursor: pointer;
-	}
-	.tabs button[aria-selected='true'] {
-		border-bottom-color: var(--cv-accent);
-		color: var(--cv-accent);
 	}
 	.scroll {
 		flex: 1;

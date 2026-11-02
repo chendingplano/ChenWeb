@@ -2,6 +2,8 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy } from 'svelte';
+	import { beforeNavigate } from '$app/navigation';
+	import { listActionClasses } from '$lib/wpi/api';
 	import {
 		SvelteFlow,
 		ViewportPortal,
@@ -25,6 +27,8 @@
 	import FlowPicker from './canvas/FlowPicker.svelte';
 	import NodePalette from './canvas/NodePalette.svelte';
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
+	import WpiClassPanel from './canvas/WpiClassPanel.svelte';
+	import { classTarget } from './canvas/class-editor';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
@@ -147,6 +151,7 @@
 	const ELEMENT_CLASS_PREFIX = 'wpi-element:';
 	let elementClasses = $state<ElementClassSummary[]>([]);
 	let pageLayouters = $state<JsonObject[]>([]);
+	let actionClasses = $state<string[]>([]);
 	const elementClassTypes = $derived<NodeType[]>(
 		elementClasses.map((c) => ({
 			id: ELEMENT_CLASS_PREFIX + c.descriptor_id,
@@ -159,8 +164,11 @@
 		}))
 	);
 	let showCreateElement = $state(false);
-	// The element class being edited from a node's tool bar.
-	let editClassId = $state<string | null>(null);
+	let propertiesTab = $state<'properties' | 'class'>('properties');
+	let hasClassChanges = $state(false);
+	beforeNavigate(({ cancel }) => {
+		if (hasClassChanges && !confirm(m.wpi_class_leave_confirm())) cancel();
+	});
 	// View JSON shows the selected node's descriptor JSON, else the page's.
 	let showJson = $state(false);
 	let showTree = $state(false);
@@ -464,8 +472,8 @@
 		if (selectedNode?.type !== 'wpi-element') return undefined;
 		const copy = selectedNode.data.class as ClassRow | undefined;
 		if (copy) {
-			const { descriptor_id, schema_version: _v, description, implement_notes: _n, code_module_id, ...attributes } = copy;
-			return { descriptor_id, version: 0, status: 'active', description, code_module_id, attributes } as unknown as ElementClassSummary;
+			const { descriptor_id, schema_version: _v, description, implement_notes: _n, code_module_id, attribute_definitions, ...attributes } = copy;
+			return { descriptor_id, version: 0, status: 'active', description, code_module_id, attribute_definitions, attributes } as unknown as ElementClassSummary;
 		}
 		return elementClasses.find((c) => c.descriptor_id === selectedNode.data.element) ?? null;
 	});
@@ -820,7 +828,12 @@
 		},
 		editClass(id) {
 			const cls = nodes.find((n) => n.id === id)?.data.element;
-			if (typeof cls === 'string' && cls !== '') editClassId = cls;
+			if (typeof cls === 'string' && cls !== '') {
+				configMode = null;
+				selectedNodeId = id;
+				nodes = nodes.map(n => ({ ...n, selected: n.id === id }));
+				propertiesTab = 'class';
+			}
 		}
 	});
 
@@ -948,7 +961,8 @@
 		if (!active || previewBundle) return;
 		// The element class forms have their own fields, and View JSON covers the canvas; undo
 		// and save belong to the canvas.
-		if (showCreateElement || editClassId !== null || showJson || showTree || showLoadPage || showCreatePage) return;
+		if (showCreateElement || showJson || showTree || showLoadPage || showCreatePage) return;
+		if (propertiesTab === 'class' && (e.target as HTMLElement).closest('#wpi-class-content')) return;
 		const mod = e.ctrlKey || e.metaKey;
 		const key = e.key.toLowerCase();
 		if (mod && key === 'z' && !e.shiftKey) {
@@ -971,6 +985,7 @@
 		restorePanel();
 		loadElementClasses();
 		listTriggerActions().then((actions) => triggerActions = actions).catch(() => showError(m.propertiespanel_actions_failed()));
+		listActionClasses().then((actions) => actionClasses = actions).catch(() => showError(m.propertiespanel_actions_failed()));
 		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => showError(m.wpi_page_layouters_failed()));
 		try {
 			const res = await flowService.getNodeTypes();
@@ -1245,9 +1260,8 @@
 		{/if}
 		</div>
 
-		{#if !previewBundle}
 		<!-- Drag to resize the properties panel; it straddles the panel's left border. -->
-		{#if !detached}
+		{#if !previewBundle && !detached}
 		<div
 			role="separator"
 			aria-orientation="vertical"
@@ -1261,7 +1275,7 @@
 		{/if}
 
 		<!-- Properties Panel -->
-		<div bind:this={panelElement} class="properties-container" class:detached style:width="{propsWidth}px" style:height={detached ? `${panelHeight}px` : undefined} style:left={detached ? `${panelPosition.x}px` : undefined} style:top={detached ? `${panelPosition.y}px` : undefined}>
+		<div bind:this={panelElement} class="properties-container" class:detached style:display={previewBundle ? 'none' : undefined} inert={!!previewBundle} style:width="{propsWidth}px" style:height={detached ? `${panelHeight}px` : undefined} style:left={detached ? `${panelPosition.x}px` : undefined} style:top={detached ? `${panelPosition.y}px` : undefined}>
 			<div class="properties-controls">
 				<button type="button" class="panel-handle" aria-label={m.wpi_editor_move_panel()} title={m.wpi_editor_move_panel()}
 					onpointerdown={startPanelDrag} onpointermove={dragPanel} onpointerup={() => dragging = null} onpointercancel={() => dragging = null}
@@ -1269,12 +1283,18 @@
 				<button type="button" class="panel-toggle" onclick={togglePanel} aria-label={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{detached ? '↪' : '↗'}</button>
 			</div>
 			<div class="properties-content">
+		<WpiClassPanel bind:tab={propertiesTab} onDirty={(dirty) => hasClassChanges = dirty}
+			actionClass={selectedTotal <= 1 && selectedNode?.type === 'wpi-action' ? String(selectedNode.data.action ?? '') : undefined} {actionClasses}
+			onActionClass={(id) => { if (selectedNode?.type === 'wpi-action') updateNodeData(selectedNode.id, { ...selectedNode.data, action: id }); }}
+			target={selectedTotal > 1 ? null : classTarget(selectedNode, loadedPage, configMode, selectedPane)} onSaved={() => {
+			void loadElementClasses();
+			void listPageLayouters().then((classes) => pageLayouters = classes).catch(() => showError(m.wpi_page_layouters_failed()));
+		}}>
 		{#if selectedNode && selectedNode.type !== 'wpi-element'}
 		<PropertiesPanel
 			node={selectedNode as any}
 			nodeType={selectedNodeType}
 			measuredSize={selectedNodeId ? measuredSizes[selectedNodeId] : undefined}
-			nodeTab
 			width={propsWidth}
 			{darkMode}
 			onUpdate={updateNodeData}
@@ -1291,6 +1311,7 @@
 			onSplit={paneActions.split} onMerge={paneActions.merge} onAdd={paneActions.add} onDelete={paneActions.remove}
 			onEditStart={() => editSession.start()} onEditEnd={() => editSession.end()} />
 		{/if}
+		</WpiClassPanel>
 			</div>
 			{#if detached}
 				<button type="button" class="floating-resize" aria-label={m.wpi_editor_resize_floating()} title={m.wpi_editor_resize_floating()}
@@ -1298,7 +1319,6 @@
 					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') resizeFloating(propsWidth - d, panelHeight); else if (event.key === 'ArrowRight') resizeFloating(propsWidth + d, panelHeight); else if (event.key === 'ArrowUp') resizeFloating(propsWidth, panelHeight - d); else if (event.key === 'ArrowDown') resizeFloating(propsWidth, panelHeight + d); else return; event.preventDefault(); }}></button>
 			{/if}
 		</div>
-		{/if}
 	</div>
 
 	{#if editorError}
@@ -1328,19 +1348,6 @@
 			loadElementClasses();
 		}}
 		onClose={() => (showCreateElement = false)}
-	/>
-{/if}
-
-{#if editClassId !== null}
-	<CreateElementDialog
-		{darkMode}
-		classId={editClassId}
-		onSaved={(id) => {
-			editClassId = null;
-			toast(m.wpi_editor_element_class_saved({ id }));
-			loadElementClasses();
-		}}
-		onClose={() => (editClassId = null)}
 	/>
 {/if}
 

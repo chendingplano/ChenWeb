@@ -64,6 +64,12 @@ test('an action instance takes its class copy defaults, held flat', () => {
 	assert.deepEqual(mergeAction({ action: 'save', class: row, table: 't' }), { action: 'save', mode: 'upsert', key: 'id', table: 't' });
 });
 
+test('class editor metadata never becomes runtime action or element attributes', () => {
+	const metadata = { '/mode': { value_editor: { id: 'value-picker', options: { choices: ['upsert'] } } } };
+	assert.deepEqual(mergeInstance({ descriptor_id: 'save', schema_version: '0.2', mode: 'upsert', attribute_definitions: metadata }, {}), { mode: 'upsert' });
+	assert.deepEqual(mergeElement({ descriptor_id: 'text', schema_version: '0.4', text: { default_value: 'Hello' }, attribute_definitions: metadata }, {}), { text: 'Hello' });
+});
+
 test('action instances are named by their place in the page', () => {
 	const r = resolveEntry(page('customers'), 'left', inst('input'), 1);
 	assert.ok(!('error' in r));

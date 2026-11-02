@@ -215,12 +215,13 @@ func (s store) insertDraftClass(ctx context.Context, id string, raw []byte, acto
 // editor's palette and properties panel. Attributes are the row's instance
 // attributes, each {help_tip, default_value} (format 0.3).
 type ClassSummary struct {
-	DescriptorID string         `json:"descriptor_id"`
-	Version      int            `json:"version"`
-	Status       string         `json:"status"`
-	Description  any            `json:"description"`
-	CodeModuleID string         `json:"code_module_id,omitempty"`
-	Attributes   map[string]any `json:"attributes"`
+	DescriptorID         string         `json:"descriptor_id"`
+	Version              int            `json:"version"`
+	Status               string         `json:"status"`
+	Description          any            `json:"description"`
+	CodeModuleID         string         `json:"code_module_id,omitempty"`
+	Attributes           map[string]any `json:"attributes"`
+	AttributeDefinitions map[string]any `json:"attribute_definitions,omitempty"`
 }
 
 // elementClasses returns the latest draft or active version of every element
@@ -246,6 +247,7 @@ func (s store) elementClasses(ctx context.Context) ([]ClassSummary, error) {
 		c.Description = body["description"]
 		c.CodeModuleID = str(body["code_module_id"])
 		c.Attributes = map[string]any{}
+		c.AttributeDefinitions, _ = body["attribute_definitions"].(map[string]any)
 		for k, v := range body {
 			if !slices.Contains(classAttrs, k) {
 				c.Attributes[k] = v

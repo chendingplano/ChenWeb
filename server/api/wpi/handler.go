@@ -328,6 +328,7 @@ func (h *Handler) ListPageLayouters(c echo.Context) error {
 }
 
 // ListTriggerActions returns active action classes supported by click triggers.
+// The Class tab requests scope=all to choose any stored active action class.
 func (h *Handler) ListTriggerActions(c echo.Context) error {
 	user := h.User(c)
 	if user == nil {
@@ -339,13 +340,14 @@ func (h *Handler) ListTriggerActions(c echo.Context) error {
 		return errorJSON(c, http.StatusInternalServerError, "Unable to list actions")
 	}
 	ids := make([]string, 0, len(classes))
+	all := c.QueryParam("scope") == "all"
 	for id := range classes {
-		if slices.Contains(triggerClasses, id) {
+		if all || slices.Contains(triggerClasses, id) {
 			ids = append(ids, id)
 		}
 	}
 	slices.Sort(ids)
-	handlerLog.Info("WPI trigger actions listed", "user", actorName(user), "found", len(ids))
+	handlerLog.Info("WPI action classes listed", "user", actorName(user), "found", len(ids), "all", all)
 	return c.JSON(http.StatusOK, map[string]any{"actions": ids})
 }
 
