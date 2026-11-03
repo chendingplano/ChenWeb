@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+# Root is required to restart pdf-parser. Check before anything is changed.
+if [ "$(id -u)" != 0 ]; then
+  echo "!! shell_server_deploy.sh must be run as root (for example: sudo -i, then run it)." >&2
+  exit 1
+fi
+
 CHENWEB_DIR=/home/gui/Workspace/ChenWeb
 DEPLOY_DIR="$CHENWEB_DIR/chenweb-deploy"
 STAGING_DIR="$CHENWEB_DIR/deploy_staging"
@@ -41,3 +47,56 @@ rm -rf "$DEPLOY_DIR"
 mkdir -p "$CHENWEB_DIR"
 tar -xzf "$archive" -C "$CHENWEB_DIR" --strip-components=1
 bash "$DEPLOY_DIR/deploy-server-china.sh" "$DEPLOY_DIR"
+
+# --- pdf-parser -------------------------------------------------------------
+# deploy-server-china.sh installs only the Go binaries. The PDF parser runs as the
+# chenweb-pdf-parser image, so rebuild it from the sources in this archive, using
+# the steps in python/pdf-parser/container/README.md.
+WORKSPACE_DIR=/home/gui/Workspace
+PDF_SRC="$DEPLOY_DIR/pdf-parser"
+PDF_DIR="$CHENWEB_DIR/python/pdf-parser"
+PDF_BUILD_DIR="$WORKSPACE_DIR/deploy/mineru-4.0.9-build"
+PDF_IMAGE=chenweb-pdf-parser:mineru-4.0.9
+
+if [ -d "$PDF_SRC" ]; then
+  echo "== pdf-parser =="
+  # The image snapshots this tree, so mirror the archive exactly: stale modules are removed.
+  rsync -a --delete --chown=gui:gui --exclude .venv --exclude __pycache__ --exclude .pytest_cache --exclude tests \
+    "$PDF_SRC"/ "$PDF_DIR"/
+  rm -rf "$PDF_BUILD_DIR"
+  python3 "$PDF_DIR/container/prepare-context.py" \
+    --worker "$PDF_DIR" --adapters "$PDF_DIR/container/mineru-v4" \
+    --mineru "$WORKSPACE_DIR/ThirdParty/mineru" --output "$PDF_BUILD_DIR"
+  docker build --network=host -t "$PDF_IMAGE" "$PDF_BUILD_DIR"
+  # Refuse to continue if the image lacks the table geometry code (the bug this section fixes).
+  docker run --rm --entrypoint sh "$PDF_IMAGE" -c \
+    'test -f /opt/pdf-parser/table_geometry.py && test -f /opt/pdf-parser/stacked_cells.py &&
+     test -f /opt/pdf-parser/mineru_cell_repair.py && grep -q write_table_geometry /opt/pdf-parser/pdf_parser.py &&
+     grep -q "use_layout=False" /opt/pdf-parser/table_geometry.py &&
+     grep -q "use_layout=False" /opt/pdf-parser/mineru_cell_repair.py' \
+    || { echo "!! $PDF_IMAGE is missing the table geometry code" >&2; exit 1; }
+  echo "  image built and verified: $PDF_IMAGE"
+  # Restarting the unit interrupts any parse in progress.
+  systemctl restart pdf-parser
+  # The deploy fails unless the running container is the image just built and has the geometry code.
+  want=$(docker image inspect -f '{{.Id}}' "$PDF_IMAGE")
+  ok=no
+  for _ in $(seq 1 60); do
+    if [ "$(docker inspect -f '{{.Image}}' chenweb-pdf-parser 2>/dev/null || true)" = "$want" ] &&
+       systemctl is-active --quiet pdf-parser; then
+      ok=yes
+      break
+    fi
+    sleep 2
+  done
+  if [ "$ok" != yes ]; then
+    echo "!! pdf-parser is not running $PDF_IMAGE" >&2
+    journalctl -u pdf-parser -n 30 --no-pager >&2 || true
+    exit 1
+  fi
+  docker exec chenweb-pdf-parser test -f /opt/pdf-parser/table_geometry.py ||
+    { echo "!! running pdf-parser lacks table_geometry.py" >&2; exit 1; }
+  echo "  pdf-parser running $PDF_IMAGE with table geometry: OK"
+else
+  echo "!! archive has no pdf-parser sources; the parser was NOT rebuilt (build it with the updated shell_server_build_rcp.sh)" >&2
+fi
