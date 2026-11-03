@@ -20,7 +20,7 @@ at identical heights across columns (321.4 / 335.7 / 349.9 / 364.2 in two differ
 Wrapped text (`气体保护电弧焊及 ⏎ 药芯焊丝电弧焊`) sits at other heights.
 
 Constraints: no LLM calls outside `shared/go/api/llm` (the reason `mineru_table_repair.py` was
-commented out on 2026-10-27); the container ships PyMuPDF 1.28.2 and BeautifulSoup 4.15 but not
+commented out on 2026-10-27); the container ships PyMuPDF 1.28.2 (2.1 from 2026-11-04, see D2) and BeautifulSoup 4.15 but not
 pdfminer; MinerU's source in `ThirdParty/mineru` stays unpatched.
 
 ## Goals / Non-Goals
@@ -52,6 +52,11 @@ MinerU's VLM post-processing: the VLM never emits a separator, so there is nothi
 The PDF grid comes from `find_tables()`, the same detector `table_geometry.py` uses. A cell's lines
 are the text lines inside its rectangle (`page.get_text("dict", clip=cell)`), with spans grouped by
 line centre, since PyMuPDF splits `<2.5` into spans `<2.` and `5` at the same height.
+Both callers pass `use_layout=False`, and PyMuPDF is pinned to 2.1 in the image and in
+`pyproject.toml`. PyMuPDF 2 by default keeps a ruled table only when its layout model draws a box
+overlapping it by 0.6 or more, and otherwise substitutes a table built from text lines on the model's
+box. The first image built with 2.1 (2026-11-04) left 表 1's continuation page unrepaired that way:
+the model's box omitted the footnote row inside the border (overlap 0.518).
 *Alternatives:* pdfminer ruling lines plus text lines: works (verified), but pdfminer is not in the
 container. Image-based ruling detection, as in the old repair: needs pixels, and gives no text.
 

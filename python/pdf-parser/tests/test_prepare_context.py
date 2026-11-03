@@ -4,7 +4,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'container' / 'prepare-context.py'
 ADAPTERS = ('parser_mineru.py', 'mineru_v4_adapter.py', 'mineru_table_repair.py',
-            'mineru_cell_repair.py', 'stacked_cells.py')
+            'mineru_cell_repair.py', 'stacked_cells.py', 'table_geometry.py')
 
 
 def test_staged_worker_has_every_module_the_mineru_parser_imports(tmp_path):

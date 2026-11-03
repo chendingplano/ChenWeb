@@ -187,7 +187,9 @@ def repair_content_list(content, pdf_path):
                     skipped['no_text_layer'] += 1
                     continue
                 if pdf_tables is None:
-                    pdf_tables = page.find_tables().tables
+                    # Ruled tables only: PyMuPDF 2's layout gating swaps a ruled table its model
+                    # boxes differently (a footnote row inside the border) for a text-line table.
+                    pdf_tables = page.find_tables(use_layout=False).tables
                 best = max(pdf_tables, key=lambda t: _iou(rect, t.bbox), default=None)
                 if best is None or _iou(rect, best.bbox) < MIN_IOU:
                     skipped['no_match'] += 1

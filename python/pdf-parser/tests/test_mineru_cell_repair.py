@@ -144,6 +144,21 @@ def test_cell_with_markup_is_left_alone(tmp_path):
     assert report['unmatched_cells'] == 1
 
 
+def stub_layout_table(monkeypatch, box):
+    """Make PyMuPDF's layout model report one table at box (PDF points)."""
+    monkeypatch.setattr(fitz.Page, 'get_layout',
+                        lambda page, **_: setattr(page, 'layout_information', [(*box, 'table')]), raising=False)
+
+
+def test_layout_table_box_does_not_replace_the_ruled_table(tmp_path, monkeypatch):
+    # On GB 9448 表 1's continuation page the layout model's table box left out the footnote row
+    # inside the border, so PyMuPDF 2 dropped the ruled table for a text-line table there.
+    stub_layout_table(monkeypatch, (50, 100, 400, 190))
+    html, report = repaired(tmp_path)
+    assert report['paired'] == 1 and report['skipped'] == {}
+    assert rows(html)[1][1] == ('&lt;2.5', None)
+
+
 def test_full_width_row_below_does_not_hide_the_cells_above(tmp_path):
     pdf_path = tmp_path / 'doc.pdf'
     make_pdf(pdf_path, footnote=True)

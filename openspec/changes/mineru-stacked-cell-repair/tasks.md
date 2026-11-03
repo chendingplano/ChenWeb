@@ -13,6 +13,7 @@
 - [x] 2.3 For data rows: match plain-text cells (1.2), skip rows with spans, apply `split_plan` (1.3) and write sub-rows with `rowspan` for the other cells; apply the `<br>` rule (1.4) to matched cells that are not split
 - [x] 2.4 Rewrite `table_body` only for changed tables; return a per-document report (tables seen/paired/changed, rows split, cells with `<br>`, skips by reason, unmatched cells)
 - [x] 2.5 Integration tests with synthetic PDFs drawn by PyMuPDF (`china-s` font), as in `test_table_geometry.py`: a ruled table with a 4-line stacked row, a wrapped-name row and a single-line row; a grid mismatch; a page without text; a rotated page; a `<eq>` cell
+- [x] 2.6 Find ruled tables with `find_tables(use_layout=False)` here and in `table_geometry.py`; pin PyMuPDF 2.1 in `pyproject.toml` and the Dockerfile; ship `table_geometry.py` in `prepare-context.py`'s file list (record 103, 表 1 continuation page, 2026-11-04)
 
 ## 3. Parser wiring (`python/pdf-parser/parser_mineru.py`)
 

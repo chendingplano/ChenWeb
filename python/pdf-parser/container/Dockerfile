@@ -11,7 +11,7 @@ COPY mineru /opt/mineru
 RUN sed -i 's/"opencv-python>=/"opencv-python-headless>=/' /opt/mineru/pyproject.toml
 RUN python -m pip install --no-cache-dir /opt/mineru \
       'transformers>=5.10.1,<6' 'accelerate>=1.5.1' 'safetensors>=0.4,<1' \
-      'psycopg2-binary>=2.9' 'PyMuPDF>=1.24' 'nats-py>=2.8' 'beautifulsoup4>=4.12' \
+      'psycopg2-binary>=2.9' 'PyMuPDF==2.1' 'nats-py>=2.8' 'beautifulsoup4>=4.12' \
     && python -m pip check
 COPY worker /opt/pdf-parser
 RUN mkdir -p /home/gui && chown 1001:1001 /home/gui

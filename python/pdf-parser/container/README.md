@@ -7,15 +7,15 @@ MinerU 4.0.9 source. OpenCV uses its headless distribution; only that dependency
 name is changed in the staged MinerU package metadata.
 
 The image snapshots the deployed PDF worker and replaces its MinerU backend,
-result adapter and table repair modules with the workspace's versions, including
-the stacked-cell repair (see below).
+result adapter, table repair and table geometry modules with the workspace's
+versions, including the stacked-cell repair (see below).
 The September worker's OCR fallback call and mode detection are adjusted to the
 MinerU 4 basic OCR interface. Its database and JetStream code stays at the deployed
 version. No `.env`, documents or model weights are baked into the image.
 
 ## Build
 
-From the Mac's workspace root, upload these container files and the five
+From the Mac's workspace root, upload these container files and the six
 adapter modules (the native deployment's Python files remain available):
 
 ```sh
@@ -27,6 +27,7 @@ rsync -az -e 'ssh -p 8822' \
   ChenWeb/python/pdf-parser/mineru_table_repair.py \
   ChenWeb/python/pdf-parser/mineru_cell_repair.py \
   ChenWeb/python/pdf-parser/stacked_cells.py \
+  ChenWeb/python/pdf-parser/table_geometry.py \
   gui@210.5.158.91:Workspace/ChenWeb/python/pdf-parser/container/mineru-v4/
 ```
 
@@ -46,9 +47,10 @@ docker run --rm chenweb-pdf-parser:mineru-4.0.9 \
   python -c 'import torch; print(torch.__version__); print(torch.ones(2,2) @ torch.ones(2,2))'
 ```
 
-`prepare-context.py` copies exactly these five files over the deployed worker;
+`prepare-context.py` copies exactly these six files over the deployed worker;
 `parser_mineru.py` imports `mineru_cell_repair.py`, which imports `stacked_cells.py`,
-so an image built without them fails at start-up.
+so an image built without them fails at start-up. `table_geometry.py` (the viewer's
+PDF row boxes) must pair the same PDF tables as the repair, so it ships with it.
 
 ## Stacked-cell repair
 
@@ -61,6 +63,13 @@ data cell at its PDF lines when they spell exactly the same text. A row whose
 cells stack values at the same heights becomes one row per height (single-line
 cells get `rowspan`); other stacked values get `<br>` where two values would run
 together. MinerU's characters are never changed. No model calls are made.
+
+The repair and `table_geometry.py` call `find_tables(use_layout=False)`, so both
+use the table drawn by the PDF's rules. PyMuPDF 2 (pinned to 2.1 in the
+Dockerfile and `pyproject.toml`) otherwise keeps a ruled table only when its
+layout model draws a similar box, and substitutes a table built from text lines
+when it does not. On 表 1's continuation page the model left out the footnote row
+inside the border: the page was not repaired and the viewer had no row boxes.
 
 A table is left as MinerU wrote it when the page is rotated, has no text layer in
 the table, has no PyMuPDF table there (borderless tables), or the grids differ.

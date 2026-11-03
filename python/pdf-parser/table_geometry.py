@@ -66,7 +66,8 @@ def extract_table_geometry(pdf_path):
                         (rect.x1-display.x0)/display.width*1000,
                         (rect.y1-display.y0)/display.height*1000]]
 
-            for table in page.find_tables().tables:
+            # Ruled tables only, as mineru_cell_repair.py pairs them (no layout-model gating).
+            for table in page.find_tables(use_layout=False).tables:
                 texts = table.extract()
                 x_edges = sorted({x for box in table.cells if box for x in (box[0], box[2])})
                 rows = []

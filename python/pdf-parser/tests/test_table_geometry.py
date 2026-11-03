@@ -114,6 +114,16 @@ def test_rows_that_do_not_split_have_no_sub_rows(tmp_path):
     assert [('sub_rows' in rows[i]) for i in (0, 3, 4)] == [False, False, False]
 
 
+def test_layout_table_box_does_not_replace_the_ruled_table(tmp_path, monkeypatch):
+    from tests.test_mineru_cell_repair import make_pdf as make_stacked_pdf, stub_layout_table
+    pdf = tmp_path / 'stacked.pdf'
+    make_stacked_pdf(pdf)
+    stub_layout_table(monkeypatch, (50, 100, 400, 190))
+    table = extract_table_geometry(pdf)['tables'][0]
+    assert len(table['rows']) == 5
+    assert len(table['rows'][1]['sub_rows']) == 3
+
+
 def test_rowspan_rows_have_no_sub_rows(tmp_path):
     pdf = tmp_path / 'sample.pdf'
     make_pdf(pdf)
