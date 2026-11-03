@@ -62,7 +62,7 @@ export function resolveTableReferences(
 	if (
 		!geometry ||
 		geometry.version !== 1 ||
-		geometry.algorithm !== 'canonical-table-geometry-v4' ||
+		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5'].includes(geometry.algorithm) ||
 		geometry.coordinate_space !== 'page-normalized-1000' ||
 		!Array.isArray(geometry.tables)
 	)
@@ -87,6 +87,8 @@ export function resolveTableReferences(
 	});
 	for (const { ref, table } of references) {
 		for (const id of ref.rows ?? []) {
+			// A row whose cell is cited is highlighted by that cell alone.
+			if ((ref.cells ?? []).some((cell) => cell.split(':')[0] === id)) continue;
 			const row = table?.rows?.find((r) => r.id === id);
 			if (
 				row &&
@@ -98,8 +100,9 @@ export function resolveTableReferences(
 	}
 	for (const { ref, table } of references) {
 		if (!table || !Array.isArray(table.rows)) continue;
+		const narrowed = new Set((ref.cells ?? []).map((cell) => cell.split(':')[0]));
 		const targets = [
-			...(ref.rows ?? []),
+			...(ref.rows ?? []).filter((id) => !narrowed.has(id)),
 			...(ref.cells ?? []).filter((cell) => !selectedRows.has(`${ref.line}#${cell.split(':')[0]}`))
 		];
 		for (const target of targets) {

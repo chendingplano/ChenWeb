@@ -261,3 +261,50 @@ func TestTableMetricContext_MultiLineCaptionAndFullWidthRow(t *testing.T) {
 		t.Fatalf("window full-width row = %+v", last)
 	}
 }
+
+// record804Table mirrors record 804 table 1 (GB 9448 护目镜遮光号): the metric's column is
+// 最低遮光号, the first data row is r1.
+const record804Table = `<table><tr><td>焊接方法</td><td>板厚mm</td><td>焊条尺寸mm</td><td>电弧电流A</td><td>最低遮光号</td><td>推荐遮光号</td></tr>` +
+	`<tr><td>手工电弧焊</td><td>—</td><td>&lt;2.5</td><td>&lt;60</td><td>7</td><td>——</td></tr>` +
+	`<tr><td>手工电弧焊</td><td>—</td><td>2.5~&lt;4</td><td>60~&lt;160</td><td>8</td><td>10</td></tr></table>`
+
+func TestBuildTableMetricContext_CitesMetricColumnCell(t *testing.T) {
+	idx := newTableLineIndex([]Line{{LineNo: 123, LineType: "table", Content: record804Table}})
+	m := map[string]any{
+		"metric_name":       "最低遮光号",
+		"source_line_spans": []any{"123"},
+		"source_table_rows": tableRowRefsFromValue([]any{"123#r1"}),
+	}
+	res := buildTableMetricContext(idx, m)
+	if len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "r1" || strings.Join(res.Refs[0].Cells, ",") != "r1:c5" {
+		t.Fatalf("refs = %+v, want row r1 narrowed to cell r1:c5", res.Refs)
+	}
+}
+
+func TestBuildTableMetricContext_NoColumnMatchKeepsRowOnly(t *testing.T) {
+	idx := newTableLineIndex([]Line{{LineNo: 123, LineType: "table", Content: record804Table}})
+	for _, name := range []string{"处理能力", "遮光号"} { // no header / two headers contain "遮光号"
+		m := map[string]any{
+			"metric_name":       name,
+			"source_line_spans": []any{"123"},
+			"source_table_rows": tableRowRefsFromValue([]any{"123#r1"}),
+		}
+		res := buildTableMetricContext(idx, m)
+		if len(res.Refs) != 1 || len(res.Refs[0].Cells) != 0 || strings.Join(res.Refs[0].Rows, ",") != "r1" {
+			t.Fatalf("name %q: refs = %+v, want row r1 without cells", name, res.Refs)
+		}
+	}
+}
+
+func TestTableRowRefs_CellsParseAndMerge(t *testing.T) {
+	refs := tableRowRefsFromValue([]any{map[string]any{
+		"line": 123, "rows": []any{"r1"}, "cells": []any{"r1:c5", "r1:x9", "h0:c1"},
+	}})
+	if len(refs) != 1 || strings.Join(refs[0].Cells, ",") != "r1:c5" {
+		t.Fatalf("refs = %+v, want only the valid data-row cell r1:c5", refs)
+	}
+	merged := mergeTableRowRefs(append(refs, TableRowRef{Line: 123, Rows: []string{"r1"}, Cells: []string{"r1:c5"}}))
+	if len(merged) != 1 || len(merged[0].Cells) != 1 {
+		t.Fatalf("merged = %+v, want one deduplicated cell", merged)
+	}
+}

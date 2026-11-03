@@ -128,3 +128,26 @@ test('renumbering recovery requires hashes for every cited row and cell', () => 
 		{ page: 7, coords: [440, 270, 750, 398], line: 106, target: 'r3:c4' }
 	]);
 });
+
+test('a cited cell narrows its own row to that cell, but another reference still selects the whole row', () => {
+	assert.deepEqual(resolveTableReferences([{ line: 121, rows: ['r3'], cells: ['r3:c4'] }], geometry), [
+		{ page: 7, coords: [440, 270, 750, 398], line: 121, target: 'r3:c4' }
+	]);
+	assert.deepEqual(
+		resolveTableReferences(
+			[
+				{ line: 121, rows: ['r3'], cells: ['r3:c4'] },
+				{ line: 121, rows: ['r3'] }
+			],
+			geometry
+		),
+		[{ page: 7, coords: [105, 270, 917, 398], line: 121, target: 'r3' }]
+	);
+});
+
+test('canonical geometry v5, written by the current server, resolves cell references', () => {
+	const v5: TableGeometry = { ...geometry, algorithm: 'canonical-table-geometry-v5' };
+	assert.deepEqual(resolveTableReferences([{ line: 121, rows: ['r3'], cells: ['r3:c4'] }], v5), [
+		{ page: 7, coords: [440, 270, 750, 398], line: 121, target: 'r3:c4' }
+	]);
+});

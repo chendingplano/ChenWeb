@@ -20,6 +20,7 @@ import (
 type TableRowRef struct {
 	Line    int               `json:"line"`
 	Rows    []string          `json:"rows"`
+	Cells   []string          `json:"cells,omitempty"` // "r1:c5": one cell of a cited row; the viewer highlights it instead of the row
 	RowHash map[string]string `json:"row_hash,omitempty"`
 }
 
@@ -59,6 +60,11 @@ func tableRowRefsFromValue(value any) []TableRowRef {
 						r.Rows = append(r.Rows, id)
 					}
 				}
+				for _, id := range toStringSlice(it["cells"]) {
+					if isTableCellID(id) {
+						r.Cells = append(r.Cells, id)
+					}
+				}
 				if hm, ok := it["row_hash"].(map[string]any); ok {
 					r.RowHash = map[string]string{}
 					for k, hv := range hm {
@@ -96,6 +102,13 @@ func isTableRowID(id string) bool {
 	return err == nil && n >= 0 && (id[0] == 'h' || n >= 1)
 }
 
+// isTableCellID accepts "r1:c5": a data row and its 1-based column.
+func isTableCellID(id string) bool {
+	row, col, ok := strings.Cut(id, ":c")
+	n, err := strconv.Atoi(col)
+	return ok && strings.HasPrefix(row, "r") && isTableRowID(row) && err == nil && n >= 1
+}
+
 // mergeTableRowRefs unions refs per line; row IDs are de-duplicated and sorted in
 // grid order (h* before r*, numerically). Hashes are kept when present.
 func mergeTableRowRefs(refs []TableRowRef) []TableRowRef {
@@ -115,6 +128,13 @@ func mergeTableRowRefs(refs []TableRowRef) []TableRowRef {
 			if !containsString(cur.Rows, id) {
 				cur.Rows = append(cur.Rows, id)
 			}
+		}
+		for _, id := range r.Cells {
+			if !containsString(cur.Cells, id) {
+				cur.Cells = append(cur.Cells, id)
+			}
+		}
+		for _, id := range r.Rows {
 			if h := r.RowHash[id]; h != "" {
 				if cur.RowHash == nil {
 					cur.RowHash = map[string]string{}
@@ -128,6 +148,7 @@ func mergeTableRowRefs(refs []TableRowRef) []TableRowRef {
 	for _, l := range lines {
 		r := byLine[l]
 		sort.Slice(r.Rows, func(i, j int) bool { return tableRowOrder(r.Rows[i]) < tableRowOrder(r.Rows[j]) })
+		sort.Strings(r.Cells)
 		out = append(out, *r)
 	}
 	return out
@@ -319,6 +340,7 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 			}
 			b.WriteString(renderTableRowPairs(g, r))
 		}
+		ref.Cells = tableMetricCellIDs(g, rows, outcome, asString(metric["metric_name"]))
 		res.Refs = append(res.Refs, ref)
 		blocks = append(blocks, b.String())
 	}
@@ -339,6 +361,45 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 	}
 	res.Context = ctx
 	return res
+}
+
+// tableMetricCellIDs narrows the selected data rows to the metric's own column: the
+// header whose label equals the metric name, else the only header that contains it.
+// It returns nothing (the viewer then highlights the row) when no column matches, or
+// when the rows are only the whole-table fallback and so do not show where the value is.
+func tableMetricCellIDs(g *TableGrid, rows []TableRow, outcome, metricName string) []string {
+	if outcome == tableRowsWholeTable {
+		return nil
+	}
+	want := normalizeTableMatchText(metricName)
+	if utf8.RuneCountInString(want) < 2 {
+		return nil
+	}
+	exact, partial := -1, []int{}
+	for c, label := range g.Columns {
+		leaf := label[strings.LastIndex(label, "/")+1:]
+		text := normalizeTableMatchText(leaf)
+		switch {
+		case text == want:
+			exact = c
+		case strings.Contains(text, want):
+			partial = append(partial, c)
+		}
+	}
+	col := exact
+	if col < 0 && len(partial) == 1 {
+		col = partial[0]
+	}
+	if col < 0 {
+		return nil
+	}
+	var ids []string
+	for _, r := range rows {
+		if strings.HasPrefix(r.ID, "r") && col < len(r.Cells) {
+			ids = append(ids, fmt.Sprintf("%s:c%d", r.ID, col+1))
+		}
+	}
+	return ids
 }
 
 func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]TableRow, string) {
