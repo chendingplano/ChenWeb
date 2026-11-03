@@ -49,7 +49,7 @@
 </script>
 
 <aside
-  class="flex flex-col h-full overflow-hidden flex-shrink-0"
+  class="flex flex-col h-full overflow-hidden shrink-0"
   style="width:200px; background:var(--cv-panel); border-right:1px solid var(--cv-divider);"
 >
   <div style="padding:8px; border-bottom:1px solid var(--cv-divider);">
@@ -73,7 +73,7 @@
           class="flex items-center gap-1 w-full text-left text-(--cv-text-faint) hover:text-(--cv-text-2) transition-colors"
           style="font-size:8px; letter-spacing:1px; margin:8px 0 4px 0; padding:0 4px 0 0; background:none; border:none; cursor:pointer;"
         >
-          <ChevronRightIcon size={10} class="flex-shrink-0 transition-transform {open ? 'rotate-90' : ''}" />
+          <ChevronRightIcon size={10} class="shrink-0 transition-transform {open ? 'rotate-90' : ''}" />
           <span class="flex-1">{categoryLabel(cat)}</span>
           <span>{items.length}</span>
         </button>

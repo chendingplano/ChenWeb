@@ -54,7 +54,7 @@
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
-	import { blankPage, centeredPageViewport, isInsidePage } from './canvas/page-placement';
+	import { blankPage, centeredPageViewport, DEFAULT_PREVIEW_SIZE, isInsidePage } from './canvas/page-placement';
 	import { unnamedPageID } from './canvas/unnamed-page';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
 	import { needsRecovery } from './canvas/recovery-content';
@@ -195,7 +195,6 @@
 	let selectedPane = $state<string | null>(null);
 	const leaves = $derived(loadedPage ? leafPanes(effectiveRoot(loadedPage as unknown as PageDescriptor)) : []);
 	let canvasRevision = $state(0);
-	const DEFAULT_PREVIEW_SIZE = { width: 1000, height: 650 };
 	let previewSize = $state({ ...DEFAULT_PREVIEW_SIZE });
 	function centerPreview() {
 		viewport = centeredPageViewport(previewSize, { width: canvasWidth, height: canvasHeight });

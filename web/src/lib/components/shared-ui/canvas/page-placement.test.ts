@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { isInsidePage, centeredPageViewport, blankPage } from './page-placement';
 
-test('blank page has no persisted identifier and starts empty', () => {
- expect(blankPage()).toEqual({ descriptor_id: '', schema_version: '0.5', page_layouter: { layouter: 'single-pane', root: { pane_id: 'main' } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [] } } });
+test('blank page has no persisted identifier, starts empty, and carries the canvas size', () => {
+ expect(blankPage()).toEqual({ descriptor_id: '', schema_version: '0.5', width: '1000px', height: '650px', page_layouter: { layouter: 'single-pane', root: { pane_id: 'main' } }, panels: { main: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [] } } });
 });
 test('element drops must be within the page bounds', () => {
  const page = { width: 1000, height: 650 };

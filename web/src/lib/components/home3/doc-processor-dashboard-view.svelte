@@ -234,11 +234,6 @@
 		if (pdfStats.active > 0 && !autoSync) {
 			startAutoSync();
 		}
-		// Stop the dedicated PDF keepalive once there's nothing left to watch.
-		if (pdfStats.active === 0 && pdfPollInterval !== null) {
-			clearInterval(pdfPollInterval);
-			pdfPollInterval = null;
-		}
 	}
 
 	// ── Manual launch state ────────────────────────────────────────────────
@@ -373,11 +368,6 @@
 		autoSync = true;
 		emptyPollCount = 0;
 		syncInterval = setInterval(pollPipelines, SYNC_INTERVAL_SECONDS * 1000);
-		// Cancel the PDF-only keepalive — full sync covers it now.
-		if (pdfPollInterval !== null) {
-			clearInterval(pdfPollInterval);
-			pdfPollInterval = null;
-		}
 	}
 
 	function stopAutoSync() {
@@ -386,11 +376,6 @@
 			syncInterval = null;
 		}
 		autoSync = false;
-		// Keep the PDF section live with a dedicated interval so active parses
-		// continue to update (and can wake full sync back up) even while paused.
-		if (pdfPollInterval === null) {
-			pdfPollInterval = setInterval(pollPdfParsing, SYNC_INTERVAL_SECONDS * 1000);
-		}
 	}
 
 	function toggleSync() {
@@ -453,7 +438,6 @@
 		} finally {
 			pipelinesLoading = false;
 		}
-		void pollPdfParsing();
 	}
 
 	async function publishEvent(subject: string, payload: Record<string, unknown>) {
@@ -847,6 +831,10 @@
 
 		pollPipelines();
 		syncInterval = setInterval(pollPipelines, SYNC_INTERVAL_SECONDS * 1000);
+		// PDF parsing has its own timer, independent of pipeline sync, so the
+		// active list keeps refreshing even when sync is paused or stalled.
+		pollPdfParsing();
+		pdfPollInterval = setInterval(pollPdfParsing, SYNC_INTERVAL_SECONDS * 1000);
 		return () => {
 			if (syncInterval !== null) clearInterval(syncInterval);
 			if (pdfPollInterval !== null) clearInterval(pdfPollInterval);

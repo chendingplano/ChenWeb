@@ -5011,3 +5011,13 @@ dig +short onto.bzton.cn        # should print 210.5.158.91
 - Update the api key in 'ChenWeb/.models.toml'
 - In 'ChenWeb/development, System Admin => LLM => LLM Accounts', find the 
   model ('deepseek-flash-processor'), update its API key.
+
+# How to start/stop app gateway
+- Run it from ChenWeb/ with scripts/deepseek-traffic-watch.sh, and stop it with Ctrl-C. It doesn't start on its own.
+- Log file: /Users/cding/Apps/ChenWebLog/deepseek-traffic.log, or the value of DEEPSEEK_WATCH_LOG if set.
+
+It samples once per second. A connection that opens and closes between samples is missed. 
+Normal LLM calls last long enough to be caught.
+Command-line API keys are redacted before logging.
+A test run caught a curl request and some Chrome connections to DeepSeek. The redaction 
+expression works on its own.

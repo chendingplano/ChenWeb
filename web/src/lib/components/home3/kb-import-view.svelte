@@ -1367,7 +1367,18 @@
 								<td class="cell" style="color:{textPrimary};">{record.doc_no ?? '-'}</td>
 								<td class="cell" style="color:{textPrimary};">{record.type}</td>
 								<td class="cell file-name-cell" title={record.file_name ?? '-'} style="color:{textPrimary};">
-									<span class="ellipsis-cell">{record.file_name ?? '-'}</span>
+									<span class="ellipsis-cell">
+										{#if (record.file_name ?? '').trim().toLowerCase().endsWith('.pdf')}
+											<a
+												href={`/api/v1/kb/inputs/${record.id}/file`}
+												target="_blank"
+												rel="noopener noreferrer"
+												style="color:{accent}; text-decoration:underline;"
+											>{record.file_name}</a>
+										{:else}
+											{record.file_name ?? '-'}
+										{/if}
+									</span>
 								</td>
 								<td class="cell status-cell" title={statusSummary} style="color:{textPrimary};">
 									<span class="ellipsis-cell">{statusSummary}</span>
@@ -1997,9 +2008,9 @@
 				>
 					<input type="checkbox" bind:checked={restartParseFile} class="sr-only" />
 					{#if restartParseFile}
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						<CheckSquareIcon class="size-4 shrink-0" style="color:{accent};" />
 					{:else}
-						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						<SquareIcon class="size-4 shrink-0" style="color:{textMuted};" />
 					{/if}
 					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">{m.kb_import_parse_file()}</span>
 					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.kb_import_parse_file_2()}</span>
@@ -2014,9 +2025,9 @@
 				>
 					<input type="checkbox" bind:checked={restartConvert} class="sr-only" />
 					{#if restartConvert}
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						<CheckSquareIcon class="size-4 shrink-0" style="color:{accent};" />
 					{:else}
-						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						<SquareIcon class="size-4 shrink-0" style="color:{textMuted};" />
 					{/if}
 					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">{m.kb_import_convert_parse_result()}</span>
 					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.kb_import_convert_parse_result_2()}</span>
@@ -2025,7 +2036,7 @@
 				<!-- Mandatory (always-on) processors -->
 				{#each MANDATORY_DISPLAY_STAGES as proc}
 					<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
+						<CheckSquareIcon class="size-4 shrink-0" style="color:{colorSuccess};" />
 						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
 						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">{m.kb_import_mandatory()}</span>
@@ -2042,9 +2053,9 @@
 					>
 						<input type="checkbox" bind:checked={restartProcessors[proc.id]} class="sr-only" />
 						{#if restartProcessors[proc.id]}
-							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+							<CheckSquareIcon class="size-4 shrink-0" style="color:{accent};" />
 						{:else}
-							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+							<SquareIcon class="size-4 shrink-0" style="color:{textMuted};" />
 						{/if}
 						<span style="font-size:13px; color:{restartProcessors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
@@ -2088,7 +2099,7 @@
 						(e.currentTarget as HTMLElement).style.opacity = restarting ? '0.6' : '1';
 					}}
 				>
-					<RefreshCwIcon class="h-4 w-4" />
+					<RefreshCwIcon class="size-4" />
 					{restarting ? m.kb_import_restarting() : m.kb_import_restart()}
 				</button>
 			</div>

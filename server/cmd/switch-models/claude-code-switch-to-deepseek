@@ -5,6 +5,8 @@ CC_SWITCH_SETTINGS="$HOME/.cc-switch/settings.json"
 CC_SWITCH_DB="$HOME/.cc-switch/cc-switch.db"
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 PROVIDER_ID="4f5bb95f-4d91-410c-b755-0d0bf1248710"
+# Fails before any file is changed if the key is not set (mise.local.toml).
+DEEPSEEK_KEY="${DEEPSEEK_APIKEY_FOR_CLAUD_CODE:?set DEEPSEEK_APIKEY_FOR_CLAUD_CODE in ChenWeb/mise.local.toml}"
 
 echo "Switching Claude Code to DeepSeek..."
 
@@ -29,14 +31,14 @@ sqlite3 "$CC_SWITCH_DB" "
 echo "  ✓ Updated cc-switch database"
 
 # 3. Update Claude Code settings — inject DeepSeek env overrides
-python3 -c "
-import json
+DEEPSEEK_KEY="$DEEPSEEK_KEY" python3 -c "
+import json, os
 path = '$CLAUDE_SETTINGS'
 with open(path) as f:
     d = json.load(f)
 d['env'] = {
     'ANTHROPIC_BASE_URL': 'https://api.deepseek.com/anthropic',
-    'ANTHROPIC_AUTH_TOKEN': 'sk-7091f67ba56b4365b66e31ed3eab6412',
+    'ANTHROPIC_AUTH_TOKEN': os.environ['DEEPSEEK_KEY'],
     'ANTHROPIC_MODEL': 'deepseek-v4-flash',
     'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'deepseek-v4-flash',
     'ANTHROPIC_DEFAULT_SONNET_MODEL': 'deepseek-v4-flash',
