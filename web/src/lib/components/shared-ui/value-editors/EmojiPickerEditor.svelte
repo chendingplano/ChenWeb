@@ -34,6 +34,7 @@
 	async function stay() { error = null; open = true; await tick(); container.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); }
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (catches Escape bubbling from the trigger and picker) -->
 <div bind:this={container} class="select-text" onkeydown={keydown} role="group" aria-label={label}>
 	<div class="ve-row">
 		<button {id} bind:this={trigger} type="button" class="ve-button emoji-trigger" aria-expanded={open} aria-label={label} onclick={() => open = !open}>
