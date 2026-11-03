@@ -16,6 +16,7 @@ import tempfile
 import zipfile
 from typing import Any, Callable
 
+from mineru_cell_repair import repair_content_list
 from parser_base import ParserBackend
 
 log = logging.getLogger(__name__)
@@ -140,6 +141,18 @@ def _terminate_and_wait(proc: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+
+
+def _repair_tables(content_list: dict[str, Any], pdf_path: str) -> None:
+    """Re-segment glued stacked cells in MinerU's tables; on any error keep MinerU's tables."""
+    try:
+        report = repair_content_list(content_list, pdf_path)
+    except Exception as exc:
+        log.warning("(20261103-512) stacked-cell repair failed, keeping MinerU tables: pdf=%s error=%s",
+                    pdf_path, exc)
+        return
+    log.info("(20261103-513) stacked-cell repair: pdf=%s report=%s",
+             pdf_path, json.dumps(report, ensure_ascii=False))
 
 
 def _promote_result_pair(
@@ -401,6 +414,7 @@ class MineruParser(ParserBackend):
                                 clean = clean[-1:]
                             if clean and all(part not in {"", ".", ".."} for part in clean):
                                 item["img_path"] = "images/" + "/".join(clean)
+                _repair_tables(normalized, pdf_path)
                 with open(staged_content_path, "w", encoding="utf-8") as f:
                     json.dump(normalized, f, ensure_ascii=False)
                 total_pages = len(pages)

@@ -14,12 +14,41 @@ import tempfile
 
 import fitz
 
+from stacked_cells import cell_lines, split_plan
+
 log = logging.getLogger(__name__)
+
+
+def _sub_rows(page, row, top, bottom, cells, table_bbox, coords):
+    """The sub-rows of a data row whose stacked values line up, as stacked_cells splits them.
+
+    Rows touched by a span are not split, mirroring mineru_cell_repair.py.
+    """
+    if any(box is None or box[1] < top - 0.5 or box[3] > bottom + 0.5 for box in row.cells):
+        return None
+    lines = [cell_lines(page, box) for box in row.cells]
+    plan = split_plan(lines)
+    if plan is None:
+        return None
+    # Sub-rows tile the band: each boundary sits midway between two sub-rows' lines.
+    edges = [top] + [(plan.bands[j - 1][1] + plan.bands[j][0]) / 2 for j in range(1, plan.k)] + [bottom]
+    sub_rows = []
+    for j in range(plan.k):
+        sub_cells = []
+        for col, box in enumerate(row.cells):
+            if col in plan.aligned:
+                sub_cells.append({'text': ' '.join(lines[col][j].text.split()),
+                                  'coords': coords((box[0], edges[j], box[2], edges[j + 1]))})
+            else:
+                sub_cells.append(cells[col])
+        sub_rows.append({'coords': coords((table_bbox[0], edges[j], table_bbox[2], edges[j + 1])),
+                         'cells': sub_cells})
+    return sub_rows
 
 
 def extract_table_geometry(pdf_path):
     pdf_path = Path(pdf_path)
-    result = {'version': 1, 'extractor': 'pymupdf-tables-v1',
+    result = {'version': 1, 'extractor': 'pymupdf-tables-v2',
               'pdf_sha256': hashlib.sha256(pdf_path.read_bytes()).hexdigest(), 'tables': []}
     with fitz.open(pdf_path) as document:
         for page_number, page in enumerate(document, 1):
@@ -60,7 +89,12 @@ def extract_table_geometry(pdf_path):
                             if box:
                                 text = page.get_textbox(fitz.Rect(box))
                         cells.append({'text': ' '.join(text.split()), 'coords': coords(box) if box else None})
-                    rows.append({'coords': coords((table.bbox[0], top, table.bbox[2], bottom)), 'cells': cells})
+                    entry = {'coords': coords((table.bbox[0], top, table.bbox[2], bottom)), 'cells': cells}
+                    # Row 0 is the header, which the MinerU repair never splits either.
+                    sub_rows = _sub_rows(page, row, top, bottom, cells, table.bbox, coords) if i else None
+                    if sub_rows:
+                        entry['sub_rows'] = sub_rows
+                    rows.append(entry)
                 result['tables'].append({'page': page_number, 'rotation': rotation, 'coords': coords(table.bbox), 'rows': rows})
             page.set_rotation(rotation)
     return result

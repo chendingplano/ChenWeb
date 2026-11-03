@@ -88,11 +88,17 @@ synthetic PDFs drawn with PyMuPDF, as `test_table_geometry.py` does, with the bu
 font for Chinese text.
 
 ### D7. Geometry: additive `sub_rows`, version bumps, no `TableGridVersion` change
-Physical rows gain an optional `sub_rows` list. The Go builder scores a ChenWeb row against the
-band and then against its sub-rows, so documents parsed before the change still match their glued
-band, and re-parsed documents match a sub-row. Bumping `pymupdf-tables-v1` → `v2` makes the file
-converter regenerate physical geometry, and bumping `Algorithm` (v4 → v5) rebuilds canonical
-companions. `ParseTableGrid` does not change, so `TableGridVersion` stays as it is; re-parsed
+Physical rows gain an optional `sub_rows` list. The Go builder matches such a row either as its band
+or as its sub-rows, never both: the sub-rows when their exact (`score`) matches sum higher than the
+band's. A document parsed before the change still has glued text, so its band scores exactly and
+its sub-rows do not; a re-parsed document is the other way round. Offering both at once would let
+the Chinese-only fallback (`scoreReadable`) tie the band with every sub-row. A garbled text layer
+scores neither exactly, so the band is kept, which is right because the repair could not match
+those cells either. Bumping `pymupdf-tables-v1` → `v2` makes the file converter regenerate physical
+geometry when it converts a document. The builder accepts both ids, because the viewer builds
+companions on request (`kbhandler/table_geometry_handler.go`) from whatever physical file a
+document has, and documents that are not re-parsed keep their v1 files. Bumping `Algorithm`
+(v4 → v5) rebuilds canonical companions. `ParseTableGrid` does not change, so `TableGridVersion` stays as it is; re-parsed
 documents also change `LineHash`, which rebuilds their companions anyway.
 
 ### D8. No feature flag
@@ -124,8 +130,9 @@ any doubt, and rollback is a redeploy of the previous parser image.
 4. Rollback: redeploy the previous image and binaries. Documents parsed in between keep their
    split rows, which `ParseTableGrid` reads like any other table.
 
-## Open Questions
+## Resolved Questions
 
-- Should already-parsed documents with glued tables be found (search `.txt` table lines for cells
-  with digit/digit junctions) and re-parsed, or left until someone re-imports them?
-- Borderless tables: is `find_tables(strategy="text")` worth a follow-up?
+- Already-parsed documents are left as they are (decided 2026-11-03). They are not searched for or
+  re-parsed; a document gets the repair only when someone re-parses it.
+- Borderless tables are worth a follow-up change (decided 2026-11-03), for example with
+  `find_tables(strategy="text")`. They stay out of scope here.

@@ -17,7 +17,8 @@ worker.mkdir(parents=True, exist_ok=True)
 mineru.mkdir(parents=True, exist_ok=True)
 for path in args.worker.glob("*.py"):
     shutil.copy2(str(path), str(worker / path.name))
-for name in ("parser_mineru.py", "mineru_v4_adapter.py", "mineru_table_repair.py"):
+for name in ("parser_mineru.py", "mineru_v4_adapter.py", "mineru_table_repair.py",
+             "mineru_cell_repair.py", "stacked_cells.py"):
     shutil.copy2(str(args.adapters / name), str(worker / name))
 # The September worker passed a language argument removed by the MinerU 4 API.
 main = worker / "pdf_parser.py"

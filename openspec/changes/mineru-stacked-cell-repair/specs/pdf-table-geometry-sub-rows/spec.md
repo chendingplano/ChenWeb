@@ -17,16 +17,23 @@ be `pymupdf-tables-v2`.
 - **WHEN** a row's cells are all single-line
 - **THEN** the physical row has no `sub_rows` field
 
-#### Scenario: Old physical geometry is regenerated
-- **WHEN** a document's `.pdf-table-geometry.json` has extractor `pymupdf-tables-v1`
-- **THEN** the file converter treats it as stale and regenerates it
+#### Scenario: Old physical geometry is regenerated on conversion
+- **WHEN** the file converter converts a document whose `.pdf-table-geometry.json` has extractor `pymupdf-tables-v1`
+- **THEN** it treats the file as stale and regenerates it
+
+#### Scenario: Old physical geometry still builds
+- **WHEN** the canonical geometry builder reads a `pymupdf-tables-v1` file of a document that has not been converted again
+- **THEN** it builds the companion from it, as before, so the document keeps its highlighting
 
 ### Requirement: Canonical rows match physical sub-rows
-When it maps ChenWeb table rows to physical rows, the canonical geometry builder SHALL score a
-ChenWeb row against each physical row and against each of that row's `sub_rows`, using the same
-scoring as for physical rows. A ChenWeb row matched to a sub-row SHALL get that sub-row's box and
-cell boxes. A ChenWeb row matched to the band SHALL get the band's box, as before. The builder's
-`Algorithm` SHALL change so canonical companions built by the previous algorithm are rebuilt.
+When it maps ChenWeb table rows to physical rows, the canonical geometry builder SHALL match a
+physical row that has `sub_rows` either as its band or as its sub-rows, never both. It SHALL use the
+sub-rows when the sum, over the sub-rows, of the best exact cell-text score any ChenWeb row reaches
+is greater than the band's best exact score; otherwise it SHALL use the band. The chosen rows are
+then matched like any physical row. A ChenWeb row matched to a sub-row SHALL get that sub-row's box
+and cell boxes. A ChenWeb row matched to the band SHALL get the band's box, as before. The builder
+SHALL accept both `pymupdf-tables-v1` and `pymupdf-tables-v2` files. Its `Algorithm` SHALL change so
+canonical companions built by the previous algorithm are rebuilt.
 
 #### Scenario: Re-parsed document highlights a sub-row
 - **WHEN** a re-parsed document's ChenWeb row is `手工电弧焊 | — | <2.5 | <60 | 7 | ——`

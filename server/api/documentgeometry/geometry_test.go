@@ -365,3 +365,54 @@ func TestPrivateUseGlyphMatchesOneChineseCharacter(t *testing.T) {
 		t.Fatalf("rows=%+v", got.Tables[0].Rows)
 	}
 }
+
+// stackedPhysical is GB 9448 表 1 in miniature: the 手工电弧焊 row stacks three values per
+// cell with no rule between them, so the physical row carries three sub-rows.
+func stackedPhysical() PhysicalDocument {
+	cell := func(text string, x0, y0, x1, y1 float64) PhysicalCell {
+		return PhysicalCell{Text: text, Coords: []float64{x0, y0, x1, y1}}
+	}
+	name := cell("手工电弧焊", 100, 200, 300, 260)
+	sub := func(y0, y1 float64, size, shade string) PhysicalRow {
+		return PhysicalRow{Coords: []float64{100, y0, 900, y1}, Cells: []PhysicalCell{name, cell(size, 300, y0, 600, y1), cell(shade, 600, y0, 900, y1)}}
+	}
+	return PhysicalDocument{Version: 1, Extractor: "pymupdf-tables-v2", PDFHash: "pdf", Tables: []PhysicalTable{{Page: 12, Coords: []float64{100, 170, 900, 290}, Rows: []PhysicalRow{
+		{Coords: []float64{100, 170, 900, 200}, Cells: []PhysicalCell{cell("焊接方法", 100, 170, 300, 200), cell("焊条尺寸 mm", 300, 170, 600, 200), cell("最低遮光号", 600, 170, 900, 200)}},
+		{Coords: []float64{100, 200, 900, 260}, Cells: []PhysicalCell{name, cell("<2.5 2.5~<4 >4", 300, 200, 600, 260), cell("7 8 10", 600, 200, 900, 260)},
+			SubRows: []PhysicalRow{sub(200, 220, "<2.5", "7"), sub(220, 240, "2.5~<4", "8"), sub(240, 260, ">4", "10")}},
+		{Coords: []float64{100, 260, 900, 290}, Cells: []PhysicalCell{cell("碳弧焊", 100, 260, 300, 290), cell("—", 300, 260, 600, 290), cell("14", 600, 260, 900, 290)}},
+	}}}}
+}
+
+func TestSplitCanonicalRowsMatchPhysicalSubRows(t *testing.T) {
+	line := "123\t12\ttable\tunknown-font\t12\t[100,170,900,290]\t<table><tr><td>焊接方法</td><td>焊条尺寸mm</td><td>最低遮光号</td></tr>" +
+		"<tr><td rowspan=\"3\">手工电弧焊</td><td>&lt;2.5</td><td>7</td></tr><tr><td>2.5~&lt;4</td><td>8</td></tr><tr><td>&gt;4</td><td>10</td></tr>" +
+		"<tr><td>碳弧焊</td><td>—</td><td>14</td></tr></table>\n"
+	got, err := Build([]byte(line), stackedPhysical())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := got.Tables[0].Rows
+	if len(rows) != 5 {
+		t.Fatalf("rows=%+v", rows)
+	}
+	for i, top := range []float64{200, 220, 240} {
+		r := rows[i+1]
+		if len(r.Boxes) != 1 || r.Boxes[0].Coords[1] != top || r.Cells[1].Boxes[0].Coords[1] != top {
+			t.Fatalf("%s must get only its sub-row box at y=%v: %+v", r.ID, top, r)
+		}
+	}
+}
+
+func TestGluedCanonicalRowKeepsPhysicalBand(t *testing.T) {
+	line := "123\t12\ttable\tunknown-font\t12\t[100,170,900,290]\t<table><tr><td>焊接方法</td><td>焊条尺寸mm</td><td>最低遮光号</td></tr>" +
+		"<tr><td>手工电弧焊</td><td>&lt;2.52.5~&lt;4&gt;4</td><td>7810</td></tr><tr><td>碳弧焊</td><td>—</td><td>14</td></tr></table>\n"
+	got, err := Build([]byte(line), stackedPhysical())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := got.Tables[0].Rows[1]
+	if r.ID != "r1" || len(r.Boxes) != 1 || r.Boxes[0].Coords[1] != 200 || r.Boxes[0].Coords[3] != 260 {
+		t.Fatalf("glued row must keep the band box: %+v", r)
+	}
+}

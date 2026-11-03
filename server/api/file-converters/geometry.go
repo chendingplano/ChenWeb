@@ -33,7 +33,7 @@ func physicalGeometryCurrent(pdfPath string) (bool, error) {
 		return false, nil
 	}
 	sum := sha256.Sum256(pdf)
-	return physical.Version == documentgeometry.Version && physical.Extractor == "pymupdf-tables-v1" && physical.PDFHash == hex.EncodeToString(sum[:]), nil
+	return physical.Version == documentgeometry.Version && physical.Extractor == documentgeometry.Extractor && physical.PDFHash == hex.EncodeToString(sum[:]), nil
 }
 
 func (s *Service) ensurePhysicalTableGeometry(ctx context.Context, pdfPath string) error {

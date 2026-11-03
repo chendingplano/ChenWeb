@@ -88,3 +88,39 @@ def test_future_physical_companion_contains_only_integer_coordinates(tmp_path):
             boxes.extend(cell['coords'] for cell in row['cells'] if cell['coords'])
         assert all(type(value) is int for box in boxes for value in box)
     assert result['tables'][0]['coords'] == [133, 100, 800, 325]
+
+
+def test_aligned_stacked_row_carries_sub_rows(tmp_path):
+    from tests.test_mineru_cell_repair import make_pdf as make_stacked_pdf
+    pdf = tmp_path / 'stacked.pdf'
+    make_stacked_pdf(pdf)
+    row = extract_table_geometry(pdf)['tables'][0]['rows'][1]
+    subs = row['sub_rows']
+    assert [[c['text'] for c in s['cells']] for s in subs] == [
+        ['手工电弧焊', '<2.5', '7'], ['手工电弧焊', '2.5~<4', '8'], ['手工电弧焊', '>4', '10']]
+    # Sub-rows tile the row band; an unsplit cell keeps its whole box.
+    assert subs[0]['coords'][1] == row['coords'][1] and subs[-1]['coords'][3] == row['coords'][3]
+    assert subs[0]['coords'][3] == subs[1]['coords'][1]
+    assert subs[1]['cells'][0]['coords'] == row['cells'][0]['coords']
+    assert subs[1]['cells'][1]['coords'][1] == subs[1]['coords'][1]
+
+
+def test_rows_that_do_not_split_have_no_sub_rows(tmp_path):
+    from tests.test_mineru_cell_repair import make_pdf as make_stacked_pdf
+    pdf = tmp_path / 'stacked.pdf'
+    make_stacked_pdf(pdf)
+    rows = extract_table_geometry(pdf)['tables'][0]['rows']
+    # Header, single-line row, and a row with only one stacked cell.
+    assert [('sub_rows' in rows[i]) for i in (0, 3, 4)] == [False, False, False]
+
+
+def test_rowspan_rows_have_no_sub_rows(tmp_path):
+    pdf = tmp_path / 'sample.pdf'
+    make_pdf(pdf)
+    assert not any('sub_rows' in row for row in extract_table_geometry(pdf)['tables'][0]['rows'])
+
+
+def test_extractor_id_is_v2(tmp_path):
+    pdf = tmp_path / 'sample.pdf'
+    make_pdf(pdf)
+    assert extract_table_geometry(pdf)['extractor'] == 'pymupdf-tables-v2'

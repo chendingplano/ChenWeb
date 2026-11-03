@@ -326,3 +326,60 @@ class TestCommand:
         assert cmd[cmd.index("--ocr-mode") + 1] == "ocr"
 
 
+
+
+class TestStackedCellRepair:
+    """parse() runs the stacked-cell repair on the adapter's content list."""
+
+    def _parser(self, tmp_path, content_list):
+        import json
+        import os
+        import sys
+
+        cli = tmp_path / "mineru-kit"
+        cli.write_text(
+            f"#!{sys.executable}\nimport sys, zipfile\n"
+            "with zipfile.ZipFile(sys.argv[-1], 'w') as z:\n"
+            "    z.writestr('out/middle_json.json', '{}')\n"
+        )
+        python = tmp_path / "python"
+        python.write_text(
+            f"#!{sys.executable}\nimport sys\n"
+            f"open(sys.argv[3], 'w', encoding='utf-8').write({json.dumps(json.dumps(content_list))})\n"
+        )
+        for script in (cli, python):
+            os.chmod(script, 0o755)
+        parser = parser_mineru.MineruParser()
+        parser._cli, parser._python, parser._initialized = str(cli), str(python), True
+        return parser
+
+    def _parse(self, tmp_path, monkeypatch=None):
+        import json
+        from tests.test_mineru_cell_repair import content, make_pdf
+
+        pdf = tmp_path / "doc.pdf"
+        make_pdf(pdf)
+        out = tmp_path / "out"
+        self._parser(tmp_path, content()).parse(str(pdf), str(out), lambda done, total: None)
+        saved = json.loads((out / "doc_content_list.json").read_text(encoding="utf-8"))
+        return saved["pages"][0]["items"][1]["table_body"]
+
+    def test_parse_writes_repaired_tables(self, tmp_path):
+        assert '<td rowspan="3">手工电弧焊</td>' in self._parse(tmp_path)
+
+    def test_parse_logs_the_repair_report(self, tmp_path, caplog):
+        caplog.set_level("INFO", logger="parser_mineru")
+        self._parse(tmp_path)
+        assert any("(20261103-513)" in r.getMessage() and '"rows_split": 2' in r.getMessage()
+                   for r in caplog.records)
+
+    def test_parse_keeps_mineru_tables_when_repair_fails(self, tmp_path, monkeypatch, caplog):
+        from tests.test_mineru_cell_repair import GLUED
+
+        def broken(content, pdf_path):
+            raise ValueError("boom")
+
+        monkeypatch.setattr(parser_mineru, "repair_content_list", broken)
+        caplog.set_level("WARNING", logger="parser_mineru")
+        assert self._parse(tmp_path) == GLUED
+        assert any("(20261103-512)" in r.getMessage() for r in caplog.records)

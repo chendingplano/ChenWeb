@@ -7,15 +7,16 @@ MinerU 4.0.9 source. OpenCV uses its headless distribution; only that dependency
 name is changed in the staged MinerU package metadata.
 
 The image snapshots the deployed PDF worker and replaces its MinerU backend,
-result adapter and table repair module with the workspace's MinerU 4 versions.
+result adapter and table repair modules with the workspace's versions, including
+the stacked-cell repair (see below).
 The September worker's OCR fallback call and mode detection are adjusted to the
 MinerU 4 basic OCR interface. Its database and JetStream code stays at the deployed
 version. No `.env`, documents or model weights are baked into the image.
 
 ## Build
 
-From the Mac's workspace root, upload these container files and the three
-adapters (the native deployment's Python files remain available):
+From the Mac's workspace root, upload these container files and the five
+adapter modules (the native deployment's Python files remain available):
 
 ```sh
 rsync -az -e 'ssh -p 8822' ChenWeb/python/pdf-parser/container/ \
@@ -24,6 +25,8 @@ rsync -az -e 'ssh -p 8822' \
   ChenWeb/python/pdf-parser/parser_mineru.py \
   ChenWeb/python/pdf-parser/mineru_v4_adapter.py \
   ChenWeb/python/pdf-parser/mineru_table_repair.py \
+  ChenWeb/python/pdf-parser/mineru_cell_repair.py \
+  ChenWeb/python/pdf-parser/stacked_cells.py \
   gui@210.5.158.91:Workspace/ChenWeb/python/pdf-parser/container/mineru-v4/
 ```
 
@@ -42,6 +45,33 @@ docker run --rm chenweb-pdf-parser:mineru-4.0.9 python -m pip check
 docker run --rm chenweb-pdf-parser:mineru-4.0.9 \
   python -c 'import torch; print(torch.__version__); print(torch.ones(2,2) @ torch.ones(2,2))'
 ```
+
+`prepare-context.py` copies exactly these five files over the deployed worker;
+`parser_mineru.py` imports `mineru_cell_repair.py`, which imports `stacked_cells.py`,
+so an image built without them fails at start-up.
+
+## Stacked-cell repair
+
+MinerU's table VLM writes the lines of a multi-line cell back to back: in GB
+9448—2025 表 1 the sizes `<2.5`, `2.5~<4`, `4~6.4`, `>6.4` arrive as
+`<2.52.5~<44~6.4>6.4`. Every tier does this. After the adapter,
+`parser_mineru.py` runs `mineru_cell_repair.py` on the content list. It pairs each
+MinerU table with the PyMuPDF `find_tables()` table at the same place, and cuts a
+data cell at its PDF lines when they spell exactly the same text. A row whose
+cells stack values at the same heights becomes one row per height (single-line
+cells get `rowspan`); other stacked values get `<br>` where two values would run
+together. MinerU's characters are never changed. No model calls are made.
+
+A table is left as MinerU wrote it when the page is rotated, has no text layer in
+the table, has no PyMuPDF table there (borderless tables), or the grids differ.
+Header rows are never changed. The worker log has one line per document:
+
+- `(20261103-513) stacked-cell repair: … report={…}` gives tables seen, paired and
+  changed, rows split, cells given `<br>`, unmatched cells, and skips by reason.
+- `(20261103-512) stacked-cell repair failed, keeping MinerU tables` means the
+  repair raised; the parse still succeeds with MinerU's tables.
+
+Contract: openspec change `mineru-stacked-cell-repair`.
 
 ## Models and runtime
 

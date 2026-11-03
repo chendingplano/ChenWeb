@@ -20,7 +20,11 @@ import (
 )
 
 const Version = 1
-const Algorithm = "canonical-table-geometry-v4"
+const Algorithm = "canonical-table-geometry-v5"
+
+// Extractor is the id table_geometry.py writes today. Files from the previous extractor
+// (pymupdf-tables-v1, no sub-rows) still build; the file converter regenerates them.
+const Extractor = "pymupdf-tables-v2"
 
 type Box struct {
 	Rotation int       `json:"rotation,omitempty"`
@@ -59,6 +63,9 @@ type PhysicalCell struct {
 type PhysicalRow struct {
 	Coords []float64      `json:"coords"`
 	Cells  []PhysicalCell `json:"cells"`
+	// SubRows split a row whose cells stack values at the same heights with no rule
+	// between them (GB 9448 表 1); see python/pdf-parser/stacked_cells.py.
+	SubRows []PhysicalRow `json:"sub_rows,omitempty"`
 }
 type PhysicalTable struct {
 	Rotation int           `json:"rotation,omitempty"`
@@ -175,6 +182,33 @@ func scoreReadable(row docprocessing.TableRow, physical PhysicalRow) int {
 	return total
 }
 
+// bestScore is the highest exact score any canonical row reaches on physical.
+func bestScore(rows []docprocessing.TableRow, physical PhysicalRow) int {
+	best := 0
+	for _, r := range rows {
+		best = max(best, score(r, physical))
+	}
+	return best
+}
+
+// matchUnits returns the PDF rows to match for a physical row: its sub-rows when the
+// canonical rows match them better than the band (a re-parsed document whose stacked
+// cells became rows), else the band. Never both: the readable fallback would tie the band
+// with every sub-row.
+func matchUnits(rows []docprocessing.TableRow, band PhysicalRow) []PhysicalRow {
+	if len(band.SubRows) == 0 {
+		return []PhysicalRow{band}
+	}
+	sub := 0
+	for _, s := range band.SubRows {
+		sub += bestScore(rows, s)
+	}
+	if sub > bestScore(rows, band) {
+		return band.SubRows
+	}
+	return []PhysicalRow{band}
+}
+
 func matchScore(row docprocessing.TableRow, physical PhysicalRow) int {
 	if s := score(row, physical); s > 0 {
 		return s
@@ -263,7 +297,7 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 		return nil, err
 	}
 	out := &Document{PhysicalHash: hash(physicalBytes), Version: Version, Algorithm: Algorithm, TableGridVersion: docprocessing.TableGridVersion, CoordinateSpace: "page-normalized-1000", LineHash: hash(lineData), PDFHash: physical.PDFHash, Tables: []Table{}}
-	if physical.Version != Version || physical.Extractor != "pymupdf-tables-v1" {
+	if physical.Version != Version || (physical.Extractor != Extractor && physical.Extractor != "pymupdf-tables-v1") {
 		return nil, fmt.Errorf("unsupported physical table geometry version/extractor")
 	}
 	physical.Tables = append([]PhysicalTable(nil), physical.Tables...)
@@ -371,19 +405,21 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 		}
 		var found []physicalMatch
 		for _, t := range selected {
-			for _, pr := range t.Rows {
-				best, m := 0, physicalMatch{table: t, row: pr}
-				for i, r := range rows {
-					s := matchScore(r, pr)
-					if s > best {
-						best = s
-						m.candidates = []int{i}
-					} else if s > 0 && s == best {
-						m.candidates = append(m.candidates, i)
+			for _, band := range t.Rows {
+				for _, pr := range matchUnits(rows, band) {
+					best, m := 0, physicalMatch{table: t, row: pr}
+					for i, r := range rows {
+						s := matchScore(r, pr)
+						if s > best {
+							best = s
+							m.candidates = []int{i}
+						} else if s > 0 && s == best {
+							m.candidates = append(m.candidates, i)
+						}
 					}
-				}
-				if len(m.candidates) > 0 && validBox(pr.Coords) {
-					found = append(found, m)
+					if len(m.candidates) > 0 && validBox(pr.Coords) {
+						found = append(found, m)
+					}
 				}
 			}
 		}
