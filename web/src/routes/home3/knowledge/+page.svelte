@@ -42,7 +42,7 @@
 	import ObjectManagerView from '$lib/components/home3/object-manager-view.svelte';
 	import SemanticProjectionsView from '$lib/components/home3/semantic-projections-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
-	import { getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
+	import { getDefaultKnowledgeStore, getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
 	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
@@ -501,6 +501,19 @@
 	let hoverBg = $derived(darkMode ? 'rgba(45,51,72,0.6)' : 'rgba(228,230,235,0.7)');
 	let childIdleBg = $derived(darkMode ? 'rgba(129,140,248,0.05)' : 'rgba(99,102,241,0.045)');
 	let cardBg = $derived(darkMode ? 'rgba(255,255,255,0.03)' : '#FFFFFF');
+	let resolvingDefaultStore = $state(!knowledgeStoreState.activeStore);
+
+	onMount(() => {
+		if (knowledgeStoreState.activeStore) return;
+		getDefaultKnowledgeStore()
+			.then((result) => {
+				if (!knowledgeStoreState.activeStore && result.status && result.record) {
+					knowledgeStoreState.setActiveStore(result.record);
+				}
+			})
+			.catch(() => {})
+			.finally(() => (resolvingDefaultStore = false));
+	});
 
 	let needsActiveStore = $derived(
 		activeSection !== 'kb-search' &&
@@ -868,7 +881,9 @@
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
-			{#if needsActiveStore && !knowledgeStoreState.activeStore}
+			{#if needsActiveStore && !knowledgeStoreState.activeStore && resolvingDefaultStore}
+				<!-- Wait for the configured default before showing the selection prompt. -->
+			{:else if needsActiveStore && !knowledgeStoreState.activeStore}
 				<div
 					class="flex h-full flex-col items-center justify-center p-8"
 					style="background:{contentBg};"

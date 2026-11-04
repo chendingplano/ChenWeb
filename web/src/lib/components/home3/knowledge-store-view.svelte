@@ -269,7 +269,7 @@
 		const result = await getDefaultKnowledgeStore();
 		if (!result.status || !result.record) return;
 		const match = stores.find((store) => store.id === result.record?.id);
-		if (match) knowledgeStoreState.setActiveStore(match);
+		if (match && !knowledgeStoreState.activeStore) knowledgeStoreState.setActiveStore(match);
 	}
 
 	function selectStore(store: KnowledgeStoreRecord) {
