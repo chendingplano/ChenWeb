@@ -1251,7 +1251,8 @@
 					{@const pct = parseProgressPercent(record)}
 					{@const progressText = parsingProgressText(record)}
 					{@const parseEntry = findParseEntry(record)}
-					{@const phases = parseEntry?.phases}
+					<!-- Parses started before the parser listed only started phases stored pending placeholders. -->
+					{@const phases = parseEntry?.phases?.filter((phase) => phase.status !== 'pending')}
 					<div
 						class="rounded-xl p-3.5"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"

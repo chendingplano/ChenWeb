@@ -63,7 +63,7 @@ from parser_base import ParserBackend
 from parser_docling import DoclingParser
 from parser_opendata import OpenDataParser
 from parser_paddle import PaddleParser
-from parser_mineru import MineruParser, PhaseTracker
+from parser_mineru import MineruParser
 
 import psycopg2
 
@@ -645,7 +645,8 @@ def _process_record(
 
         # Initial in-progress status (idempotent: in poll mode the claim already
         # stamped proc_status=active; this merges/refreshes it).
-        initial_phases = PhaseTracker().phases if isinstance(backend, MineruParser) else []
+        # Phases appear as MinerU starts them; [] clears a previous run's phases.
+        initial_phases: list[dict] = []
         raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, 0, 0, parser_name, 0, initial_phases)
 
         # Throttled progress callback

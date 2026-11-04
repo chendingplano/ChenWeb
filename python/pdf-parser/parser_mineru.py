@@ -23,15 +23,10 @@ log = logging.getLogger(__name__)
 
 # Matches "X/Y" in tqdm output like "Processing pages: 60%|██| 3/5 [00:06<00:04]"
 _PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
-MINERU_V4_PHASE_NAMES = (
-    "Layout Predict", "MFR Predict", "Table-wireless Predict", "OCR-det",
-    "OCR-det Predict", "OCR-rec", "OCR-rec Predict", "Processing pages",
-)
-_PHASE_PROGRESS_RE = re.compile(
-    r'('
-    + '|'.join(re.escape(name) for name in sorted(MINERU_V4_PHASE_NAMES, key=len, reverse=True))
-    + r'):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)'
-)
+# Any tqdm bar "<label>: NN%|<bar>| done/total". The labels depend on the backend MinerU
+# picks for the platform (Linux VLM: Layout Predict, VLM Predict; pipeline: MFR Predict,
+# OCR-det, ...), so no fixed list can name them.
+_PHASE_PROGRESS_RE = re.compile(r'([A-Za-z][\w /.-]*?):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)')
 
 
 def _processing_pages(line: str) -> tuple[int, int] | None:
@@ -62,33 +57,39 @@ def _iter_output_records(stream):
 
 
 class PhaseTracker:
-    """Turn MinerU 4 tqdm updates into ordered phase snapshots."""
+    """Turn MinerU 4 tqdm updates into phase snapshots, in the order the phases start.
+
+    Only started phases are listed, active or complete; which phases run is known only
+    once MinerU prints them."""
 
     def __init__(self, system: str | None = None) -> None:
-        """The legacy system argument is ignored; MinerU 4 labels are shared."""
-        self.names = MINERU_V4_PHASE_NAMES
-        self.phases = [dict(name=name, progress=0, status="pending") for name in self.names]
+        """The legacy system argument is ignored."""
+        self.phases: list[dict] = []
         self.started: dict[str, float] = {}
 
     def update(self, line: str) -> tuple[list[dict], bool] | None:
         match = _PHASE_PROGRESS_RE.search(line)
         if not match:
             return None
-        name, done, total = match.group(1), int(match.group(2)), int(match.group(3))
+        name, done, total = match.group(1).strip(), int(match.group(2)), int(match.group(3))
         if total <= 0:
             return None
-        phase = self.phases[self.names.index(name)]
         now = time.monotonic()
         if name not in self.started:
             self.started[name] = now
         progress = min(100, int(done * 100 / total))
         complete = done >= total
-        if phase["status"] == "complete":
+        status = "complete" if complete else "active"
+        phase = next((item for item in self.phases if item["name"] == name), None)
+        if phase is None:
+            phase = {"name": name}
+            self.phases.append(phase)
+        elif phase["status"] == "complete":
             return None
-        if phase["progress"] == progress and phase["status"] == ("complete" if complete else "active"):
+        elif phase["progress"] == progress and phase["status"] == status:
             return None
         phase["progress"] = progress
-        phase["status"] = "complete" if complete else "active"
+        phase["status"] = status
         if complete:
             phase["elapsed_seconds"] = round(now - self.started[name], 2)
         return [dict(item) for item in self.phases], complete or progress == 0

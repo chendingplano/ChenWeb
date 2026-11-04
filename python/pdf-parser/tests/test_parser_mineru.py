@@ -11,11 +11,10 @@ def test_phase_tracker_reports_v4_phases_and_elapsed_time(monkeypatch):
     monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
     tracker = PhaseTracker(system="Linux")
 
+    assert tracker.phases == []
     started, force = tracker.update("Sep 28 02:30:14 Layout Predict:   0%|          | 0/16 [00:00<?, ?it/s]")
     assert force is True
-    assert len(started) == 8
-    assert started[0] == {"name": "Layout Predict", "progress": 0, "status": "active"}
-    assert all(phase["status"] == "pending" for phase in started[1:])
+    assert started == [{"name": "Layout Predict", "progress": 0, "status": "active"}]
 
     finished, force = tracker.update("Layout Predict: 100%|██████████| 16/16 [00:06<00:00, 2.49it/s]")
     assert force is True
@@ -25,28 +24,26 @@ def test_phase_tracker_reports_v4_phases_and_elapsed_time(monkeypatch):
 
     active, force = tracker.update("MFR Predict:  55%|█████▌    | 16/29 [00:05<00:04]")
     assert force is False
+    assert [phase["name"] for phase in active] == ["Layout Predict", "MFR Predict"]
     assert active[1]["progress"] == 55
     assert active[1]["status"] == "active"
     assert tracker.update("unrelated log line") is None
 
 
-def test_mac_phase_tracker_uses_mineru_v4_labels(monkeypatch):
-    ticks = iter([1.0, 2.0, 3.0])
+def test_phase_tracker_lists_only_the_phases_mineru_has_started(monkeypatch):
+    # The Linux box's VLM tier runs Layout Predict then VLM Predict; no pipeline phases.
+    ticks = iter([1.0, 18.0, 20.0, 21.0])
     monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
-    tracker = PhaseTracker(system="Darwin")
-    assert [phase["name"] for phase in tracker.phases] == [
-        "Layout Predict", "MFR Predict", "Table-wireless Predict", "OCR-det",
-        "OCR-det Predict", "OCR-rec", "OCR-rec Predict", "Processing pages",
-    ]
-    ocr, force = tracker.update("OCR-det: 50%|█████     | 1/2 [00:00<00:00]")
+    tracker = PhaseTracker()
+    tracker.update("Layout Predict:   0%|          | 0/31 [00:00<?, ?it/s]")
+    tracker.update("Layout Predict: 100%|██████████| 31/31 [00:17<00:00,  1.81it/s]")
+    tracker.update("VLM Predict:   0%|          | 0/595 [00:00<?, ?it/s]")
+    phases, force = tracker.update("VLM Predict:   1%|▏         | 8/595 [01:16<2:47:34, 17.13s/it]")
     assert force is False
-    assert ocr[3]["status"] == "active" and ocr[3]["progress"] == 50
-    completed, force = tracker.update("OCR-det Predict: 100%|████| 2/2 [00:02<00:00]")
-    assert force is True
-    assert completed[4]["status"] == "complete"
-    pages, force = tracker.update("Processing pages: 100%|████| 3/3 [00:03<00:00]")
-    assert force is True
-    assert pages[7]["status"] == "complete"
+    assert phases == [
+        {"name": "Layout Predict", "progress": 100, "status": "complete", "elapsed_seconds": 17.0},
+        {"name": "VLM Predict", "progress": 1, "status": "active"},
+    ]
 
 def test_only_processing_pages_counter_is_a_page_count():
     assert _processing_pages("Predict: 100%|████| 303/303 [03:58<00:00]") is None
