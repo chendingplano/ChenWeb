@@ -8343,5 +8343,17 @@
 	"wpi_value_editor_attr_options": "Editor options",
 	"wpi_value_editor_font_invalid": "Enter inherit or a CSS font-family list, such as \"Noto Sans SC\", sans-serif.",
 	"wpi_value_editor_choices_failed": "The choices could not be loaded.",
-	"wpi_value_editor_not_built": "Value editor \"{editor}\" is not built yet."
+	"wpi_value_editor_not_built": "Value editor \"{editor}\" is not built yet.",
+	"wpi_color_custom": "Custom",
+	"wpi_color_move": "Move color dialog with arrow keys",
+	"wpi_color_close": "Close color dialog",
+	"wpi_color_saturation": "Saturation and brightness",
+	"wpi_color_hue": "Hue",
+	"wpi_color_opacity": "Opacity",
+	"wpi_color_channel": "Color channel {channel}",
+	"wpi_color_palette": "Palette",
+	"wpi_color_common": "Common colors",
+	"wpi_color_families": "Color families",
+	"wpi_color_resize": "Resize color dialog with arrow keys",
+	"wpi_color_rgb": "RGB"
 }

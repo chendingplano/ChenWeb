@@ -8343,5 +8343,17 @@
 	"wpi_value_editor_attr_options": "编辑器选项",
 	"wpi_value_editor_font_invalid": "请输入 inherit 或 CSS font-family 列表，例如 \"Noto Sans SC\", sans-serif。",
 	"wpi_value_editor_choices_failed": "无法加载可选项。",
-	"wpi_value_editor_not_built": "值编辑器“{editor}”尚未实现。"
+	"wpi_value_editor_not_built": "值编辑器“{editor}”尚未实现。",
+	"wpi_color_custom": "自定义",
+	"wpi_color_move": "使用方向键移动颜色对话框",
+	"wpi_color_close": "关闭颜色对话框",
+	"wpi_color_saturation": "饱和度和亮度",
+	"wpi_color_hue": "色相",
+	"wpi_color_opacity": "不透明度",
+	"wpi_color_channel": "颜色通道 {channel}",
+	"wpi_color_palette": "调色板",
+	"wpi_color_common": "常用颜色",
+	"wpi_color_families": "颜色系列",
+	"wpi_color_resize": "使用方向键调整颜色对话框大小",
+	"wpi_color_rgb": "RGB"
 }
