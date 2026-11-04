@@ -22,7 +22,7 @@
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
  import { MIN_PANE_SIZE } from './pane-edit';
  import { pageDragSize, type PageSide } from './page-resize';
- import { resizeElement, resizeHandles, type ElementHandle } from './element-resize';
+ import { resizeElement, resizeHandles, resizeOutline as elementResizeOutline, type ElementHandle } from './element-resize';
 
  let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize }: {
   darkMode: boolean; pageName: string; dirty: boolean; openedAt: number | null; autoSavedAt: number | null; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
@@ -86,10 +86,16 @@
   observer.observe(host);
   return { destroy() { observer.disconnect(); } };
  }
- let elementDrag: { pointer: number; id: string; handle: ElementHandle; x: number; y: number; zoom: number; size: { width: number; height: number }; value: { width?: number; height?: number } } | null = null;
+ let elementOutline = $state<{ x: number; y: number; width: number; height: number } | null>(null);
+ let elementDrag: { box: { x: number; y: number; width: number; height: number }; pointer: number; id: string; handle: ElementHandle; x: number; y: number; zoom: number; size: { width: number; height: number }; value: { width?: number; height?: number } } | null = null;
  function startElementResize(event: PointerEvent, id: string, handle: ElementHandle) {
   if (event.button !== 0 || !elementSizes[id]) return;
-  elementDrag = { pointer: event.pointerId, id, handle, x: event.clientX, y: event.clientY, zoom: zoom || 1, size: elementSizes[id], value: {} };
+  const scale = zoom || 1;
+  const target = (event.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
+  const preview = previewElement.getBoundingClientRect();
+  const box = { x: (target.left - preview.left) / scale - previewElement.clientLeft, y: (target.top - preview.top) / scale - previewElement.clientTop, ...elementSizes[id] };
+  elementDrag = { box, pointer: event.pointerId, id, handle, x: event.clientX, y: event.clientY, zoom: scale, size: elementSizes[id], value: {} };
+  elementOutline = box;
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   event.preventDefault(); event.stopPropagation();
  }
@@ -97,6 +103,7 @@
   const d = elementDrag;
   if (!d || d.pointer !== event.pointerId) return;
   d.value = resizeElement(d.size, d.handle, event.clientX - d.x, event.clientY - d.y, d.zoom);
+  elementOutline = elementResizeOutline(d.box, d.handle, d.value);
   event.stopPropagation();
  }
  function elementResizeKey(event: KeyboardEvent, id: string, handle: ElementHandle) {
@@ -113,7 +120,11 @@
   const d = elementDrag;
   if (!d || d.pointer !== event.pointerId) return;
   elementDrag = null;
-  if (!cancel && (event.clientX !== d.x || event.clientY !== d.y)) onElementResize(d.id, d.value);
+  elementOutline = null;
+  if (!cancel) {
+   if (event.clientX !== d.x || event.clientY !== d.y) onElementResize(d.id, resizeElement(d.size, d.handle, event.clientX - d.x, event.clientY - d.y, d.zoom));
+   onSelect(d.id);
+  }
   event.stopPropagation();
  }
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number; pageWidth: number; pageHeight: number; original: JsonObject; movedX: boolean; movedY: boolean } | null = null;
@@ -295,7 +306,7 @@
        <button class:selected={selectedId === item.node.id} class="overlay nodrag nopan" aria-label={m.wpi_preview_select({ name: String(item.node.data.label ?? item.node.data.element ?? '') })} aria-pressed={selectedId === item.node.id} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onSelect(item.node.id); }}></button>
        {#if selectedId === item.node.id && elementSizes[item.node.id]}
         {#each resizeHandles(elementSizes[item.node.id].width, elementSizes[item.node.id].height, zoom || 1) as handle}
-         <button type="button" class="element-grip nodrag nopan {handle}" aria-label={m.wpi_resize_element({ direction: handle })} title={m.wpi_resize_element({ direction: handle })} onpointerdown={(event) => startElementResize(event, item.node.id, handle)} onpointermove={moveElementResize} onkeydown={(event) => elementResizeKey(event, item.node.id, handle)} onpointerup={endElementResize} onpointercancel={(event) => endElementResize(event, true)}></button>
+         <button type="button" class="element-grip nodrag nopan {handle}" aria-label={m.wpi_resize_element({ direction: handle })} title={m.wpi_resize_element({ direction: handle })} onpointerdown={(event) => startElementResize(event, item.node.id, handle)} onpointermove={moveElementResize} onclick={(event) => event.stopPropagation()} onkeydown={(event) => elementResizeKey(event, item.node.id, handle)} onpointerup={endElementResize} onpointercancel={(event) => endElementResize(event, true)}></button>
         {/each}
        {/if}
       </div>
@@ -321,6 +332,7 @@
  <span>{m.wpi_status_opened({ time: openedAt ? new Date(openedAt).toLocaleString() : m.wpi_status_never() })}</span>
 </div>
 <div bind:this={previewElement} class="preview select-text" style="width:{size.width}px; height:{size.height}px; color-scheme:{darkMode ? 'dark' : 'light'}" data-wpi-page-preview>
+ {#if elementOutline}<div class="element-resize-outline" style:left="{elementOutline.x}px" style:top="{elementOutline.y}px" style:width="{elementOutline.width}px" style:height="{elementOutline.height}px" aria-hidden="true"></div>{/if}
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
   <div style="{placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}; padding: 0 40px 40px">
@@ -348,6 +360,7 @@
 <style>
  .page-status { position:absolute; left:0; top:-32px; height:32px; display:flex; align-items:center; gap:16px; padding:0 10px; box-sizing:border-box; overflow:auto; white-space:nowrap; background:var(--cv-surface); color:var(--cv-text); border:1px solid var(--cv-border); font-size:11px; pointer-events:auto; }
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
+ .element-resize-outline { position:absolute; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:9; }
  .resize-outline { position:absolute; left:0; top:0; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:6; }
  .element-toolbar { position:absolute; z-index:10; transform:translate(-50%, -100%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }
  .element-toolbar button { background:none; border:0; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; display:flex; align-items:center; }

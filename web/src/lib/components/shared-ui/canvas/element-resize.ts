@@ -13,3 +13,8 @@ export function resizeElement(size: { width: number; height: number }, handle: E
  if (handle.includes('n') || handle.includes('s')) result.height = Math.max(20, Math.round(size.height + dy / zoom * (handle.includes('n') ? -1 : 1)));
  return result;
 }
+
+export function resizeOutline(box: { x: number; y: number; width: number; height: number }, handle: ElementHandle, size: { width?: number; height?: number }) {
+ const width = size.width ?? box.width, height = size.height ?? box.height;
+ return { x: box.x + (handle.includes('w') ? box.width - width : 0), y: box.y + (handle.includes('n') ? box.height - height : 0), width, height };
+}
