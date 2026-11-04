@@ -8,9 +8,16 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import type { Json } from '$lib/wpi/types';
 	import { commonSenseEditor } from '$lib/wpi/properties/common-sense';
-	import type { EditorDef, GroupDef, PropertyContext, PropertyDef, PropertySource } from '$lib/wpi/properties/types';
+	import type {
+		EditorDef,
+		GroupDef,
+		PropertyContext,
+		PropertyDef,
+		PropertySource
+	} from '$lib/wpi/properties/types';
 	import { valueEditors } from './editors';
 	import HelpTip from './HelpTip.svelte';
+	import ColorModeSelect from '../value-editors/ColorModeSelect.svelte';
 
 	let {
 		title,
@@ -36,7 +43,17 @@
 	const listed = $derived(new Set(def.groups.flatMap((g) => g.properties.map((p) => p.name))));
 	const groups = $derived.by((): GroupDef[] => {
 		const other = source.names.filter((n) => !listed.has(n));
-		return other.length ? [...def.groups, { id: 'other', label: m.wpi_input_group_other, help: def.otherHelp, properties: other.map((name) => ({ name })) }] : def.groups;
+		return other.length
+			? [
+					...def.groups,
+					{
+						id: 'other',
+						label: m.wpi_input_group_other,
+						help: def.otherHelp,
+						properties: other.map((name) => ({ name }))
+					}
+				]
+			: def.groups;
 	});
 
 	function shown(p: PropertyDef): boolean {
@@ -59,6 +76,12 @@
 		if (readOnly(p)) return valueEditors['read-only'];
 		return valueEditors[p.editor ?? commonSenseEditor(p.name, source.defaultValue(p.name))];
 	}
+	function isEditableColor(p: PropertyDef) {
+		return (
+			!readOnly(p) &&
+			(p.editor ?? commonSenseEditor(p.name, source.defaultValue(p.name))) === 'color'
+		);
+	}
 	function optionsOf(p: PropertyDef) {
 		return typeof p.options === 'function' ? p.options(ctx) : (p.options ?? {});
 	}
@@ -77,7 +100,9 @@
 	// One edit per property: entering another property ends the last one.
 	let editing: string | null = null;
 	function focusIn(event: FocusEvent) {
-		const name = (event.target as HTMLElement).closest<HTMLElement>('[data-property]')?.dataset.property ?? null;
+		const name =
+			(event.target as HTMLElement).closest<HTMLElement>('[data-property]')?.dataset.property ??
+			null;
 		if (name === editing) return;
 		if (editing !== null) onEditEnd?.();
 		editing = name;
@@ -92,7 +117,12 @@
 	}
 </script>
 
-<section class="property-editor select-text" aria-label={title} onfocusin={focusIn} onfocusout={focusOut}>
+<section
+	class="property-editor select-text"
+	aria-label={title}
+	onfocusin={focusIn}
+	onfocusout={focusOut}
+>
 	<h2 class="title">{title}</h2>
 	{@render children?.()}
 	{#each groups as group (group.id)}
@@ -109,10 +139,26 @@
 					<div class="property" data-property={p.name}>
 						<div class="heading">
 							<label for={id}>
-								{p.label?.() ?? p.name}{#if source.required(p.name)}<span class="required" title={m.propertiespanel_required()}> *</span>{/if}
+								{p.label?.() ?? p.name}{#if source.required(p.name)}<span
+										class="required"
+										title={m.propertiespanel_required()}
+									>
+										*</span
+									>{/if}
 							</label>
+							{#if isEditableColor(p)}
+								<ColorModeSelect
+									{id}
+									label={p.label?.() ?? p.name}
+									value={edited(p)}
+									theme={optionsOf(p).theme}
+									onChange={(v) => source.set(p.name, toStored(p, v))}
+								/>
+							{/if}
 							{#if source.resettable(p.name) && source.isSet(p.name) && !readOnly(p)}
-								<button type="button" class="reset" onclick={() => source.set(p.name, undefined)}>{m.wpi_input_reset()}</button>
+								<button type="button" class="reset" onclick={() => source.set(p.name, undefined)}
+									>{m.wpi_input_reset()}</button
+								>
 							{/if}
 						</div>
 						<div class="editor">
@@ -120,7 +166,7 @@
 								{id}
 								label={p.label?.() ?? p.name}
 								value={edited(p)}
-								options={optionsOf(p)}
+								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p) }}
 								check={check(p)}
 								onChange={(v) => source.set(p.name, toStored(p, v))}
 							/>
@@ -182,6 +228,10 @@
 		gap: 4px;
 		margin-bottom: 4px;
 		padding-right: 12px;
+	}
+	.heading label {
+		flex: 1;
+		min-width: 0;
 	}
 	label {
 		font-size: 10px;

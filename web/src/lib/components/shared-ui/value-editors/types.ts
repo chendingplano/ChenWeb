@@ -20,6 +20,8 @@ export type ValueEditorOptions = {
 	integer?: boolean;
 	// color: whether separate light and dark colours are allowed.
 	theme?: boolean;
+	// The property panel places the color mode selector in its heading.
+	colorModeInHeading?: boolean;
 	// localized-text: a button that sets the value to the empty string.
 	emptyAction?: () => string;
 	// Typed text is applied on leaving the field, not on every key.

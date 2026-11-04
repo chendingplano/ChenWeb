@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import DraftField from './DraftField.svelte';
+	import ColorModeSelect from './ColorModeSelect.svelte';
 	import { colorFamilies } from './commonColors';
-	import { colorMode, colorPart, withColorMode, withColorPart, type ColorMode } from './values';
+	import { colorMode, colorPart, withColorPart } from './values';
 	import { rgbToHsv, hsvToRgb, rgbaHex } from './color-math';
 	import type { ValueEditorProps } from './types';
 	import './value-editors.css';
@@ -24,6 +25,15 @@
 		width = $state(350),
 		height = $state(560);
 	let opener: HTMLElement | null = null;
+	$effect(() => {
+		if (
+			opened &&
+			(mode === 'none' ||
+				(mode === 'single' && opened !== 'single') ||
+				(mode === 'theme' && opened === 'single'))
+		)
+			close();
+	});
 	const family = $derived(colorFamilies.find((f) => f.key === familyKey) ?? colorFamilies[0]);
 	const rgb = $derived(hsvToRgb(h, s, v));
 	const common = colorFamilies.flatMap((f) => f.colors.slice(0, 3));
@@ -164,20 +174,18 @@
 	}}
 />
 <div class="color-line">
-	<select
-		{id}
-		class="ve-input color-mode"
-		aria-label={label}
-		value={mode}
-		onchange={(e) => {
-			if (opened) close();
-			onChange(withColorMode(value, e.currentTarget.value as ColorMode));
-		}}
-		><option value="none">{m.wpi_color_none()}</option><option value="single"
-			>{m.wpi_color_single()}</option
-		>{#if options.theme || mode === 'theme'}<option value="theme">{m.wpi_color_theme()}</option
-			>{/if}</select
-	>
+	{#if !options.colorModeInHeading}
+		<ColorModeSelect
+			{id}
+			{label}
+			{value}
+			theme={options.theme}
+			onChange={(next) => {
+				if (opened) close();
+				onChange(next);
+			}}
+		/>
+	{/if}
 	{#if mode !== 'none'}{#each variants as variant (variant)}<div class="color-value">
 				{#if variant !== 'single'}<span class="ve-variant">{variantLabel(variant)}</span
 					>{/if}<button
@@ -332,11 +340,6 @@
 		padding: 0 4px;
 		color: var(--cv-text-muted, #777);
 		font-size: 11px;
-	}
-	.color-mode {
-		width: auto;
-		flex: none;
-		max-width: 120px;
 	}
 	.color-value {
 		display: flex;
