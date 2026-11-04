@@ -63,7 +63,7 @@
 		...((d.editor_options ?? {}) as ValueEditorOptions),
 		...(loads && loaded ? { choices: loaded } : {}),
 		...(colorHeading ? { colorModeInHeading: true } : {}),
-		...(drawing === 'length' ? { readOnly: d.binding_mode === 'read-only', useDefault: value == null } : {})
+		...(drawing === 'length' ? { readOnly: d.binding_mode === 'read-only', useDefault: value == null, displayType: d.editor_options?.displayType === true } : {})
 	});
 
 	function check(next: Json): string | null {

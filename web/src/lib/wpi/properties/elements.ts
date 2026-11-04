@@ -117,6 +117,7 @@ export const valueEditor: EditorDef = {
 			label: m.wpi_value_editor_group_editor,
 			properties: [
 				{ name: 'editor', label: m.wpi_value_editor_attr_editor, readOnly: true },
+				{ name: 'editor_options.displayType', label: m.wpi_length_display_type, editor: 'switch', visible: (ctx) => ctx.get('editor') === 'length' },
 				{ name: 'editor_options.defaultValue', label: m.wpi_class_default_value, editor: 'length', options: { keywords: ['auto', 'elastic'], units: ['px', 'rem', 'em', '%'] }, visible: (ctx) => ctx.get('editor') === 'length' },
 				{ name: 'editor_options', label: m.wpi_value_editor_attr_options, editor: 'json', options: { rows: 3 } }
 			]

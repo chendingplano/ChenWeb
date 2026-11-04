@@ -8363,5 +8363,6 @@
 	"wpi_resize_confirmation": "确认调整尺寸",
 	"wpi_length_type": "{name}的长度类型",
 	"wpi_length_default": "默认",
-	"wpi_length_value": "数值"
+	"wpi_length_value": "数值",
+	"wpi_length_display_type": "显示类型"
 }

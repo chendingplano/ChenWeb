@@ -8363,5 +8363,6 @@
 	"wpi_resize_confirmation": "Confirm resize",
 	"wpi_length_type": "Length type for {name}",
 	"wpi_length_default": "Default",
-	"wpi_length_value": "Value"
+	"wpi_length_value": "Value",
+	"wpi_length_display_type": "Display type"
 }

@@ -16,6 +16,7 @@ export type ValueEditorOptions = {
 	units?: string[];
 	defaultValue?: string;
 	useDefault?: boolean;
+	displayType?: boolean;
 	valueDisplay?: 'input' | 'label' | 'select';
 	allowCustomValue?: boolean;
 	helpTip?: string | { en: string; 'zh-cn': string };

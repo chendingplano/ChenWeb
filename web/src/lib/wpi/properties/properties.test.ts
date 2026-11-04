@@ -202,3 +202,16 @@ test('length editor exposes and updates its nested default without losing option
 	const fixed = elementSource({}, { ...valueClass, attributes: { editor_options: { default_value: {}, instance_modifiable: false } } }, {}, () => {});
 	assert.equal(fixed.fixed('editor_options.defaultValue'), true);
 });
+
+test('length editor display type switch updates only its option', () => {
+	const p = prop(elementEditor('value-editor'), 'editor_options.displayType');
+	assert.equal(p.editor, 'switch');
+	assert.equal(p.visible!(ctx({ editor: 'length' })), true);
+	assert.equal(p.visible!(ctx({ editor: 'color' })), false);
+	const c: ElementClassSummary = { ...cls, attributes: { editor_options: { default_value: { units: ['px'] } } } };
+	let saved: JsonObject = {};
+	const s = elementSource({}, c, {}, (attrs) => saved = attrs);
+	assert.equal(s.get('editor_options.displayType') ?? false, false);
+	s.set('editor_options.displayType', true);
+	assert.deepEqual(saved, { editor_options: { units: ['px'], displayType: true } });
+});

@@ -27,13 +27,30 @@
 	function leaveLabel(event: FocusEvent) {
 		const target = event.target as HTMLInputElement;
 		if (target.tagName !== 'INPUT') return;
-		const parsed = parseAmount(target.value);
+		const parsed = options.displayType === false ? parseLength(target.value, keywords, units, true) : parseAmount(target.value);
 		if (parsed.ok && (parsed.value === undefined || !check?.(parsed.value))) editing = false;
 	}
 </script>
 
 <div class="length-row" bind:this={wrapper} onfocusout={leaveLabel}>
-	{#if options.readOnly}
+	{#if options.displayType === false}
+		{#if options.readOnly}
+			<span id={id} class="value-label">{value ?? options.defaultValue ?? ''}</span>
+		{:else if options.valueDisplay === 'label' && !editing}
+			<button type="button" {id} class="value-label editable" ondblclick={edit} onclick={(e) => { if (e.detail === 0) edit(); }}>{value ?? options.defaultValue ?? ''}</button>
+		{:else if options.valueDisplay === 'select' && !options.allowCustomValue}
+			{@const current = String(value ?? options.defaultValue ?? '')}
+			{@const selectedParts = lengthParts(current)}
+			{@const suffix = units.includes(selectedParts.type) ? selectedParts.type : ''}
+			<select {id} class="ve-input" value={current} onchange={(e) => { const parsed = parseLength(e.currentTarget.value, keywords, units, true); if (parsed.ok && (parsed.value === undefined || !check?.(parsed.value))) onChange(parsed.value); }}>
+				<option value={current}>{current}</option>
+				{#each options.choices ?? [] as choice}{#if `${choice}${suffix}` !== current}<option value={`${choice}${suffix}`}>{`${choice}${suffix}`}</option>{/if}{/each}
+			</select>
+		{:else}
+			<DraftField deferEmpty {id} {value} format={(v) => String(v ?? options.defaultValue ?? '')} parse={(text) => parseLength(text, keywords, units, true)} invalidMessage={() => m.wpi_prop_invalid_length({ allowed: [...units, ...keywords].join(', ') })} {check} commitOnBlur={options.commitOnBlur} {onChange} list={options.valueDisplay === 'select' ? `${id}-choices` : undefined} />
+			{#if options.valueDisplay === 'select'}<datalist id={`${id}-choices`}>{#each options.choices ?? [] as choice}<option value={choice}></option>{/each}</datalist>{/if}
+		{/if}
+	{:else if options.readOnly}
 		<span id={id} class="value-label">{type === 'default' ? options.defaultValue : (parts.amount || value || '')}</span>
 		<span class="type-label">{type === 'default' ? m.wpi_length_default() : type}</span>
 	{:else if numeric}
@@ -51,7 +68,7 @@
 	{:else}
 		<span id={id} class="value-label">{type === 'default' ? options.defaultValue : ''}</span>
 	{/if}
-	{#if !options.readOnly}
+	{#if options.displayType !== false && !options.readOnly}
 		<select class="ve-input type" aria-label={m.wpi_length_type({ name: label })} value={type} onchange={changeType}>
 			{#if type === ''}<option value=""></option>{/if}
 			{#if type && type !== 'default' && type !== 'value' && !keywords.includes(type) && !units.includes(type)}<option value={type}>{type}</option>{/if}
