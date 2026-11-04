@@ -13,7 +13,7 @@
  import { m } from '$lib/paraglide/messages.js';
  import { getElementClass } from '$lib/wpi/api';
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
- import { resolveEntry } from '$lib/wpi/entries';
+ import { resolveEntry, isFixed } from '$lib/wpi/entries';
  import { cssLength, effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
  import { flowGeometry } from '$lib/wpi/layouters/flow-geometry';
  import ElementView from '$lib/wpi/elements/Element.svelte';
@@ -22,12 +22,12 @@
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
  import { MIN_PANE_SIZE } from './pane-edit';
  import { pageDragSize, type PageSide } from './page-resize';
- import { resizeElement, resizeHandles, resizeOutline as elementResizeOutline, type ElementHandle } from './element-resize';
+ import { resizeElement, resizeHandles, resizeOutline as elementResizeOutline, resizeLimitChanges, type ResizeLimit, type ResizeLimitChange, type ElementHandle } from './element-resize';
 
  let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize }: {
   darkMode: boolean; pageName: string; dirty: boolean; openedAt: number | null; autoSavedAt: number | null; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
-  onElementResize: (id: string, size: { width?: number; height?: number }) => void;
+  onElementResize: (id: string, size: { width?: number; height?: number }, changes: ResizeLimitChange[]) => void;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
   onPaneResize: (a: string, b: string, axis: 'width' | 'height', first: number, second: number, parentSize: number) => void;
@@ -87,14 +87,14 @@
   return { destroy() { observer.disconnect(); } };
  }
  let elementOutline = $state<{ x: number; y: number; width: number; height: number } | null>(null);
- let elementDrag: { box: { x: number; y: number; width: number; height: number }; pointer: number; id: string; handle: ElementHandle; x: number; y: number; zoom: number; size: { width: number; height: number }; value: { width?: number; height?: number } } | null = null;
+ let elementDrag: { host: HTMLElement; box: { x: number; y: number; width: number; height: number }; pointer: number; id: string; handle: ElementHandle; x: number; y: number; zoom: number; size: { width: number; height: number }; value: { width?: number; height?: number } } | null = null;
  function startElementResize(event: PointerEvent, id: string, handle: ElementHandle) {
   if (event.button !== 0 || !elementSizes[id]) return;
   const scale = zoom || 1;
   const target = (event.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
   const preview = previewElement.getBoundingClientRect();
   const box = { x: (target.left - preview.left) / scale - previewElement.clientLeft, y: (target.top - preview.top) / scale - previewElement.clientTop, ...elementSizes[id] };
-  elementDrag = { box, pointer: event.pointerId, id, handle, x: event.clientX, y: event.clientY, zoom: scale, size: elementSizes[id], value: {} };
+  elementDrag = { host: (event.currentTarget as HTMLElement).parentElement!, box, pointer: event.pointerId, id, handle, x: event.clientX, y: event.clientY, zoom: scale, size: elementSizes[id], value: {} };
   elementOutline = box;
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   event.preventDefault(); event.stopPropagation();
@@ -106,6 +106,47 @@
   elementOutline = elementResizeOutline(d.box, d.handle, d.value);
   event.stopPropagation();
  }
+ function commitElementResize(id: string, size: { width?: number; height?: number }, host: HTMLElement) {
+  const node = nodes.find((n) => n.id === id);
+  if (!node) return;
+  size = { ...size };
+  if (size.width === elementSizes[id]?.width) delete size.width;
+  if (size.height === elementSizes[id]?.height) delete size.height;
+  if (size.width === undefined && size.height === undefined) return;
+  const pane = String(node.data.pane ?? '');
+  const item = entries(pane).find((entry) => entry.node.id === id);
+  if (!item || 'error' in item.entry) return;
+  const row = (node.data.class ?? classes[String(node.data.element ?? '')]) as ClassRow | undefined;
+  if (row && ((size.width !== undefined && isFixed(row, 'width')) || (size.height !== undefined && isFixed(row, 'height')))) {
+   alert(m.wpi_resize_fixed_limit()); return;
+  }
+  const config = panelConfig(pane);
+  const desc = item.entry.desc as unknown as Record<string, unknown>;
+  const limits: ResizeLimit[] = [];
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;box-sizing:border-box;min-width:0;min-height:0;max-width:none;max-height:none;padding:0;border:0';
+  host.parentElement!.appendChild(probe);
+  for (const [source, key, axis, kind, value] of [
+   ['element', 'min_width', 'width', 'min', desc.min_width], ['element', 'max_width', 'width', 'max', desc.max_width],
+   ['panel', 'min_elem_width', 'width', 'min', config.min_elem_width ?? '20px'], ['panel', 'max_elem_width', 'width', 'max', config.max_elem_width ?? '300px'],
+   ['panel', 'min_row_height', 'height', 'min', config.min_row_height ?? '30px'], ['panel', 'max_row_height', 'height', 'max', config.max_row_height ?? '200px']
+  ] as const) {
+   if (value === undefined || value === null || size[axis] === undefined) continue;
+   const length = typeof value === 'number' || /^\d+(?:\.\d+)?$/.test(String(value).trim()) ? `${value}px` : String(value);
+   if (!CSS.supports(axis, length)) continue;
+   probe.style[axis] = length;
+   const pixels = probe.getBoundingClientRect()[axis] / (zoom || 1);
+   limits.push({ source, key, axis, kind, pixels });
+   probe.style[axis] = '0px';
+  }
+  probe.remove();
+  const changes = resizeLimitChanges(size, limits);
+  if (changes.some((change) => change.source === 'element' && row && isFixed(row, change.key))) {
+   alert(m.wpi_resize_fixed_limit()); return;
+  }
+  if (changes.length && !confirm(m.wpi_resize_override_limits({ limits: changes.map((change) => `${change.key}: ${change.value}`).join(', ') }))) return;
+  onElementResize(id, size, changes);
+ }
  function elementResizeKey(event: KeyboardEvent, id: string, handle: ElementHandle) {
   const step = event.shiftKey ? 10 : 1;
   const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
@@ -113,7 +154,7 @@
   if ((!dx && !dy) || !elementSizes[id]) return;
   const value = resizeElement(elementSizes[id], handle, dx, dy, 1);
   if ((value.width === undefined || value.width === elementSizes[id].width) && (value.height === undefined || value.height === elementSizes[id].height)) return;
-  onElementResize(id, value);
+  commitElementResize(id, value, (event.currentTarget as HTMLElement).parentElement!);
   event.preventDefault(); event.stopPropagation();
  }
  function endElementResize(event: PointerEvent, cancel = false) {
@@ -122,7 +163,7 @@
   elementDrag = null;
   elementOutline = null;
   if (!cancel) {
-   if (event.clientX !== d.x || event.clientY !== d.y) onElementResize(d.id, resizeElement(d.size, d.handle, event.clientX - d.x, event.clientY - d.y, d.zoom));
+   if (event.clientX !== d.x || event.clientY !== d.y) commitElementResize(d.id, resizeElement(d.size, d.handle, event.clientX - d.x, event.clientY - d.y, d.zoom), d.host);
    onSelect(d.id);
   }
   event.stopPropagation();

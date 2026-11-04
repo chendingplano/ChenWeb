@@ -7852,6 +7852,8 @@
 	"wpi_flow_normal_dashed": "中虚线",
 	"wpi_flow_bold_dashed": "粗虚线",
 	"wpi_resize_element": "调整元素大小（{direction}）",
+	"wpi_resize_override_limits": "请求的大小超出以下限制：{limits}。是否覆盖这些限制？面板限制会影响同一面板中的其他元素。选择取消以保留当前大小。",
+	"wpi_resize_fixed_limit": "大小或限制由元素类固定，无法在此覆盖。",
 	"wpi_resize_preview": "调整页面预览大小（也可使用方向键）",
 	"propertiespanel_column_label": "列标签",
 	"propertiespanel_column_field": "字段",
