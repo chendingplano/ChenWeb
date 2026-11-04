@@ -170,6 +170,15 @@
   resizeNotice = null;
   onElementResize(id, size, changes);
  }
+ // Svelte delegates onclick to the document, after Svelte Flow's pane click handler.
+ // Handle these clicks directly so they cannot clear the underlying selection first.
+ function resizeDialogButton(node: HTMLButtonElement, callback: () => void) {
+  const click = (event: MouseEvent) => { event.stopPropagation(); callback(); };
+  const down = (event: Event) => event.stopPropagation();
+  node.addEventListener('click', click); node.addEventListener('pointerdown', down); node.addEventListener('mousedown', down);
+  return { destroy() { node.removeEventListener('click', click); node.removeEventListener('pointerdown', down); node.removeEventListener('mousedown', down); } };
+ }
+ function cancelResize() { const id = resizeNotice?.id; resizeNotice = null; if (id) onSelect(id); }
  function confirmResize() {
   const pending = resizeNotice;
   if (!pending || selectedId !== pending.id) return;
@@ -428,7 +437,7 @@
  {/if}
 {#if resizeNotice && selectedId === resizeNotice.id}
  <div class="resize-notice nodrag nopan" role="dialog" aria-label={m.wpi_resize_confirmation()} style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
-  <span>{resizeNotice.message}</span><div class="resize-notice-actions"><button type="button" bind:this={resizeCancelButton} onclick={(event) => { event.stopPropagation(); const id = resizeNotice?.id; resizeNotice = null; if (id) onSelect(id); }}>{m.wpi_create_element_cancel()}</button><button type="button" onclick={(event) => { event.stopPropagation(); confirmResize(); }}>{m.wpi_create_element_saved_ok()}</button></div>
+  <span>{resizeNotice.message}</span><div class="resize-notice-actions"><button type="button" bind:this={resizeCancelButton} use:resizeDialogButton={cancelResize}>{m.wpi_create_element_cancel()}</button><button type="button" use:resizeDialogButton={confirmResize}>{m.wpi_create_element_saved_ok()}</button></div>
  </div>
 {/if}
 {#if resizeOutline}
