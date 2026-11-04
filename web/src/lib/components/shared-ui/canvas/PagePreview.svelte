@@ -176,6 +176,7 @@
   if (pending.changes.length && !confirm(m.wpi_resize_override_limits({ limits: pending.changes.map((change) => `${change.key}: ${change.value}`).join(', ') }))) return;
   resizeNotice = null;
   onElementResize(pending.id, pending.size, pending.changes);
+  onSelect(pending.id);
  }
  function elementResizeKey(event: KeyboardEvent, id: string, handle: ElementHandle) {
   const step = event.shiftKey ? 10 : 1;
@@ -427,7 +428,7 @@
  {/if}
 {#if resizeNotice && selectedId === resizeNotice.id}
  <div class="resize-notice nodrag nopan" role="dialog" aria-label={m.wpi_resize_confirmation()} style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
-  <span>{resizeNotice.message}</span><div class="resize-notice-actions"><button type="button" bind:this={resizeCancelButton} onclick={() => resizeNotice = null}>{m.wpi_create_element_cancel()}</button><button type="button" onclick={confirmResize}>{m.wpi_create_element_saved_ok()}</button></div>
+  <span>{resizeNotice.message}</span><div class="resize-notice-actions"><button type="button" bind:this={resizeCancelButton} onclick={(event) => { event.stopPropagation(); const id = resizeNotice?.id; resizeNotice = null; if (id) onSelect(id); }}>{m.wpi_create_element_cancel()}</button><button type="button" onclick={(event) => { event.stopPropagation(); confirmResize(); }}>{m.wpi_create_element_saved_ok()}</button></div>
  </div>
 {/if}
 {#if resizeOutline}
