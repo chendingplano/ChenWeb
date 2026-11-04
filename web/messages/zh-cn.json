@@ -7851,6 +7851,7 @@
 	"wpi_flow_thin_dashed": "细虚线",
 	"wpi_flow_normal_dashed": "中虚线",
 	"wpi_flow_bold_dashed": "粗虚线",
+	"wpi_resize_element": "调整元素大小（{direction}）",
 	"wpi_resize_preview": "调整页面预览大小（也可使用方向键）",
 	"propertiespanel_column_label": "列标签",
 	"propertiespanel_column_field": "字段",

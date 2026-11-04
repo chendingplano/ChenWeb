@@ -7851,6 +7851,7 @@
 	"wpi_flow_thin_dashed": "Thin dashed",
 	"wpi_flow_normal_dashed": "Normal dashed",
 	"wpi_flow_bold_dashed": "Bold dashed",
+	"wpi_resize_element": "Resize element ({direction})",
 	"wpi_resize_preview": "Resize page preview (arrow keys also resize)",
 	"propertiespanel_column_label": "Column label",
 	"propertiespanel_column_field": "Field",

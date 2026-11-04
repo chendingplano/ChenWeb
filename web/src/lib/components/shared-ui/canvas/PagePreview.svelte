@@ -22,10 +22,12 @@
  import { instanceJson, isElementNode, paneNodes } from './wpi-json';
  import { MIN_PANE_SIZE } from './pane-edit';
  import { pageDragSize, type PageSide } from './page-resize';
+ import { resizeElement, resizeHandles, type ElementHandle } from './element-resize';
 
- let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry }: {
+ let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize }: {
   darkMode: boolean; pageName: string; dirty: boolean; openedAt: number | null; autoSavedAt: number | null; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   size: { width: number; height: number }; zoom: number;
+  onElementResize: (id: string, size: { width?: number; height?: number }) => void;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
   onPaneResize: (a: string, b: string, axis: 'width' | 'height', first: number, second: number, parentSize: number) => void;
@@ -74,6 +76,45 @@
   requestAnimationFrame(() => {
    onMeasurePanes(Array.from(previewElement.querySelectorAll<HTMLElement>('[data-pane-id]')).map((pane) => ({ id: pane.dataset.paneId!, width: pane.getBoundingClientRect().width / (zoom || 1), height: pane.getBoundingClientRect().height / (zoom || 1), parentWidth: (pane.parentElement?.getBoundingClientRect().width ?? 0) / (zoom || 1), parentHeight: (pane.parentElement?.getBoundingClientRect().height ?? 0) / (zoom || 1) })));
   });
+ }
+ let elementSizes = $state<Record<string, { width: number; height: number }>>({});
+ function measureElement(host: HTMLElement, id: string) {
+  const observer = new ResizeObserver(() => {
+   const width = host.offsetWidth, height = host.offsetHeight;
+   if (elementSizes[id]?.width !== width || elementSizes[id]?.height !== height) elementSizes = { ...elementSizes, [id]: { width, height } };
+  });
+  observer.observe(host);
+  return { destroy() { observer.disconnect(); } };
+ }
+ let elementDrag: { pointer: number; id: string; handle: ElementHandle; x: number; y: number; zoom: number; size: { width: number; height: number }; value: { width?: number; height?: number } } | null = null;
+ function startElementResize(event: PointerEvent, id: string, handle: ElementHandle) {
+  if (event.button !== 0 || !elementSizes[id]) return;
+  elementDrag = { pointer: event.pointerId, id, handle, x: event.clientX, y: event.clientY, zoom: zoom || 1, size: elementSizes[id], value: {} };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault(); event.stopPropagation();
+ }
+ function moveElementResize(event: PointerEvent) {
+  const d = elementDrag;
+  if (!d || d.pointer !== event.pointerId) return;
+  d.value = resizeElement(d.size, d.handle, event.clientX - d.x, event.clientY - d.y, d.zoom);
+  event.stopPropagation();
+ }
+ function elementResizeKey(event: KeyboardEvent, id: string, handle: ElementHandle) {
+  const step = event.shiftKey ? 10 : 1;
+  const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+  const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+  if ((!dx && !dy) || !elementSizes[id]) return;
+  const value = resizeElement(elementSizes[id], handle, dx, dy, 1);
+  if ((value.width === undefined || value.width === elementSizes[id].width) && (value.height === undefined || value.height === elementSizes[id].height)) return;
+  onElementResize(id, value);
+  event.preventDefault(); event.stopPropagation();
+ }
+ function endElementResize(event: PointerEvent, cancel = false) {
+  const d = elementDrag;
+  if (!d || d.pointer !== event.pointerId) return;
+  elementDrag = null;
+  if (!cancel && (event.clientX !== d.x || event.clientY !== d.y)) onElementResize(d.id, d.value);
+  event.stopPropagation();
  }
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number; pageWidth: number; pageHeight: number; original: JsonObject; movedX: boolean; movedY: boolean } | null = null;
  let resizeOutline = $state<{ width: number; height: number } | null>(null);
@@ -245,13 +286,18 @@
    <div style={placeStyle(pane)} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>
     <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}; {surfaceColorStyle(panel ?? {}, !!colors.background_color)}" data-flow-layout use:flowGeometry={{ config, count: items.length, sizeToRows: !items.some((it) => !('error' in it.entry) && (it.entry.desc.width === 'elastic' || (typeof it.entry.desc.width === 'string' && it.entry.desc.width.endsWith('%')))) }}>
      {#each items as item (item.node.id)}
-      <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config)} data-flow-item>
+      <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measureElement={item.node.id} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config)} data-flow-item>
        {#if 'error' in item.entry}
         <ErrorBox title={m.wpi_error_title({ descriptor: page.descriptor_id })} message={item.entry.error} />
        {:else if rt.root}
         <ElementView instanceId={rt.root} element={item.entry} />
        {/if}
        <button class:selected={selectedId === item.node.id} class="overlay nodrag nopan" aria-label={m.wpi_preview_select({ name: String(item.node.data.label ?? item.node.data.element ?? '') })} aria-pressed={selectedId === item.node.id} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onSelect(item.node.id); }}></button>
+       {#if selectedId === item.node.id && elementSizes[item.node.id]}
+        {#each resizeHandles(elementSizes[item.node.id].width, elementSizes[item.node.id].height, zoom || 1) as handle}
+         <button type="button" class="element-grip nodrag nopan {handle}" aria-label={m.wpi_resize_element({ direction: handle })} title={m.wpi_resize_element({ direction: handle })} onpointerdown={(event) => startElementResize(event, item.node.id, handle)} onpointermove={moveElementResize} onkeydown={(event) => elementResizeKey(event, item.node.id, handle)} onpointerup={endElementResize} onpointercancel={(event) => endElementResize(event, true)}></button>
+        {/each}
+       {/if}
       </div>
      {/each}
     </div>
@@ -324,8 +370,17 @@
  .flow { position: relative; }
  .element { position: relative; box-sizing: border-box; overflow: auto; }
  .stretch { display: flex; flex-direction: column; }
- .stretch > :global(:not(.overlay)) { flex: 1 1 auto; }
+ .stretch > :global(:not(.overlay):not(.element-grip)) { flex: 1 1 auto; }
  .overlay { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; min-height: 20px; background: transparent; border: 1px solid transparent; cursor: pointer; }
+ .element-grip { position:absolute; z-index:3; width:10px; height:10px; padding:0; border:1px solid #6366f1; border-radius:50%; background:white; touch-action:none; }
+ .element-grip.nw, .element-grip.n, .element-grip.ne { top:0; }
+ .element-grip.sw, .element-grip.s, .element-grip.se { bottom:0; }
+ .element-grip.nw, .element-grip.w, .element-grip.sw { left:0; }
+ .element-grip.ne, .element-grip.e, .element-grip.se { right:0; }
+ .element-grip.n, .element-grip.s { left:50%; transform:translateX(-50%); cursor:ns-resize; }
+ .element-grip.e, .element-grip.w { top:50%; transform:translateY(-50%); cursor:ew-resize; }
+ .element-grip.nw, .element-grip.se { cursor:nwse-resize; }
+ .element-grip.ne, .element-grip.sw { cursor:nesw-resize; }
  .overlay:hover { background: rgba(99,102,241,.08); border-color: rgba(99,102,241,.5); }
  .overlay.selected, .overlay:focus-visible { background: rgba(99,102,241,.08); border: 2px solid #6366f1; outline: none; }
 </style>
