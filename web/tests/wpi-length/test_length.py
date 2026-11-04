@@ -37,6 +37,15 @@ with sync_playwright() as p:
     default.locator('select').select_option('px')
     expect(page.locator('#attributes')).to_contain_text('\"defaultValue\":\"42px\"')
     display = page.locator('[data-property="editor_options.displayType"] input')
+    display_row = page.locator('[data-property="editor_options.displayType"]')
+    default_row = page.locator('[data-property="editor_options.defaultValue"]')
+    toggle_box = display_row.locator('.editor')
+    default_input = default_row.locator('input')
+    toggle_rect = toggle_box.bounding_box()
+    default_rect = default_input.bounding_box()
+    assert abs(toggle_rect['x'] - default_rect['x']) < 1
+    assert abs(display_row.locator('label').bounding_box()['y'] - toggle_rect['y']) < toggle_rect['height']
+    assert toggle_box.evaluate('(el) => getComputedStyle(el).backgroundColor') == default_input.evaluate('(el) => getComputedStyle(el).backgroundColor')
     expect(display).not_to_be_checked()
     page_length = page.locator('#page-length')
     expect(page_length.locator('select.type')).to_have_count(0)

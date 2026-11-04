@@ -136,7 +136,7 @@
 					{@const Editor = editorOf(p)}
 					{@const help = tip(p)}
 					{@const warn = warning(p)}
-					<div class="property" class:length-property={p.editor === 'length'} data-property={p.name}>
+					<div class="property" class:length-property={p.editor === 'length' || p.name === 'editor_options.displayType'} data-property={p.name}>
 						<div class="heading">
 							<label for={id}>
 								{p.label?.() ?? p.name}{#if source.required(p.name)}<span
@@ -161,7 +161,7 @@
 								>
 							{/if}
 						</div>
-						<div class="editor">
+						<div class="editor" class:display-type-editor={p.name === 'editor_options.displayType'}>
 							<Editor
 								{id}
 								label={p.label?.() ?? p.name}
@@ -254,6 +254,16 @@
 	}
 	.editor {
 		position: relative;
+	}
+	.display-type-editor {
+		display: flex;
+		align-items: center;
+		box-sizing: border-box;
+		min-height: 26px;
+		padding: 4px 8px;
+		border: 1px solid var(--cv-border, #d1d5db);
+		border-radius: 4px;
+		background: var(--cv-surface, transparent);
 	}
 	.hint,
 	.warning {
