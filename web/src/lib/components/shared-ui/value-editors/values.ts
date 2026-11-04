@@ -26,12 +26,13 @@ const invalid: Parsed = { ok: false };
 
 // A length: an allowed keyword, or a non-negative number with an allowed unit;
 // a number without a unit means px. A percentage is at most 100.
-export function parseLength(text: string, keywords: string[], units: string[]): Parsed {
+export function parseLength(text: string, keywords: string[], units: string[], unitless = false): Parsed {
 	const t = text.trim();
 	if (t === '') return { ok: true, value: undefined };
 	if (keywords.includes(t)) return { ok: true, value: t };
 	const m = /^(\d+(?:\.\d+)?)\s*(px|rem|em|%)?$/.exec(t);
 	if (!m) return invalid;
+	if (!m[2] && unitless) return { ok: true, value: m[1] };
 	const unit = m[2] ?? 'px';
 	if (!units.includes(unit) || (unit === '%' && Number(m[1]) > 100)) return invalid;
 	return { ok: true, value: `${m[1]}${unit}` };
@@ -39,13 +40,13 @@ export function parseLength(text: string, keywords: string[], units: string[]): 
 
 export function lengthParts(value: Json | undefined): { amount: string; type: string } {
 	if (typeof value !== 'string') return { amount: '', type: '' };
-	const match = /^(\d+(?:\.\d+)?)(px|rem|em|%)$/.exec(value);
-	return match ? { amount: match[1], type: match[2] } : { amount: '', type: value };
+	const match = /^(\d+(?:\.\d+)?)(px|rem|em|%)?$/.exec(value);
+	return match ? { amount: match[1], type: match[2] ?? 'value' } : { amount: '', type: value };
 }
 
 export function lengthWithType(value: Json | undefined, type: string, units: string[]): string | undefined {
 	if (type === 'default' || type === '') return undefined;
-	return units.includes(type) ? `${lengthParts(value).amount || '0'}${type}` : type;
+	return type === 'value' ? lengthParts(value).amount || '0' : units.includes(type) ? `${lengthParts(value).amount || '0'}${type}` : type;
 }
 
 export function parseNumber(text: string, opts: { min?: number; max?: number; integer?: boolean }): Parsed {

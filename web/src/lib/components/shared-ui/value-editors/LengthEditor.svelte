@@ -10,19 +10,19 @@
 	const keywords = $derived(options.keywords ?? []);
 	const units = $derived(options.units ?? ['px', 'rem', 'em', '%']);
 	const parts = $derived(lengthParts(value));
-	const type = $derived(options.useDefault && options.defaultValue !== undefined ? 'default' : parts.type);
-	const numeric = $derived(units.includes(type));
+	const type = $derived(options.useDefault && options.defaultValue !== undefined ? 'default' : (parts.type || 'value'));
+	const numeric = $derived((type === 'value' || units.includes(type)));
 	let editing = $state(false);
 	let wrapper: HTMLDivElement;
 	async function edit() { editing = true; await tick(); wrapper?.querySelector('input')?.focus(); }
 	function changeType(event: Event) {
 		const select = event.currentTarget as HTMLSelectElement;
 		const result = lengthWithType(value, select.value, units);
-		if (result === undefined || (parseLength(result, keywords, units).ok && !check?.(result))) onChange(result);
+		if (result === undefined || (parseLength(result, keywords, units, select.value === 'value').ok && !check?.(result))) onChange(result);
 		else select.value = type;
 	}
 	function parseAmount(text: string) {
-		return parseLength(text.trim() ? `${text.trim()}${type}` : '', [], units);
+		return parseLength(text.trim() ? `${text.trim()}${type === 'value' ? '' : type}` : '', [], units, type === 'value');
 	}
 	function leaveLabel(event: FocusEvent) {
 		const target = event.target as HTMLInputElement;
@@ -54,8 +54,9 @@
 	{#if !options.readOnly}
 		<select class="ve-input type" aria-label={m.wpi_length_type({ name: label })} value={type} onchange={changeType}>
 			{#if type === ''}<option value=""></option>{/if}
-			{#if type && type !== 'default' && !keywords.includes(type) && !units.includes(type)}<option value={type}>{type}</option>{/if}
+			{#if type && type !== 'default' && type !== 'value' && !keywords.includes(type) && !units.includes(type)}<option value={type}>{type}</option>{/if}
 			{#if options.defaultValue !== undefined}<option value="default">{m.wpi_length_default()}</option>{/if}
+			<option value="value">{m.wpi_length_value()}</option>
 			{#each keywords as keyword}<option value={keyword}>{keyword}</option>{/each}
 			{#each units as unit}<option value={unit}>{unit}</option>{/each}
 		</select>

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	colorMode,
+	lengthParts,
+	lengthWithType,
 	moved,
 	parseJsonText,
 	parseLength,
@@ -84,4 +86,11 @@ test('length parts and type changes preserve values without conversion', async (
 	assert.equal(lengthWithType('12rem', '%', ['px', 'rem', '%']), '12%');
 	assert.equal(lengthWithType('auto', 'px', ['px']), '0px');
 	assert.equal(lengthWithType('12px', 'default', ['px']), undefined);
+});
+
+test('unitless value type retains numbers without a suffix', () => {
+	assert.deepEqual(lengthParts('12.5'), { amount: '12.5', type: 'value' });
+	assert.deepEqual(parseLength('12.5', [], ['px'], true), { ok: true, value: '12.5' });
+	assert.equal(lengthWithType('12px', 'value', ['px']), '12');
+	assert.equal(lengthWithType('12', 'px', ['px']), '12px');
 });
