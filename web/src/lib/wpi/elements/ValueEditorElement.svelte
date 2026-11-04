@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { valueEditors } from '$lib/components/shared-ui/property-editor/editors';
+	import ColorModeSelect from '$lib/components/shared-ui/value-editors/ColorModeSelect.svelte';
 	import type { ValueEditorOptions } from '$lib/components/shared-ui/value-editors/types';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { listActionClasses, listPageLayouters } from '../api';
@@ -19,17 +20,23 @@
 	const d = $derived(element.desc);
 	const editor = $derived(d.editor ?? '');
 	const drawing = $derived(drawingEditor(editor));
-	const View = $derived(drawing && valueEditors[d.binding_mode === 'read-only' ? 'read-only' : drawing]);
+	const View = $derived(
+		drawing && valueEditors[d.binding_mode === 'read-only' ? 'read-only' : drawing]
+	);
+	const colorHeading = $derived(drawing === 'color' && d.binding_mode !== 'read-only');
 	// Without a binding the value stays on the page; an unset value is written as null.
 	let unbound = $state<Json | undefined>(undefined);
-	const value = $derived(d.data_binding ? (rt.read(instanceId, d.data_binding) ?? undefined) : unbound);
+	const value = $derived(
+		d.data_binding ? (rt.read(instanceId, d.data_binding) ?? undefined) : unbound
+	);
 	const errors = $derived(rt.errorsFor(instanceId, d.data_binding));
 
 	// action-picker and layouter-picker offer the stored classes unless the options name choices.
 	let loaded = $state<string[] | null>(null);
 	let loadFailed = $state(false);
 	const loads = $derived(
-		(editor === 'action-picker' || editor === 'layouter-picker') && !Array.isArray(d.editor_options?.choices)
+		(editor === 'action-picker' || editor === 'layouter-picker') &&
+			!Array.isArray(d.editor_options?.choices)
 	);
 	$effect(() => {
 		if (!loads) return;
@@ -46,11 +53,14 @@
 	});
 	const options = $derived<ValueEditorOptions>({
 		...((d.editor_options ?? {}) as ValueEditorOptions),
-		...(loads && loaded ? { choices: loaded } : {})
+		...(loads && loaded ? { choices: loaded } : {}),
+		...(colorHeading ? { colorModeInHeading: true } : {})
 	});
 
 	function check(next: Json): string | null {
-		return editor === 'font-picker' && !validTextAttribute('font_family', next) ? m.wpi_value_editor_font_invalid() : null;
+		return editor === 'font-picker' && !validTextAttribute('font_family', next)
+			? m.wpi_value_editor_font_invalid()
+			: null;
 	}
 	function change(next: Json | undefined) {
 		if (d.data_binding) rt.write(instanceId, d.data_binding, next ?? null);
@@ -60,13 +70,25 @@
 
 {#if View}
 	<div class="value-editor">
-		<label class="caption" for={id}>{localized(d.label)}</label>
+		<div class="heading">
+			<label class="caption" for={id}>{localized(d.label)}</label>
+			{#if colorHeading}<ColorModeSelect
+					{id}
+					label={localized(d.label)}
+					{value}
+					theme={options.theme}
+					onChange={change}
+				/>{/if}
+		</div>
 		<View {id} label={localized(d.label)} {value} {options} {check} onChange={change} />
 		{#if loadFailed}<p class="error">{m.wpi_value_editor_choices_failed()}</p>{/if}
 		{#each errors as code (code)}<p class="error">{fieldErrorText(code)}</p>{/each}
 	</div>
 {:else}
-	<ErrorBox title={m.wpi_error_title({ descriptor: element.pageId })} message={m.wpi_value_editor_not_built({ editor })} />
+	<ErrorBox
+		title={m.wpi_error_title({ descriptor: element.pageId })}
+		message={m.wpi_value_editor_not_built({ editor })}
+	/>
 {/if}
 
 <style>
@@ -76,6 +98,13 @@
 		gap: 4px;
 		min-width: 0;
 		width: 100%;
+	}
+	.heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 4px;
+		min-width: 0;
 	}
 	.caption {
 		font-size: 14px;
