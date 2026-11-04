@@ -1,5 +1,5 @@
 <script lang="ts">
- import { elementMinimum, belowElementMinimum } from '$lib/wpi/element-minimum';
+ import { elementMinimum, belowElementMinimum, clampElementMinimum } from '$lib/wpi/element-minimum';
  // The page being edited, drawn on the canvas with the interpreter's layout and
  // element components (OpenSpec wpi-pages-own-panes, design D12): its pane tree,
  // and in each leaf pane its element nodes. Each element has a selection
@@ -41,6 +41,7 @@
  } = $props();
  const actions = getNodeActions();
  let previewElement: HTMLElement;
+ let resizeNotice = $state<{ id: string; message: string; left: number; top: number } | null>(null);
  let toolbarPosition = $state<{ left: number; top: number } | null>(null);
  function positionToolbar() {
   const target = previewElement?.querySelector<HTMLElement>('.overlay.selected');
@@ -118,7 +119,7 @@
   const item = entries(pane).find((entry) => entry.node.id === id);
   if (!item || 'error' in item.entry) return;
   const minimum = elementMinimum(item.entry.module, item.entry.desc.editor);
-  if (belowElementMinimum(size, minimum)) { alert(m.wpi_resize_content_minimum({ width: String(minimum!.width), height: String(minimum!.height) })); return; }
+
   const row = (node.data.class ?? classes[String(node.data.element ?? '')]) as ClassRow | undefined;
   if (row && ((size.width !== undefined && isFixed(row, 'width')) || (size.height !== undefined && isFixed(row, 'height')))) {
    alert(m.wpi_resize_fixed_limit()); return;
@@ -134,7 +135,7 @@
    ['panel', 'min_elem_width', 'width', 'min', config.min_elem_width ?? '20px'], ['panel', 'max_elem_width', 'width', 'max', config.max_elem_width ?? '300px'],
    ['panel', 'min_row_height', 'height', 'min', config.min_row_height ?? '30px'], ['panel', 'max_row_height', 'height', 'max', config.max_row_height ?? '200px']
   ] as const) {
-   if (value === undefined || value === null || size[axis] === undefined) continue;
+   if (value === undefined || value === null) continue;
    const length = typeof value === 'number' || /^\d+(?:\.\d+)?$/.test(String(value).trim()) ? `${value}px` : String(value);
    if (!CSS.supports(axis, length)) continue;
    probe.style[axis] = length;
@@ -143,11 +144,22 @@
    probe.style[axis] = '0px';
   }
   probe.remove();
+  const effectiveMinimum = {
+   width: Math.max(minimum?.width ?? 0, ...limits.filter((limit) => limit.axis === 'width' && limit.kind === 'min').map((limit) => limit.pixels)),
+   height: Math.max(minimum?.height ?? 0, ...limits.filter((limit) => limit.axis === 'height' && limit.kind === 'min').map((limit) => limit.pixels))
+  };
+  let nextNotice: typeof resizeNotice = null;
+  if (belowElementMinimum(size, effectiveMinimum)) {
+   const rect = host.getBoundingClientRect(), root = previewElement.getBoundingClientRect(), scale = zoom || 1;
+   nextNotice = { id, message: m.wpi_resize_content_minimum({ width: String(Math.ceil(effectiveMinimum.width)), height: String(Math.ceil(effectiveMinimum.height)) }), left: Math.max(0, Math.min((rect.left - root.left) / scale, Math.max(0, previewElement.clientWidth - 260))), top: Math.max(0, Math.min((rect.bottom - root.top) / scale + 8, previewElement.clientHeight - 70)) };
+   size = clampElementMinimum(size, effectiveMinimum);
+  }
   const changes = resizeLimitChanges(size, limits);
   if (changes.some((change) => change.source === 'element' && row && isFixed(row, change.key))) {
    alert(m.wpi_resize_fixed_limit()); return;
   }
   if (changes.length && !confirm(m.wpi_resize_override_limits({ limits: changes.map((change) => `${change.key}: ${change.value}`).join(', ') }))) return;
+  resizeNotice = nextNotice;
   onElementResize(id, size, changes);
  }
  function elementResizeKey(event: KeyboardEvent, id: string, handle: ElementHandle) {
@@ -397,11 +409,18 @@
    <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
   </div>
  {/if}
+{#if resizeNotice && selectedId === resizeNotice.id}
+ <div class="resize-notice nodrag nopan" role="status" style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
+  <span>{resizeNotice.message}</span><button type="button" aria-label={m.wpi_load_close()} onclick={() => resizeNotice = null}>×</button>
+ </div>
+{/if}
 {#if resizeOutline}
  <div class="resize-outline" style:width="{resizeOutline.width}px" style:height="{resizeOutline.height}px" aria-hidden="true"></div>
 {/if}
 
 <style>
+ .resize-notice { position:absolute; z-index:20; width:250px; display:flex; align-items:start; gap:8px; box-sizing:border-box; padding:10px 12px; border:1px solid var(--cv-border); border-radius:6px; background:var(--cv-panel); color:var(--cv-text); box-shadow:0 4px 16px #0004; font-size:11px; }
+ .resize-notice button { flex:none; border:0; padding:0; background:transparent; color:inherit; font-size:16px; cursor:pointer; }
  .page-status { position:absolute; left:0; top:-32px; height:32px; display:flex; align-items:center; gap:16px; padding:0 10px; box-sizing:border-box; overflow:auto; white-space:nowrap; background:var(--cv-surface); color:var(--cv-text); border:1px solid var(--cv-border); font-size:11px; pointer-events:auto; }
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
  .element-resize-outline { position:absolute; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:9; }

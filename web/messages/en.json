@@ -8359,5 +8359,5 @@
 	"wpi_color_families": "Color families",
 	"wpi_color_resize": "Resize color dialog with arrow keys",
 	"wpi_color_rgb": "RGB",
-	"wpi_resize_content_minimum": "This color picker needs at least {width} × {height} pixels to display its contents."
+	"wpi_resize_content_minimum": "The size was adjusted to respect the minimum: {width} × {height} pixels."
 }
