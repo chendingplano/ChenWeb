@@ -186,31 +186,33 @@
 			}}
 		/>
 	{/if}
-	{#if mode !== 'none'}{#each variants as variant (variant)}<div class="color-value">
-				{#if variant !== 'single'}<span class="ve-variant">{variantLabel(variant)}</span
-					>{/if}<button
-					type="button"
-					class="color-swatch"
-					aria-label={m.wpi_color_picker_label({ field: label, variant: variantLabel(variant) })}
-					aria-expanded={opened === variant}
-					style:background={colorPart(value, variant) || 'transparent'}
-					onclick={(e) => open(variant, e.currentTarget)}
-				></button><DraftField
-					id={`${id}-${variant}`}
-					value={colorPart(value, variant)}
-					ariaLabel={m.wpi_color_value_label({ field: label, variant: variantLabel(variant) })}
-					format={(v) => (typeof v === 'string' ? v : '')}
-					parse={(text) => ({ ok: true, value: text.trim() === '' ? undefined : text.trim() })}
-					invalidMessage={() => m.wpi_text_invalid()}
-					check={(css) => {
-						if (typeof CSS !== 'undefined' && !CSS.supports('color', String(css)))
-							return m.wpi_text_invalid();
-						const next = withColorPart(value, variant, String(css));
-						return check && next !== undefined ? check(next) : null;
-					}}
-					onChange={(css) => onChange(withColorPart(value, variant, String(css ?? '')))}
-				/>
-				<span class="color-percent">{Math.round(read(colorPart(value, variant))[3] * 100)}%</span>
+	{#if mode !== 'none'}{#each variants as variant (variant)}<div class="color-variant">
+				{#if variant !== 'single'}<span class="ve-variant">{variantLabel(variant)}</span>{/if}
+				<div class="color-value">
+					<button
+						type="button"
+						class="color-swatch"
+						aria-label={m.wpi_color_picker_label({ field: label, variant: variantLabel(variant) })}
+						aria-expanded={opened === variant}
+						style:background={colorPart(value, variant) || 'transparent'}
+						onclick={(e) => open(variant, e.currentTarget)}
+					></button><DraftField
+						id={`${id}-${variant}`}
+						value={colorPart(value, variant)}
+						ariaLabel={m.wpi_color_value_label({ field: label, variant: variantLabel(variant) })}
+						format={(v) => (typeof v === 'string' ? v : '')}
+						parse={(text) => ({ ok: true, value: text.trim() === '' ? undefined : text.trim() })}
+						invalidMessage={() => m.wpi_text_invalid()}
+						check={(css) => {
+							if (typeof CSS !== 'undefined' && !CSS.supports('color', String(css)))
+								return m.wpi_text_invalid();
+							const next = withColorPart(value, variant, String(css));
+							return check && next !== undefined ? check(next) : null;
+						}}
+						onChange={(css) => onChange(withColorPart(value, variant, String(css ?? '')))}
+					/>
+					<span class="color-percent">{Math.round(read(colorPart(value, variant))[3] * 100)}%</span>
+				</div>
 			</div>{/each}{/if}
 </div>
 {#if opened}<div
@@ -341,6 +343,13 @@
 		color: var(--cv-text-muted, #777);
 		font-size: 11px;
 	}
+	.color-variant {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		flex: 1;
+		min-width: 0;
+	}
 	.color-value {
 		display: flex;
 		align-items: center;
@@ -350,6 +359,9 @@
 		background: var(--cv-surface, #f3f3f3);
 		border-radius: 6px;
 		padding: 3px;
+	}
+	:global(.dark) .color-value {
+		background: color-mix(in srgb, var(--cv-surface, #1e293b) 82%, white);
 	}
 	.color-value :global(.ve-input) {
 		min-width: 75px;
