@@ -2,6 +2,7 @@ package wpi
 
 import (
 	"golang.org/x/text/language"
+	"maps"
 	"slices"
 )
 
@@ -11,7 +12,7 @@ import (
 // editor, from the IDs the class editor offers (classValueEditorIDs).
 
 var (
-	valueEditorAttributes = []string{"data_binding", "editor_options"}
+	valueEditorAttributes = []string{"data_binding", "editor_options", "label_options"}
 	// pendingValueEditors have no code yet, so only a draft class may name one.
 	pendingValueEditors = []string{"date-picker", "time-picker", "button-type-picker", "database-picker", "schema-picker"}
 	drawnValueEditors   = slices.DeleteFunc(slices.Clone(classValueEditorIDs), func(id string) bool {
@@ -31,6 +32,25 @@ func (v *validator) valueEditorAttributes(e map[string]any, path string) {
 			v.stringEditorOptions(opts, path+"/editor_options")
 		}
 	}
+	if val, ok := e["label_options"]; ok {
+		if opts, valid := v.object(val, path+"/label_options"); valid {
+			v.labelOptions(opts, path+"/label_options")
+		}
+	}
+}
+
+// labelOptions checks the List choices of the label, the only key label_options
+// holds. The label is a string, so the choices are checked as a string editor's.
+func (v *validator) labelOptions(opts map[string]any, path string) {
+	choices := map[string]any{}
+	for _, key := range slices.Sorted(maps.Keys(opts)) {
+		if key != "choices" {
+			v.errf(path+"/"+key, "unknown attribute %q", key)
+		} else {
+			choices[key] = opts[key]
+		}
+	}
+	v.stringEditorOptions(choices, path)
 }
 
 // valueEditorClassDefaults checks the defaults of a value-editor class row in

@@ -18,6 +18,11 @@
   onChange: (value: Json | undefined) => void;
  } = $props();
  let menu: HTMLDetailsElement;
+
+ // A press outside the menu closes it.
+ function closeOutside(event: PointerEvent) {
+  if (menu?.open && !menu.contains(event.target as Node)) menu.open = false;
+ }
  function setMode(next: StringMode) {
   const locale = getLocale();
   const converted = convertStringMode(value, next, languages, locale);
@@ -29,8 +34,9 @@
   menu.open = false;
  }
 </script>
+<svelte:window onpointerdown={closeOutside} />
 <details class="mode-menu" class:heading bind:this={menu}>
- <summary aria-label={m.wpi_string_mode()}>…</summary>
+ <summary aria-label={m.wpi_string_mode()}>{m.wpi_string_options()}</summary>
  <div class="mode-items">
   <button type="button" aria-pressed={mode === 'single'} onclick={() => setMode('single')}>{m.wpi_string_single()}</button>
   <button type="button" aria-pressed={mode === 'multilingual'} onclick={() => setMode('multilingual')}>{m.wpi_string_multilingual()}</button>
@@ -40,9 +46,13 @@
 
 <style>
  .mode-menu { position: relative; }
+ /* Beside the caption, the menu is a flex box so its button centres on the row. */
+ .heading { display: flex; align-items: center; }
+ /* A pulldown button in the value editors' look: the background of their input. */
  .mode-menu summary { cursor: pointer; list-style: none; padding: 4px 8px; }
- .heading summary { padding: 0 6px; line-height: 1; }
+ .heading summary { display: inline-flex; gap: 4px; padding: 1px 6px; border: 1px solid var(--cv-border, #d1d5db); border-radius: 4px; background: var(--cv-surface, transparent); color: var(--cv-text, inherit); font-size: 10px; line-height: 1.4; }
+ .heading summary::after { content: '▾'; }
  .mode-items { position: absolute; z-index: 5; right: 0; display: grid; padding: 4px; background: var(--cv-panel); border: 1px solid var(--cv-border); }
  .heading .mode-items { right: auto; left: 0; }
- .mode-items button { text-align: left; padding: 5px 12px; white-space: nowrap; }
+ .mode-items button { text-align: left; padding: 5px 12px; white-space: nowrap; font-size: 10px; }
 </style>

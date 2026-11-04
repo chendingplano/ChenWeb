@@ -67,7 +67,7 @@ export const button: EditorDef = {
 		{
 			id: 'general',
 			label: m.wpi_input_group_general,
-			properties: [{ name: 'label', label: m.propertiespanel_attr_label, editor: 'localized-text' }, actionPicker('on_click', m.propertiespanel_attr_on_click)]
+			properties: [{ name: 'label', label: m.propertiespanel_attr_label, editor: 'string-editor', options: { mode: 'multilingual', languages: ['en', 'zh-cn'] } }, actionPicker('on_click', m.propertiespanel_attr_on_click)]
 		},
 		elementSize(m.wpi_element_width_limits_hint)
 	]
@@ -112,7 +112,7 @@ export const valueEditor: EditorDef = {
 		{
 			id: 'general',
 			label: m.wpi_input_group_general,
-			properties: [{ name: 'label', label: m.propertiespanel_attr_label, editor: 'localized-text' }, ...binding]
+			properties: [{ name: 'label', label: m.propertiespanel_attr_label, editor: 'string-editor', options: { mode: 'multilingual', languages: ['en', 'zh-cn'] } }, ...binding]
 		},
 		{
 			id: 'editor',
@@ -123,7 +123,7 @@ export const valueEditor: EditorDef = {
 				{ name: 'editor_options.defaultValue', label: m.wpi_class_default_value, editor: 'length', options: { keywords: ['auto', 'elastic'], units: ['px', 'rem', 'em', '%'] }, visible: (ctx) => ctx.get('editor') === 'length' },
 				{ name: 'editor_options.mode', label: m.wpi_string_mode, editor: 'value-picker', options: { choices: ['single', 'multilingual', 'list'], choiceLabel: (v) => v === 'single' ? m.wpi_string_single() : v === 'list' ? m.wpi_string_list() : m.wpi_string_multilingual() }, visible: (ctx) => ctx.get('editor') === 'string-editor' },
 				{ name: 'editor_options.languages', label: m.wpi_string_languages, editor: 'json', visible: (ctx) => ctx.get('editor') === 'string-editor' && ctx.get('editor_options.mode') === 'multilingual' },
-				{ name: 'editor_options.choices', label: m.wpi_string_choices, editor: 'json', visible: (ctx) => ctx.get('editor') === 'string-editor' && ctx.get('editor_options.mode') === 'list' },
+				{ name: 'editor_options.choices', label: m.wpi_string_choices, editor: 'string-choices', visible: (ctx) => ctx.get('editor') === 'string-editor' && ctx.get('editor_options.mode') === 'list' },
 				{ name: 'editor_options.emptyAsNull', label: m.wpi_string_empty_as_null, editor: 'switch', visible: (ctx) => ctx.get('editor') === 'string-editor' },
 				{ name: 'editor_options.commitOnBlur', label: m.wpi_string_commit_on_blur, editor: 'switch', visible: (ctx) => ctx.get('editor') === 'string-editor' },
 				{ name: 'editor_options', label: m.wpi_value_editor_attr_options, editor: 'json', options: { rows: 3 } }

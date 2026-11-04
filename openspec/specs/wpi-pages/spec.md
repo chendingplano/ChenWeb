@@ -41,6 +41,29 @@ when the editor opens. A recovery write based on an obsolete page version SHALL 
 When unnamed recoveries are restored at startup, the editor SHALL omit the default empty
 Unnamed tab; an existing tab containing a page or edits SHALL be preserved.
 
+Each new tab holding an unnamed page SHALL be labelled `unnamed-N`, where N is the lowest
+positive number no open tab already uses as its label. Labels are not translated. Saving a page
+or closing a tab frees its label. The tab label is independent of the recovery ID.
+
+When an author closes a dirty tab holding an unnamed page, the editor SHALL ask whether to save,
+discard or cancel. Cancel SHALL leave the tab open and unchanged. Discard SHALL close the tab and
+delete the author's recovery record. Save SHALL open the first-save dialog; the tab SHALL close
+only after the page is stored, and that save SHALL remove the recovery record. Cancelling the
+dialog or a failed save SHALL leave the tab open. A dirty tab holding a named page SHALL keep
+the discard confirmation.
+
+#### Scenario: New tabs get distinct names
+- **WHEN** an author clicks the add-tab button while `unnamed-1` and `unnamed-3` are open
+- **THEN** the new tab is labelled `unnamed-2`
+
+#### Scenario: Close a dirty unnamed tab and save
+- **WHEN** an author closes a dirty unnamed tab, chooses Save and submits a name and ID
+- **THEN** the page is stored under that ID, its recovery record is deleted and the tab closes
+
+#### Scenario: Close a dirty unnamed tab and discard
+- **WHEN** an author closes a dirty unnamed tab and chooses Discard
+- **THEN** the tab closes and its recovery record is deleted
+
 #### Scenario: Idle after recovery
 - **WHEN** a recovery save succeeds and the page descriptor does not change
 - **THEN** subsequent timer checks do not write another recovery

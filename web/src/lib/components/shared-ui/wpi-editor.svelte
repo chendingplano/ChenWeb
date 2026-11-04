@@ -58,7 +58,8 @@
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
 	import { blankPage, centeredPageViewport, DEFAULT_PREVIEW_SIZE, isInsidePage } from './canvas/page-placement';
-	import { unnamedPageID } from './canvas/unnamed-page';
+	import { unnamedPageID, unnamedTabLabel } from './canvas/unnamed-page';
+	import CloseUnsavedDialog from './canvas/CloseUnsavedDialog.svelte';
 	import { sameCanvasContent } from './canvas/canvas-dirty';
 	import { needsRecovery } from './canvas/recovery-content';
 	import {
@@ -303,7 +304,8 @@
 	}
 
 	// Undo / redo
-	type PageSnapshot = Snapshot & { page: JsonObject | null; previewSize: { width: number; height: number } };
+	type PageSnapshot = Snapshot & { page: JsonObject | null; app?: JsonObject | null; previewSize: { width: number; height: number } };
+	let loadedApp = $state<JsonObject | null>(null);
 	let undoStack = $state<PageSnapshot[]>([]);
 	let redoStack = $state<PageSnapshot[]>([]);
 	let lastSavedSnapshot = $state<PageSnapshot | null>(null);
@@ -327,6 +329,7 @@
 		recoveredTabs.has(activeTabId) || (lastSavedSnapshot !== null &&
 			(activeFlow?.flow_name !== savedName || !sameCanvasContent({ nodes, edges }, lastSavedSnapshot) ||
 			 JSON.stringify(loadedPage) !== JSON.stringify(lastSavedSnapshot.page) ||
+			 JSON.stringify(loadedApp) !== JSON.stringify(lastSavedSnapshot.app ?? null) ||
 			 JSON.stringify(previewSize) !== JSON.stringify(lastSavedSnapshot.previewSize)))
 	);
 	type CanvasTab = {
@@ -337,7 +340,7 @@
 	let tabs = $state<CanvasTab[]>([]);
 	let nextTabId = 1;
 	function currentSnapshot(): PageSnapshot {
-		return JSON.parse(JSON.stringify({ nodes, edges, page: loadedPage, previewSize }));
+		return JSON.parse(JSON.stringify({ nodes, edges, page: loadedPage, app: loadedApp, previewSize }));
 	}
 	function captureTab() {
 		if (!activeTabId) return;
@@ -354,6 +357,7 @@
 		activeFlow = tab.flow;
 		savedName = tab.savedName;
 		({ nodes, edges, page: loadedPage, previewSize } = JSON.parse(JSON.stringify(tab.snapshot)));
+		loadedApp = tab.snapshot.app ? JSON.parse(JSON.stringify(tab.snapshot.app)) : null;
 		lastSavedSnapshot = tab.saved;
 		undoStack = tab.undo; redoStack = tab.redo;
 		viewport = { ...tab.viewport }; selectedNodeId = tab.selected; configMode = tab.config; selectedPane = null;
@@ -365,7 +369,7 @@
 		const id = nextTabId++;
 		lastRecovery.set(id, Date.now());
 		if (recoveryID) { recoveryIDs.set(id, recoveryID); claimedRecoveryIDs.add(recoveryID); }
-		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || m.wpi_unnamed()), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+		const flow: Flow = { flow_id: -1, user_id: 0, flow_name: String(page?.descriptor_id || unnamedTabLabel(tabs.map((item) => item.flow?.flow_name ?? ''))), flow_desc: '', is_default: false, is_shared: false, is_template: false, template_category: '', flow_data: { nodes: [], edges: [] }, thumbnail_svg: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
 		const tab: CanvasTab = { id, flow, savedName: flow.flow_name, snapshot: empty, saved: empty, undo: [], redo: [], viewport: { x: 0, y: 0, zoom: 1 }, selected: null, config: null, dirty: false, openedAt: Date.now(), autoSavedAt: null };
 		tabs = [...tabs, tab];
 		switchTab(id);
@@ -384,10 +388,21 @@
 			redoStack = [];
 		}
 	}
-	function closeTab(id: number) {
+	// Tab being closed whose unsaved, never-named page awaits the author's choice.
+	let closePrompt = $state<number | null>(null);
+	let closeAfterSave: number | null = null;
+	function isUnnamedTab(tab: CanvasTab): boolean {
+		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
+		const app = tab.id === activeTabId ? loadedApp : tab.snapshot.app;
+		return !app && !!page && !page.descriptor_id;
+	}
+	function closeTab(id: number, force = false) {
 		const tab = tabs.find((item) => item.id === id);
 		if (!tab) return;
-		if ((id === activeTabId ? isDirty : tab.dirty) && !confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
+		if (!force && (id === activeTabId ? isDirty : tab.dirty)) {
+			if (isUnnamedTab(tab)) { closePrompt = id; return; }
+			if (!confirm(m.canvas_01_you_have_unsaved_changes_discard())) return;
+		}
 		if (id === activeTabId) {
 			const index = tabs.findIndex((item) => item.id === id);
 			const next = tabs[index + 1] ?? tabs[index - 1];
@@ -410,7 +425,7 @@
 			let configured = 0;
 			try { configured = Number(localStorage.getItem('wpi.autoSaveSeconds')); } catch { /* Use the default. */ }
 			const interval = Number.isFinite(configured) && configured > 0 ? configured * 1000 : 10000;
-			if (!tab.dirty || !page || recovering.has(tab.id) || savingTabs.has(tab.id) || Date.now() - (lastRecovery.get(tab.id) ?? 0) < interval) continue;
+			if (!tab.dirty || !page || tab.snapshot.app || recovering.has(tab.id) || savingTabs.has(tab.id) || Date.now() - (lastRecovery.get(tab.id) ?? 0) < interval) continue;
 			let id = String(page.descriptor_id || '');
 			if (!id) {
 				id = recoveryIDs.get(tab.id) ?? unnamedPageID(new Date(), recoveryIDs.values());
@@ -428,7 +443,8 @@
 	}
 	function tabTitle(tab: CanvasTab): string {
 		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
-		return localized(page?.page_name as Text | undefined) || String(page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
+		const app = tab.id === activeTabId ? loadedApp : tab.snapshot.app;
+		return localized((app?.app_name ?? page?.page_name) as Text | undefined) || String(app?.descriptor_id || page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
 	}
 	const pageOverview = $derived(pageMinimapBounds(previewSize, { width: canvasWidth, height: canvasHeight }, viewport));
 	function movePageOverview(event: PointerEvent) {
@@ -502,6 +518,7 @@
 	}
 	function pushSnapshot() {
 		const snap: PageSnapshot = {
+			app: loadedApp ? JSON.parse(JSON.stringify(loadedApp)) : null,
 			page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
 			previewSize: { ...previewSize },
 			nodes: JSON.parse(JSON.stringify(nodes)),
@@ -517,6 +534,7 @@
 		const [top, ...rest] = undoStack;
 		redoStack = [
 			{
+				app: loadedApp ? JSON.parse(JSON.stringify(loadedApp)) : null,
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges)),
 				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
@@ -526,6 +544,7 @@
 		];
 		undoStack = rest;
 		loadedPage = top.page;
+		loadedApp = top.app ?? null;
 		previewSize = { ...top.previewSize };
 		nodes = top.nodes;
 		edges = top.edges;
@@ -537,6 +556,7 @@
 		const [top, ...rest] = redoStack;
 		undoStack = [
 			{
+				app: loadedApp ? JSON.parse(JSON.stringify(loadedApp)) : null,
 				nodes: JSON.parse(JSON.stringify(nodes)),
 				edges: JSON.parse(JSON.stringify(edges)),
 				page: loadedPage ? JSON.parse(JSON.stringify(loadedPage)) : null,
@@ -546,6 +566,7 @@
 		].slice(0, MAX_UNDO);
 		redoStack = rest;
 		loadedPage = top.page;
+		loadedApp = top.app ?? null;
 		previewSize = { ...top.previewSize };
 		nodes = top.nodes;
 		edges = top.edges;
@@ -617,6 +638,7 @@
 	let savingTabs = new Set<number>();
 	let showCreatePage = $state(false);
 	async function save(metadata?: ReturnType<typeof newPageMetadata>): Promise<boolean> {
+		if (loadedApp) { showError(m.wpi_app_save_unavailable()); return false; }
 		if (savingTabs.has(activeTabId)) return false;
 		if (!loadedPage) return false;
 		if (!metadata && (typeof loadedPage.descriptor_id !== 'string' || !loadedPage.descriptor_id)) {
@@ -1065,7 +1087,11 @@
 			{canUndo}
 			{canRedo}
 			selectedCount={selectedTotal}
-			onCreate={(kind) => (kind === 'element' ? (showCreateElement = true) : createWpiNode(kind))}
+			onCreate={(kind) => {
+				if (kind === 'app') { addTab(); loadedApp = { descriptor_id: '', schema_version: '0.5' }; configMode = 'page'; centerPreview(); }
+				else if (kind === 'element') showCreateElement = true;
+				else createWpiNode(kind);
+			}}
 			onLoadPage={() => (showLoadPage = true)}
 			onViewJson={() => {
 				if (propertiesTab === 'class') {
@@ -1329,10 +1355,11 @@
 			onUpdate={updateNodeData}
 		/>
 		{:else}
-		<WpiProperties page={loadedPage} mode={configMode} {selectedPane} node={selectedNode}
+		<WpiProperties page={loadedPage} app={loadedApp} mode={configMode} {selectedPane} node={selectedNode}
 			elementClass={selectedElementClass} flowConfig={selectedFlowConfig} {triggerActions} {pageLayouters} {validatorClasses}
 			positions={selectionGeometry}
 			onPage={(page) => { recordEdit(); loadedPage = page; }}
+			onApp={(app) => { recordEdit(); loadedApp = app; }}
 			onNode={updateNodeData}
 			onLayouter={(cls) => { paneEdit((edit) => setPageLayouter(edit, cls)); selectedPane = null; }}
 			onRename={paneActions.rename}
@@ -1457,8 +1484,23 @@
 </style>
 
 {#if showCreatePage}
- <CreatePageDialog {darkMode} onClose={() => (showCreatePage = false)} onCreate={(id, name, description, keywords, tags) =>
-  save(newPageMetadata(name, description, keywords, tags, id))} />
+ <CreatePageDialog {darkMode} onClose={() => { showCreatePage = false; closeAfterSave = null; }} onCreate={async (id, name, description, keywords, tags) => {
+  const tabID = closeAfterSave;
+  const done = await save(newPageMetadata(name, description, keywords, tags, id));
+  // The save stores the page and deletes its recovery record; only then does the tab close.
+  if (done && tabID !== null && pageVersions.has(tabID)) closeTab(tabID, true);
+  return done;
+ }} />
+{/if}
+
+{#if closePrompt !== null}
+ {@const tab = tabs.find((item) => item.id === closePrompt)}
+ {#if tab}
+  <CloseUnsavedDialog {darkMode} name={tabTitle(tab)}
+   onCancel={() => (closePrompt = null)}
+   onDiscard={() => { const id = closePrompt!; closePrompt = null; closeTab(id, true); }}
+   onSave={() => { const id = closePrompt!; closePrompt = null; switchTab(id); closeAfterSave = id; showCreatePage = true; }} />
+ {/if}
 {/if}
 
 {#if showTree}

@@ -16,6 +16,7 @@ export type ValueEditorId =
 	| 'value-picker'
 	| 'ordered-multi-picker'
 	| 'string-list'
+	| 'string-choices'
 	| 'color'
 	| 'length'
 	| 'icon-picker'

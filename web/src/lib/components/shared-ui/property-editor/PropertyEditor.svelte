@@ -19,6 +19,7 @@
 	import HelpTip from './HelpTip.svelte';
 	import ColorModeSelect from '../value-editors/ColorModeSelect.svelte';
 	import StringModeMenu from '../value-editors/StringModeMenu.svelte';
+	import StringChoicesEditor from '../value-editors/StringChoicesEditor.svelte';
 	import { currentStringMode, stringLanguages, type StringMode } from '../value-editors/string-value';
 
 	let {
@@ -95,6 +96,10 @@
 	function stringModeOf(p: PropertyDef) {
 		return currentStringMode(edited(p), stringModes[p.name] ?? optionsOf(p).mode);
 	}
+	// A string property's List values are stored beside it, as <name>_options.choices.
+	function choicesOf(p: PropertyDef): Json | undefined {
+		return source.get(`${p.name}_options.choices`);
+	}
 	function optionsOf(p: PropertyDef) {
 		return typeof p.options === 'function' ? p.options(ctx) : (p.options ?? {});
 	}
@@ -123,6 +128,9 @@
 			group.querySelector<HTMLElement>('summary')?.focus();
 		}
 	}
+	function closeStringMenuOutside(event: PointerEvent) {
+		if (stringMenuOpen && !(event.target as Element).closest('.string-menu')) stringMenuOpen = false;
+	}
 	function setStringMode(mode: string) {
 		source.set('editor_options.mode', mode);
 		stringMenuOpen = false;
@@ -145,6 +153,7 @@
 	}
 </script>
 
+<svelte:window onpointerdown={closeStringMenuOutside} />
 <section
 	bind:this={root}
 	class="property-editor select-text"
@@ -155,7 +164,7 @@
 	<h2 class="title">{title}</h2>
 	{#if ctx.get('editor') === 'string-editor'}
 		<div class="string-menu">
-			<button type="button" class="reset" aria-label={m.wpi_string_mode()} aria-expanded={stringMenuOpen} onclick={() => stringMenuOpen = !stringMenuOpen}>…</button>
+			<button type="button" class="reset" aria-label={m.wpi_string_mode()} aria-expanded={stringMenuOpen} onclick={() => stringMenuOpen = !stringMenuOpen}>{m.wpi_string_options()}</button>
 			{#if stringMenuOpen}
 				<div class="string-menu-items">
 					<button type="button" disabled={source.fixed('editor_options.mode')} onclick={() => setStringMode('single')}>{m.wpi_string_single()}</button>
@@ -214,16 +223,24 @@
 								>
 							{/if}
 						</div>
-						<div class="editor" class:display-type-editor={p.name === 'editor_options.displayType'}>
+						<div class="editor" class:display-type-editor={p.name === 'editor_options.displayType'} class:indented={isEditableString(p)}>
 							<Editor
 								{id}
 								label={p.label?.() ?? p.name}
 								value={edited(p)}
-								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p), ...(isEditableString(p) ? { modeInHeading: true, mode: stringModeOf(p) } : {}), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
+								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p), ...(isEditableString(p) ? { modeInHeading: true, mode: stringModeOf(p), choices: (choicesOf(p) as string[] | undefined) ?? [] } : {}), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
 								check={check(p)}
 								onChange={(v) => source.set(p.name, toStored(p, v))}
 							/>
 							{#if help}<HelpTip id={`${id}-tip`} tip={help} name={p.label?.() ?? p.name} />{/if}
+							{#if isEditableString(p) && stringModeOf(p) === 'list'}
+								<div class="hint">{m.wpi_string_choices()}</div>
+								<StringChoicesEditor
+									id={`${id}-choices`}
+									value={choicesOf(p)}
+									onChange={(v) => source.set(`${p.name}_options.choices`, v)}
+								/>
+							{/if}
 						</div>
 						{#if source.fixed(p.name)}<p class="hint">{m.propertiespanel_fixed()}</p>{/if}
 						{#if warn}<p class="warning" role="status">{warn}</p>{/if}
@@ -238,7 +255,7 @@
 <style>
 	.string-menu { position: relative; display: flex; justify-content: end; }
 	.string-menu-items { position: absolute; z-index: 4; top: 100%; display: grid; padding: 4px; background: var(--cv-panel); border: 1px solid var(--cv-border); }
-	.string-menu-items button { text-align: left; padding: 5px 12px; white-space: nowrap; }
+	.string-menu-items button { text-align: left; padding: 5px 12px; white-space: nowrap; font-size: 10px; }
 	.property-editor {
 		padding: 0 12px 12px;
 		color: var(--cv-text);
@@ -277,6 +294,8 @@
 	.property {
 		margin: 0 0 12px;
 	}
+	/* A string property's value and its List values are indented under its caption. */
+	.editor.indented { margin-left: 16px; }
 	.length-property { display: grid; grid-template-columns: minmax(60px, 1fr) minmax(100px, 2fr); align-items: start; gap: 4px; }
 	.length-property .heading { margin: 0; padding: 4px 0 0; }
 	.length-property .hint, .length-property .warning { grid-column: 1 / -1; }
@@ -298,6 +317,7 @@
 	}
 	.string-heading label {
 		flex: 0 1 auto;
+		line-height: 1.4;
 	}
 	.string-heading .reset {
 		margin-left: auto;

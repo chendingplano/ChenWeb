@@ -52,7 +52,7 @@
     canUndo:          boolean;
     canRedo:          boolean;
     selectedCount:    number;
-    onCreate:         (kind: WpiNodeKind) => void;
+    onCreate:         (kind: WpiNodeKind | 'app') => void;
     onLoadPage:       () => void;
     onViewJson:       () => void;
     onViewTree:       () => void;
@@ -105,6 +105,9 @@
       {/snippet}
     </DropdownMenu.Trigger>
     <DropdownMenu.Content align="start" class="min-w-40">
+      <DropdownMenu.Item class={itemClass} onclick={() => onCreate('app')}>
+        <FileIcon class="w-4 h-4 text-muted-foreground" />{m.wpi_toolbar_create_app()}
+      </DropdownMenu.Item>
       <DropdownMenu.Item class={itemClass} onclick={() => onCreate('page')}>
         <FileIcon class="w-4 h-4 text-muted-foreground" />{m.wpi_toolbar_create_page()}
       </DropdownMenu.Item>

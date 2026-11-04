@@ -16,6 +16,7 @@ import NumberEditor from '../value-editors/NumberEditor.svelte';
 import OrderedMultiPicker from '../value-editors/OrderedMultiPicker.svelte';
 import ReadOnlyValue from '../value-editors/ReadOnlyValue.svelte';
 import SortOrderEditor from '../value-editors/SortOrderEditor.svelte';
+import StringChoicesEditor from '../value-editors/StringChoicesEditor.svelte';
 import StringListEditor from '../value-editors/StringListEditor.svelte';
 import SwitchEditor from '../value-editors/SwitchEditor.svelte';
 import TablePickerEditor from '../value-editors/TablePickerEditor.svelte';
@@ -35,6 +36,7 @@ export const valueEditors: Record<ValueEditorId, Component<ValueEditorProps>> = 
 	'value-picker': ValuePicker,
 	'ordered-multi-picker': OrderedMultiPicker,
 	'string-list': StringListEditor,
+	'string-choices': StringChoicesEditor,
 	color: ColorPicker,
 	length: LengthEditor,
 	'icon-picker': IconPickerEditor,

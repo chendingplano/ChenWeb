@@ -9,3 +9,9 @@ export function unnamedPageID(now: Date, used: Iterable<string>): string {
 		date.setTime(date.getTime() + 1000);
 	}
 }
+
+// Tab labels are unnamed-1, unnamed-2, …; the lowest number no open tab uses is reused.
+export function unnamedTabLabel(used: Iterable<string>): string {
+	const occupied = new Set(used);
+	for (let n = 1; ; n++) if (!occupied.has(`unnamed-${n}`)) return `unnamed-${n}`;
+}
