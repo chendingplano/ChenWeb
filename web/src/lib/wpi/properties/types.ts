@@ -4,6 +4,7 @@
 // definition and a PropertySource that reads and writes the entity.
 import type { ValueEditorOptions } from '$lib/components/shared-ui/value-editors/types';
 import type { FlowLayouterConfig, Json } from '../types';
+import type { ValidatorClass } from '../validators';
 
 export type ValueEditorId =
 	| 'text'
@@ -24,6 +25,7 @@ export type ValueEditorId =
 	| 'column-list'
 	| 'sort-order-editor'
 	| 'validation'
+	| 'validator-list'
 	| 'read-only'
 	| 'json';
 
@@ -33,6 +35,8 @@ export type PropertyContext = {
 	get: (name: string) => Json | undefined;
 	triggerActions: string[];
 	pageLayouters: string[];
+	// The validator classes an element's Validators group offers.
+	validatorClasses?: ValidatorClass[];
 	// Measured on the canvas, in page pixels from the page's top-left corner.
 	position?: { x: number; y: number };
 	// An element's pane and the flow layouter configuration of its panel.

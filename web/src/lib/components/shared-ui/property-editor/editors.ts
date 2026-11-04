@@ -21,6 +21,7 @@ import SwitchEditor from '../value-editors/SwitchEditor.svelte';
 import TablePickerEditor from '../value-editors/TablePickerEditor.svelte';
 import TextEditor from '../value-editors/TextEditor.svelte';
 import ValidationEditor from '../value-editors/ValidationEditor.svelte';
+import ValidatorListEditor from '../value-editors/ValidatorListEditor.svelte';
 import ValuePicker from '../value-editors/ValuePicker.svelte';
 
 export const valueEditors: Record<ValueEditorId, Component<ValueEditorProps>> = {
@@ -42,6 +43,7 @@ export const valueEditors: Record<ValueEditorId, Component<ValueEditorProps>> = 
 	'column-list': ColumnListEditor,
 	'sort-order-editor': SortOrderEditor,
 	validation: ValidationEditor,
+	'validator-list': ValidatorListEditor,
 	'read-only': ReadOnlyValue,
 	json: JsonEditor
 };

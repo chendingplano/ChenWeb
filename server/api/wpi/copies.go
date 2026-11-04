@@ -16,9 +16,9 @@ type copySite struct {
 	path    string
 }
 
-// copySites lists every element instance, action instance (not static data) and
-// layouter copy of a page. It accepts pages that fail validation, so it can run
-// before them.
+// copySites lists every element instance with its validator instances, action
+// instance (not static data) and layouter copy of a page. It accepts pages that
+// fail validation, so it can run before them.
 func copySites(page map[string]any) []copySite {
 	var out []copySite
 	if pl, ok := page["page_layouter"].(map[string]any); ok {
@@ -35,6 +35,13 @@ func copySites(page map[string]any) []copySite {
 		for i, e := range list {
 			if m, ok := e.(map[string]any); ok {
 				out = append(out, copySite{KindElement, "element", m, fmt.Sprintf("%s/elem_list/%d", path, i)})
+				// The element's validator instances (OpenSpec wpi-primitive-validators, D3).
+				vals, _ := m["validators"].([]any)
+				for j, val := range vals {
+					if vm, ok := val.(map[string]any); ok {
+						out = append(out, copySite{KindValidator, "validator", vm, fmt.Sprintf("%s/elem_list/%d/validators/%d", path, i, j)})
+					}
+				}
 			}
 		}
 	}

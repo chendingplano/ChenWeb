@@ -5,6 +5,7 @@ import { textChoiceLabel } from '$lib/components/shared-ui/canvas/text-property-
 import { bindingModeLabel, elementPlacement, elementSize, fontWeights, weightText, weightValue } from './shared';
 import type { JsonObject } from '../types';
 import type { EditorDef, PropertyContext } from './types';
+import { validatorsGroup } from './validators';
 
 // What InputElement.svelte uses when neither the instance nor its class sets a value.
 export const inputDefaults: JsonObject = {
@@ -81,6 +82,7 @@ export const input: EditorDef = {
 				{ name: 'validation', label: m.wpi_input_attr_validation, editor: 'validation', options: (ctx) => ({ numberRules: ctx.get('input_type') === 'number' }) }
 			]
 		},
+		validatorsGroup,
 		elementSize(m.wpi_element_width_limits_hint)
 	]
 };

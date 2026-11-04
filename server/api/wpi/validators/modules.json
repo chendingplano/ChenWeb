@@ -1,0 +1,256 @@
+{
+  "_comment": "What each validator code module accepts (OpenSpec wpi-primitive-validators, design D4). Read by Go (validators.Modules) and TypeScript (web/src/lib/wpi/validators). Constraints are listed in the order their checks run; default is the code default (absent: not applied until set). error_codes give each code's params.",
+  "categories": ["primitive", "text", "network", "datetime", "collection", "identifier", "file", "geographic", "numeric", "security", "relational"],
+  "modules": {
+    "string": {
+      "category": "primitive",
+      "value_types": ["string"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail", "check"], "default": "check"},
+        {"name": "trim", "type": "choice", "choices": ["none", "both", "start", "end"], "default": "none"},
+        {"name": "normalization", "type": "choice", "choices": ["none", "nfc", "nfd", "nfkc", "nfkd"], "default": "none"},
+        {"name": "length_unit", "type": "choice", "choices": ["code_points", "utf16_units", "utf8_bytes"], "default": "code_points"},
+        {"name": "min_length", "type": "non_negative_integer"},
+        {"name": "max_length", "type": "non_negative_integer"},
+        {"name": "non_blank", "type": "boolean", "default": false},
+        {"name": "single_line", "type": "boolean", "default": false},
+        {"name": "pattern", "type": "pattern"},
+        {"name": "prefix", "type": "string"},
+        {"name": "suffix", "type": "string"},
+        {"name": "contains", "type": "string"}
+      ],
+      "error_codes": {
+        "string.type": [],
+        "string.empty": [],
+        "string.min_length": ["min_length", "length_unit", "actual"],
+        "string.max_length": ["max_length", "length_unit", "actual"],
+        "string.blank": [],
+        "string.line_break": [],
+        "string.pattern": ["pattern"],
+        "string.pattern_limit": ["limit"],
+        "string.prefix": ["prefix"],
+        "string.suffix": ["suffix"],
+        "string.contains": ["contains"]
+      }
+    },
+    "integer": {
+      "category": "primitive",
+      "value_types": ["number", "string"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail"], "default": "pass"},
+        {"name": "accept_strings", "type": "boolean", "default": true},
+        {"name": "minimum", "type": "integer"},
+        {"name": "maximum", "type": "integer"},
+        {"name": "exclusive_minimum", "type": "integer"},
+        {"name": "exclusive_maximum", "type": "integer"},
+        {"name": "sign", "type": "choice", "choices": ["any", "positive", "negative", "non_negative", "non_positive", "non_zero"], "default": "any"},
+        {"name": "multiple_of", "type": "positive_integer"},
+        {"name": "representation", "type": "choice", "choices": ["any", "int8", "int16", "int32", "uint8", "uint16", "uint32"], "default": "any"}
+      ],
+      "error_codes": {
+        "integer.type": [],
+        "integer.empty": [],
+        "integer.unsafe": [],
+        "integer.minimum": ["minimum"],
+        "integer.maximum": ["maximum"],
+        "integer.exclusive_minimum": ["exclusive_minimum"],
+        "integer.exclusive_maximum": ["exclusive_maximum"],
+        "integer.sign": ["sign"],
+        "integer.multiple_of": ["multiple_of"],
+        "integer.range": ["representation", "lowest", "highest"]
+      }
+    },
+    "number": {
+      "category": "primitive",
+      "value_types": ["number", "string"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail"], "default": "pass"},
+        {"name": "accept_strings", "type": "boolean", "default": true},
+        {"name": "allow_non_finite", "type": "boolean", "default": false},
+        {"name": "integer_only", "type": "boolean", "default": false},
+        {"name": "minimum", "type": "number"},
+        {"name": "maximum", "type": "number"},
+        {"name": "exclusive_minimum", "type": "number"},
+        {"name": "exclusive_maximum", "type": "number"},
+        {"name": "sign", "type": "choice", "choices": ["any", "positive", "negative", "non_negative", "non_positive", "non_zero"], "default": "any"},
+        {"name": "multiple_of", "type": "positive_number"}
+      ],
+      "error_codes": {
+        "number.type": [],
+        "number.empty": [],
+        "number.finite": [],
+        "number.integer": [],
+        "number.minimum": ["minimum"],
+        "number.maximum": ["maximum"],
+        "number.exclusive_minimum": ["exclusive_minimum"],
+        "number.exclusive_maximum": ["exclusive_maximum"],
+        "number.sign": ["sign"],
+        "number.multiple_of": ["multiple_of"]
+      }
+    },
+    "decimal": {
+      "category": "primitive",
+      "value_types": ["string", "number"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail"], "default": "pass"},
+        {"name": "accept_numbers", "type": "boolean", "default": true},
+        {"name": "scale", "type": "non_negative_integer"},
+        {"name": "rounding", "type": "choice", "choices": ["reject", "half_up", "half_even", "down", "up", "floor", "ceiling"], "default": "reject"},
+        {"name": "precision", "type": "positive_integer"},
+        {"name": "minimum", "type": "decimal"},
+        {"name": "maximum", "type": "decimal"},
+        {"name": "exclusive_minimum", "type": "decimal"},
+        {"name": "exclusive_maximum", "type": "decimal"},
+        {"name": "sign", "type": "choice", "choices": ["any", "positive", "negative", "non_negative", "non_positive", "non_zero"], "default": "any"},
+        {"name": "multiple_of", "type": "positive_decimal"}
+      ],
+      "error_codes": {
+        "decimal.type": [],
+        "decimal.empty": [],
+        "decimal.scale": ["scale", "actual"],
+        "decimal.precision": ["precision", "actual"],
+        "decimal.integer_digits": ["integer_digits", "actual"],
+        "decimal.minimum": ["minimum"],
+        "decimal.maximum": ["maximum"],
+        "decimal.exclusive_minimum": ["exclusive_minimum"],
+        "decimal.exclusive_maximum": ["exclusive_maximum"],
+        "decimal.sign": ["sign"],
+        "decimal.multiple_of": ["multiple_of"]
+      }
+    },
+    "boolean": {
+      "category": "primitive",
+      "value_types": ["boolean", "string", "number"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail", "check"], "default": "pass"},
+        {"name": "accept_strings", "type": "boolean", "default": false},
+        {"name": "accept_numbers", "type": "boolean", "default": false},
+        {"name": "must_be", "type": "choice", "choices": ["either", "true", "false"], "default": "either"}
+      ],
+      "error_codes": {
+        "boolean.type": [],
+        "boolean.empty": [],
+        "boolean.must_be": ["must_be"]
+      }
+    },
+    "enum": {
+      "category": "primitive",
+      "value_types": ["string", "number", "boolean", "null", "object", "array"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail", "check"], "default": "pass"},
+        {"name": "allowed_values", "type": "json_array"},
+        {"name": "excluded_values", "type": "json_array"},
+        {"name": "case_sensitive", "type": "boolean", "default": true},
+        {"name": "type_sensitive", "type": "boolean", "default": true}
+      ],
+      "error_codes": {
+        "enum.empty": [],
+        "enum.not_allowed": ["allowed_values"],
+        "enum.excluded": ["excluded_values"]
+      }
+    },
+    "null": {
+      "category": "primitive",
+      "value_types": ["string", "number", "boolean", "null", "object", "array"],
+      "empty_values": [],
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "mode", "type": "choice", "choices": ["must_be_null", "must_not_be_null"], "default": "must_be_null"},
+        {"name": "absent_is_null", "type": "boolean", "default": true},
+        {"name": "empty_string_is_null", "type": "boolean", "default": false}
+      ],
+      "error_codes": {
+        "null.must_be_null": [],
+        "null.must_not_be_null": []
+      }
+    },
+    "binary": {
+      "category": "primitive",
+      "value_types": ["string"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail"], "default": "pass"},
+        {"name": "encoding", "type": "choice", "choices": ["base64", "base64url", "hex"], "default": "base64"},
+        {"name": "ignore_whitespace", "type": "boolean", "default": false},
+        {"name": "padding", "type": "choice", "choices": ["optional", "required", "forbidden"], "default": "optional"},
+        {"name": "hex_case", "type": "choice", "choices": ["any", "lower", "upper"], "default": "any"},
+        {"name": "min_bytes", "type": "non_negative_integer"},
+        {"name": "max_bytes", "type": "non_negative_integer"}
+      ],
+      "error_codes": {
+        "binary.type": [],
+        "binary.empty": [],
+        "binary.encoding": ["encoding"],
+        "binary.padding": ["padding"],
+        "binary.case": ["hex_case"],
+        "binary.min_bytes": ["min_bytes", "actual"],
+        "binary.max_bytes": ["max_bytes", "actual"]
+      }
+    },
+    "bigint": {
+      "category": "primitive",
+      "value_types": ["string", "number"],
+      "empty_values": ["absent", "null", "empty_string"],
+      "empty_constraint": "empty",
+      "execution": "sync",
+      "runs_in": "browser_and_backend",
+      "constraints": [
+        {"name": "empty", "type": "choice", "choices": ["pass", "fail"], "default": "pass"},
+        {"name": "accept_numbers", "type": "boolean", "default": true},
+        {"name": "allow_leading_zeros", "type": "boolean", "default": true},
+        {"name": "min_digits", "type": "positive_integer"},
+        {"name": "max_digits", "type": "positive_integer"},
+        {"name": "minimum", "type": "bigint"},
+        {"name": "maximum", "type": "bigint"},
+        {"name": "exclusive_minimum", "type": "bigint"},
+        {"name": "exclusive_maximum", "type": "bigint"},
+        {"name": "sign", "type": "choice", "choices": ["any", "positive", "negative", "non_negative", "non_positive", "non_zero"], "default": "any"},
+        {"name": "multiple_of", "type": "positive_bigint"},
+        {"name": "representation", "type": "choice", "choices": ["unbounded", "int64", "uint64", "int128", "uint128"], "default": "unbounded"}
+      ],
+      "error_codes": {
+        "bigint.type": [],
+        "bigint.empty": [],
+        "bigint.unsafe_number": [],
+        "bigint.leading_zeros": [],
+        "bigint.min_digits": ["min_digits", "actual"],
+        "bigint.max_digits": ["max_digits", "actual"],
+        "bigint.minimum": ["minimum"],
+        "bigint.maximum": ["maximum"],
+        "bigint.exclusive_minimum": ["exclusive_minimum"],
+        "bigint.exclusive_maximum": ["exclusive_maximum"],
+        "bigint.sign": ["sign"],
+        "bigint.multiple_of": ["multiple_of"],
+        "bigint.range": ["representation", "lowest", "highest"]
+      }
+    }
+  }
+}

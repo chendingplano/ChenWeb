@@ -4,6 +4,8 @@
  import { getRuntime } from '../runtime.svelte';
  import { fieldErrorText, localized } from '../text';
  import { validateInput } from '../input-validation';
+ import { bindingPointer, runValidators, type ValidationError } from '../validators';
+ import { elementValidationTexts } from '../validators/messages';
  import type { Json } from '../types';
  import type { HTMLInputAttributes } from 'svelte/elements';
  import type { ElementProps } from './index';
@@ -17,6 +19,10 @@
  const serverErrors = $derived(rt.errorsFor(instanceId, d.data_binding));
  let touched = $state(false);
  let clientErrors = $state<string[]>([]);
+ // Validators run with the input's own rules (OpenSpec wpi-primitive-validators, D8).
+ let validatorErrors = $state<ValidationError[]>([]);
+ const serverValidatorErrors = $derived(rt.validationErrorsFor(instanceId, d.data_binding));
+ const validatorTexts = $derived(elementValidationTexts(validatorErrors, serverValidatorErrors, d.validators));
  let labelBox = $state<HTMLElement>();
  let truncated = $state(false);
  let labelOpen = $state(false);
@@ -25,10 +31,15 @@
  const placement = $derived(d.label_placement ?? 'left');
  const horizontal = $derived(placement === 'left' || placement === 'right');
  const allErrors = $derived([...new Set([...clientErrors, ...serverErrors])]);
+ const invalid = $derived(allErrors.length > 0 || validatorTexts.length > 0);
+ function runChecks(next: Json | undefined) {
+  validatorErrors = d.binding_mode === 'read-only' ? [] : runValidators(d.validators, next, bindingPointer(d.data_binding));
+ }
  function check(): boolean {
   touched = true;
   clientErrors = validateInput(value == null ? '' : String(value), d);
-  return clientErrors.length === 0;
+  runChecks(value);
+  return clientErrors.length === 0 && validatorErrors.length === 0;
  }
  $effect(() => rt.registerInput(instanceId, id, (focus) => {
   const valid = check();
@@ -48,7 +59,10 @@
   if (d.input_type === 'number') next = raw === '' || Number.isNaN(Number(raw)) ? (raw === '' ? null : raw) : Number(raw);
   if (d.data_binding) rt.write(instanceId, d.data_binding, next);
   else unboundValue = next;
-  if (touched) clientErrors = validateInput(raw, d);
+  if (touched) {
+   clientErrors = validateInput(raw, d);
+   runChecks(next);
+  }
  }
  function onInput(event: Event) {
   const el = event.currentTarget as HTMLInputElement;
@@ -69,10 +83,10 @@
   {/if}
  </div>
  <div class="control">
-  <Input {id} type={d.input_type ?? 'text'} value={value == null ? '' : String(value)} readonly={!editable} required={editable && d.required} placeholder={localized(d.placeholder) || undefined} autocomplete={d.autocomplete as HTMLInputAttributes['autocomplete']} aria-invalid={allErrors.length > 0} aria-describedby={[d.help_text ? `${id}-help` : '', allErrors.length ? `${id}-errors` : ''].filter(Boolean).join(' ') || undefined} oninput={onInput} onblur={check} oncompositionstart={() => composing = true} oncompositionend={(e) => { composing = false; onInput(e); }}/>
+  <Input {id} type={d.input_type ?? 'text'} value={value == null ? '' : String(value)} readonly={!editable} required={editable && d.required} placeholder={localized(d.placeholder) || undefined} autocomplete={d.autocomplete as HTMLInputAttributes['autocomplete']} aria-invalid={invalid} aria-describedby={[d.help_text ? `${id}-help` : '', invalid ? `${id}-errors` : ''].filter(Boolean).join(' ') || undefined} oninput={onInput} onblur={check} oncompositionstart={() => composing = true} oncompositionend={(e) => { composing = false; onInput(e); }}/>
   {#if d.help_text}<p id="{id}-help" class="help">{localized(d.help_text)}</p>{/if}
   {#if d.help_tip}<div class="tip"><button type="button" aria-label={m.wpi_input_help()} aria-expanded={helpOpen} onclick={() => helpOpen = !helpOpen} onkeydown={(e) => { if (e.key === 'Escape') helpOpen = false; }}>ⓘ</button>{#if helpOpen}<span>{localized(d.help_tip)}</span>{/if}</div>{/if}
-  {#if allErrors.length}<div id="{id}-errors" class="errors">{#each allErrors as code (code)}<p>{fieldErrorText(code)}</p>{/each}</div>{/if}
+  {#if invalid}<div id="{id}-errors" class="errors">{#each allErrors as code (code)}<p>{fieldErrorText(code)}</p>{/each}{#each validatorTexts as text (text)}<p>{text}</p>{/each}</div>{/if}
  </div>
 </div></div>
 

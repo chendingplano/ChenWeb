@@ -1,12 +1,15 @@
 // Client for the WPI endpoints (server/api/wpi).
 import type { ActionInstance, ActionRef, Bundle, Issue, Json, JsonObject, Text } from './types';
+import type { ValidationError, ValidatorClass } from './validators';
 
 export class WpiError extends Error {
 	constructor(
 		message: string,
 		readonly status: number,
 		readonly issues: Issue[] = [],
-		readonly fieldErrors: Record<string, string[]> | null = null
+		readonly fieldErrors: Record<string, string[]> | null = null,
+		// Validator failures by bound attribute path (OpenSpec wpi-primitive-validators, D7).
+		readonly validationErrors: Record<string, ValidationError[]> | null = null
 	) {
 		super(message);
 	}
@@ -46,7 +49,8 @@ export async function previewDraftPage(page: JsonObject): Promise<Bundle> {
 export type SaveResult = { key_attribute: string; key_value: Json };
 
 // Runs a load or save instance named by its place in a stored page. Throws
-// WpiError; a save rejected by its field rules carries fieldErrors.
+// WpiError; a save rejected by its field rules carries fieldErrors, and one
+// rejected by validators validationErrors.
 export async function runAction(
 	ref: ActionRef,
 	args: JsonObject = {},
@@ -64,7 +68,8 @@ export async function runAction(
 	const body = await parse(res);
 	if (!res.ok) {
 		const fieldErrors = (body.field_errors as Record<string, string[]> | undefined) ?? null;
-		throw new WpiError(String(body.error ?? res.statusText), res.status, [], fieldErrors);
+		const validationErrors = (body.validation_errors as Record<string, ValidationError[]> | undefined) ?? null;
+		throw new WpiError(String(body.error ?? res.statusText), res.status, [], fieldErrors, validationErrors);
 	}
 	return body as Record<string, Json>;
 }
@@ -105,6 +110,15 @@ export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise
 		throw new WpiError(String(body.error ?? res.statusText), res.status);
 	}
 	return (body.classes as ElementClassSummary[]) ?? [];
+}
+
+// The active validator classes, whole, for the palette's VALIDATORS folder and
+// the Properties panel (OpenSpec wpi-primitive-validators).
+export async function listValidatorClasses(fetchFn: typeof fetch = fetch): Promise<ValidatorClass[]> {
+	const res = await fetchFn('/api/v1/wpi/classes/validator', { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return (body.classes as ValidatorClass[]) ?? [];
 }
 
 export async function listTriggerActions(fetchFn: typeof fetch = fetch): Promise<string[]> {

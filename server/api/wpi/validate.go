@@ -112,10 +112,15 @@ var (
 	saveClass      = []string{"save"}
 )
 
-// elementCode returns the instance attributes an element code module defines.
+// elementCode returns the instance attributes an element code module defines:
+// its own, the sizes, and validators for the modules that take them
+// (validator_classes.go).
 func elementCode(module string) (codeAttrs, bool) {
 	a, ok := codeModules[module]
 	a.optional = append(slices.Clone(a.optional), elementSizeAttrs...)
+	if acceptsValidators(module) {
+		a.optional = append(a.optional, "validators")
+	}
 	return a, ok
 }
 
@@ -171,6 +176,8 @@ func newValidatorMode(kind Kind, id string, body map[string]any, allowIncomplete
 		v.classRow(body)
 	case KindPageLayouter, KindElementLayouter:
 		v.layouterClass(body)
+	case KindValidator:
+		v.validatorClass(body)
 	default:
 		v.errf("", "unknown descriptor kind %q", kind)
 	}
@@ -949,6 +956,9 @@ func (v *validator) element(module string, all map[string]any, path string) {
 			v.size(e, k, path)
 		}
 	}
+	if val, ok := e["validators"]; ok {
+		v.validatorList(val, path+"/validators")
+	}
 	switch module {
 	case "text":
 		v.textAttributes(e, path)
@@ -1527,7 +1537,8 @@ func mergeInstance(kind Kind, row, own map[string]any) map[string]any {
 // holds and returns the merged instance. Every attribute whose default in the
 // copy is null must be set by the instance. An element instance may set only
 // the attributes its copy names, plus the size attributes every element has,
-// and none that its copy fixes (devdoc 2026102601 §3.5.1).
+// and none that its copy fixes (devdoc 2026102601 §3.5.1). validators is like
+// the sizes for the modules that take it (OpenSpec wpi-primitive-validators, D3).
 func (v *validator) againstCopy(kind Kind, cls string, row, own map[string]any, path string) map[string]any {
 	if kind == KindElement {
 		for _, k := range slices.Sorted(maps.Keys(own)) {
@@ -1535,7 +1546,9 @@ func (v *validator) againstCopy(kind Kind, cls string, row, own map[string]any, 
 			switch {
 			case isFixed(row, k):
 				v.errf(path+"/"+k, "attribute %q is fixed by element class %q; an instance cannot set it", k, cls)
-			case !named && !slices.Contains(elementSizeAttrs, k):
+			case !named && k == "validators" && !acceptsValidators(str(row["code_module_id"])):
+				v.errf(path+"/"+k, "code module %q does not take validators; only %v elements do", str(row["code_module_id"]), validatorModules)
+			case !named && !slices.Contains(elementSizeAttrs, k) && k != "validators":
 				v.errf(path+"/"+k, "element class %q has no attribute %q", cls, k)
 			}
 		}

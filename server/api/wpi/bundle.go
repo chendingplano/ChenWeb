@@ -367,14 +367,15 @@ func tableErrors(ctx context.Context, columns Columns, actions []mergedAction) (
 
 // moduleRef is a code module a class copy in a page names, of a module type.
 type moduleRef struct {
-	kind   string // storedModule, storedPageLayouterModule or storedElementLayouterModule
+	kind   string // storedModule, storedPageLayouterModule, storedElementLayouterModule or storedValidatorModule
 	module string
 	page   string
 	path   string
 }
 
 // pageModules lists the code modules a valid page's class copies name: its page
-// layouter's, each panel's element layouter's and each element instance's.
+// layouter's, each panel's element layouter's, each element instance's and each
+// of its validator instances'.
 func pageModules(pageID string, page map[string]any, els []mergedElement) []moduleRef {
 	var out []moduleRef
 	add := func(kind string, holder map[string]any, path string) {
@@ -391,6 +392,12 @@ func pageModules(pageID string, page map[string]any, els []mergedElement) []modu
 	}
 	for _, e := range els {
 		out = append(out, moduleRef{storedModule, str(e.copy["code_module_id"]), pageID, e.path + "/" + copyKey + "/code_module_id"})
+		list, _ := e.body["validators"].([]any)
+		for i, item := range list {
+			m, _ := item.(map[string]any)
+			row, _ := m[copyKey].(map[string]any)
+			out = append(out, moduleRef{storedValidatorModule, str(row["code_module_id"]), pageID, fmt.Sprintf("%s/validators/%d/%s/code_module_id", e.path, i, copyKey)})
+		}
 	}
 	return out
 }

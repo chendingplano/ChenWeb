@@ -300,6 +300,7 @@ const (
 	storedModule                = "code_module"
 	storedPageLayouterModule    = "page_layouter_module"
 	storedElementLayouterModule = "element_layouter_module"
+	storedValidatorModule       = "validator_module"
 )
 
 // moduleTypes is the kb.code_modules.module_type each module kind checks.
@@ -307,6 +308,7 @@ var moduleTypes = map[string]string{
 	storedModule:                "element",
 	storedPageLayouterModule:    "page-layouter",
 	storedElementLayouterModule: "element-layouter",
+	storedValidatorModule:       "validator",
 }
 
 const activeModuleSQL = `SELECT code_module_id FROM kb.code_modules WHERE module_type = '%s' AND status = 'active' AND code_module_id = ANY($1)`
@@ -315,6 +317,7 @@ var storedSQL = map[string]struct{ exist, row string }{
 	storedModule:                {fmt.Sprintf(activeModuleSQL, "element"), ``},
 	storedPageLayouterModule:    {fmt.Sprintf(activeModuleSQL, "page-layouter"), ``},
 	storedElementLayouterModule: {fmt.Sprintf(activeModuleSQL, "element-layouter"), ``},
+	storedValidatorModule:       {fmt.Sprintf(activeModuleSQL, "validator"), ``},
 	storedStatement: {
 		`SELECT stmt_name FROM kb.stored_stmts WHERE stmt_name = ANY($1)`,
 		`SELECT sql_stmt, access_controls FROM kb.stored_stmts WHERE stmt_name = $1`,

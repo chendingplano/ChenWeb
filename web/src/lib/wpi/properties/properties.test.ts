@@ -26,7 +26,7 @@ test('input: groups in order and its input types', () => {
 	const input = elementEditor('input');
 	assert.deepEqual(
 		input.groups.map((g) => g.id),
-		['placement', 'general', 'caption_layout', 'caption_appearance', 'input_help', 'validation', 'size']
+		['placement', 'general', 'caption_layout', 'caption_appearance', 'input_help', 'validation', 'validators', 'size']
 	);
 	assert.deepEqual(options(prop(input, 'input_type'), ctx()).choices, ['text', 'password', 'email', 'number', 'tel', 'url', 'search']);
 });

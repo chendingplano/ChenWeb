@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -209,7 +210,7 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
 	switch Kind(kind) {
-	case KindElement, KindPageLayouter, KindElementLayouter:
+	case KindElement, KindPageLayouter, KindElementLayouter, KindValidator:
 		if refused, err := checkModule(c, st, Kind(kind), id, body, user); refused {
 			return err
 		}
@@ -327,6 +328,27 @@ func (h *Handler) ListPageLayouters(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"classes": bodies})
 }
 
+// ListValidatorClasses returns the latest active validator classes, whole, for
+// the editor's palette and Properties panel (OpenSpec wpi-primitive-validators).
+// Endpoint: GET /api/v1/wpi/classes/validator
+func (h *Handler) ListValidatorClasses(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	classes, err := (store{h.DB}).latest(c.Request().Context(), KindValidator, nil)
+	if err != nil {
+		handlerLog.Error("WPI validator class list failed", "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to list validator classes")
+	}
+	bodies := make([]map[string]any, 0, len(classes))
+	for _, id := range slices.Sorted(maps.Keys(classes)) {
+		bodies = append(bodies, classes[id].Body)
+	}
+	handlerLog.Info("WPI validator classes listed", "user", actorName(user), "found", len(bodies))
+	return c.JSON(http.StatusOK, map[string]any{"classes": bodies})
+}
+
 // ListTriggerActions returns active action classes supported by click triggers.
 // The Class tab requests scope=all to choose any stored active action class.
 func (h *Handler) ListTriggerActions(c echo.Context) error {
@@ -441,7 +463,7 @@ func (h *Handler) UpdateElementClass(c echo.Context) error {
 // wpi-code-modules, design D9; wpi-pages-own-panes, design D6). When refused is
 // true, the response has been written and err is its error.
 func checkModule(c echo.Context, st store, kind Kind, id string, body map[string]any, user *ApiTypes.UserInfo) (refused bool, err error) {
-	moduleKind := map[Kind]string{KindElement: storedModule, KindPageLayouter: storedPageLayouterModule, KindElementLayouter: storedElementLayouterModule}[kind]
+	moduleKind := map[Kind]string{KindElement: storedModule, KindPageLayouter: storedPageLayouterModule, KindElementLayouter: storedElementLayouterModule, KindValidator: storedValidatorModule}[kind]
 	issues, err := moduleErrors(c.Request().Context(), st.registered, []moduleRef{{moduleKind, str(body["code_module_id"]), id, "/code_module_id"}})
 	for i := range issues {
 		issues[i].Kind = kind

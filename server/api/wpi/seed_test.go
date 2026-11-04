@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"slices"
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/wpi/validators"
 )
 
 // The classes and the demo descriptors live only in seed migrations. These tests
@@ -288,5 +290,62 @@ func TestSeedDemoAppsAreValid(t *testing.T) {
 				t.Fatalf("app reaches pages %v; want %v", got, want)
 			}
 		})
+	}
+}
+
+// validatorsMigration registers the validator modules and stores the nine
+// primitive validator classes (OpenSpec wpi-primitive-validators).
+const validatorsMigration = "../../../project_migrations/20261104000002_wpi_primitive_validators.sql"
+
+var (
+	validatorSeedRow       = regexp.MustCompile(`(?s)\('([a-z0-9-]+)', \$wpi\$(.*?)\$wpi\$::jsonb\)`)
+	validatorModuleSeedRow = regexp.MustCompile(`\('([a-z0-9-]+)', '[^']+',\s*'[^']*',\s*'validator', 'validator-primitive.md'`)
+)
+
+// Every validator code module has its kb.code_modules row and one active class
+// that validates and states every constraint and error code of its code, with
+// help tips and a description in both languages.
+func TestSeedValidatorClasses(t *testing.T) {
+	text := readFile(t, validatorsMigration)
+	modules := map[string]bool{}
+	for _, m := range validatorModuleSeedRow.FindAllStringSubmatch(text, -1) {
+		modules[m[1]] = true
+	}
+	rows := validatorSeedRow.FindAllStringSubmatch(text, -1)
+	if len(rows) != len(validators.Modules) || len(modules) != len(validators.Modules) {
+		t.Fatalf("%d classes and %d modules seeded; %d validator modules have code", len(rows), len(modules), len(validators.Modules))
+	}
+	for _, m := range rows {
+		id, body := m[1], decode(t, m[2])
+		spec, ok := validators.Modules[id]
+		if !ok || !modules[id] {
+			t.Fatalf("validator %q: no code or no module row", id)
+		}
+		if issues := ValidateDescriptor(KindValidator, id, body); len(issues) > 0 {
+			t.Fatalf("validator %q: %+v", id, issues)
+		}
+		for _, k := range []string{"value_types", "empty_values", "execution", "runs_in", "error_codes"} {
+			if _, ok := body[k]; !ok {
+				t.Fatalf("validator %q does not state %s", id, k)
+			}
+		}
+		desc, _ := body["description"].(map[string]any)
+		if desc["en"] == nil || desc["zh-cn"] == nil {
+			t.Fatalf("validator %q description: %v", id, body["description"])
+		}
+		defs := body["constraints"].(map[string]any)
+		for _, c := range spec.Constraints {
+			def, ok := defs[c.Name].(map[string]any)
+			if !ok {
+				t.Fatalf("validator %q does not list constraint %q", id, c.Name)
+			}
+			tip, _ := def["help_tip"].(map[string]any)
+			if tip["en"] == nil || tip["zh-cn"] == nil || def["type"] != c.Type {
+				t.Fatalf("validator %q constraint %q: %v", id, c.Name, def)
+			}
+		}
+		if codes := body["error_codes"].(map[string]any); len(codes) != len(spec.ErrorCodes) {
+			t.Fatalf("validator %q states %d of %d error codes", id, len(codes), len(spec.ErrorCodes))
+		}
 	}
 }

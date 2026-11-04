@@ -10,6 +10,8 @@ export interface NodeType {
   id: string;           // e.g. "ai-assistant"
   label: string;
   category: string;     // "AI" | "Data" | "Actions"
+  subcategory?: string; // a sub-folder of the category in the palette, e.g. a validator category
+  title?: string;       // the palette tooltip, when not "drag onto the canvas"
   icon: string;         // lucide icon name
   inputs: string[];     // connector labels
   outputs: string[];

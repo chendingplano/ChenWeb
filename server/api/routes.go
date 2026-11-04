@@ -456,6 +456,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/wpi/pages/:pageId", wpiHandler.GetPage)
 	apiGroup.GET("/wpi/classes/page-layouter", wpiHandler.ListPageLayouters)
 	apiGroup.GET("/wpi/classes/action", wpiHandler.ListTriggerActions)
+	apiGroup.GET("/wpi/classes/validator", wpiHandler.ListValidatorClasses)
 	apiGroup.GET("/wpi/classes/element", wpiHandler.ListElementClasses)
 	apiGroup.POST("/wpi/classes/element", wpiHandler.CreateElementClass)
 	apiGroup.GET("/wpi/classes/element/:classId", wpiHandler.GetElementClass)

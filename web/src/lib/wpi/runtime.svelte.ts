@@ -12,6 +12,7 @@ import { effectiveRoot, leafPanes } from './layout';
 import { findCached, forget, paneInstanceId, paneOwner, sharingKey, show, type PaneModel } from './panel-cache';
 import { getPath, parseRef, resolveArgs, setPath } from './refs';
 import type { ActionInstance, ActionRef, Bundle, Input, InputSpec, Json, JsonObject } from './types';
+import type { ValidationError } from './validators';
 
 // One open copy of a page. hostPane is the pane instance it was opened in, or
 // null for the page in the app's page area.
@@ -31,6 +32,8 @@ export type PageInstance = {
 	loading: boolean;
 	error: string | null;
 	fieldErrors: Record<string, string[]>;
+	// The server's validator failures from the last save, by bound attribute path.
+	validationErrors: Record<string, ValidationError[]>;
 	// Incremented each time the instance goes from hidden to shown.
 	shown: number;
 };
@@ -107,6 +110,7 @@ export class AppRuntime {
 			loading: false,
 			error: null,
 			fieldErrors: {},
+			validationErrors: {},
 			shown: 0
 		};
 		if (input.ref) void this.#loadInput(id);
@@ -259,9 +263,15 @@ export class AppRuntime {
 			setPath(inst.doc, [String(res.key_attribute)], res.key_value);
 			inst.snapshot = sentSnapshot === canonical(inst.doc) ? canonical(inst.doc) : canonical(sent);
 			inst.fieldErrors = {};
+			inst.validationErrors = {};
 			return true;
 		} catch (err) {
-			if (err instanceof WpiError && err.fieldErrors) { if (canonical(inst.doc) === sentSnapshot) inst.fieldErrors = err.fieldErrors; }
+			if (err instanceof WpiError && (err.fieldErrors || err.validationErrors)) {
+				if (canonical(inst.doc) === sentSnapshot) {
+					inst.fieldErrors = err.fieldErrors ?? {};
+					inst.validationErrors = err.validationErrors ?? {};
+				}
+			}
 			else inst.error = message(err);
 			return false;
 		}
@@ -336,10 +346,17 @@ export class AppRuntime {
 		setPath(inst.doc, path, value);
 		const attr = path.join('.');
 		if (inst.fieldErrors[attr]) delete inst.fieldErrors[attr];
+		if (inst.validationErrors[attr]) delete inst.validationErrors[attr];
 	}
 
 	errorsFor(instanceId: string, binding: string | undefined): string[] {
 		const path = bindingPath(binding);
 		return (path && this.pages[instanceId]?.fieldErrors[path.join('.')]) || [];
+	}
+
+	// The server's validator failures for a binding from the last save.
+	validationErrorsFor(instanceId: string, binding: string | undefined): ValidationError[] {
+		const path = bindingPath(binding);
+		return (path && this.pages[instanceId]?.validationErrors[path.join('.')]) || [];
 	}
 }

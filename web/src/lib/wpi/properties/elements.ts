@@ -5,6 +5,7 @@ import { m } from '$lib/paraglide/messages.js';
 import type { Json } from '../types';
 import { bindingModeLabel, elementPlacement, elementSize } from './shared';
 import type { EditorDef, PropertyDef } from './types';
+import { validatorsGroup } from './validators';
 
 export function actionLabel(id: string): string {
 	switch (id) {
@@ -55,6 +56,7 @@ export const select: EditorDef = {
 				{ name: 'options', label: m.wpi_prop_attr_options, editor: 'json', options: { rows: 3 } }
 			]
 		},
+		validatorsGroup,
 		elementSize()
 	]
 };
@@ -122,6 +124,7 @@ export const valueEditor: EditorDef = {
 				{ name: 'editor_options', label: m.wpi_value_editor_attr_options, editor: 'json', options: { rows: 3 } }
 			]
 		},
+		validatorsGroup,
 		elementSize()
 	]
 };

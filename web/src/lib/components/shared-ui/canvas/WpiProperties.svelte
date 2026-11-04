@@ -14,6 +14,8 @@
 	import { elementEditor, moduleFallbacks, page as pageDef, pane as paneDef, panel as panelDef } from '$lib/wpi/properties';
 	import { withClassEditors, elementClassDefinitions } from '$lib/wpi/properties/class-definition';
 	import { elementSource, pageSource, paneIsLeaf, panelSource, paneSource } from '$lib/wpi/properties/sources';
+	import { withValidatorGroups, withValidatorSource } from '$lib/wpi/properties/validators';
+	import type { ValidatorClass } from '$lib/wpi/validators';
 	import PropertyEditor from '../property-editor/PropertyEditor.svelte';
 	import PaneStructure from './PaneStructure.svelte';
 	import { renameProblem } from './pane-edit';
@@ -28,6 +30,7 @@
 		flowConfig,
 		triggerActions,
 		pageLayouters,
+		validatorClasses = [],
 		positions,
 		onPage,
 		onNode,
@@ -50,6 +53,8 @@
 		flowConfig?: FlowLayouterConfig;
 		triggerActions: string[];
 		pageLayouters: JsonObject[];
+		// Offered by an element's Validators group (OpenSpec wpi-primitive-validators).
+		validatorClasses?: ValidatorClass[];
 		positions: { element?: Point; pane?: Point };
 		onPage: (page: JsonObject) => void;
 		onNode: (nodeId: string, data: Record<string, unknown>) => void;
@@ -65,7 +70,7 @@
 	} = $props();
 
 	const layouterIds = $derived(pageLayouters.map((c) => String(c.descriptor_id)));
-	const common = $derived({ triggerActions, pageLayouters: layouterIds });
+	const common = $derived({ triggerActions, pageLayouters: layouterIds, validatorClasses });
 	const module = $derived(String(elementClass?.code_module_id ?? node?.data.element ?? ''));
 	const leaf = $derived(!!page && !!selectedPane && paneIsLeaf(page, selectedPane));
 	const panelClassDefinitions = $derived((page as unknown as PageDescriptor | null)?.panels?.[selectedPane ?? '']?.elem_layouter?.class?.attribute_definitions as JsonObject | undefined);
@@ -91,11 +96,12 @@
 				<p>{m.propertiespanel_element_class_unavailable({ id: String(node.data.element ?? '') })}</p>
 			</div>
 		{:else}
+			{@const source = withValidatorSource(elementSource(attrs, elementClass ?? null, moduleFallbacks(module), (next) => onNode(node.id, { ...node.data, attrs: next })))}
 			<div class="scroll">
 				<PropertyEditor
 					title={m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}
-					def={withClassEditors(elementEditor(module), elementClassDefinitions(elementClass))}
-					source={elementSource(attrs, elementClass ?? null, moduleFallbacks(module), (next) => onNode(node.id, { ...node.data, attrs: next }))}
+					def={withValidatorGroups(withClassEditors(elementEditor(module), elementClassDefinitions(elementClass)), source.get('validators'))}
+					{source}
 					context={{ ...common, pane: String(node.data.pane ?? ''), flowConfig, position: positions.element }}
 					idPrefix={`prop-${node.id}`}
 					{onEditStart}

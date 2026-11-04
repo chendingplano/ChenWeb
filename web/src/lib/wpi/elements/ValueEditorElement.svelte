@@ -14,6 +14,8 @@
 	import { fieldErrorText, localized } from '../text';
 	import { validTextAttribute } from '../text-attributes';
 	import type { Json } from '../types';
+	import { bindingPointer, runValidators, type ValidationError } from '../validators';
+	import { elementValidationTexts } from '../validators/messages';
 	import type { ElementProps } from './index';
 
 	let { instanceId, element }: ElementProps = $props();
@@ -71,9 +73,27 @@
 			? m.wpi_value_editor_font_invalid()
 			: null;
 	}
+	// Validators run after the editor applies a value and before a save
+	// (OpenSpec wpi-primitive-validators, D8).
+	let validatorErrors = $state<ValidationError[]>([]);
+	const validatorTexts = $derived(
+		elementValidationTexts(validatorErrors, rt.validationErrorsFor(instanceId, d.data_binding), d.validators)
+	);
+	function validate(next: Json | undefined): boolean {
+		validatorErrors = d.binding_mode === 'read-only' ? [] : runValidators(d.validators, next, bindingPointer(d.data_binding));
+		return validatorErrors.length === 0;
+	}
+	$effect(() =>
+		rt.registerInput(instanceId, id, (focus) => {
+			const valid = validate(value);
+			if (!valid && focus) document.getElementById(id)?.focus();
+			return valid;
+		})
+	);
 	function change(next: Json | undefined) {
 		if (d.data_binding) rt.write(instanceId, d.data_binding, next ?? null);
 		else unbound = next;
+		validate(d.data_binding ? (next ?? null) : next);
 	}
 </script>
 
@@ -93,6 +113,7 @@
 		<View {id} label={localized(d.label)} {value} {options} {check} onChange={change} />
 		{#if loadFailed}<p class="error">{m.wpi_value_editor_choices_failed()}</p>{/if}
 		{#each errors as code (code)}<p class="error">{fieldErrorText(code)}</p>{/each}
+		{#each validatorTexts as text (text)}<p class="error">{text}</p>{/each}
 	</div>
 {:else}
 	<ErrorBox

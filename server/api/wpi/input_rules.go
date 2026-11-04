@@ -3,12 +3,16 @@ package wpi
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/chendingplano/deepdoc/server/api/wpi/validators"
 )
 
 func number(v any) (float64, bool) {
@@ -96,10 +100,45 @@ func checkInputValue(value any, d map[string]any) []string {
 }
 
 func checkPageInputs(page map[string]any, doc map[string]any) fieldErrors {
+	fields, _ := checkInputs(page, doc)
+	return fields
+}
+
+// validationErrors are validator failures by bound attribute path, such as
+// "address.city" (OpenSpec wpi-primitive-validators, design D7).
+type validationErrors map[string][]validators.Error
+
+// inputErrors are the failures of a page's input rules and validators; a save
+// with any is refused with 422.
+type inputErrors struct {
+	fields     fieldErrors
+	validation validationErrors
+}
+
+func (e inputErrors) Error() string { return "input checks failed" }
+
+// codes lists the validator error codes, for the log (§2.6.8).
+func (e inputErrors) codes() []string {
+	var out []string
+	for _, key := range slices.Sorted(maps.Keys(e.validation)) {
+		for _, v := range e.validation[key] {
+			out = append(out, key+":"+v.Code)
+		}
+	}
+	return out
+}
+
+// checkInputs checks the input doc against the page's elements bound to it:
+// each input's own rules, and the validators of every input, select and
+// value-editor element that is not read-only (design D8), which run here
+// again whatever the browser checked.
+func checkInputs(page map[string]any, doc map[string]any) (fieldErrors, validationErrors) {
 	_, elements, _ := validatePage(str(page["descriptor_id"]), page)
-	errs := fieldErrors{}
+	errs, vals := fieldErrors{}, validationErrors{}
 	for _, el := range elements {
-		if str(el.copy["code_module_id"]) != "input" {
+		module := str(el.copy["code_module_id"])
+		list, _ := el.body["validators"].([]any)
+		if module != "input" && (!acceptsValidators(module) || len(list) == 0) {
 			continue
 		}
 		ref := str(el.body["data_binding"])
@@ -108,18 +147,30 @@ func checkPageInputs(page map[string]any, doc map[string]any) fieldErrors {
 		}
 		parts := strings.Split(strings.TrimPrefix(ref, "$input_doc."), ".")
 		var value any = doc
+		present := true
 		for _, p := range parts {
 			m, ok := value.(map[string]any)
 			if !ok {
-				value = nil
+				value, present = nil, false
 				break
 			}
-			value = m[p]
+			value, present = m[p]
 		}
-		if codes := checkInputValue(value, el.body); len(codes) > 0 {
-			key := strings.Join(parts, ".")
-			errs[key] = append(errs[key], codes...)
+		key := strings.Join(parts, ".")
+		if module == "input" {
+			if codes := checkInputValue(value, el.body); len(codes) > 0 {
+				errs[key] = append(errs[key], codes...)
+			}
+		}
+		if len(list) > 0 && el.body["binding_mode"] != "read-only" {
+			checked := value
+			if !present {
+				checked = validators.Absent
+			}
+			if found := runValidators(list, checked, validatorPointer(parts)); len(found) > 0 {
+				vals[key] = append(vals[key], found...)
+			}
 		}
 	}
-	return errs
+	return errs, vals
 }

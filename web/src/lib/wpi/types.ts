@@ -5,6 +5,7 @@
 // types describe what the interpreter receives in a validated bundle. A stored
 // page holds a copy of each class it uses in "class"; a page being edited may
 // not have them yet, so "class" is optional here.
+import type { ValidatorInstance } from './validators';
 
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type JsonObject = { [key: string]: Json };
@@ -94,6 +95,8 @@ export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
 	required?: boolean;
 	max_length?: number;
 	validation?: { min_length?: number; pattern?: string; min?: number; max?: number; step?: number };
+	// input, select and value-editor: validator instances, all of which must pass.
+	validators?: ValidatorInstance[];
 	autocomplete?: string;
 	label_placement?: 'left' | 'right' | 'top' | 'bottom';
 	label_horizontal_gap?: string;

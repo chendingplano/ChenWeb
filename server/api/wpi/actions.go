@@ -77,8 +77,8 @@ func (h *Handler) RunAction(c echo.Context) error {
 	var rows int
 	var result any
 	if err == nil && act.Class == "save" {
-		if errs := checkPageInputs(page, req.InputDoc); len(errs) > 0 {
-			err = errs
+		if fields, vals := checkInputs(page, req.InputDoc); len(fields) > 0 || len(vals) > 0 {
+			err = inputErrors{fields, vals}
 		}
 	}
 	if err == nil {
@@ -88,7 +88,11 @@ func (h *Handler) RunAction(c echo.Context) error {
 		"mode", act.Mode + act.Result, "rows", rows, "duration_ms", time.Since(start).Milliseconds()}
 	var reqErr *requestError
 	var fieldErrs fieldErrors
+	var inErrs inputErrors
 	switch {
+	case errors.As(err, &inErrs):
+		handlerLog.Info("WPI save rejected by input rules or validators", append(logArgs, "field_errors", len(inErrs.fields), "validation_errors", inErrs.codes())...)
+		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"field_errors": inErrs.fields, "validation_errors": inErrs.validation})
 	case errors.As(err, &fieldErrs):
 		handlerLog.Info("WPI save rejected by field rules", append(logArgs, "field_errors", len(fieldErrs))...)
 		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"field_errors": fieldErrs})

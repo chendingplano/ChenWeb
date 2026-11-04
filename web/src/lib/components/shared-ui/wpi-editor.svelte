@@ -19,7 +19,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -29,7 +29,10 @@
 	import PropertiesPanel from './canvas/PropertiesPanel.svelte';
 	import WpiClassPanel from './canvas/WpiClassPanel.svelte';
 	import { classTarget } from './canvas/class-editor';
-	import { ELEMENT_CLASS_PREFIX, elementPaletteTypes } from './canvas/element-palette';
+	import { ELEMENT_CLASS_PREFIX, VALIDATOR_CLASS_PREFIX, elementPaletteTypes, validatorPaletteTypes } from './canvas/element-palette';
+	import { addValidator, elementModule } from './canvas/validator-drop';
+	import { acceptsValidators, type ValidatorClass } from '$lib/wpi/validators';
+	import { validatorCategoryLabel } from '$lib/wpi/validators/messages';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
@@ -140,7 +143,7 @@
 	let showPicker = $state(false);
 	let nodeTypes = $state<NodeType[]>([]);
 	// Palette folders for WPI building blocks, after the server's node-type folders.
-	const WPI_PALETTE_CATEGORIES = ['Pages', 'Elements', 'Value editors'];
+	const WPI_PALETTE_CATEGORIES = ['Pages', 'Elements', 'Value editors', 'Validators'];
 	// Node types the tool bar creates. They are not in the server's palette list.
 	const WPI_NODE_TYPES = $derived<Record<WpiNodeKind, NodeType>>({
 		page: { id: 'wpi-page', label: m.wpi_editor_page(), category: 'Pages', icon: 'file', inputs: ['in'], outputs: ['out'], defaultData: {} },
@@ -154,6 +157,10 @@
 	const elementClassTypes = $derived<NodeType[]>(
 		elementPaletteTypes(elementClasses, (id) => m.wpi_editor_draft_class({ id }))
 	);
+	// Validator classes, listed in the palette's VALIDATORS folder by category and
+	// offered by the Properties panel (OpenSpec wpi-primitive-validators, D9).
+	let validatorClasses = $state<ValidatorClass[]>([]);
+	const validatorClassTypes = $derived<NodeType[]>(validatorPaletteTypes(validatorClasses, m.nodepalette_drop_onto_element()));
 	let showCreateElement = $state(false);
 	let propertiesTab = $state<'properties' | 'class'>('properties');
 	let classPanel = $state<{ viewClassJson: () => boolean }>();
@@ -731,6 +738,10 @@
 		const raw = event.dataTransfer?.getData('application/xyflow-node-type');
 		if (!raw) return;
 		const nodeType: NodeType = JSON.parse(raw);
+		if (nodeType.id.startsWith(VALIDATOR_CLASS_PREFIX)) {
+			dropValidator(event, nodeType.id.slice(VALIDATOR_CLASS_PREFIX.length));
+			return;
+		}
 		const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
 
 		// The node's top-left corner goes where it was dropped: screen → flow coordinates.
@@ -762,6 +773,27 @@
 		];
 		selectedNodeId = id;
 		checkLimits();
+	}
+
+	// A validator goes onto the element under the pointer, if that element takes
+	// validators; the element becomes the selection (OpenSpec wpi-primitive-validators, D9).
+	function dropValidator(event: DragEvent, classId: string) {
+		const cls = validatorClasses.find((c) => c.descriptor_id === classId);
+		const target = (document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-editor-element]') as HTMLElement | null)?.dataset.editorElement;
+		const node = nodes.find((n) => n.id === target && isElementNode(n));
+		if (!cls || !node) {
+			showError(m.wpi_vld_drop_not_element());
+			return;
+		}
+		if (!acceptsValidators(elementModule(node, elementClasses))) {
+			showError(m.wpi_vld_drop_wrong_element({ element: String(node.data.element ?? '') }));
+			return;
+		}
+		takeSnapshot();
+		nodes = addValidator(nodes, node.id, cls);
+		configMode = null;
+		selectedNodeId = node.id;
+		propertiesTab = 'properties';
 	}
 
 	function checkLimits() {
@@ -975,6 +1007,7 @@
 		recoveryTimer = setInterval(autoSavePages, 1000);
 		restorePanel();
 		loadElementClasses();
+		listValidatorClasses().then((classes) => (validatorClasses = classes)).catch((error) => showError(m.wpi_vld_classes_failed({ detail: error instanceof Error ? error.message : String(error) })));
 		listTriggerActions().then((actions) => triggerActions = actions).catch(() => showError(m.propertiespanel_actions_failed()));
 		listActionClasses().then((actions) => actionClasses = actions).catch(() => showError(m.propertiespanel_actions_failed()));
 		listPageLayouters().then((classes) => pageLayouters = classes).catch(() => showError(m.wpi_page_layouters_failed()));
@@ -1018,8 +1051,9 @@
 	<div bind:this={body} class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
 		{#if !previewBundle}<NodePalette
-			nodeTypes={[...nodeTypes, ...elementClassTypes]}
+			nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]}
 			extraCategories={WPI_PALETTE_CATEGORIES}
+			subcategoryLabel={validatorCategoryLabel}
 			{darkMode}
 			onDragStart={onPaletteDragStart}
 		/>{/if}
@@ -1296,7 +1330,7 @@
 		/>
 		{:else}
 		<WpiProperties page={loadedPage} mode={configMode} {selectedPane} node={selectedNode}
-			elementClass={selectedElementClass} flowConfig={selectedFlowConfig} {triggerActions} {pageLayouters}
+			elementClass={selectedElementClass} flowConfig={selectedFlowConfig} {triggerActions} {pageLayouters} {validatorClasses}
 			positions={selectionGeometry}
 			onPage={(page) => { recordEdit(); loadedPage = page; }}
 			onNode={updateNodeData}

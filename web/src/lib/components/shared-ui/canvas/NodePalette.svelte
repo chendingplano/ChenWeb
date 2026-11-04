@@ -8,12 +8,16 @@
     nodeTypes       = [],
     extraCategories = [],
     darkMode        = true,
+    subcategoryLabel = (sub: string) => sub.toUpperCase(),
     onDragStart,
   }: {
     nodeTypes:        NodeType[];
     // Folders shown after the node-type categories, even while no node type belongs to them.
     extraCategories?: string[];
     darkMode?:        boolean;
+    // The label of a sub-folder: node types with a subcategory are listed in one
+    // inside their category's folder (OpenSpec wpi-primitive-validators, D9).
+    subcategoryLabel?: (sub: string) => string;
     onDragStart:      (event: DragEvent, nodeType: NodeType) => void;
   } = $props();
 
@@ -35,6 +39,11 @@
     );
   }
 
+  // A folder's sub-folders, in the order their first node types come.
+  function subcategories(items: NodeType[]) {
+    return [...new Set(items.map(n => n.subcategory).filter((s): s is string => !!s))];
+  }
+
   function categoryLabel(cat: string) {
     switch (cat) {
       case 'AI':       return m.nodepalette_category_ai();
@@ -43,10 +52,25 @@
       case 'Pages':    return m.nodepalette_category_pages();
       case 'Elements': return m.nodepalette_category_elements();
       case 'Value editors': return m.nodepalette_category_value_editors();
+      case 'Validators': return m.nodepalette_category_validators();
       default:         return cat.toUpperCase();
     }
   }
 </script>
+
+{#snippet entry(nodeType: NodeType)}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    draggable="true"
+    ondragstart={(e) => onDragStart(e, nodeType)}
+    class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-(--cv-hover) transition-colors select-none"
+    style="background:var(--cv-surface); border:1px solid transparent; font-size:10px; color:var(--cv-text);"
+    title={nodeType.title ?? m.nodepalette_drag_onto_canvas()}
+  >
+    <span style="font-size:14px; flex-shrink:0;">{getIcon(nodeType.icon)}</span>
+    {nodeType.label}
+  </div>
+{/snippet}
 
 <aside
   class="flex flex-col h-full overflow-hidden shrink-0"
@@ -81,18 +105,27 @@
           {#if items.length === 0}
             <div style="font-size:9px; color:var(--cv-text-faint); font-style:italic; padding:2px 8px 4px 14px;">{m.nodepalette_no_nodes_yet()}</div>
           {/if}
-          {#each items as nodeType (nodeType.id)}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              draggable="true"
-              ondragstart={(e) => onDragStart(e, nodeType)}
-              class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-(--cv-hover) transition-colors select-none"
-              style="background:var(--cv-surface); border:1px solid transparent; font-size:10px; color:var(--cv-text);"
-              title={m.nodepalette_drag_onto_canvas()}
+          {#each items.filter(n => !n.subcategory) as nodeType (nodeType.id)}{@render entry(nodeType)}{/each}
+          {#each subcategories(items) as sub (sub)}
+            {@const key = `${cat}/${sub}`}
+            {@const subItems = items.filter(n => n.subcategory === sub)}
+            {@const subOpen = searching || !!expanded[key]}
+            <button
+              type="button"
+              onclick={() => (expanded[key] = !expanded[key])}
+              aria-expanded={subOpen}
+              class="flex items-center gap-1 w-full text-left text-(--cv-text-faint) hover:text-(--cv-text-2) transition-colors"
+              style="font-size:8px; letter-spacing:1px; margin:4px 0 4px 0; padding:0 4px 0 10px; background:none; border:none; cursor:pointer;"
             >
-              <span style="font-size:14px; flex-shrink:0;">{getIcon(nodeType.icon)}</span>
-              {nodeType.label}
-            </div>
+              <ChevronRightIcon size={10} class="shrink-0 transition-transform {subOpen ? 'rotate-90' : ''}" />
+              <span class="flex-1">{subcategoryLabel(sub)}</span>
+              <span>{subItems.length}</span>
+            </button>
+            {#if subOpen}
+              <div style="padding-left:10px;">
+                {#each subItems as nodeType (nodeType.id)}{@render entry(nodeType)}{/each}
+              </div>
+            {/if}
           {/each}
         {/if}
       {/if}
@@ -105,7 +138,7 @@
   const ICON_MAP: Record<string, string> = {
     Bot: '🤖', Terminal: '💻', Type: '📝', FileText: '📄',
     File: '📁', Image: '🎬', Wrench: '🔧', Plug: '🔌',
-    Globe: '📡', Filter: '📋', GitBranch: '🗂',
+    Globe: '📡', Filter: '📋', GitBranch: '🗂', ShieldCheck: '🛡',
   };
   export function getIcon(name: string) { return ICON_MAP[name] ?? '⬡'; }
 </script>

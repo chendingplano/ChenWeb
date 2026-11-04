@@ -2,6 +2,7 @@
 // it edits one value, calls onChange only with values that are valid, and
 // onChange(undefined) unsets the value.
 import type { Json } from '$lib/wpi/types';
+import type { ValidatorClass } from '$lib/wpi/validators';
 
 export type ValueEditorOptions = {
 	// value-picker and ordered-multi-picker: the values offered, with their labels.
@@ -39,6 +40,8 @@ export type ValueEditorOptions = {
 	numberRules?: boolean;
 	// field-picker: the table whose fields are offered, as database.schema.table.
 	table?: string;
+	// validator-list: the validator classes an author may add.
+	validatorClasses?: ValidatorClass[];
 };
 
 export type ValueEditorProps = {

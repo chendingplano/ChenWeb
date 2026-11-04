@@ -14,12 +14,15 @@ import "encoding/json"
 // Element class rows are written in ElementSchemaVersion, where each instance
 // attribute is an object with a help tip, a default and whether instances may
 // change it, and the class names its code module in code_module_id. Action class
-// rows are written in ActionSchemaVersion. These are the only formats this
+// rows are written in ActionSchemaVersion, and validator class rows, which hold
+// their constraints in a constraints object, in ValidatorSchemaVersion (OpenSpec
+// wpi-primitive-validators, design D2). These are the only formats this
 // interpreter accepts.
 const (
-	SchemaVersion        = "0.5"
-	ElementSchemaVersion = "0.4"
-	ActionSchemaVersion  = "0.2"
+	SchemaVersion          = "0.5"
+	ElementSchemaVersion   = "0.4"
+	ActionSchemaVersion    = "0.2"
+	ValidatorSchemaVersion = "0.1"
 )
 
 // schemaVersionOf returns the descriptor format of a kind.
@@ -29,6 +32,8 @@ func schemaVersionOf(kind Kind) string {
 		return ElementSchemaVersion
 	case KindAction:
 		return ActionSchemaVersion
+	case KindValidator:
+		return ValidatorSchemaVersion
 	}
 	return SchemaVersion
 }
@@ -44,11 +49,12 @@ const (
 	KindAction          Kind = "action"
 	KindPageLayouter    Kind = "page-layouter"
 	KindElementLayouter Kind = "element-layouter"
+	KindValidator       Kind = "validator"
 )
 
 func validKind(k string) bool {
 	switch Kind(k) {
-	case KindApp, KindPage, KindElement, KindAction, KindPageLayouter, KindElementLayouter:
+	case KindApp, KindPage, KindElement, KindAction, KindPageLayouter, KindElementLayouter, KindValidator:
 		return true
 	}
 	return false

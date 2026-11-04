@@ -4,7 +4,8 @@
  // element components (OpenSpec wpi-pages-own-panes, design D12): its pane tree,
  // and in each leaf pane its element nodes. Each element has a selection
  // overlay; each leaf pane is a drop target (data-editor-pane) and is selected
- // by its tag or a click on its empty area.
+ // by its tag or a click on its empty area. Each element is the drop target of
+ // validators (data-editor-element, OpenSpec wpi-primitive-validators).
  import { onMount, tick, untrack } from 'svelte';
  import CopyIcon from '@lucide/svelte/icons/copy';
  import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -378,7 +379,7 @@
    <div style={placeStyle(pane)} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>
     <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}; {surfaceColorStyle(panel ?? {}, !!colors.background_color)}" data-flow-layout use:flowGeometry={{ config, count: items.length, sizeToRows: !items.some((it) => !('error' in it.entry) && (it.entry.desc.width === 'elastic' || (typeof it.entry.desc.width === 'string' && it.entry.desc.width.endsWith('%')))) }}>
      {#each items as item (item.node.id)}
-      <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measureElement={item.node.id} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config, elementMinimum(item.entry.module, item.entry.desc.editor))} data-flow-item>
+      <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measureElement={item.node.id} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config, elementMinimum(item.entry.module, item.entry.desc.editor))} data-flow-item data-editor-element={item.node.id}>
        {#if 'error' in item.entry}
         <ErrorBox title={m.wpi_error_title({ descriptor: page.descriptor_id })} message={item.entry.error} />
        {:else if rt.root}
