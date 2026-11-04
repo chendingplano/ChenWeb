@@ -41,7 +41,12 @@
  } = $props();
  const actions = getNodeActions();
  let previewElement: HTMLElement;
- let resizeNotice = $state<{ id: string; message: string; left: number; top: number } | null>(null);
+ let resizeNotice = $state<{ id: string; message: string; left: number; top: number; size: { width?: number; height?: number }; changes: ResizeLimitChange[] } | null>(null);
+ let resizeCancelButton = $state<HTMLButtonElement>();
+ $effect(() => {
+  if (resizeNotice && resizeNotice.id !== selectedId) resizeNotice = null;
+  else if (resizeNotice) tick().then(() => resizeCancelButton?.focus());
+ });
  let toolbarPosition = $state<{ left: number; top: number } | null>(null);
  function positionToolbar() {
   const target = previewElement?.querySelector<HTMLElement>('.overlay.selected');
@@ -148,19 +153,29 @@
    width: Math.max(minimum?.width ?? 0, ...limits.filter((limit) => limit.axis === 'width' && limit.kind === 'min').map((limit) => limit.pixels)),
    height: Math.max(minimum?.height ?? 0, ...limits.filter((limit) => limit.axis === 'height' && limit.kind === 'min').map((limit) => limit.pixels))
   };
-  let nextNotice: typeof resizeNotice = null;
-  if (belowElementMinimum(size, effectiveMinimum)) {
+  const needsConfirmation = belowElementMinimum(size, effectiveMinimum);
+  if (needsConfirmation) {
    const rect = host.getBoundingClientRect(), root = previewElement.getBoundingClientRect(), scale = zoom || 1;
-   nextNotice = { id, message: m.wpi_resize_content_minimum({ width: String(Math.ceil(effectiveMinimum.width)), height: String(Math.ceil(effectiveMinimum.height)) }), left: Math.max(0, Math.min((rect.left - root.left) / scale, Math.max(0, previewElement.clientWidth - 260))), top: Math.max(0, Math.min((rect.bottom - root.top) / scale + 8, previewElement.clientHeight - 70)) };
-   size = clampElementMinimum(size, effectiveMinimum);
+   const clamped = clampElementMinimum(size, effectiveMinimum);
+   const changes = resizeLimitChanges(clamped, limits);
+   if (changes.some((change) => change.source === 'element' && row && isFixed(row, change.key))) { alert(m.wpi_resize_fixed_limit()); return; }
+   resizeNotice = { id, message: m.wpi_resize_content_minimum({ width: String(Math.ceil(effectiveMinimum.width)), height: String(Math.ceil(effectiveMinimum.height)) }), left: Math.max(0, Math.min((rect.left - root.left) / scale, Math.max(0, previewElement.clientWidth - 260))), top: Math.max(0, Math.min((rect.bottom - root.top) / scale + 8, previewElement.clientHeight - 110)), size: clamped, changes };
+   return;
   }
   const changes = resizeLimitChanges(size, limits);
   if (changes.some((change) => change.source === 'element' && row && isFixed(row, change.key))) {
    alert(m.wpi_resize_fixed_limit()); return;
   }
   if (changes.length && !confirm(m.wpi_resize_override_limits({ limits: changes.map((change) => `${change.key}: ${change.value}`).join(', ') }))) return;
-  resizeNotice = nextNotice;
+  resizeNotice = null;
   onElementResize(id, size, changes);
+ }
+ function confirmResize() {
+  const pending = resizeNotice;
+  if (!pending || selectedId !== pending.id) return;
+  if (pending.changes.length && !confirm(m.wpi_resize_override_limits({ limits: pending.changes.map((change) => `${change.key}: ${change.value}`).join(', ') }))) return;
+  resizeNotice = null;
+  onElementResize(pending.id, pending.size, pending.changes);
  }
  function elementResizeKey(event: KeyboardEvent, id: string, handle: ElementHandle) {
   const step = event.shiftKey ? 10 : 1;
@@ -387,6 +402,7 @@
  <span>{m.wpi_status_auto_saved({ time: autoSavedAt ? new Date(autoSavedAt).toLocaleString() : m.wpi_status_never() })}</span>
  <span>{m.wpi_status_opened({ time: openedAt ? new Date(openedAt).toLocaleString() : m.wpi_status_never() })}</span>
 </div>
+<svelte:window onkeydown={(event) => { if (event.key === 'Escape' && resizeNotice) { event.preventDefault(); resizeNotice = null; } }} />
 <div bind:this={previewElement} class="preview select-text" style="width:{size.width}px; height:{size.height}px; color-scheme:{darkMode ? 'dark' : 'light'}" data-wpi-page-preview>
  {#if elementOutline}<div class="element-resize-outline" style:left="{elementOutline.x}px" style:top="{elementOutline.y}px" style:width="{elementOutline.width}px" style:height="{elementOutline.height}px" aria-hidden="true"></div>{/if}
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
@@ -410,8 +426,8 @@
   </div>
  {/if}
 {#if resizeNotice && selectedId === resizeNotice.id}
- <div class="resize-notice nodrag nopan" role="status" style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
-  <span>{resizeNotice.message}</span><button type="button" aria-label={m.wpi_load_close()} onclick={() => resizeNotice = null}>×</button>
+ <div class="resize-notice nodrag nopan" role="dialog" aria-label={m.wpi_resize_confirmation()} style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
+  <span>{resizeNotice.message}</span><div class="resize-notice-actions"><button type="button" bind:this={resizeCancelButton} onclick={() => resizeNotice = null}>{m.wpi_create_element_cancel()}</button><button type="button" onclick={confirmResize}>{m.wpi_create_element_saved_ok()}</button></div>
  </div>
 {/if}
 {#if resizeOutline}
@@ -419,8 +435,9 @@
 {/if}
 
 <style>
- .resize-notice { position:absolute; z-index:20; width:250px; display:flex; align-items:start; gap:8px; box-sizing:border-box; padding:10px 12px; border:1px solid var(--cv-border); border-radius:6px; background:var(--cv-panel); color:var(--cv-text); box-shadow:0 4px 16px #0004; font-size:11px; }
- .resize-notice button { flex:none; border:0; padding:0; background:transparent; color:inherit; font-size:16px; cursor:pointer; }
+ .resize-notice { position:absolute; z-index:20; width:250px; display:flex; flex-direction:column; gap:8px; box-sizing:border-box; padding:10px 12px; border:1px solid var(--cv-border); border-radius:6px; background:var(--cv-panel); color:var(--cv-text); box-shadow:0 4px 16px #0004; font-size:11px; }
+ .resize-notice-actions { display:flex; justify-content:flex-end; gap:6px; width:100%; }
+ .resize-notice button { border:1px solid var(--cv-border); border-radius:4px; padding:3px 9px; background:var(--cv-surface); color:inherit; font-size:11px; cursor:pointer; }
  .page-status { position:absolute; left:0; top:-32px; height:32px; display:flex; align-items:center; gap:16px; padding:0 10px; box-sizing:border-box; overflow:auto; white-space:nowrap; background:var(--cv-surface); color:var(--cv-text); border:1px solid var(--cv-border); font-size:11px; pointer-events:auto; }
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
  .element-resize-outline { position:absolute; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:9; }

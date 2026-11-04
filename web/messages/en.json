@@ -8359,5 +8359,6 @@
 	"wpi_color_families": "Color families",
 	"wpi_color_resize": "Resize color dialog with arrow keys",
 	"wpi_color_rgb": "RGB",
-	"wpi_resize_content_minimum": "The size was adjusted to respect the minimum: {width} × {height} pixels."
+	"wpi_resize_content_minimum": "The requested size is below the minimum of {width} × {height} pixels. Apply the minimum size?",
+	"wpi_resize_confirmation": "Confirm resize"
 }
