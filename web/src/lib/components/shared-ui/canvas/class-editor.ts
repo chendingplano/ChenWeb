@@ -27,6 +27,7 @@ export const VALUE_EDITOR_IDS = [
 	'text',
 	'multiline-text',
 	'localized-text',
+	'string-editor',
 	'number',
 	'switch',
 	'value-picker',

@@ -1,0 +1,25 @@
+import type { Json } from '$lib/wpi/types';
+
+export type StringMode = 'single' | 'multilingual' | 'list';
+
+export function emptyStringValue(value: string, emptyAsNull: boolean): string | null {
+ return value === '' && emptyAsNull ? null : value;
+}
+
+export function convertStringMode(value: Json | undefined, mode: StringMode, languages: string[], locale: string): Json {
+ const map = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : null;
+ if (mode === 'multilingual') {
+  if (map) return { ...map };
+  return typeof value === 'string' ? { [languages.includes(locale) ? locale : languages[0]]: value } : {};
+ }
+ if (!map) return typeof value === 'string' ? value : null;
+ const current = map[locale];
+ if (typeof current === 'string') return current;
+ for (const language of languages) if (typeof map[language] === 'string') return map[language];
+ return null;
+}
+
+export function losesTranslations(value: Record<string, Json>, languages: string[], locale: string): boolean {
+ const selected = typeof value[locale] === 'string' ? locale : languages.find(language => typeof value[language] === 'string');
+ return Object.entries(value).some(([language, text]) => language !== selected && typeof text === 'string' && text !== '');
+}

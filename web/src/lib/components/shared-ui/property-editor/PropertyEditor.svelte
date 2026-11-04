@@ -99,6 +99,21 @@
 
 	// One edit per property: entering another property ends the last one.
 	let editing: string | null = null;
+	let root: HTMLElement;
+	let stringMenuOpen = $state(false);
+	function openValidators() {
+		stringMenuOpen = false;
+		const group = root.querySelector<HTMLDetailsElement>('[data-group="validators"]');
+		if (group) {
+			group.open = true;
+			group.scrollIntoView({ block: 'nearest' });
+			group.querySelector<HTMLElement>('summary')?.focus();
+		}
+	}
+	function setStringMode(mode: string) {
+		source.set('editor_options.mode', mode);
+		stringMenuOpen = false;
+	}
 	function focusIn(event: FocusEvent) {
 		const name =
 			(event.target as HTMLElement).closest<HTMLElement>('[data-property]')?.dataset.property ??
@@ -118,17 +133,31 @@
 </script>
 
 <section
+	bind:this={root}
 	class="property-editor select-text"
 	aria-label={title}
 	onfocusin={focusIn}
 	onfocusout={focusOut}
 >
 	<h2 class="title">{title}</h2>
+	{#if ctx.get('editor') === 'string-editor'}
+		<div class="string-menu">
+			<button type="button" class="reset" aria-label={m.wpi_string_mode()} aria-expanded={stringMenuOpen} onclick={() => stringMenuOpen = !stringMenuOpen}>…</button>
+			{#if stringMenuOpen}
+				<div class="string-menu-items">
+					<button type="button" disabled={source.fixed('editor_options.mode')} onclick={() => setStringMode('single')}>{m.wpi_string_single()}</button>
+					<button type="button" disabled={source.fixed('editor_options.mode')} onclick={() => setStringMode('multilingual')}>{m.wpi_string_multilingual()}</button>
+					<button type="button" disabled={source.fixed('editor_options.mode')} onclick={() => setStringMode('list')}>{m.wpi_string_list()}</button>
+					<button type="button" onclick={openValidators}>{m.wpi_vld_group_validators()}</button>
+				</div>
+			{/if}
+		</div>
+	{/if}
 	{@render children?.()}
 	{#each groups as group (group.id)}
 		{@const properties = group.properties.filter(shown)}
 		{#if properties.length && (!group.visible || group.visible(ctx))}
-			<details class="group" open>
+			<details class="group" data-group={group.id} open>
 				<summary>{group.label()}</summary>
 				{#if group.help?.()}<p class="hint">{group.help()}</p>{/if}
 				{#each properties as p (p.name)}
@@ -183,6 +212,9 @@
 </section>
 
 <style>
+	.string-menu { position: relative; display: flex; justify-content: end; }
+	.string-menu-items { position: absolute; z-index: 4; top: 100%; display: grid; padding: 4px; background: var(--cv-panel); border: 1px solid var(--cv-border); }
+	.string-menu-items button { text-align: left; padding: 5px 12px; white-space: nowrap; }
 	.property-editor {
 		padding: 0 12px 12px;
 		color: var(--cv-text);

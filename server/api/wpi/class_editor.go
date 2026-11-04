@@ -134,7 +134,7 @@ func (h *Handler) UpdateClass(c echo.Context) error {
 }
 
 var classValueEditorIDs = []string{
-	"text", "multiline-text", "localized-text", "number", "switch", "value-picker", "ordered-multi-picker", "string-list",
+	"text", "string-editor", "multiline-text", "localized-text", "number", "switch", "value-picker", "ordered-multi-picker", "string-list",
 	"date-picker", "time-picker", "color", "length", "font-picker", "alignment-picker", "icon-picker", "emoji-picker", "button-type-picker",
 	"database-picker", "schema-picker", "table-picker", "field-picker", "data-source", "column-list", "sort-order-editor",
 	"validation", "action-picker", "layouter-picker", "read-only", "json",

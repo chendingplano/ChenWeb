@@ -6,6 +6,7 @@ import type { ValueEditorId } from './types';
 
 const drawn = new Set<string>([
 	'text',
+	'string-editor',
 	'multiline-text',
 	'localized-text',
 	'number',

@@ -8,6 +8,7 @@ import type { ValidatorClass } from '../validators';
 
 export type ValueEditorId =
 	| 'text'
+	| 'string-editor'
 	| 'multiline-text'
 	| 'localized-text'
 	| 'number'

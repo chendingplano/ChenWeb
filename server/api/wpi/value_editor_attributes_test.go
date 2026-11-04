@@ -12,6 +12,11 @@ func TestValueEditorAttributes(t *testing.T) {
 		{`"editor": "color", "label": {"en": "Accent", "zh-cn": "强调色"}, "data_binding": "$input_doc.theme.accent", "binding_mode": "read-write", "editor_options": {"theme": true}`, ""},
 		{`"editor": "icon-picker", "binding_mode": "read-only"`, ""},
 		{`"editor": "emoji-picker", "binding_mode": "read-write"`, ""},
+		{`"editor": "string-editor", "editor_options": {"mode":"list", "languages":["en","zh-cn"], "emptyAsNull":false, "choices":["one","two"]}`, ""},
+		{`"editor": "string-editor", "editor_options": {"emptyAsNull":"yes"}`, "/editor_options/emptyAsNull"},
+		{`"editor": "string-editor", "editor_options": {"languages":["en","en"]}`, "/editor_options/languages"},
+		{`"editor": "string-editor", "editor_options": {"languages":["bad tag"]}`, "/editor_options/languages"},
+		{`"editor": "string-editor", "editor_options": {"mode":"bad"}`, "/editor_options/mode"},
 		{`"editor": "slider"`, "/editor"},
 		{`"editor": "date-picker"`, "/editor"},
 		{`"editor_options": ["a", "b"]`, "/editor_options"},
@@ -75,8 +80,8 @@ func TestValueEditorPages(t *testing.T) {
 // module supports for the rest, and their instances run with the defaults.
 func TestSeedValueEditorClasses(t *testing.T) {
 	rows := regexp.MustCompile(`(?s)\('([a-z0-9-]+)', '(active|draft)', \$wpi\$(\{.*?\})\$wpi\$`).FindAllStringSubmatch(readFile(t, valueEditorElementsMigration)+readFile(t, "../../../project_migrations/20261102000004_wpi_emoji_picker.sql"), -1)
-	if len(rows) != len(classValueEditorIDs) {
-		t.Fatalf("found %d classes, want %d", len(rows), len(classValueEditorIDs))
+	if len(rows) != len(classValueEditorIDs)-1 {
+		t.Fatalf("found %d legacy classes, want %d", len(rows), len(classValueEditorIDs)-1)
 	}
 	classes := testClasses()
 	editors := map[string]bool{}
@@ -102,6 +107,9 @@ func TestSeedValueEditorClasses(t *testing.T) {
 		elements = append(elements, `{"element": "`+id+`"}`)
 	}
 	for _, id := range classValueEditorIDs {
+		if id == "string-editor" {
+			continue
+		} // seeded by its own later migration
 		if !editors[id] {
 			t.Fatalf("no class draws value editor %q", id)
 		}

@@ -1,4 +1,13 @@
 {
+	"wpi_string_mode": "String mode",
+	"wpi_string_languages": "Languages",
+	"wpi_string_choices": "Choices",
+	"wpi_string_empty_as_null": "Treat empty as null",
+	"wpi_string_commit_on_blur": "Apply when leaving field",
+	"wpi_string_single": "Single",
+	"wpi_string_multilingual": "Multilingual",
+	"wpi_string_list": "List",
+	"wpi_string_discard_translations": "Switching modes removes other translations. The resulting value will be {value}. Continue?",
 	"wpi_element_width_limits_hint": "The rendered width is also constrained by the element and panel width limits.",
 	"wpi_instance_id_note": "Instance ID identifies this element in the current editor session and is not saved in the page.",
 	"wpi_preview_element_issue": "Pane {pane}, element {number} (counting from 1; index {index} counting from 0), instance ID {id}, field {field}: {detail}",

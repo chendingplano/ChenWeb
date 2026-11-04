@@ -5,6 +5,9 @@ import type { Json } from '$lib/wpi/types';
 import type { ValidatorClass } from '$lib/wpi/validators';
 
 export type ValueEditorOptions = {
+	mode?: 'single' | 'multilingual' | 'list';
+	languages?: string[];
+	emptyAsNull?: boolean;
 	// value-picker and ordered-multi-picker: the values offered, with their labels.
 	choices?: string[];
 	choiceLabel?: (value: string) => string;

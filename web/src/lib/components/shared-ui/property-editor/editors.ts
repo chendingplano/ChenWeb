@@ -20,12 +20,14 @@ import StringListEditor from '../value-editors/StringListEditor.svelte';
 import SwitchEditor from '../value-editors/SwitchEditor.svelte';
 import TablePickerEditor from '../value-editors/TablePickerEditor.svelte';
 import TextEditor from '../value-editors/TextEditor.svelte';
+import StringValueEditor from '../value-editors/StringValueEditor.svelte';
 import ValidationEditor from '../value-editors/ValidationEditor.svelte';
 import ValidatorListEditor from '../value-editors/ValidatorListEditor.svelte';
 import ValuePicker from '../value-editors/ValuePicker.svelte';
 
 export const valueEditors: Record<ValueEditorId, Component<ValueEditorProps>> = {
 	text: TextEditor,
+	'string-editor': StringValueEditor,
 	'multiline-text': MultilineTextEditor,
 	'localized-text': LocalizedTextEditor,
 	number: NumberEditor,

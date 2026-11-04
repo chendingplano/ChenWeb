@@ -215,3 +215,12 @@ test('length editor display type switch updates only its option', () => {
 	s.set('editor_options.displayType', true);
 	assert.deepEqual(saved, { editor_options: { units: ['px'], displayType: true } });
 });
+
+test('string editor choices and empty handling preserve other options', () => {
+	const c: ElementClassSummary = { ...cls, attributes: { editor_options: { default_value: { mode: 'list', emptyAsNull: true, choices: [] } } } };
+	let saved: JsonObject = {};
+	const s = elementSource({}, c, {}, (attrs) => saved = attrs);
+	s.set('editor_options.choices', ['red', 'blue']);
+	assert.deepEqual(saved, { editor_options: { mode: 'list', emptyAsNull: true, choices: ['red', 'blue'] } });
+	assert.equal(prop(elementEditor('value-editor'), 'editor_options.choices').visible!(ctx({ editor: 'string-editor', 'editor_options.mode': 'list' })), true);
+});

@@ -25,7 +25,8 @@ export function elementSource(
 	fallbacks: JsonObject,
 	onChange: (attrs: JsonObject) => void
 ): PropertySource {
-	const nestedKey = (name: string) => name === 'editor_options.defaultValue' ? 'defaultValue' : name === 'editor_options.displayType' ? 'displayType' : undefined;
+	const nestedOptions = new Set(['defaultValue', 'displayType', 'mode', 'languages', 'emptyAsNull', 'choices', 'commitOnBlur']);
+	const nestedKey = (name: string) => name.startsWith('editor_options.') && nestedOptions.has(name.slice('editor_options.'.length)) ? name.slice('editor_options.'.length) : undefined;
 	const object = (value: unknown): JsonObject => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {};
 	const def = (name: string) => cls?.attributes[nestedKey(name) ? 'editor_options' : name];
 	const defaultValue = (name: string) => {

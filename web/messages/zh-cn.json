@@ -1,4 +1,13 @@
 {
+	"wpi_string_mode": "文本模式",
+	"wpi_string_languages": "语言",
+	"wpi_string_choices": "可选值",
+	"wpi_string_empty_as_null": "将空字符串视为 null",
+	"wpi_string_commit_on_blur": "离开输入框时应用",
+	"wpi_string_single": "单一文本",
+	"wpi_string_multilingual": "多语言",
+	"wpi_string_list": "列表",
+	"wpi_string_discard_translations": "切换模式将删除其他翻译。转换后的值为 {value}。是否继续？",
 	"wpi_element_width_limits_hint": "实际显示宽度还受元素和面板的宽度限制。",
 	"wpi_instance_id_note": "实例 ID 用于在当前编辑会话中标识此元素，不会保存到页面中。",
 	"wpi_preview_element_issue": "窗格 {pane}，第 {number} 个元素（从 1 开始计数；从 0 开始的索引为 {index}），实例 ID {id}，字段 {field}：{detail}",

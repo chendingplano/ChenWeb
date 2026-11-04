@@ -15,6 +15,7 @@
 		(Array.isArray(value) ? value : []).filter((v): v is JsonObject => !!v && typeof v === 'object' && !Array.isArray(v))
 	);
 	const classes = $derived(options.validatorClasses ?? []);
+	let adding = $state(false);
 
 	function set(next: Json[]) {
 		onChange(next.length ? next : undefined);
@@ -46,10 +47,11 @@
 			</li>
 		{/each}
 	</ol>
-	<select class="ve-input" aria-label={m.wpi_vld_list_add()} value="" onchange={(e) => { add(e.currentTarget.value); e.currentTarget.value = ''; }}>
+	<button type="button" class="ve-button" aria-label={m.wpi_vld_list_add()} aria-expanded={adding} onclick={() => adding = !adding}>+</button>
+	{#if adding}<select class="ve-input" aria-label={m.wpi_vld_list_add()} value="" onchange={(e) => { add(e.currentTarget.value); e.currentTarget.value = ''; adding = false; }}>
 		<option value="">{m.wpi_vld_list_add()}</option>
 		{#each classes as cls (cls.descriptor_id)}<option value={cls.descriptor_id}>{cls.descriptor_id}</option>{/each}
-	</select>
+	</select>{/if}
 </div>
 
 <style>

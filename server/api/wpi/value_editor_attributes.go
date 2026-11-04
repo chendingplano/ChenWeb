@@ -1,6 +1,9 @@
 package wpi
 
-import "slices"
+import (
+	"golang.org/x/text/language"
+	"slices"
+)
 
 // Checks of the value-editor element code module (KnowledgeStore
 // doc-repo/code_modules/interpreter-value-editor.md). One module draws every
@@ -24,7 +27,9 @@ func (v *validator) valueEditorAttributes(e map[string]any, path string) {
 	v.oneOf(e, "binding_mode", path, bindingModes)
 	v.oneOf(e, "editor", path, drawnValueEditors)
 	if val, ok := e["editor_options"]; ok {
-		v.object(val, path+"/editor_options")
+		if opts, valid := v.object(val, path+"/editor_options"); valid && str(e["editor"]) == "string-editor" {
+			v.stringEditorOptions(opts, path+"/editor_options")
+		}
 	}
 }
 
@@ -37,6 +42,39 @@ func (v *validator) valueEditorClassDefaults(defaults map[string]any, draft bool
 	}
 	v.oneOf(defaults, "editor", "", allowed)
 	if val, ok := defaults["editor_options"]; ok {
-		v.object(val, "/editor_options")
+		if opts, valid := v.object(val, "/editor_options"); valid && str(defaults["editor"]) == "string-editor" {
+			v.stringEditorOptions(opts, "/editor_options")
+		}
+	}
+}
+
+func (v *validator) stringEditorOptions(opts map[string]any, path string) {
+	v.oneOf(opts, "mode", path, []string{"single", "multilingual", "list"})
+	v.boolean(opts, "emptyAsNull", path)
+	v.boolean(opts, "commitOnBlur", path)
+	for _, key := range []string{"languages", "choices"} {
+		val, present := opts[key]
+		if !present {
+			continue
+		}
+		items, ok := v.array(val, path+"/"+key, key == "languages")
+		if !ok {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok || (key == "languages" && s == "") || seen[s] {
+				v.errf(path+"/"+key, "must contain distinct strings")
+				break
+			}
+			if key == "languages" {
+				if _, err := language.Parse(s); err != nil {
+					v.errf(path+"/"+key, "must contain valid language tags")
+					break
+				}
+			}
+			seen[s] = true
+		}
 	}
 }
