@@ -7,8 +7,8 @@
  import type { ElementClassSummary } from '../../src/lib/wpi/api';
  import type { Json } from '../../src/lib/wpi/types';
  let value = $state<Json | undefined>('12px');
- let attrs = $state<JsonObject>({});
- const cls: ElementClassSummary = { descriptor_id: 'length-editor', version: 1, status: 'active', description: null, attributes: { editor: {scope: 'class', default_value: 'length'}, editor_options: {default_value: {keywords:['auto'], units:['px','%']}} } };
+ let attrs = $state<JsonObject>({ width: '24px', label: 'Test' });
+ const cls: ElementClassSummary = { descriptor_id: 'length-editor', version: 1, status: 'active', description: null, attributes: { width: { default_value: 'elastic' }, label: {default_value: 'Label'}, editor: {scope: 'class', default_value: 'length'}, editor_options: {default_value: {keywords:['auto'], units:['px','%']}} } };
  const source = $derived(elementSource(attrs, cls, {}, (next) => attrs = next));
 </script>
 <LengthEditor id="length" label="Width" {value} options={{units:['px','%'],keywords:['auto']}} onChange={(v) => value = v} />

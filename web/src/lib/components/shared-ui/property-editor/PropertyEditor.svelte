@@ -155,7 +155,7 @@
 									onChange={(v) => source.set(p.name, toStored(p, v))}
 								/>
 							{/if}
-							{#if source.resettable(p.name) && source.isSet(p.name) && !readOnly(p)}
+							{#if Editor !== valueEditors.length && source.resettable(p.name) && source.isSet(p.name) && !readOnly(p)}
 								<button type="button" class="reset" onclick={() => source.set(p.name, undefined)}
 									>{m.wpi_input_reset()}</button
 								>
