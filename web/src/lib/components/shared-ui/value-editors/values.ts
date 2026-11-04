@@ -83,7 +83,7 @@ export function colorPart(value: Json | undefined, variant: 'single' | 'light' |
 
 // The value after switching mode, keeping the colour already chosen.
 export function withColorMode(value: Json | undefined, mode: ColorMode): ColorValue {
-	const first = typeof value === 'string' ? value : colorPart(value, 'light');
+	const first = typeof value === 'string' ? (value === 'auto' ? '' : value) : colorPart(value, 'light');
 	if (mode === 'none') return undefined;
 	if (mode === 'single') return first || '#000000';
 	return { light: first || '#ffffff', dark: colorPart(value, 'dark') || first || '#000000' };

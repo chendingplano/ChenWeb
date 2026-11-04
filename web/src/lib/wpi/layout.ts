@@ -164,8 +164,8 @@ export function pageBoxStyle(page: PageDescriptor, host?: PaneSpec): string {
 	if (page.max_width) css.push(`max-width: ${cssLength(page.max_width)}`);
 	if (page.max_height) css.push(`max-height: ${cssLength(page.max_height)}`);
 	if (host) css.push(`align-items: ${crossAlign[host.hori_align ?? 'center']}`, `justify-content: ${mainAlign[host.vert_align ?? 'top']}`);
-	if (page.bkgd_color && page.bkgd_color !== 'auto') css.push(`background-color: ${page.bkgd_color}`);
-	if (page.frgd_color && page.frgd_color !== 'auto') css.push(`color: ${page.frgd_color}`);
+	if (page.bkgd_color && page.bkgd_color !== 'auto') css.push(`background-color: ${surfaceColorValue(page.bkgd_color)}`);
+	if (page.frgd_color && page.frgd_color !== 'auto') css.push(`color: ${surfaceColorValue(page.frgd_color)}`);
 	return css.join('; ');
 }
 
@@ -182,12 +182,15 @@ export function clampPx(value: number, min?: string, max?: string): number {
 	return Math.min(Math.max(value, lo), hi);
 }
 
+function surfaceColorValue(c: SurfaceColor): string {
+ return typeof c === 'string' ? c : `light-dark(${c.light}, ${c.dark})`;
+}
+
 // Theme pairs follow the active application color scheme; omitted values inherit.
 export function surfaceColorStyle(colors: SurfaceColors, suppressBackground = false): string {
  const css: string[] = [];
- const value = (c: SurfaceColor) => typeof c === 'string' ? c : `light-dark(${c.light}, ${c.dark})`;
- if (colors.background_color && !suppressBackground) css.push(`background-color: ${value(colors.background_color)}`);
- if (colors.foreground_color) css.push(`color: ${value(colors.foreground_color)}`);
+ if (colors.background_color && !suppressBackground) css.push(`background-color: ${surfaceColorValue(colors.background_color)}`);
+ if (colors.foreground_color) css.push(`color: ${surfaceColorValue(colors.foreground_color)}`);
  return css.join('; ');
 }
 

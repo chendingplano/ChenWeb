@@ -199,8 +199,8 @@ export type PageDescriptor = SizeAttrs & {
 	vert_align?: 'top' | 'center' | 'bottom';
 	hori_scrollbar?: 'auto' | 'hide';
 	vert_scrollbar?: 'auto' | 'hide';
-	bkgd_color?: string;
-	frgd_color?: string;
+	bkgd_color?: SurfaceColor;
+	frgd_color?: SurfaceColor;
 	access_controls?: string[];
 	keywords?: string[];
 	page_tags?: string[];

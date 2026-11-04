@@ -188,6 +188,8 @@ func TestValidatePage(t *testing.T) {
 		{`"input": {}`, `"input": {}, "vert_align": "expand"`, `"expand" is not supported`},
 		{`"input": {}`, `"input": {}, "width": "150%"`, `must be within 0% and 100%`},
 		{`"input": {}`, `"input": {}, "min_height": "-5px"`, `/min_height "-5px" must be a non-negative number`},
+		{`"input": {}`, `"input": {}, "bkgd_color": {"light":"#fff","dark":"#000"}`, ""},
+		{`"input": {}`, `"input": {}, "bkgd_color": {"light":"auto","dark":"#000"}`, `/bkgd_color/light`},
 		{`"input": {}`, `"input": {}, "bkgd_color": "#12"`, `/bkgd_color "#12" must match`},
 		{`"input": {}`, `"input": {}, "keywords": [""]`, `/keywords/0 must be a non-empty string`},
 		{`"input": {}`, `"input": {}, "access_controls": "admin"`, `/access_controls must be an array`},

@@ -55,6 +55,7 @@ test('colour modes keep the chosen colour', () => {
 	assert.equal(colorMode(undefined), 'none');
 	assert.equal(colorMode('#fff'), 'single');
 	assert.equal(colorMode({ light: '#fff', dark: '#000' }), 'theme');
+	assert.deepEqual(withColorMode('auto', 'theme'), { light: '#ffffff', dark: '#000000' });
 	assert.deepEqual(withColorMode('#123456', 'theme'), { light: '#123456', dark: '#123456' });
 	assert.equal(withColorMode({ light: '#aaa', dark: '#000' }, 'single'), '#aaa');
 	assert.equal(withColorMode('#aaa', 'none'), undefined);

@@ -211,3 +211,10 @@ writing back the new key and showing field errors next to their elements.
 - **WHEN** the user edits the *New customer* form and clicks a button whose `on_click` is `{"action": "save-page"}`
 - **THEN** the page's `save_action` inserts the customer and the new `id` is written into the input doc
 
+
+### Requirement: Page light and dark colors
+Page `bkgd_color` and `frgd_color` light/dark pairs SHALL render as CSS `light-dark()` colors following the active color scheme.
+
+#### Scenario: Page background follows theme
+- **WHEN** a page sets `bkgd_color` to `{ "light": "#fff", "dark": "#000" }`
+- **THEN** its background uses the light or dark value according to the active color scheme

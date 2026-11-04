@@ -126,6 +126,7 @@ test('page box: sizes, colors, height rule, host alignment', () => {
 		pageBoxStyle(page({ width: '50 %', height: '400', min_width: '320', max_height: '600px', bkgd_color: '#fff', frgd_color: 'auto' })),
 		'display: flex; flex-direction: column; box-sizing: border-box; flex: none; min-width: 0; width: 50%; height: 400px; min-width: 320px; min-height: 50px; max-height: 600px; background-color: #fff'
 	);
+	assert.match(pageBoxStyle(page({ bkgd_color: { light: '#fff', dark: '#000' } })), /background-color: light-dark\(#fff, #000\)/);
 	assert.match(pageBoxStyle(page()), /width: 100%/);
 	assert.doesNotMatch(pageBoxStyle(page()), /height: 100%/);
 	const homePage = page({ page_layouter: { layouter: 'top-left-middle-right-bottom', root: home } });

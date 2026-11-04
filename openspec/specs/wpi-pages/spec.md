@@ -75,7 +75,7 @@ and MAY set `page_name`, `description`, `access_controls`, `keywords`, `page_tag
 - a size or margin is a non-negative number with an optional unit `px`, `rem`, `em` or `%`
   (`px` when omitted; spaces may precede the unit), a `%` value is within 0 to 100, and
   `width` and `height` also accept `auto`;
-- `bkgd_color` and `frgd_color` are `auto` or a CSS color;
+- `bkgd_color` and `frgd_color` are `auto`, a CSS color, or an object with `light` and `dark` CSS colors;
 - `binding_mode` is `read-only` or `read-write`.
 
 The page's status is the `status` column of `kb.frontend_pages`; a `status` attribute, the

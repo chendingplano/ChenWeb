@@ -87,6 +87,9 @@ test('page: scroll bars, refresh and the page layouter', () => {
 	assert.equal(refresh.write!(false), undefined);
 	assert.equal(prop(page, 'page_layouter').read!({ layouter: 'single-pane' }), 'single-pane');
 	assert.equal(prop(page, 'bkgd_color').validate!('auto', ctx()), null);
+	assert.equal(options(prop(page, 'bkgd_color'), ctx()).theme, true);
+	assert.equal(prop(page, 'bkgd_color').validate!({ light: '#fff', dark: '#000' }, ctx()), null);
+	assert.ok(prop(page, 'bkgd_color').validate!({ light: 'auto', dark: '#000' }, ctx()));
 	assert.ok(prop(pane, 'background_color').validate!('auto', ctx()));
 	assert.equal(prop(pane, 'background_color').validate!({ light: '#fff', dark: '#000' }, ctx()), null);
 	assert.equal(pane.groups.find((g) => g.id === 'content')!.visible!(ctx({}, { leaf: false })), false);

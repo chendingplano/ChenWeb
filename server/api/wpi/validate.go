@@ -350,7 +350,13 @@ func (v *validator) page(b map[string]any) {
 	v.oneOf(b, "hori_scrollbar", "", scrollbars)
 	v.oneOf(b, "vert_scrollbar", "", scrollbars)
 	for _, k := range []string{"bkgd_color", "frgd_color"} {
-		v.matching(b, k, "", colorPattern)
+		if raw, ok := b[k]; ok {
+			if _, pair := raw.(map[string]any); pair {
+				v.surfaceColorPair(raw, "/"+k)
+			} else {
+				v.matching(b, k, "", colorPattern)
+			}
+		}
 	}
 	for _, k := range pageSizeAttrs {
 		v.pageLength(b, k, k == "width" || k == "height")
@@ -1662,16 +1668,20 @@ func (v *validator) surfaceColors(obj map[string]any, path string) {
 			}
 			continue
 		}
-		pair, ok := v.object(raw, path+"/"+key)
-		if !ok {
-			continue
-		}
-		v.keys(pair, path+"/"+key, []string{"light", "dark"})
-		for _, mode := range []string{"light", "dark"} {
-			value, ok := pair[mode].(string)
-			if !ok || value == "auto" || !colorPattern.MatchString(value) {
-				v.errf(path+"/"+key+"/"+mode, "must be a CSS color")
-			}
+		v.surfaceColorPair(raw, path+"/"+key)
+	}
+}
+
+func (v *validator) surfaceColorPair(raw any, path string) {
+	pair, ok := v.object(raw, path)
+	if !ok {
+		return
+	}
+	v.keys(pair, path, []string{"light", "dark"})
+	for _, mode := range []string{"light", "dark"} {
+		value, ok := pair[mode].(string)
+		if !ok || value == "auto" || !colorPattern.MatchString(value) {
+			v.errf(path+"/"+mode, "must be a CSS color")
 		}
 	}
 }

@@ -13,7 +13,7 @@ const colorPattern = /^(auto|#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(
 function validColor(value: Json, auto: boolean): boolean {
 	const ok = (s: Json | undefined) => typeof s === 'string' && colorPattern.test(s) && (auto || s !== 'auto');
 	if (typeof value === 'string') return ok(value);
-	return !!value && typeof value === 'object' && !Array.isArray(value) && ok(value.light) && ok(value.dark);
+	return !!value && typeof value === 'object' && !Array.isArray(value) && ok(value.light) && ok(value.dark) && value.light !== 'auto' && value.dark !== 'auto';
 }
 
 function color(name: string, label: () => string, helpTip: () => string, theme: boolean, auto = false): PropertyDef {
@@ -108,8 +108,8 @@ export const page: EditorDef = {
 			id: 'colors',
 			label: m.wpi_page_group_colors,
 			properties: [
-				color('bkgd_color', m.wpi_prop_bkgd_color, m.wpi_prop_tip_page_color, false, true),
-				color('frgd_color', m.wpi_prop_frgd_color, m.wpi_prop_tip_page_color, false, true)
+				color('bkgd_color', m.wpi_prop_bkgd_color, m.wpi_prop_tip_page_color, true, true),
+				color('frgd_color', m.wpi_prop_frgd_color, m.wpi_prop_tip_page_color, true, true)
 			]
 		},
 		{
