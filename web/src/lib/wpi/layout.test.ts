@@ -59,6 +59,12 @@ test('flow configuration maps both alignment axes', () => {
 	assert.match(flowStyle({ rows_alignment: 'space-between', horizontal_alignment: 'space-between' }), /align-content: space-between/);
 });
 
+test('color editor minimum overrides smaller panel dimensions', () => {
+ const css = flowItemStyle({ width: '100px', height: '30px' }, { max_elem_width: '200px', max_row_height: '80px' }, { width: 280, height: 120 });
+ assert.match(css, /min-width: max\(20px, 0px, 280px\)/);
+ assert.match(css, /min-height: max\(30px, 120px\)/);
+});
+
 test('flow item sizes', () => {
 	assert.equal(flowItemStyle({ width: 600, height: 300 }), 'flex: 0 0 600px; width: 600px; height: 300px');
 	assert.equal(flowItemStyle({ width: 0, height: 0 }), 'flex: 0 0 0px; width: 0px; height: 0px');

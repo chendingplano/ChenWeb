@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { elementMinimum } from '../element-minimum';
 	import { m } from '$lib/paraglide/messages.js';
 	import ElementView from '../elements/Element.svelte';
 	import { resolveEntry } from '../entries';
@@ -40,7 +41,7 @@
 					(entry.desc.height === undefined ||
 						entry.desc.height === 'auto' ||
 						entry.desc.height === 'elastic')}
-				style={flowItemStyle(entry.desc, config)}
+				style={flowItemStyle(entry.desc, config, elementMinimum(entry.module, entry.desc.editor))}
 				class:flow-text={entry.module === 'text'}
 				data-flow-item
 			>

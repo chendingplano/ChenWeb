@@ -54,7 +54,7 @@ export function flowStyle(config: FlowLayouterConfig = {}): string {
 	].join('; ');
 }
 
-export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'min_width' | 'max_width'>, config?: FlowLayouterConfig): string {
+export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'min_width' | 'max_width'>, config?: FlowLayouterConfig, minimum?: { width: number; height: number }): string {
 	const css: string[] = [];
 	const width = typeof el.width === 'number' ? `${el.width}px` : el.width;
 	const height = typeof el.height === 'number' ? `${el.height}px` : el.height;
@@ -76,6 +76,9 @@ export function flowItemStyle(el: Pick<ElementInstance, 'width' | 'height' | 'mi
 		if (el.max_width) css.push(`max-width: ${el.max_width}`);
 	}
 	if (isFixed(height)) css.push(`height: ${height}`);
+	if (minimum) {
+		css.push(`min-width: max(${config ? (config.min_elem_width ?? '20px') : '0px'}, ${el.min_width ?? '0px'}, ${minimum.width}px)`, `min-height: max(${config ? (config.min_row_height ?? '30px') : '0px'}, ${minimum.height}px)`);
+	}
 	return css.join('; ');
 }
 

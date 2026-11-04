@@ -335,7 +335,7 @@
 		display: flex;
 		align-items: center;
 		gap: 4px;
-		overflow-x: auto;
+		overflow-x: visible;
 	}
 	.color-line.theme-colors {
 		flex-direction: column;
@@ -359,7 +359,7 @@
 		align-items: center;
 		gap: 4px;
 		flex: 1;
-		min-width: 125px;
+		min-width: 0;
 		background: var(--cv-surface, #f3f3f3);
 		border-radius: 6px;
 		padding: 3px;
@@ -368,7 +368,8 @@
 		background: color-mix(in srgb, var(--cv-surface, #1e293b) 82%, white);
 	}
 	.color-value :global(.ve-input) {
-		min-width: 75px;
+		min-width: 65px;
+		width: 65px;
 		border: 0;
 		background: transparent;
 	}

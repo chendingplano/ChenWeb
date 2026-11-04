@@ -8358,5 +8358,6 @@
 	"wpi_color_common": "常用颜色",
 	"wpi_color_families": "颜色系列",
 	"wpi_color_resize": "使用方向键调整颜色对话框大小",
-	"wpi_color_rgb": "RGB"
+	"wpi_color_rgb": "RGB",
+	"wpi_resize_content_minimum": "此颜色选择器至少需要 {width} × {height} 像素才能完整显示内容。"
 }
