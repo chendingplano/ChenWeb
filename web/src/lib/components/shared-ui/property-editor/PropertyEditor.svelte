@@ -18,6 +18,8 @@
 	import { valueEditors } from './editors';
 	import HelpTip from './HelpTip.svelte';
 	import ColorModeSelect from '../value-editors/ColorModeSelect.svelte';
+	import StringModeMenu from '../value-editors/StringModeMenu.svelte';
+	import { currentStringMode, stringLanguages, type StringMode } from '../value-editors/string-value';
 
 	let {
 		title,
@@ -81,6 +83,17 @@
 			!readOnly(p) &&
 			(p.editor ?? commonSenseEditor(p.name, source.defaultValue(p.name))) === 'color'
 		);
+	}
+	function isEditableString(p: PropertyDef) {
+		return (
+			!readOnly(p) &&
+			(p.editor ?? commonSenseEditor(p.name, source.defaultValue(p.name))) === 'string-editor'
+		);
+	}
+	// The Single or List mode chosen in a string property's heading menu.
+	let stringModes = $state<Record<string, StringMode>>({});
+	function stringModeOf(p: PropertyDef) {
+		return currentStringMode(edited(p), stringModes[p.name] ?? optionsOf(p).mode);
 	}
 	function optionsOf(p: PropertyDef) {
 		return typeof p.options === 'function' ? p.options(ctx) : (p.options ?? {});
@@ -166,7 +179,7 @@
 					{@const help = tip(p)}
 					{@const warn = warning(p)}
 					<div class="property" class:length-property={p.editor === 'length' || p.name === 'editor_options.displayType'} data-property={p.name}>
-						<div class="heading">
+						<div class="heading" class:string-heading={isEditableString(p)}>
 							<label for={id}>
 								{p.label?.() ?? p.name}{#if source.required(p.name)}<span
 										class="required"
@@ -175,6 +188,17 @@
 										*</span
 									>{/if}
 							</label>
+							{#if isEditableString(p)}
+								<StringModeMenu
+									heading
+									value={edited(p)}
+									mode={stringModeOf(p)}
+									languages={stringLanguages(optionsOf(p).languages)}
+									check={check(p)}
+									onMode={(mode) => (stringModes[p.name] = mode)}
+									onChange={(v) => source.set(p.name, toStored(p, v))}
+								/>
+							{/if}
 							{#if isEditableColor(p)}
 								<ColorModeSelect
 									{id}
@@ -195,7 +219,7 @@
 								{id}
 								label={p.label?.() ?? p.name}
 								value={edited(p)}
-								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
+								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p), ...(isEditableString(p) ? { modeInHeading: true, mode: stringModeOf(p) } : {}), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
 								check={check(p)}
 								onChange={(v) => source.set(p.name, toStored(p, v))}
 							/>
@@ -267,6 +291,16 @@
 	.heading label {
 		flex: 1;
 		min-width: 0;
+	}
+	/* The string mode menu sits right after the caption; Reset stays at the end. */
+	.string-heading {
+		justify-content: flex-start;
+	}
+	.string-heading label {
+		flex: 0 1 auto;
+	}
+	.string-heading .reset {
+		margin-left: auto;
 	}
 	label {
 		font-size: 10px;

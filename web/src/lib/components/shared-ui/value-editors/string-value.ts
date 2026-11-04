@@ -2,6 +2,16 @@ import type { Json } from '$lib/wpi/types';
 
 export type StringMode = 'single' | 'multilingual' | 'list';
 
+export function stringLanguages(languages: string[] | undefined): string[] {
+ return languages?.length ? languages : ['en', 'zh-cn'];
+}
+
+// A language map is shown in Multilingual; any other value in the Single or List mode chosen.
+export function currentStringMode(value: Json | undefined, chosen: StringMode | undefined): StringMode {
+ if (value !== null && typeof value === 'object' && !Array.isArray(value)) return 'multilingual';
+ return chosen === 'list' ? 'list' : 'single';
+}
+
 export function emptyStringValue(value: string, emptyAsNull: boolean): string | null {
  return value === '' && emptyAsNull ? null : value;
 }

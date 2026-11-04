@@ -33,6 +33,9 @@ export type ValueEditorOptions = {
 	theme?: boolean;
 	// The property panel places the color mode selector in its heading.
 	colorModeInHeading?: boolean;
+	// string-editor: the property panel places the mode menu in its heading and
+	// passes the current mode as `mode`.
+	modeInHeading?: boolean;
 	// localized-text: a button that sets the value to the empty string.
 	emptyAction?: () => string;
 	// Typed text is applied on leaving the field, not on every key.
