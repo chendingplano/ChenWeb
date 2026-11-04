@@ -2,6 +2,7 @@
      the value editor its class fixes in editor, under its label, bound to an input-doc field. -->
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
+	import { untrack } from 'svelte';
 	import { valueEditors } from '$lib/components/shared-ui/property-editor/editors';
 	import ColorModeSelect from '$lib/components/shared-ui/value-editors/ColorModeSelect.svelte';
 	import type { ValueEditorOptions } from '$lib/components/shared-ui/value-editors/types';
@@ -25,7 +26,13 @@
 	);
 	const colorHeading = $derived(drawing === 'color' && d.binding_mode !== 'read-only');
 	// Without a binding the value stays on the page; an unset value is written as null.
-	let unbound = $state<Json | undefined>(undefined);
+	let unbound = $state<Json | undefined>(
+		untrack(() =>
+			drawing === 'color' && d.editor_options?.theme === true && !d.data_binding
+				? { light: '#ffffff', dark: '#000000' }
+				: undefined
+		)
+	);
 	const value = $derived(
 		d.data_binding ? (rt.read(instanceId, d.data_binding) ?? undefined) : unbound
 	);

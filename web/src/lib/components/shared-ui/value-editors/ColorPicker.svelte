@@ -173,7 +173,7 @@
 		if (e.key === 'Escape' && opened) close();
 	}}
 />
-<div class="color-line">
+<div class="color-line" class:theme-colors={mode === 'theme'}>
 	{#if !options.colorModeInHeading}
 		<ColorModeSelect
 			{id}
@@ -336,6 +336,10 @@
 		align-items: center;
 		gap: 4px;
 		overflow-x: auto;
+	}
+	.color-line.theme-colors {
+		flex-direction: column;
+		align-items: stretch;
 	}
 	.color-percent {
 		flex: none;
