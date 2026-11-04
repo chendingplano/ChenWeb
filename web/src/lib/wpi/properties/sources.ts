@@ -25,16 +25,33 @@ export function elementSource(
 	fallbacks: JsonObject,
 	onChange: (attrs: JsonObject) => void
 ): PropertySource {
-	const def = (name: string) => cls?.attributes[name];
-	const defaultValue = (name: string) => def(name)?.default_value ?? fallbacks[name];
+	const nestedDefault = 'editor_options.defaultValue';
+	const object = (value: unknown): JsonObject => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {};
+	const def = (name: string) => cls?.attributes[name === nestedDefault ? 'editor_options' : name];
+	const defaultValue = (name: string) => name === nestedDefault
+		? object(def(name)?.default_value ?? fallbacks.editor_options).defaultValue
+		: def(name)?.default_value ?? fallbacks[name];
+	const options = () => object(attrs.editor_options ?? def(nestedDefault)?.default_value ?? fallbacks.editor_options);
 	return {
-		get: (name) => attrs[name] ?? defaultValue(name) ?? undefined,
-		isSet: (name) => name in attrs,
+		get: (name) => name === nestedDefault ? options().defaultValue : attrs[name] ?? defaultValue(name) ?? undefined,
+		isSet: (name) => name === nestedDefault
+			? 'defaultValue' in object(attrs.editor_options) && JSON.stringify(object(attrs.editor_options).defaultValue) !== JSON.stringify(defaultValue(name))
+			: name in attrs,
 		fixed: (name) => def(name)?.scope === 'class' || def(name)?.instance_modifiable === false,
-		required: (name) => def(name)?.default_value === null,
-		helpTip: (name) => localized(def(name)?.help_tip),
+		required: (name) => name !== nestedDefault && def(name)?.default_value === null,
+		helpTip: (name) => name === nestedDefault ? '' : localized(def(name)?.help_tip),
 		defaultValue: (name) => defaultValue(name) ?? undefined,
-		set: (name, value) => onChange(value === undefined ? without(attrs, name) : { ...attrs, [name]: value }),
+		set: (name, value) => {
+			if (name === nestedDefault) {
+				const next = { ...options() };
+				if (value === undefined) {
+					const inherited = defaultValue(name);
+					if (inherited === undefined) delete next.defaultValue;
+					else next.defaultValue = inherited;
+				} else next.defaultValue = value;
+				onChange({ ...attrs, editor_options: next });
+			} else onChange(value === undefined ? without(attrs, name) : { ...attrs, [name]: value });
+		},
 		names: Object.keys(cls?.attributes ?? {}),
 		resettable: () => true
 	};

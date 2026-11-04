@@ -176,3 +176,29 @@ test('text: choosing no icon stores the empty string, so it overrides a class ic
 	assert.equal(icon.write!('info'), 'info');
 	assert.equal(options(icon, ctx()).choices![0], 'none');
 });
+
+test('length editor exposes and updates its nested default without losing options', () => {
+	const p = prop(elementEditor('value-editor'), 'editor_options.defaultValue');
+	assert.equal(p.editor, 'length');
+	assert.equal(p.visible!(ctx({ editor: 'length' })), true);
+	assert.equal(p.visible!(ctx({ editor: 'color' })), false);
+	const valueClass: ElementClassSummary = { ...cls, attributes: {
+		editor_options: { default_value: { keywords: ['auto'], units: ['px', '%'] } }
+	} };
+	let saved: JsonObject = {};
+	let s = elementSource({}, valueClass, {}, (attrs) => saved = attrs);
+	s.set('editor_options.defaultValue', '24px');
+	assert.deepEqual(saved, { editor_options: { keywords: ['auto'], units: ['px', '%'], defaultValue: '24px' } });
+	s = elementSource(saved, valueClass, {}, (attrs) => saved = attrs);
+	assert.equal(s.get('editor_options.defaultValue'), '24px');
+	assert.equal(s.isSet('editor_options.defaultValue'), true);
+	s.set('editor_options.defaultValue', undefined);
+	assert.deepEqual(saved, { editor_options: { keywords: ['auto'], units: ['px', '%'] } });
+	const inherited = { ...valueClass, attributes: { editor_options: { default_value: { defaultValue: '8px', units: ['px'] } } } };
+	s = elementSource({ editor_options: { defaultValue: '24px', units: ['px'] } }, inherited, {}, (attrs) => saved = attrs);
+	s.set('editor_options.defaultValue', undefined);
+	assert.deepEqual(saved, { editor_options: { defaultValue: '8px', units: ['px'] } });
+	assert.equal(elementSource(saved, inherited, {}, () => {}).isSet('editor_options.defaultValue'), false);
+	const fixed = elementSource({}, { ...valueClass, attributes: { editor_options: { default_value: {}, instance_modifiable: false } } }, {}, () => {});
+	assert.equal(fixed.fixed('editor_options.defaultValue'), true);
+});
