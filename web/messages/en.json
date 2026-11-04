@@ -8364,5 +8364,6 @@
 	"wpi_length_type": "Length type for {name}",
 	"wpi_length_default": "Default",
 	"wpi_length_value": "Value",
-	"wpi_length_display_type": "Display type"
+	"wpi_length_display_type": "Display type",
+	"wpi_length_display_type_tip": "Show the type selector so users can choose a unit, a keyword, or the default. When off, users edit the complete value."
 }

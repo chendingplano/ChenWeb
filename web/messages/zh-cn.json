@@ -8364,5 +8364,6 @@
 	"wpi_length_type": "{name}的长度类型",
 	"wpi_length_default": "默认",
 	"wpi_length_value": "数值",
-	"wpi_length_display_type": "显示类型"
+	"wpi_length_display_type": "显示类型",
+	"wpi_length_display_type_tip": "显示类型选择器，让用户选择单位、关键字或默认值。关闭时，用户可编辑完整的值。"
 }
