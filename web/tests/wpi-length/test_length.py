@@ -1,0 +1,19 @@
+import os
+from playwright.sync_api import sync_playwright, expect
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True, **({'executable_path': os.environ['CHROMIUM_PATH']} if os.environ.get('CHROMIUM_PATH') else {}))
+    page = browser.new_page()
+    page.goto('http://localhost:5187/', wait_until='networkidle')
+    page.locator('select.type').select_option('auto')
+    page.locator('select.type').select_option('px')
+    field = page.locator('#length')
+    expect(field).to_have_value('0')
+    field.fill('')
+    expect(field).to_be_focused()
+    expect(page.locator('select.type')).to_have_value('px')
+    field.fill('25')
+    expect(page.locator('output')).to_have_text('25px')
+    field.fill('')
+    page.get_by_text('Outside').click()
+    expect(page.locator('output')).to_have_text('unset')
+    browser.close()

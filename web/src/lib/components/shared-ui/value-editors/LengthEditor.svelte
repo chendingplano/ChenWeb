@@ -45,7 +45,7 @@
 				{#each options.choices ?? [] as choice}<option value={choice}>{choice}</option>{/each}
 			</select>
 		{:else}
-			<DraftField {id} {value} format={(v) => lengthParts(v).amount} parse={parseAmount} invalidMessage={() => m.wpi_prop_invalid_length({ allowed: [...units, ...keywords].join(', ') })} {check} commitOnBlur={options.commitOnBlur} {onChange} list={options.valueDisplay === 'select' ? `${id}-choices` : undefined} />
+			<DraftField deferEmpty {id} {value} format={(v) => lengthParts(v).amount} parse={parseAmount} invalidMessage={() => m.wpi_prop_invalid_length({ allowed: [...units, ...keywords].join(', ') })} {check} commitOnBlur={options.commitOnBlur} {onChange} list={options.valueDisplay === 'select' ? `${id}-choices` : undefined} />
 			{#if options.valueDisplay === 'select'}<datalist id={`${id}-choices`}>{#each options.choices ?? [] as choice}<option value={choice}></option>{/each}</datalist>{/if}
 		{/if}
 	{:else}

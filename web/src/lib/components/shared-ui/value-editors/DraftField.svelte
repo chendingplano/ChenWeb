@@ -22,6 +22,7 @@
 		multiline = false,
 		rows = 1,
 		commitOnBlur = false,
+		deferEmpty = false,
 		readonly = false,
 		inputmode,
 		list,
@@ -37,6 +38,7 @@
 		multiline?: boolean;
 		rows?: number;
 		commitOnBlur?: boolean;
+		deferEmpty?: boolean;
 		readonly?: boolean;
 		inputmode?: 'text' | 'numeric' | 'decimal';
 		list?: string;
@@ -77,7 +79,7 @@
 		rejected = false;
 		const r = read(text);
 		error = 'error' in r ? r.error : null;
-		if ('value' in r && !commitOnBlur) emit(r.value);
+		if ('value' in r && !commitOnBlur && !(deferEmpty && r.value === undefined)) emit(r.value);
 	}
 	// Leaving with invalid text keeps it, unapplied, until the author abandons or fixes it.
 	function leave() {
@@ -87,7 +89,7 @@
 			rejected = true;
 			return;
 		}
-		if (commitOnBlur) emit(r.value);
+		if (commitOnBlur || (deferEmpty && r.value === undefined)) emit(r.value);
 		draft = null;
 	}
 	function abandon() {
