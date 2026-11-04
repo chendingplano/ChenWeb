@@ -2196,9 +2196,20 @@
 										<div class="grid gap-1" style="grid-template-columns: 160px 1fr;">
 											{#each Object.entries(item as Record<string, unknown>) as [key, val]}
 												<span style="font-size:12px; color:{textMuted}; word-break:break-all;">{key}</span>
-												<span style="font-size:12px; color:{textPrimary}; word-break:break-word;">
-													{val === null || val === undefined ? '—' : typeof val === 'object' ? JSON.stringify(val) : String(val)}
-												</span>
+												{#if key === 'phases' && Array.isArray(tryParseJsonLike(val)) && (tryParseJsonLike(val) as unknown[]).length > 0}
+													<div style="min-width:0;">
+														{#each flattenNestedForDisplay(tryParseJsonLike(val)) as row}
+															<div style="display:flex; align-items:baseline; padding-left:{row.depth * 16}px; gap:8px; padding-bottom:2px;">
+																<span style="font-size:12px; width:120px; flex-shrink:0; word-break:break-all; color:{row.value === null ? textSecondary : textMuted}; font-weight:{row.value === null ? '600' : '400'};">{row.key}</span>
+																{#if row.value !== null}<span style="font-size:12px; color:{textPrimary}; word-break:break-word; min-width:0;">{row.value}</span>{/if}
+															</div>
+														{/each}
+													</div>
+												{:else}
+													<span style="font-size:12px; color:{textPrimary}; word-break:break-word;">
+														{val === null || val === undefined ? '—' : typeof val === 'object' ? JSON.stringify(val) : String(val)}
+													</span>
+												{/if}
 											{/each}
 										</div>
 									</div>
