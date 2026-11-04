@@ -73,7 +73,7 @@
 		return p.write ? p.write(v) : v;
 	}
 	function editorOf(p: PropertyDef) {
-		if (readOnly(p)) return valueEditors['read-only'];
+		if (readOnly(p) && p.editor !== 'length') return valueEditors['read-only'];
 		return valueEditors[p.editor ?? commonSenseEditor(p.name, source.defaultValue(p.name))];
 	}
 	function isEditableColor(p: PropertyDef) {
@@ -136,7 +136,7 @@
 					{@const Editor = editorOf(p)}
 					{@const help = tip(p)}
 					{@const warn = warning(p)}
-					<div class="property" data-property={p.name}>
+					<div class="property" class:length-property={p.editor === 'length'} data-property={p.name}>
 						<div class="heading">
 							<label for={id}>
 								{p.label?.() ?? p.name}{#if source.required(p.name)}<span
@@ -166,7 +166,7 @@
 								{id}
 								label={p.label?.() ?? p.name}
 								value={edited(p)}
-								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p) }}
+								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
 								check={check(p)}
 								onChange={(v) => source.set(p.name, toStored(p, v))}
 							/>
@@ -221,6 +221,9 @@
 	.property {
 		margin: 0 0 12px;
 	}
+	.length-property { display: grid; grid-template-columns: minmax(60px, 1fr) minmax(100px, 2fr); align-items: start; gap: 4px; }
+	.length-property .heading { margin: 0; padding: 4px 0 0; }
+	.length-property .hint, .length-property .warning { grid-column: 1 / -1; }
 	.heading {
 		display: flex;
 		align-items: center;

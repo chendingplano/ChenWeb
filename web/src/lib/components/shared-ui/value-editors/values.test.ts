@@ -75,3 +75,13 @@ test('moving a list item stays within the list', () => {
 	assert.deepEqual(moved(['a', 'b', 'c'], 1, -1), ['b', 'a', 'c']);
 	assert.deepEqual(moved(['a', 'b'], 1, 1), ['a', 'b']);
 });
+
+test('length parts and type changes preserve values without conversion', async () => {
+	const { lengthParts, lengthWithType } = await import('./values');
+	assert.deepEqual(lengthParts('12.5rem'), { amount: '12.5', type: 'rem' });
+	assert.deepEqual(lengthParts('auto'), { amount: '', type: 'auto' });
+	assert.deepEqual(lengthParts(undefined), { amount: '', type: '' });
+	assert.equal(lengthWithType('12rem', '%', ['px', 'rem', '%']), '12%');
+	assert.equal(lengthWithType('auto', 'px', ['px']), '0px');
+	assert.equal(lengthWithType('12px', 'default', ['px']), undefined);
+});

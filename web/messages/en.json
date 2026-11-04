@@ -8360,5 +8360,7 @@
 	"wpi_color_resize": "Resize color dialog with arrow keys",
 	"wpi_color_rgb": "RGB",
 	"wpi_resize_content_minimum": "The requested size is below the minimum of {width} × {height} pixels. Apply the minimum size?",
-	"wpi_resize_confirmation": "Confirm resize"
+	"wpi_resize_confirmation": "Confirm resize",
+	"wpi_length_type": "Length type for {name}",
+	"wpi_length_default": "Default"
 }

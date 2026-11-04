@@ -24,6 +24,7 @@
 		commitOnBlur = false,
 		readonly = false,
 		inputmode,
+		list,
 		onChange
 	}: {
 		id: string;
@@ -38,6 +39,7 @@
 		commitOnBlur?: boolean;
 		readonly?: boolean;
 		inputmode?: 'text' | 'numeric' | 'decimal';
+		list?: string;
 		onChange: (value: Json | undefined) => void;
 	} = $props();
 
@@ -120,6 +122,7 @@
 		class="ve-input"
 		type="text"
 		{inputmode}
+		{list}
 		{readonly}
 		aria-label={ariaLabel}
 		aria-invalid={rejected}

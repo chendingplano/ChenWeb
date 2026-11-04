@@ -37,6 +37,17 @@ export function parseLength(text: string, keywords: string[], units: string[]): 
 	return { ok: true, value: `${m[1]}${unit}` };
 }
 
+export function lengthParts(value: Json | undefined): { amount: string; type: string } {
+	if (typeof value !== 'string') return { amount: '', type: '' };
+	const match = /^(\d+(?:\.\d+)?)(px|rem|em|%)$/.exec(value);
+	return match ? { amount: match[1], type: match[2] } : { amount: '', type: value };
+}
+
+export function lengthWithType(value: Json | undefined, type: string, units: string[]): string | undefined {
+	if (type === 'default' || type === '') return undefined;
+	return units.includes(type) ? `${lengthParts(value).amount || '0'}${type}` : type;
+}
+
 export function parseNumber(text: string, opts: { min?: number; max?: number; integer?: boolean }): Parsed {
 	const t = text.trim();
 	if (t === '') return { ok: true, value: undefined };

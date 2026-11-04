@@ -14,6 +14,12 @@ export type ValueEditorOptions = {
 	// length: the keywords and units allowed; a number without a unit means px.
 	keywords?: string[];
 	units?: string[];
+	defaultValue?: string;
+	useDefault?: boolean;
+	valueDisplay?: 'input' | 'label' | 'select';
+	allowCustomValue?: boolean;
+	helpTip?: string | { en: string; 'zh-cn': string };
+	readOnly?: boolean;
 	// number
 	min?: number;
 	max?: number;

@@ -8360,5 +8360,7 @@
 	"wpi_color_resize": "使用方向键调整颜色对话框大小",
 	"wpi_color_rgb": "RGB",
 	"wpi_resize_content_minimum": "所选尺寸小于最小值 {width} × {height} 像素。是否应用最小尺寸？",
-	"wpi_resize_confirmation": "确认调整尺寸"
+	"wpi_resize_confirmation": "确认调整尺寸",
+	"wpi_length_type": "{name}的长度类型",
+	"wpi_length_default": "默认"
 }

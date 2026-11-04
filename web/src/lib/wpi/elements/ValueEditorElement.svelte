@@ -5,6 +5,7 @@
 	import { untrack } from 'svelte';
 	import { valueEditors } from '$lib/components/shared-ui/property-editor/editors';
 	import ColorModeSelect from '$lib/components/shared-ui/value-editors/ColorModeSelect.svelte';
+	import HelpTip from '$lib/components/shared-ui/property-editor/HelpTip.svelte';
 	import type { ValueEditorOptions } from '$lib/components/shared-ui/value-editors/types';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { listActionClasses, listPageLayouters } from '../api';
@@ -22,7 +23,7 @@
 	const editor = $derived(d.editor ?? '');
 	const drawing = $derived(drawingEditor(editor));
 	const View = $derived(
-		drawing && valueEditors[d.binding_mode === 'read-only' ? 'read-only' : drawing]
+		drawing && valueEditors[d.binding_mode === 'read-only' && drawing !== 'length' ? 'read-only' : drawing]
 	);
 	const colorHeading = $derived(drawing === 'color' && d.binding_mode !== 'read-only');
 	// Without a binding the value stays on the page; an unset value is written as null.
@@ -61,7 +62,8 @@
 	const options = $derived<ValueEditorOptions>({
 		...((d.editor_options ?? {}) as ValueEditorOptions),
 		...(loads && loaded ? { choices: loaded } : {}),
-		...(colorHeading ? { colorModeInHeading: true } : {})
+		...(colorHeading ? { colorModeInHeading: true } : {}),
+		...(drawing === 'length' ? { readOnly: d.binding_mode === 'read-only', useDefault: value == null } : {})
 	});
 
 	function check(next: Json): string | null {
@@ -76,7 +78,7 @@
 </script>
 
 {#if View}
-	<div class="value-editor">
+	<div class="value-editor" class:length-editor={drawing === 'length'}>
 		<div class="heading">
 			<label class="caption" for={id}>{localized(d.label)}</label>
 			{#if colorHeading}<ColorModeSelect
@@ -86,6 +88,7 @@
 					theme={options.theme}
 					onChange={change}
 				/>{/if}
+		{#if drawing === 'length' && options.helpTip}<span class="tip"><HelpTip id={`${id}-tip`} tip={localized(options.helpTip)} name={localized(d.label)} /></span>{/if}
 		</div>
 		<View {id} label={localized(d.label)} {value} {options} {check} onChange={change} />
 		{#if loadFailed}<p class="error">{m.wpi_value_editor_choices_failed()}</p>{/if}
@@ -106,6 +109,9 @@
 		min-width: 0;
 		width: 100%;
 	}
+	.length-editor { display: grid; grid-template-columns: minmax(60px, 1fr) minmax(100px, 2fr); align-items: start; }
+	.length-editor .error { grid-column: 1 / -1; }
+	.tip { position: relative; width: 14px; height: 14px; }
 	.heading {
 		display: flex;
 		align-items: center;
