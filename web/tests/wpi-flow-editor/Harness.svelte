@@ -63,7 +63,7 @@
 <output id="action">{action}</output>
 <div id="runtime"><WpiApp bundle={runtimeBundle} editorPreview /></div>
 <pre id="page">{JSON.stringify(page)}</pre>
-<div style="position:relative; width:1100px; height:400px">
+<div style="position:relative; width:1100px; height:400px; pointer-events:none">
 	<PagePreview {darkMode} descriptor={page} {nodes} {selectedId} selectedPane={null} size={previewSize} zoom={1}
 		onResizeStart={noop} onResize={(value) => previewSize = value} onSelect={(id) => selectedId = id} onSelectPane={noop} onMeasure={noop}
 		onPaneResize={noop} onPageResize={(axis, value) => page = resizePageDimension(page, axis, value)} onPageCancel={(original) => page = original} onMeasurePanes={noop} />
