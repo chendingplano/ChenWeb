@@ -108,6 +108,8 @@ func (r ambiguousObjectLLMJSONResolver) ResolveAmbiguousObject(ctx context.Conte
 		"resolve_ambiguous_object",
 		"MID-2026092901",
 	)
+	// Each artifact differs, so keep the reusable instructions first for caching.
+	in.DocumentFirst = false
 	var payload map[string]any
 	if structured, ok := r.client.(LLMStructuredJSONExtractor); ok {
 		result, err := structured.ExtractStructuredJSON(ctx, in, ambiguousObjectResolutionContract())
