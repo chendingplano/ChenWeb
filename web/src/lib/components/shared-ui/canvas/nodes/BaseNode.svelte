@@ -54,20 +54,20 @@
   <!-- Mini toolbar (only when selected) -->
   {#if selected && (actions || onEdit)}
     <div
-      class="nodrag absolute flex gap-1"
-      style="top:-30px; left:50%; transform:translateX(-50%); background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; white-space:nowrap; z-index:10;"
+      class="nodrag absolute flex gap-1.5"
+      style="top:-46px; left:50%; transform:translateX(-50%); background:var(--cv-toolbar); border:1px solid var(--cv-border); border-radius:8px; padding:4px 6px; white-space:nowrap; z-index:10;"
     >
       {#if onEdit}
-        <button onclick={(e) => run(e, () => onEdit?.())} title={m.basenode_edit_class()} style="background:none; border:none; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label={m.basenode_edit_class()}>
-          <PencilIcon class="w-3 h-3" />
+        <button onclick={(e) => run(e, () => onEdit?.())} title={m.basenode_edit_class()} style="background:none; border:none; cursor:pointer; color:var(--cv-text-2); padding:4px; min-width:28px; min-height:28px; border-radius:4px; display:flex; align-items:center; justify-content:center;" aria-label={m.basenode_edit_class()}>
+          <PencilIcon class="w-4 h-4" />
         </button>
       {/if}
       {#if actions}
-        <button onclick={(e) => run(e, () => actions.duplicate(id))} title={m.basenode_duplicate()} style="background:none; border:none; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label={m.basenode_duplicate()}>
-          <CopyIcon class="w-3 h-3" />
+        <button onclick={(e) => run(e, () => actions.duplicate(id))} title={m.basenode_duplicate()} style="background:none; border:none; cursor:pointer; color:var(--cv-text-2); padding:4px; min-width:28px; min-height:28px; border-radius:4px; display:flex; align-items:center; justify-content:center;" aria-label={m.basenode_duplicate()}>
+          <CopyIcon class="w-4 h-4" />
         </button>
-        <button onclick={(e) => run(e, () => actions.remove(id))} title={m.basenode_delete()} style="background:none; border:none; cursor:pointer; color:#ef4444; padding:1px 3px; border-radius:3px; display:flex; align-items:center;" aria-label={m.basenode_delete()}>
-          <Trash2Icon class="w-3 h-3" />
+        <button onclick={(e) => run(e, () => actions.remove(id))} title={m.basenode_delete()} style="background:none; border:none; cursor:pointer; color:#ef4444; padding:4px; min-width:28px; min-height:28px; border-radius:4px; display:flex; align-items:center; justify-content:center;" aria-label={m.basenode_delete()}>
+          <Trash2Icon class="w-4 h-4" />
         </button>
       {/if}
     </div>

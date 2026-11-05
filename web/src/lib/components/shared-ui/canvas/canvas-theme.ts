@@ -8,6 +8,7 @@ const DARK = {
 	panel: '#111827', // side panels and dialogs
 	raised: '#161b27', // tool bar, nodes, minimap, cards
 	surface: '#1e2535', // inputs, list items, chips
+	toolbar: '#30394d', // floating node toolbar
 	'surface-hover': '#273046',
 	field: '#0d1117', // inline edit fields
 	divider: '#1e2a3a', // lines between areas
@@ -33,6 +34,7 @@ const LIGHT: typeof DARK = {
 	panel: '#ffffff',
 	raised: '#ffffff',
 	surface: '#f1f5f9',
+	toolbar: '#cbd5e1', // floating node toolbar
 	'surface-hover': '#e2e8f0',
 	field: '#ffffff',
 	divider: '#e5e7eb',
