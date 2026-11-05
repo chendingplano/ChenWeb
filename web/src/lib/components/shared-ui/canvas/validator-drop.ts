@@ -4,6 +4,7 @@
 import type { Node } from '@xyflow/svelte';
 import type { ElementClassSummary } from '$lib/wpi/api';
 import type { JsonObject } from '$lib/wpi/types';
+import { classVersion, makeInstanceId, newDynamicInstanceId, nextSeqno } from '$lib/wpi/instance-ids';
 import { newValidatorInstance, type ValidatorClass } from '$lib/wpi/validators';
 
 // The code module of an element node: its class copy's, else its listed class's.
@@ -13,12 +14,18 @@ export function elementModule(node: Node, classes: ElementClassSummary[]): strin
 	return classes.find((c) => c.descriptor_id === node.data.element)?.code_module_id ?? '';
 }
 
-export function addValidator(nodes: Node[], nodeId: string, cls: ValidatorClass): Node[] {
+// `taken` are the page's other descriptors, whose seqnos are in use.
+export function addValidator(nodes: Node[], nodeId: string, cls: ValidatorClass, taken: JsonObject[] = []): Node[] {
 	return nodes.map((n) => {
 		if (n.id !== nodeId) return { ...n, selected: false };
 		const attrs = (n.data.attrs as JsonObject | undefined) ?? {};
 		const list = Array.isArray(attrs.validators) ? attrs.validators : [];
-		const validators = [...list, newValidatorInstance(cls) as unknown as JsonObject];
+		const instance = {
+			...newValidatorInstance(cls),
+			instance_id: makeInstanceId(cls.descriptor_id, classVersion('validator', cls.descriptor_id) ?? 1, nextSeqno([...taken, ...nodes.map((x) => ({ instance_id: x.data.instance_id, attrs: x.data.attrs }) as JsonObject)])),
+			dynamic_instance_id: newDynamicInstanceId()
+		} as unknown as JsonObject;
+		const validators = [...list, instance];
 		return { ...n, selected: true, data: { ...n.data, attrs: { ...attrs, validators } } };
 	});
 }

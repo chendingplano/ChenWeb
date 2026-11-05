@@ -349,6 +349,31 @@ func (h *Handler) ListValidatorClasses(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"classes": bodies})
 }
 
+// ListClassVersions returns the latest active version of every class, by kind
+// and class ID. A class copy has no version attribute, so the editor reads the
+// versions here to build the instance_id of each copy it places
+// (<descriptor_id>_<version>_<seqno>).
+// Endpoint: GET /api/v1/wpi/classes/versions
+func (h *Handler) ListClassVersions(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	out := map[Kind]map[string]int{}
+	for _, kind := range []Kind{KindElement, KindAction, KindPageLayouter, KindElementLayouter, KindValidator} {
+		classes, err := (store{h.DB}).latest(c.Request().Context(), kind, nil)
+		if err != nil {
+			handlerLog.Error("WPI class versions failed", "kind", kind, "user", actorName(user), "error", err)
+			return errorJSON(c, http.StatusInternalServerError, "Unable to list class versions")
+		}
+		out[kind] = make(map[string]int, len(classes))
+		for id, d := range classes {
+			out[kind][id] = d.Version
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"versions": out})
+}
+
 // ListTriggerActions returns active action classes supported by click triggers.
 // The Class tab requests scope=all to choose any stored active action class.
 func (h *Handler) ListTriggerActions(c echo.Context) error {

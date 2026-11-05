@@ -7,6 +7,7 @@
 // out of the node's JSON and put back in the page.
 import type { Node } from '@xyflow/svelte';
 import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
+import { newDynamicInstanceId, stampInstances, stripDynamicIds } from '$lib/wpi/instance-ids';
 import type { Json, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
 import { normalizeElementLengths, withListSourceDefaults } from './element-attributes';
 
@@ -25,9 +26,12 @@ export function nodeJson(node: Node): JsonObject {
 	return { element, ...normalizeElementLengths(element === 'list' ? withListSourceDefaults(attrs, undefined) : attrs) };
 }
 
-// Canvas instance IDs identify nodes in this editor session; they are not WPI attributes.
+// An element node's instance_id is saved with the page; its dynamic_instance_id is
+// generated at run time and shown here only (devdoc 2026102601 §3.4).
 export function nodeViewJson(node: Node): JsonObject {
- return isElementNode(node) ? { instance_id: node.id, ...nodeJson(node) } : nodeJson(node);
+ if (!isElementNode(node)) return nodeJson(node);
+ const { instance_id, dynamic_instance_id } = node.data as { instance_id?: string; dynamic_instance_id?: string };
+ return { ...(instance_id ? { instance_id } : {}), ...(dynamic_instance_id ? { dynamic_instance_id } : {}), ...nodeJson(node) };
 }
 
 export function elementIssueLocation(path: string, nodes: Node[], page: JsonObject): { pane: string; index: number; id: string; field: string } | null {
@@ -46,7 +50,7 @@ export function elementIssueLocation(path: string, nodes: Node[], page: JsonObje
 // its pane.
 export function nodeData(node: Node, json: JsonObject): Record<string, unknown> {
 	if (!isElementNode(node)) return json;
-	const { element, class: _copy, instance_id: _id, ...attrs } = json;
+	const { element, class: _copy, instance_id: _id, dynamic_instance_id: _dyn, ...attrs } = json;
 	return { ...node.data, element, attrs };
 }
 
@@ -63,10 +67,13 @@ export function paneNodes(nodes: Node[], pane: string): Node[] {
 		.sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
 }
 
-// An element node as the instance its panel stores: with its class copy.
+// An element node as the instance its panel stores: with its instance_id and class
+// copy, and without any dynamic_instance_id, its own or its validators' and actions'.
 export function instanceJson(node: Node): JsonObject {
 	const copy = node.data.class as JsonObject | undefined;
-	return copy ? { ...nodeJson(node), class: copy } : nodeJson(node);
+	const id = node.data.instance_id as string | undefined;
+	const { element, ...rest } = stripDynamicIds(nodeJson(node));
+	return { element, ...(id ? { instance_id: id } : {}), ...rest, ...(copy ? { class: copy } : {}) };
 }
 
 // The canvas as a page: the page's attributes and page layouter, and for each
@@ -84,7 +91,7 @@ export function pageJson(nodes: Node[], page: JsonObject): JsonObject {
 		if (!panel && own.length === 0) continue;
 		panels[pane] = { ...(panel ?? { elem_layouter: { layouter: 'flow-layouter' } }), elem_list: own.map(instanceJson) };
 	}
-	return { ...page, schema_version: PAGE_SCHEMA_VERSION, panels };
+	return stripDynamicIds({ ...page, schema_version: PAGE_SCHEMA_VERSION, panels });
 }
 
 // One editable node per element instance of every panel, in the order of the
@@ -102,12 +109,12 @@ export function pageNodes(page: JsonObject): Node[] {
 			if (!instance || typeof instance !== 'object' || Array.isArray(instance) || typeof instance.element !== 'string') {
 				throw new Error('Invalid element instance');
 			}
-			const { element, class: copy, ...attrs } = instance;
+			const { element, class: copy, instance_id, ...attrs } = instance;
 			nodes.push({
 				id: `wpi-element-loaded-${pane}-${index}`,
 				type: 'wpi-element',
 				position: { x: 60 + (index % 4) * 240, y: 60 + p * 4000 + Math.floor(index / 4) * 160 },
-				data: { label: element, element, attrs, pane, ...(copy ? { class: copy } : {}) }
+				data: { label: element, element, attrs: stampInstances(attrs, null), pane, dynamic_instance_id: newDynamicInstanceId(), ...(typeof instance_id === 'string' ? { instance_id } : {}), ...(copy ? { class: copy } : {}) }
 			});
 		});
 	});

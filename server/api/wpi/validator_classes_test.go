@@ -168,3 +168,19 @@ func TestValidatorModuleRefs(t *testing.T) {
 		t.Fatalf("no validator module ref: %+v", pageModules("p", body, els))
 	}
 }
+
+// instance_id names a copy within its page (devdoc 2026102601 §3.4): it is
+// accepted on an element and on a validator, and is not an attribute of the class.
+func TestInstanceIDAccepted(t *testing.T) {
+	classes := validatorClasses()
+	page := pageWith(`{"element": "input", "instance_id": "input_1_1", "label": "Age", "data_binding": "$input_doc.age", "validators": [{"validator": "integer", "instance_id": "integer_1_2"}]}`)
+	expectIssue(t, writePage(t, classes, page), "")
+	// Action instances and layouter copies take one too.
+	body := decode(t, pageWith(`{"element": "button", "instance_id": "button_1_3", "label": "Save", "on_click": {"action": "save-page", "instance_id": "save-page_1_4"}}`))
+	body["page_layouter"].(map[string]any)["instance_id"] = "single-pane_1_5"
+	body["panels"].(map[string]any)["main"].(map[string]any)["elem_layouter"] = map[string]any{"layouter": "flow-layouter", "instance_id": "flow-layouter_1_6"}
+	if issues, err := fillClassCopies(context.Background(), "p", body, fixtureLoader(t, classes)); err != nil || len(issues) > 0 {
+		t.Fatalf("copies: %v %v", issues, err)
+	}
+	expectIssue(t, ValidateDescriptor(KindPage, "p", body), "")
+}

@@ -133,7 +133,7 @@ func (v *validator) validatorList(val any, path string) {
 		if !ok {
 			continue
 		}
-		v.keys(m, p, []string{"validator", copyKey}, "constraints", "messages")
+		v.keys(m, p, []string{"validator", copyKey}, "constraints", "messages", instanceIDKey)
 		row, ok := v.classCopy(KindValidator, m, "validator", p)
 		if !ok {
 			continue

@@ -27,12 +27,14 @@
  import { MIN_PANE_SIZE } from './pane-edit';
  import { pageDragSize, type PageSide } from './page-resize';
  import { resizeElement, resizeHandles, resizeOutline as elementResizeOutline, resizeLimitChanges, type ResizeLimit, type ResizeLimitChange, type ElementHandle } from './element-resize';
+ import { dropIndex } from './element-order';
 
- let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, pageLayouterAvailable, elementLayouterAvailable, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onViewLayouter, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize }: {
+ let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, pageLayouterAvailable, elementLayouterAvailable, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onViewLayouter, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize, onMoveElement }: {
   darkMode: boolean; pageName: string; dirty: boolean; openedAt: number | null; autoSavedAt: number | null; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
   pageLayouterAvailable: boolean; elementLayouterAvailable: boolean;
   size: { width: number; height: number }; zoom: number;
   onElementResize: (id: string, size: { width?: number; height?: number }, changes: ResizeLimitChange[]) => void;
+  onMoveElement: (id: string, index: number) => void;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
   onViewLayouter: (view: 'page-layouter' | 'element-layouter') => void;
@@ -213,6 +215,45 @@
   }
   event.stopPropagation();
  }
+ // Dragging an element to another place in its pane. The drag starts after a few
+ // pixels, so a click still selects; the drop lands among the pane's other elements.
+ let reorder: { id: string; pane: string; pointer: number; x: number; y: number; from: number; dragging: boolean; index: number } | null = null;
+ let reorderLine = $state<{ x: number; y: number; height: number } | null>(null);
+ function startReorder(event: PointerEvent, id: string) {
+  if (event.button !== 0) return;
+  const pane = String(nodes.find((n) => n.id === id)?.data.pane ?? '');
+  reorder = { id, pane, pointer: event.pointerId, x: event.clientX, y: event.clientY, from: paneNodes(elements, pane).findIndex((n) => n.id === id), dragging: false, index: 0 };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault(); event.stopPropagation();
+ }
+ function moveReorder(event: PointerEvent) {
+  const r = reorder;
+  if (!r || r.pointer !== event.pointerId) return;
+  if (!r.dragging) {
+   if (Math.hypot(event.clientX - r.x, event.clientY - r.y) < 4) return;
+   r.dragging = true;
+  }
+  const others = [...previewElement.querySelectorAll<HTMLElement>('[data-editor-element]')].filter((el) => el.dataset.editorElement !== r.id && el.closest('[data-editor-pane]')?.getAttribute('data-editor-pane') === r.pane);
+  const boxes = others.map((el) => el.getBoundingClientRect());
+  r.index = dropIndex(boxes, event.clientX, event.clientY);
+  reorderLine = reorderMark(boxes, r.index);
+  event.stopPropagation();
+ }
+ // The bar at the drop place, in the preview's coordinates like the element outline.
+ function reorderMark(boxes: DOMRect[], index: number) {
+  const box = boxes[index] ?? boxes[index - 1];
+  if (!box) return null;
+  const scale = zoom || 1;
+  const preview = previewElement.getBoundingClientRect();
+  const x = index < boxes.length ? box.left : box.right;
+  return { x: (x - preview.left) / scale - previewElement.clientLeft, y: (box.top - preview.top) / scale - previewElement.clientTop, height: box.height / scale };
+ }
+ function endReorder(event: PointerEvent, cancel = false) {
+  const r = reorder;
+  if (!r || r.pointer !== event.pointerId) return;
+  reorder = null; reorderLine = null;
+  if (r.dragging && !cancel && r.index !== r.from) onMoveElement(r.id, r.index);
+ }
  let drag: { id: number; x: number; y: number; width: number; height: number; zoom: number; pageWidth: number; pageHeight: number; original: JsonObject; movedX: boolean; movedY: boolean } | null = null;
  let resizeOutline = $state<{ width: number; height: number } | null>(null);
  function startResize(event: PointerEvent) {
@@ -389,7 +430,7 @@
        {:else if rt.root}
         <ElementView instanceId={rt.root} element={item.entry} />
        {/if}
-       <button class:selected={selectedId === item.node.id} class="overlay nodrag nopan" aria-label={m.wpi_preview_select({ name: String(item.node.data.label ?? item.node.data.element ?? '') })} aria-pressed={selectedId === item.node.id} onpointerdown={(event) => event.stopPropagation()} onclick={(event) => { event.stopPropagation(); onSelect(item.node.id); }}></button>
+       <button class:selected={selectedId === item.node.id} class="overlay nodrag nopan" aria-label={m.wpi_preview_select({ name: String(item.node.data.label ?? item.node.data.element ?? '') })} aria-pressed={selectedId === item.node.id} onpointerdown={(event) => startReorder(event, item.node.id)} onpointermove={moveReorder} onpointerup={endReorder} onpointercancel={(event) => endReorder(event, true)} onclick={(event) => { event.stopPropagation(); onSelect(item.node.id); }}></button>
        {#if selectedId === item.node.id && elementSizes[item.node.id]}
         {#each resizeHandles(elementSizes[item.node.id].width, elementSizes[item.node.id].height, zoom || 1) as handle}
          <button type="button" class="element-grip nodrag nopan {handle}" aria-label={m.wpi_resize_element({ direction: handle })} title={m.wpi_resize_element({ direction: handle })} onpointerdown={(event) => startElementResize(event, item.node.id, handle)} onpointermove={moveElementResize} onclick={(event) => event.stopPropagation()} onkeydown={(event) => elementResizeKey(event, item.node.id, handle)} onpointerup={endElementResize} onpointercancel={(event) => endElementResize(event, true)}></button>
@@ -420,6 +461,7 @@
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape' && resizeNotice) { event.preventDefault(); resizeNotice = null; } }} />
 <div bind:this={previewElement} class="preview select-text" style="width:{size.width}px; height:{size.height}px; color-scheme:{darkMode ? 'dark' : 'light'}" data-wpi-page-preview>
  {#if elementOutline}<div class="element-resize-outline" style:left="{elementOutline.x}px" style:top="{elementOutline.y}px" style:width="{elementOutline.width}px" style:height="{elementOutline.height}px" aria-hidden="true"></div>{/if}
+ {#if reorderLine}<div class="reorder-line" style:left="{reorderLine.x}px" style:top="{reorderLine.y}px" style:height="{reorderLine.height}px" aria-hidden="true"></div>{/if}
  {#if failures.length}<ErrorBox title={m.wpi_editor_element_classes_failed()} message={failures.join(', ')} />{/if}
  {#if ready}
   <div style="{placeStyle({ hori_align: page.hori_align, vert_align: page.vert_align, hori_scrollbar: page.hori_scrollbar, vert_scrollbar: page.vert_scrollbar })}; padding: 0 40px 40px">
@@ -446,9 +488,9 @@
      <DropdownMenu.Item disabled={!elementLayouterAvailable} onclick={() => onViewLayouter('element-layouter')}>{m.wpi_preview_element_layouter()}</DropdownMenu.Item>
     </DropdownMenu.Content>
    </DropdownMenu.Root>
-   {#if actions.editClass}<button title={m.basenode_edit_class()} aria-label={m.basenode_edit_class()} onclick={(event) => { event.stopPropagation(); actions.editClass?.(selectedId!); }}><PencilIcon class="w-3 h-3" /></button>{/if}
-   <button title={m.basenode_duplicate()} aria-label={m.basenode_duplicate()} onclick={(event) => { event.stopPropagation(); actions.duplicate(selectedId!); }}><CopyIcon class="w-3 h-3" /></button>
-   <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
+   {#if actions.editClass}<button title={m.basenode_edit_class()} aria-label={m.basenode_edit_class()} onclick={(event) => { event.stopPropagation(); actions.editClass?.(selectedId!); }}><PencilIcon class="w-4 h-4" /></button>{/if}
+   <button title={m.basenode_duplicate()} aria-label={m.basenode_duplicate()} onclick={(event) => { event.stopPropagation(); actions.duplicate(selectedId!); }}><CopyIcon class="w-4 h-4" /></button>
+   <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-4 h-4" /></button>
   </div>
  {/if}
 {#if resizeNotice && selectedId === resizeNotice.id}
@@ -468,9 +510,12 @@
  .preview { position: absolute; left: 0; top: 0; background: var(--background); color: var(--foreground); border: 1px solid var(--cv-border); overflow: hidden; pointer-events: auto; }
  .element-resize-outline { position:absolute; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:9; }
  .resize-outline { position:absolute; left:0; top:0; box-sizing:border-box; border:2px dashed var(--cv-accent); pointer-events:none; z-index:6; }
- .element-toolbar { pointer-events:auto; position:absolute; z-index:10; transform:translate(-50%, -100%); display:flex; gap:4px; background:var(--cv-surface); border:1px solid var(--cv-border); border-radius:6px; padding:3px 6px; }
- .element-toolbar button { background:none; border:0; cursor:pointer; color:var(--cv-text-2); padding:1px 3px; display:flex; align-items:center; }
+ .element-toolbar { pointer-events:auto; position:absolute; z-index:10; transform:translate(-50%, -100%); display:flex; gap:4px; background:var(--cv-toolbar); border:1px solid var(--cv-border); border-radius:8px; padding:4px 6px; }
+ .element-toolbar button { background:none; border:0; cursor:pointer; color:var(--cv-text-2); padding:4px; min-width:28px; min-height:28px; border-radius:4px; display:flex; align-items:center; justify-content:center; }
+ .element-toolbar button:hover { background:var(--cv-toolbar-hover); color:#fff; }
+ .element-toolbar button:focus-visible { outline:2px solid var(--cv-accent); outline-offset:1px; }
  .element-toolbar button:last-child { color:#ef4444; }
+ .element-toolbar button:last-child:hover { color:#fff; }
  .resize-handle { position:absolute; right:0; bottom:0; width:18px; height:18px; z-index:5; border:0; background: linear-gradient(135deg, transparent 45%, var(--cv-accent) 46%, var(--cv-accent) 52%, transparent 53%, transparent 64%, var(--cv-accent) 65%, var(--cv-accent) 71%, transparent 72%); cursor:nwse-resize; touch-action:none; }
  .resize-handle:focus-visible { outline:2px solid var(--cv-accent); }
  .pane { position: relative; outline: 1px dashed rgba(99,102,241,.25); outline-offset: -1px; }
@@ -502,4 +547,5 @@
  .element-grip.ne, .element-grip.sw { cursor:nesw-resize; }
  .overlay:hover { background: rgba(99,102,241,.08); border-color: rgba(99,102,241,.5); }
  .overlay.selected, .overlay:focus-visible { background: rgba(99,102,241,.08); border: 2px solid #6366f1; outline: none; }
+.reorder-line { position: absolute; z-index: 4; width: 3px; margin-left: -1px; border-radius: 2px; background: #6366f1; pointer-events: none; }
 </style>

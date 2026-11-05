@@ -116,12 +116,22 @@ test('element tree shows the configured panel layouter name', () => {
 	assert.match(elementTree([], page, { pane: 'pane', panel: 'panel', layouter: 'Layouter', elements: 'Element List' }), /Layouter: custom-layouter/);
 });
 
-test('element JSON shows canvas instance ID without saving it as a descriptor attribute', async () => {
+test('instance_id is saved with the page; dynamic_instance_id is shown but never saved', async () => {
  const { nodeViewJson } = await import('./wpi-json');
- const node = element('instance-7', 'text', 0, 0, { width: 150 });
- assert.deepEqual(nodeViewJson(node), { instance_id: 'instance-7', element: 'text', width: '150px' });
- assert.deepEqual(nodeData(node, { instance_id: 'instance-7', element: 'text' }), { ...node.data, attrs: {} });
- assert.deepEqual((pageJson([node], single).panels as any).main.elem_list, [{ element: 'text', width: '150px' }]);
+ const node = element('n7', 'text', 0, 0, { width: 150 });
+ node.data = { ...node.data, instance_id: 'text_1_1', dynamic_instance_id: 'dyn-1' };
+ assert.deepEqual(nodeViewJson(node), { instance_id: 'text_1_1', dynamic_instance_id: 'dyn-1', element: 'text', width: '150px' });
+ assert.deepEqual(nodeData(node, { instance_id: 'x', dynamic_instance_id: 'y', element: 'text' }), { ...node.data, attrs: {} });
+ assert.deepEqual((pageJson([node], single).panels as any).main.elem_list, [{ element: 'text', instance_id: 'text_1_1', width: '150px' }]);
+});
+
+test('loading a page keeps instance_id and generates dynamic ids for elements and validators', () => {
+ const page = { ...single, panels: { main: { elem_list: [{ element: 'input', instance_id: 'input_4_2', validators: [{ validator: 'decimal', instance_id: 'decimal_1_3' }] }] } } };
+ const [node] = pageNodes(page);
+ assert.equal(node.data.instance_id, 'input_4_2');
+ assert.ok(node.data.dynamic_instance_id);
+ const saved = (pageJson([node], page).panels as any).main.elem_list[0];
+ assert.deepEqual(saved, { element: 'input', instance_id: 'input_4_2', validators: [{ validator: 'decimal', instance_id: 'decimal_1_3' }] });
 });
 
 test('issue location maps zero-based pointer to the displayed element and its canvas ID', async () => {

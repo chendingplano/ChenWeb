@@ -1,4 +1,5 @@
 // Client for the WPI endpoints (server/api/wpi).
+import { setClassVersions } from './instance-ids';
 import type { ActionInstance, ActionRef, Bundle, Issue, Json, JsonObject, Text } from './types';
 import type { ValidationError, ValidatorClass } from './validators';
 
@@ -114,6 +115,14 @@ export async function listElementClasses(fetchFn: typeof fetch = fetch): Promise
 
 // The active validator classes, whole, for the palette's VALIDATORS folder and
 // the Properties panel (OpenSpec wpi-primitive-validators).
+// Reads the latest version of every class into the instance ID registry.
+export async function loadClassVersions(fetchFn: typeof fetch = fetch): Promise<void> {
+	const res = await fetchFn('/api/v1/wpi/classes/versions', { credentials: 'same-origin' });
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	setClassVersions((body.versions as Record<string, Record<string, number>>) ?? {});
+}
+
 export async function listValidatorClasses(fetchFn: typeof fetch = fetch): Promise<ValidatorClass[]> {
 	const res = await fetchFn('/api/v1/wpi/classes/validator', { credentials: 'same-origin' });
 	const body = await parse(res);

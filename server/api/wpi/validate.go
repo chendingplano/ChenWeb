@@ -434,7 +434,7 @@ func (v *validator) pageLayouterCopy(val any, path string) map[string]bool {
 	if !ok {
 		return nil
 	}
-	v.keys(m, path, []string{"layouter", copyKey}, "root")
+	v.keys(m, path, []string{"layouter", copyKey}, "root", instanceIDKey)
 	row, ok := v.classCopy(KindPageLayouter, m, "layouter", path)
 	if root, present := m["root"]; present {
 		return v.paneTree(root, path+"/root")
@@ -454,7 +454,7 @@ func (v *validator) elementLayouterCopy(val any, path string) {
 	if !ok {
 		return
 	}
-	v.keys(m, path, []string{"layouter", copyKey}, "config")
+	v.keys(m, path, []string{"layouter", copyKey}, "config", instanceIDKey)
 	row, ok := v.classCopy(KindElementLayouter, m, "layouter", path)
 	if config, present := m["config"]; present && ok {
 		v.layouterConfig(str(row["code_module_id"]), config, path+"/config")
@@ -924,12 +924,19 @@ func (v *validator) noClassAttrs(m map[string]any, path string) {
 	}
 }
 
+// instanceIDKey is the attribute in which the editor records an instance's ID
+// within its page: <descriptor_id>_<version>_<seqno> (devdoc 2026102601 §3.4).
+// It identifies the copy, so it is not one of the copy's attributes. The
+// frontend's dynamic_instance_id is never saved. The editor writes it when it
+// copies the class onto the page; the server only accepts it.
+const instanceIDKey = "instance_id"
+
 // instanceAttrs returns an instance's own attributes: everything but its class
-// name (classKey), its class copy and class attributes.
+// name (classKey), its class copy, its instance_id and class attributes.
 func instanceAttrs(m map[string]any, classKey string) map[string]any {
 	out := map[string]any{}
 	for k, val := range m {
-		if k != classKey && k != copyKey && !slices.Contains(classAttrs, k) {
+		if k != classKey && k != copyKey && k != instanceIDKey && !slices.Contains(classAttrs, k) {
 			out[k] = val
 		}
 	}

@@ -15,7 +15,14 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PauseIcon from '@lucide/svelte/icons/pause';
-	import { listDocProcLogs, listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord, type ParseState } from '$lib/services/kbService';
+	import {
+		listDocProcLogs,
+		listKbInputs,
+		getKbFrontendConfig,
+		stopKbInput,
+		type KbInputRecord,
+		type ParseState
+	} from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
 		MANDATORY_DISPLAY_STAGES,
@@ -116,10 +123,30 @@
 
 	// Pie chart segments (parsed-success / parsed-failed / active / waiting)
 	let pieData = $derived([
-		{ key: 'success', label: m.doc_processor_dashboard_parsed_success(), value: pdfStats.success, color: colorSuccess },
-		{ key: 'failed', label: m.doc_processor_dashboard_parsed_failed(), value: pdfStats.failed, color: colorError },
-		{ key: 'active', label: m.doc_processor_dashboard_active(), value: pdfStats.active, color: accent },
-		{ key: 'waiting', label: m.doc_processor_dashboard_waiting(), value: pdfStats.waiting, color: textMuted }
+		{
+			key: 'success',
+			label: m.doc_processor_dashboard_parsed_success(),
+			value: pdfStats.success,
+			color: colorSuccess
+		},
+		{
+			key: 'failed',
+			label: m.doc_processor_dashboard_parsed_failed(),
+			value: pdfStats.failed,
+			color: colorError
+		},
+		{
+			key: 'active',
+			label: m.doc_processor_dashboard_active(),
+			value: pdfStats.active,
+			color: accent
+		},
+		{
+			key: 'waiting',
+			label: m.doc_processor_dashboard_waiting(),
+			value: pdfStats.waiting,
+			color: textMuted
+		}
 	]);
 	let pieTotal = $derived(pieData.reduce((sum, d) => sum + d.value, 0));
 
@@ -139,13 +166,22 @@
 	// Bar chart series (new records / parsed-success / parsed-failed / wait)
 	let barData = $derived([
 		{ label: m.doc_processor_dashboard_new_records(), value: pdfStats.total, color: accent },
-		{ label: m.doc_processor_dashboard_parsed_success(), value: pdfStats.success, color: colorSuccess },
+		{
+			label: m.doc_processor_dashboard_parsed_success(),
+			value: pdfStats.success,
+			color: colorSuccess
+		},
 		{ label: m.doc_processor_dashboard_parsed_failed(), value: pdfStats.failed, color: colorError },
 		{ label: m.doc_processor_dashboard_wait(), value: pdfStats.waiting, color: textMuted }
 	]);
 	let barMax = $derived(Math.max(1, ...barData.map((b) => b.value)));
 
-	type ParsePhase = { name: string; progress: number; status: 'pending' | 'active' | 'complete'; elapsed_seconds?: number };
+	type ParsePhase = {
+		name: string;
+		progress: number;
+		status: 'pending' | 'active' | 'complete';
+		elapsed_seconds?: number;
+	};
 	type ParseEntry = KbInputRecord['status'][number] & { phases?: ParsePhase[]; num_pages?: number };
 
 	// Read a 0–100 percentage from a parsing entry's free-form progress string
@@ -166,7 +202,10 @@
 			const value = Math.max(0, Math.min(100, parseFloat(pct[1])));
 			// 0% while actively parsing means no real page progress yet —
 			// return null so the indeterminate animation plays instead of a flat bar.
-			const isActive = (entry?.proc_status ?? (entry as Record<string, unknown>)?.['proc-status'] ?? '').toString().toLowerCase() === 'active';
+			const isActive =
+				(entry?.proc_status ?? (entry as Record<string, unknown>)?.['proc-status'] ?? '')
+					.toString()
+					.toLowerCase() === 'active';
 			if (value === 0 && isActive) return null;
 			return value;
 		}
@@ -182,7 +221,10 @@
 	function parsingProgressText(record: KbInputRecord): string {
 		const entry = findParseEntry(record);
 		const raw = entry?.progress?.trim() ?? '';
-		const isActive = (entry?.proc_status ?? (entry as Record<string, unknown>)?.['proc-status'] ?? '').toString().toLowerCase() === 'active';
+		const isActive =
+			(entry?.proc_status ?? (entry as Record<string, unknown>)?.['proc-status'] ?? '')
+				.toString()
+				.toLowerCase() === 'active';
 		if (raw === '0%' && isActive) {
 			// Show server-side elapsed time (ms_used advances via heartbeat every 15 s).
 			const msUsed = (entry as Record<string, unknown>)?.ms_used;
@@ -216,9 +258,10 @@
 				listKbInputs({ ...base, parseState: 'pending' }),
 				listKbInputs({ ...base })
 			]);
-			pdfActiveParsing = retainUnchangedData(pdfActiveParsing, (activeRes.results ?? []).filter(
-				(r) => !r.file_name?.toLowerCase().endsWith('.zip')
-			));
+			pdfActiveParsing = retainUnchangedData(
+				pdfActiveParsing,
+				(activeRes.results ?? []).filter((r) => !r.file_name?.toLowerCase().endsWith('.zip'))
+			);
 			pdfStats = retainUnchangedData(pdfStats, {
 				total: totalRes.total ?? 0,
 				success: successRes.total ?? 0,
@@ -228,7 +271,8 @@
 			});
 			pdfParsingError = '';
 		} catch (err) {
-			pdfParsingError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pdf_parsing();
+			pdfParsingError =
+				err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pdf_parsing();
 		}
 		// If active parses detected while pipeline sync is paused, wake it back up.
 		if (pdfStats.active > 0 && !autoSync) {
@@ -253,7 +297,11 @@
 	let runMode = $state<RunMode>('failed');
 	let forceClear = $state(false);
 	let maxRecords = $state<number>(5);
-	let noEligibleDialog = $state<{ recordCount: number; modeLabel: string; fromSearch?: boolean } | null>(null);
+	let noEligibleDialog = $state<{
+		recordCount: number;
+		modeLabel: string;
+		fromSearch?: boolean;
+	} | null>(null);
 	let searchingRecords = $state(false);
 
 	$effect(() => {
@@ -274,11 +322,21 @@
 		stoppingIds = new Set([...stoppingIds, record.id]);
 		try {
 			await stopKbInput(record.id);
-			launchToast = { kind: 'success', msg: m.doc_processor_dashboard_stop_requested_for_record({ id: record.id }) };
-			setTimeout(() => { launchToast = null; }, 4000);
+			launchToast = {
+				kind: 'success',
+				msg: m.doc_processor_dashboard_stop_requested_for_record({ id: record.id })
+			};
+			setTimeout(() => {
+				launchToast = null;
+			}, 4000);
 		} catch (err) {
-			launchToast = { kind: 'error', msg: err instanceof Error ? err.message : m.doc_processor_dashboard_stop_failed() };
-			setTimeout(() => { launchToast = null; }, 4000);
+			launchToast = {
+				kind: 'error',
+				msg: err instanceof Error ? err.message : m.doc_processor_dashboard_stop_failed()
+			};
+			setTimeout(() => {
+				launchToast = null;
+			}, 4000);
 		} finally {
 			stoppingIds = new Set([...stoppingIds].filter((id) => id !== record.id));
 		}
@@ -345,7 +403,12 @@
 	}
 
 	function recordTitle(record: KbInputRecord): string {
-		return record.title?.trim() || record.name?.trim() || record.file_name?.trim() || m.doc_processor_dashboard_record_2({ id: record.id });
+		return (
+			record.title?.trim() ||
+			record.name?.trim() ||
+			record.file_name?.trim() ||
+			m.doc_processor_dashboard_record_2({ id: record.id })
+		);
 	}
 
 	function formatTime(s?: string): string {
@@ -379,7 +442,8 @@
 	}
 
 	function toggleSync() {
-		if (autoSync) stopAutoSync(); else startAutoSync();
+		if (autoSync) stopAutoSync();
+		else startAutoSync();
 	}
 
 	// ── API calls ──────────────────────────────────────────────────────────
@@ -391,7 +455,16 @@
 			let page = 1;
 			let total = 0;
 			do {
-				const result = await listKbInputs({ docType: 'all', parseState: 'all', fileName: '', startTime: '', endTime: '', page, pageSize: 500, pipelineFilter: 'peak_waiting' });
+				const result = await listKbInputs({
+					docType: 'all',
+					parseState: 'all',
+					fileName: '',
+					startTime: '',
+					endTime: '',
+					page,
+					pageSize: 500,
+					pipelineFilter: 'peak_waiting'
+				});
 				const records = result.results ?? [];
 				waiting.push(...records);
 				total = result.total;
@@ -411,8 +484,8 @@
 			});
 			const ids = configuredProcessorIds;
 			const newPipelines = (res.results ?? [])
-				.filter(r => !r.file_name?.toLowerCase().endsWith('.zip'))
-				.filter(r => isActiveRecord(r, ids))
+				.filter((r) => !r.file_name?.toLowerCase().endsWith('.zip'))
+				.filter((r) => isActiveRecord(r, ids))
 				.slice(0, activePipelineLimit);
 			const newCount = newPipelines.length;
 			activePipelines = retainUnchangedData(activePipelines, newPipelines);
@@ -434,7 +507,8 @@
 				emptyPollCount = 0;
 			}
 		} catch (err) {
-			pipelinesError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pipelines();
+			pipelinesError =
+				err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_pipelines();
 		} finally {
 			pipelinesLoading = false;
 		}
@@ -449,7 +523,11 @@
 		});
 		if (!res.ok) {
 			const body = await res.json().catch(() => null);
-			throw new Error(body?.error_msg ?? body?.message ?? m.doc_processor_dashboard_request_failed({ status: res.status }));
+			throw new Error(
+				body?.error_msg ??
+					body?.message ??
+					m.doc_processor_dashboard_request_failed({ status: res.status })
+			);
 		}
 	}
 
@@ -465,28 +543,54 @@
 		// means convert only.
 		// Both supersede a standalone doc-processor publish to avoid double-processing.
 		if (reParse) {
-			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true });
+			await publishEvent('kb.pdf.staged', {
+				record_id: String(record.id),
+				type: record.type ?? 'pdf',
+				status: 'success',
+				force: true
+			});
 			return;
 		}
 		// extract_relation links its endpoints against extract_entity's entities. If
 		// entities don't already exist for this record, force extract_entity to run too
 		// (ADR 2026061702). Done per record so a record that already has entities is not
 		// re-run unnecessarily.
-		const chosen = buildManualLaunchOperations(selectableProcessorIds, procs, entityExtractionSucceeded(record));
+		const chosen = buildManualLaunchOperations(
+			selectableProcessorIds,
+			procs,
+			entityExtractionSucceeded(record)
+		);
 		if (reConvert) {
-			const payload: Record<string, unknown> = { record_id: String(record.id), type: 'pdf', status: 'success', force: true };
+			const payload: Record<string, unknown> = {
+				record_id: String(record.id),
+				type: 'pdf',
+				status: 'success',
+				force: true
+			};
 			if (chosen.length !== selectableProcessorIds.length) payload.operation = chosen;
 			await publishEvent('kb.pdf.parsed', payload);
 			return;
 		}
-		const payload = buildManualLaunchPayload(record.id, selectedProcessorPackage, chosen, runMode === 'force', forceClear);
+		const payload = buildManualLaunchPayload(
+			record.id,
+			selectedProcessorPackage,
+			chosen,
+			runMode === 'force',
+			forceClear
+		);
 		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}
 
-	function filterByRunMode(records: KbInputRecord[], mode: RunMode, selectedStageIds: Set<string>): KbInputRecord[] {
+	function filterByRunMode(
+		records: KbInputRecord[],
+		mode: RunMode,
+		selectedStageIds: Set<string>
+	): KbInputRecord[] {
 		if (mode === 'force') return records;
 		return records.filter((rec) => {
-			const relevantStages = computeStages(rec, selectableProcessorIds).filter((s) => selectedStageIds.has(s.id));
+			const relevantStages = computeStages(rec, selectableProcessorIds).filter((s) =>
+				selectedStageIds.has(s.id)
+			);
 			return relevantStages.some((s) => {
 				if (mode === 'unfinished') return s.status === 'pending' || s.status === 'in-progress';
 				if (mode === 'failed') return s.status === 'failed';
@@ -512,29 +616,43 @@
 
 			if (runMode === 'failed') {
 				const res = await listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'failed' });
-				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
+				fetchedRecords = (res.results ?? []).filter(
+					(r) => !r.file_name?.toLowerCase().endsWith('.zip')
+				);
 			} else {
 				// 'unfinished' and 'unfinished_failed': use with_unfinished_procs which
 				// finds all records where any processor lacks a success entry (pending,
 				// in-progress, or failed). filterByRunMode then narrows to the exact
 				// statuses the mode requires. procStatus:'running' was wrong — it missed
 				// records that are parsed+converted but never had doc processors run.
-				const res = await listKbInputs({ ...base, pageSize: fetchSize, pipelineFilter: 'with_unfinished_procs' });
-				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
+				const res = await listKbInputs({
+					...base,
+					pageSize: fetchSize,
+					pipelineFilter: 'with_unfinished_procs'
+				});
+				fetchedRecords = (res.results ?? []).filter(
+					(r) => !r.file_name?.toLowerCase().endsWith('.zip')
+				);
 			}
 
 			const selectedStageIds = new Set<string>([
 				...(parseFileChecked ? ['parsing'] : []),
 				...(convertChecked ? ['converting'] : []),
-				...selectableProcessorIds.filter(p => processors[p])
+				...selectableProcessorIds.filter((p) => processors[p])
 			]);
 
-			const eligible = filterByRunMode(fetchedRecords, runMode, selectedStageIds).slice(0, maxRecords);
+			const eligible = filterByRunMode(fetchedRecords, runMode, selectedStageIds).slice(
+				0,
+				maxRecords
+			);
 
 			if (eligible.length === 0) {
-				const modeLabel = runMode === 'unfinished' ? m.doc_processor_dashboard_mode_unfinished()
-					: runMode === 'failed' ? m.doc_processor_dashboard_mode_failed()
-					: m.doc_processor_dashboard_mode_unfinished_or_failed();
+				const modeLabel =
+					runMode === 'unfinished'
+						? m.doc_processor_dashboard_mode_unfinished()
+						: runMode === 'failed'
+							? m.doc_processor_dashboard_mode_failed()
+							: m.doc_processor_dashboard_mode_unfinished_or_failed();
 				noEligibleDialog = { recordCount: fetchedRecords.length, modeLabel, fromSearch: true };
 				return;
 			}
@@ -567,12 +685,18 @@
 				...(convertChecked ? ['converting'] : []),
 				...selectableProcessorIds.filter((p) => processors[p])
 			]);
-			const eligible = filterByRunMode(selectedRecords, runMode, selectedStageIds).slice(0, maxRecords);
+			const eligible = filterByRunMode(selectedRecords, runMode, selectedStageIds).slice(
+				0,
+				maxRecords
+			);
 			showConfirm = false;
 			if (eligible.length === 0) {
-				const modeLabel = runMode === 'unfinished' ? m.doc_processor_dashboard_mode_unfinished()
-					: runMode === 'failed' ? m.doc_processor_dashboard_mode_failed()
-					: m.doc_processor_dashboard_mode_unfinished_or_failed();
+				const modeLabel =
+					runMode === 'unfinished'
+						? m.doc_processor_dashboard_mode_unfinished()
+						: runMode === 'failed'
+							? m.doc_processor_dashboard_mode_failed()
+							: m.doc_processor_dashboard_mode_unfinished_or_failed();
 				noEligibleDialog = { recordCount: selectedRecords.length, modeLabel };
 				return;
 			}
@@ -583,12 +707,23 @@
 			if (failures.length === 0) {
 				const n = eligible.length;
 				if (!autoSync) startAutoSync();
-				launchToast = { kind: 'success', msg: m.doc_processor_dashboard_launched_record({ n, plural: n !== 1 ? 's' : '' }) };
+				launchToast = {
+					kind: 'success',
+					msg: m.doc_processor_dashboard_launched_record({ n, plural: n !== 1 ? 's' : '' })
+				};
 			} else {
-				const firstMsg = failures[0].reason instanceof Error ? failures[0].reason.message : m.doc_processor_dashboard_unknown_error();
-				launchToast = { kind: 'error', msg: `${failures.length}/${eligible.length} failed: ${firstMsg}` };
+				const firstMsg =
+					failures[0].reason instanceof Error
+						? failures[0].reason.message
+						: m.doc_processor_dashboard_unknown_error();
+				launchToast = {
+					kind: 'error',
+					msg: `${failures.length}/${eligible.length} failed: ${firstMsg}`
+				};
 			}
-			setTimeout(() => { launchToast = null; }, 4000);
+			setTimeout(() => {
+				launchToast = null;
+			}, 4000);
 		} catch (err) {
 			launchError = err instanceof Error ? err.message : m.doc_processor_dashboard_launch_failed();
 		} finally {
@@ -609,7 +744,8 @@
 				launchToast = null;
 			}, 4000);
 		} catch (err) {
-			restartError = err instanceof Error ? err.message : m.doc_processor_dashboard_restart_failed();
+			restartError =
+				err instanceof Error ? err.message : m.doc_processor_dashboard_restart_failed();
 		} finally {
 			restarting = false;
 		}
@@ -672,7 +808,10 @@
 			failedTotal = res.total ?? 0;
 			failedLoaded = true;
 		} catch (err) {
-			failedError = err instanceof Error ? err.message : m.doc_processor_dashboard_failed_to_load_failed_pipelines();
+			failedError =
+				err instanceof Error
+					? err.message
+					: m.doc_processor_dashboard_failed_to_load_failed_pipelines();
 		} finally {
 			failedLoading = false;
 		}
@@ -728,7 +867,10 @@
 		parseFileChecked = hasParseFailed;
 		convertChecked = !hasParseFailed && hasConvertFailed;
 		processors = Object.fromEntries(
-			selectableProcessorIds.map((p) => [p, !hasParseFailed && !hasConvertFailed && failedStageIds.has(p)])
+			selectableProcessorIds.map((p) => [
+				p,
+				!hasParseFailed && !hasConvertFailed && failedStageIds.has(p)
+			])
 		);
 	}
 
@@ -745,7 +887,10 @@
 		parseFileChecked = hasParseIncomplete;
 		convertChecked = !hasParseIncomplete && hasConvertIncomplete;
 		processors = Object.fromEntries(
-			selectableProcessorIds.map((p) => [p, !hasParseIncomplete && !hasConvertIncomplete && incompleteStageIds.has(p)])
+			selectableProcessorIds.map((p) => [
+				p,
+				!hasParseIncomplete && !hasConvertIncomplete && incompleteStageIds.has(p)
+			])
 		);
 	}
 
@@ -754,11 +899,7 @@
 		restartProcessors = Object.fromEntries(selectableProcessorIds.map((p) => [p, next]));
 	}
 
-	function showTooltip(
-		e: MouseEvent,
-		recordId: number,
-		stage: StageInfo
-	) {
+	function showTooltip(e: MouseEvent, recordId: number, stage: StageInfo) {
 		const el = e.currentTarget as HTMLElement;
 		const rect = el.getBoundingClientRect();
 		const cacheKey = `${recordId}:${stage.id}`;
@@ -770,7 +911,8 @@
 			status: stage.status,
 			entry: stage.entry,
 			progress: stage.entry?.progress ?? cachedProgress ?? undefined,
-			progressLoading: stage.status === 'in-progress' && !stage.entry?.progress && cachedProgress === undefined,
+			progressLoading:
+				stage.status === 'in-progress' && !stage.entry?.progress && cachedProgress === undefined,
 			x: rect.left + rect.width / 2,
 			y: rect.top
 		};
@@ -794,7 +936,8 @@
 				orderBy: 'create_time',
 				orderDir: 'desc'
 			});
-			const progress = res.results?.find((row) => row.proc_progress?.trim())?.proc_progress?.trim() || null;
+			const progress =
+				res.results?.find((row) => row.proc_progress?.trim())?.proc_progress?.trim() || null;
 			stageProgressCache = { ...stageProgressCache, [cacheKey]: progress };
 			if (tooltipState && tooltipState.recordId === recordId && tooltipState.stageId === stageId) {
 				tooltipState = {
@@ -815,19 +958,25 @@
 	}
 
 	onMount(() => {
-		getKbFrontendConfig().then((cfg) => {
-			const req = cfg.required_processors ?? [];
-			requiredProcessors = req;
-			processorPackages = cfg.processor_packages ?? {};
-			const packageNames = Object.keys(processorPackages);
-			if (packageNames.length > 0) {
-				selectedProcessorPackage = packageNames.find((name) => name.toLowerCase() === 'default') ?? packageNames[0];
-			}
-			activePipelineLimit = Math.max(1, cfg.max_doc_process_pipelines ?? 10);
-			processors = processorSelectionForPackage(selectedProcessorPackage, processorPackages, [...MANDATORY_PROCESSOR_IDS, ...req]);
-		}).catch(() => {
-			// Keep defaults on failure
-		});
+		getKbFrontendConfig()
+			.then((cfg) => {
+				const req = cfg.required_processors ?? [];
+				requiredProcessors = req;
+				processorPackages = cfg.processor_packages ?? {};
+				const packageNames = Object.keys(processorPackages);
+				if (packageNames.length > 0) {
+					selectedProcessorPackage =
+						packageNames.find((name) => name.toLowerCase() === 'default') ?? packageNames[0];
+				}
+				activePipelineLimit = Math.max(1, cfg.max_doc_process_pipelines ?? 10);
+				processors = processorSelectionForPackage(selectedProcessorPackage, processorPackages, [
+					...MANDATORY_PROCESSOR_IDS,
+					...req
+				]);
+			})
+			.catch(() => {
+				// Keep defaults on failure
+			});
 
 		pollPipelines();
 		syncInterval = setInterval(pollPipelines, SYNC_INTERVAL_SECONDS * 1000);
@@ -845,21 +994,20 @@
 <!-- ══════════════════════════════════════════════════════════════
      Root
 ══════════════════════════════════════════════════════════════ -->
-<div class="flex select-text flex-col" style="min-height:100%;">
-
+<div class="flex flex-col select-text" style="min-height:100%;">
 	<!-- ── Toast ─────────────────────────────────────────────── -->
 	{#if launchToast}
 		<div
-			class="fixed right-6 top-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3"
+			class="fixed top-6 right-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3"
 			style="background:{launchToast.kind === 'success' ? colorSuccessTint : colorErrorTint};
 			       border:1px solid {launchToast.kind === 'success' ? colorSuccess : colorError}40;
 			       color:{launchToast.kind === 'success' ? colorSuccess : colorError};
 			       font-size:13px; font-weight:500; box-shadow:0 4px 16px rgba(0,0,0,0.25);"
 		>
 			{#if launchToast.kind === 'success'}
-				<CircleCheckIcon class="h-4 w-4 flex-shrink-0" />
+				<CircleCheckIcon class="h-4 w-4 shrink-0" />
 			{:else}
-				<XCircleIcon class="h-4 w-4 flex-shrink-0" />
+				<XCircleIcon class="h-4 w-4 shrink-0" />
 			{/if}
 			{launchToast.msg}
 		</div>
@@ -877,14 +1025,22 @@
 				min-width:160px; max-width:280px;
 			"
 		>
-			<div style="font-size:11px; font-weight:600; color:{stageStatusColor(tooltipState.status)}; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.08em;">
+			<div
+				style="font-size:11px; font-weight:600; color:{stageStatusColor(
+					tooltipState.status
+				)}; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.08em;"
+			>
 				{tooltipState.label} · {tooltipState.status}
 			</div>
 			{#if tooltipState.entry}
 				{#if tooltipState.progress}
-					<div style="font-size:12px; color:{textSecondary};">{m.doc_processor_dashboard_progress({ progress: tooltipState.progress })}</div>
+					<div style="font-size:12px; color:{textSecondary};">
+						{m.doc_processor_dashboard_progress({ progress: tooltipState.progress })}
+					</div>
 				{:else if tooltipState.progressLoading}
-					<div style="font-size:12px; color:{textMuted};">{m.doc_processor_dashboard_loading_progress()}</div>
+					<div style="font-size:12px; color:{textMuted};">
+						{m.doc_processor_dashboard_loading_progress()}
+					</div>
 				{/if}
 				{#if tooltipState.entry.time || tooltipState.entry.start_time}
 					<div style="font-size:11px; color:{textMuted}; font-family:monospace; margin-top:2px;">
@@ -897,7 +1053,9 @@
 					</div>
 				{/if}
 			{:else}
-				<div style="font-size:12px; color:{textMuted};">{m.doc_processor_dashboard_not_yet_started()}</div>
+				<div style="font-size:12px; color:{textMuted};">
+					{m.doc_processor_dashboard_not_yet_started()}
+				</div>
 			{/if}
 		</div>
 	{/if}
@@ -906,30 +1064,49 @@
 	     Section 1 — Active Pipelines
 	══════════════════════════════════════════════════════════ -->
 	<section class="p-6">
-
 		<!-- Section header -->
 		<div class="mb-4 flex items-start justify-between">
 			<div>
-				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_active_pipelines()}</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_live_processing_threads()}</p>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">
+					{m.doc_processor_dashboard_active_pipelines()}
+				</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">
+					{m.doc_processor_dashboard_live_processing_threads()}
+				</p>
 			</div>
 			<div class="flex items-center gap-3">
 				{#if lastPoll}
-					<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{m.doc_processor_dashboard_updated({ lastPoll })}</span>
+					<span style="font-size:11px; color:{textMuted}; font-family:monospace;"
+						>{m.doc_processor_dashboard_updated({ lastPoll })}</span
+					>
 				{/if}
-				<span style="font-size:11px; color:{textMuted};">{autoSync ? m.doc_processor_dashboard_live_processing_threads_refreshes_every({ seconds: SYNC_INTERVAL_SECONDS }) : m.doc_processor_dashboard_live_processing_threads_auto_sync()}</span>
+				<span style="font-size:11px; color:{textMuted};"
+					>{autoSync
+						? m.doc_processor_dashboard_live_processing_threads_refreshes_every({
+								seconds: SYNC_INTERVAL_SECONDS
+							})
+						: m.doc_processor_dashboard_live_processing_threads_auto_sync()}</span
+				>
 				<!-- Stop Sync / Start Sync toggle -->
 				<button
 					onclick={toggleSync}
 					class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-none"
-					style="background:{autoSync ? surface2 : colorSuccessTint}; border:1px solid {autoSync ? borderColor : colorSuccess + '50'}; color:{autoSync ? textSecondary : colorSuccess}; font-size:12px; font-weight:500; cursor:pointer;"
+					style="background:{autoSync ? surface2 : colorSuccessTint}; border:1px solid {autoSync
+						? borderColor
+						: colorSuccess + '50'}; color:{autoSync
+						? textSecondary
+						: colorSuccess}; font-size:12px; font-weight:500; cursor:pointer;"
 					onmouseenter={(e) => {
 						(e.currentTarget as HTMLElement).style.color = autoSync ? textPrimary : colorSuccess;
-						(e.currentTarget as HTMLElement).style.borderColor = autoSync ? accent + '60' : colorSuccess;
+						(e.currentTarget as HTMLElement).style.borderColor = autoSync
+							? accent + '60'
+							: colorSuccess;
 					}}
 					onmouseleave={(e) => {
 						(e.currentTarget as HTMLElement).style.color = autoSync ? textSecondary : colorSuccess;
-						(e.currentTarget as HTMLElement).style.borderColor = autoSync ? borderColor : colorSuccess + '50';
+						(e.currentTarget as HTMLElement).style.borderColor = autoSync
+							? borderColor
+							: colorSuccess + '50';
 					}}
 				>
 					{#if autoSync}
@@ -965,70 +1142,88 @@
 				{#each Array(3) as _, i}
 					<div
 						class="rounded-xl"
-						style="height:90px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 - i * 0.25};"
+						style="height:90px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 -
+							i * 0.25};"
 					></div>
 				{/each}
 			</div>
 
-		<!-- Error -->
+			<!-- Error -->
 		{:else if pipelinesError}
 			<div
 				class="flex items-center gap-3 rounded-xl p-4"
 				style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:13px;"
 			>
-				<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+				<AlertCircleIcon class="h-4 w-4 shrink-0" />
 				{pipelinesError}
 			</div>
 
-		<!-- Empty state -->
+			<!-- Empty state -->
 		{:else if activePipelines.length === 0}
 			<div
 				class="flex flex-col items-center rounded-xl py-14"
 				style="background:{surface2}; border:1px solid {borderColor};"
 			>
 				<ActivityIcon class="mb-3 h-10 w-10" style="color:{textMuted}; opacity:0.4;" />
-				<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 6px;">{m.doc_processor_dashboard_no_active_pipelines()}</p>
-				<p style="font-size:12px; color:{textMuted}; margin:0; max-width:320px; text-align:center; line-height:1.5;">
+				<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 6px;">
+					{m.doc_processor_dashboard_no_active_pipelines()}
+				</p>
+				<p
+					style="font-size:12px; color:{textMuted}; margin:0; max-width:320px; text-align:center; line-height:1.5;"
+				>
 					{m.doc_processor_dashboard_processing_threads_appear_here_while()}
 				</p>
 			</div>
 
-		<!-- Pipeline cards -->
+			<!-- Pipeline cards -->
 		{:else}
 			<div class="space-y-3">
 				{#each activePipelines as record (record.id)}
-					{@const stages = visibleStages(computeStages(record, selectableProcessorIds), requiredProcessors)}
+					{@const stages = visibleStages(
+						computeStages(record, selectableProcessorIds),
+						requiredProcessors
+					)}
 					<div
 						class="rounded-xl p-4"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
 					>
 						<!-- Card header -->
 						<div class="mb-4 flex items-center justify-between">
-							<div class="flex items-center gap-2 min-w-0">
+							<div class="flex min-w-0 items-center gap-2">
 								<span
 									style="font-family:monospace; font-size:10px; font-weight:600; color:{accent};
 									       background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 6px; flex-shrink:0;"
-								>#{record.id}</span>
+									>#{record.id}</span
+								>
 								<span
 									class="truncate"
 									style="font-size:13px; font-weight:600; color:{textPrimary}; max-width:340px;"
-									title={recordTitle(record)}
-								>{recordTitle(record)}</span>
+									title={recordTitle(record)}>{recordTitle(record)}</span
+								>
 								<span
 									style="font-size:10px; padding:1px 7px; border-radius:999px;
 									       background:{accentTint}; color:{accent}; font-family:monospace; flex-shrink:0;"
-								>{record.type}</span>
+									>{record.type}</span
+								>
 							</div>
-							<div class="flex flex-shrink-0 items-center gap-2">
-								<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{formatTime(record.modify_time)}</span>
+							<div class="flex shrink-0 items-center gap-2">
+								<span style="font-size:11px; color:{textMuted}; font-family:monospace;"
+									>{formatTime(record.modify_time)}</span
+								>
 								<!-- Detail button -->
 								<button
 									onclick={() => openDetail(record)}
 									title={m.doc_processor_dashboard_view_status_details()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
-									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; (e.currentTarget as HTMLElement).style.color = accent; }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
+									onmouseenter={(e) => {
+										(e.currentTarget as HTMLElement).style.background = accentTint;
+										(e.currentTarget as HTMLElement).style.color = accent;
+									}}
+									onmouseleave={(e) => {
+										(e.currentTarget as HTMLElement).style.background = surface2;
+										(e.currentTarget as HTMLElement).style.color = textMuted;
+									}}
 								>
 									<FileTextIcon class="h-3 w-3" />
 									{m.doc_processor_dashboard_detail()}
@@ -1039,12 +1234,23 @@
 									disabled={stoppingIds.has(record.id)}
 									title={m.doc_processor_dashboard_request_pipeline_stop()}
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
-									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(record.id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
-									onmouseenter={(e) => { if (!stoppingIds.has(record.id)) (e.currentTarget as HTMLElement).style.background = colorErrorTint; }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(
+										record.id
+									)
+										? 'not-allowed'
+										: 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
+									onmouseenter={(e) => {
+										if (!stoppingIds.has(record.id))
+											(e.currentTarget as HTMLElement).style.background = colorErrorTint;
+									}}
+									onmouseleave={(e) => {
+										(e.currentTarget as HTMLElement).style.background = surface2;
+									}}
 								>
 									<SquareIcon class="h-3 w-3" />
-									{stoppingIds.has(record.id) ? m.doc_processor_dashboard_stopping() : m.doc_processor_dashboard_stop()}
+									{stoppingIds.has(record.id)
+										? m.doc_processor_dashboard_stopping()
+										: m.doc_processor_dashboard_stop()}
 								</button>
 								<!-- Restart button -->
 								<button
@@ -1069,7 +1275,7 @@
 							{#each stages as stage, i}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div
-									class="relative flex flex-shrink-0 flex-col items-center"
+									class="relative flex shrink-0 flex-col items-center"
 									style="min-width:68px;"
 									onmouseenter={(e) => showTooltip(e, record.id, stage)}
 									onmouseleave={hideTooltip}
@@ -1097,17 +1303,27 @@
 										{/if}
 									</div>
 									<div
-										style="font-size:9px; color:{stageStatusColor(stage.status)}{stage.status === 'pending' ? '80' : ''}; margin-top:4px; text-align:center; white-space:nowrap; max-width:68px; overflow:hidden; text-overflow:ellipsis;"
-									>{stage.label}</div>
+										style="font-size:9px; color:{stageStatusColor(stage.status)}{stage.status ===
+										'pending'
+											? '80'
+											: ''}; margin-top:4px; text-align:center; white-space:nowrap; max-width:68px; overflow:hidden; text-overflow:ellipsis;"
+									>
+										{stage.label}
+									</div>
 								</div>
 								{#if i < stages.length - 1}
-									<div style="flex:0 0 16px; height:2px; background:{borderColor}; margin-bottom:13px; flex-shrink:0;"></div>
+									<div
+										style="flex:0 0 16px; height:2px; background:{borderColor}; margin-bottom:13px; flex-shrink:0;"
+									></div>
 								{/if}
 							{/each}
 						</div>
 
 						<!-- Status line -->
-						<div class="mt-3" style="font-size:11px; color:{textMuted}; font-family:monospace; border-top:1px solid {borderColor}; padding-top:8px;">
+						<div
+							class="mt-3"
+							style="font-size:11px; color:{textMuted}; font-family:monospace; border-top:1px solid {borderColor}; padding-top:8px;"
+						>
 							{m.doc_processor_dashboard_last({ record: lastStatusText(record) })}
 						</div>
 					</div>
@@ -1116,19 +1332,43 @@
 		{/if}
 		{#if !pipelinesLoading && !pipelinesError && waitingPipelines.length > 0}
 			<div class="mt-6 w-full md:w-1/2">
-				<h3 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">{m.doc_processor_dashboard_waiting_pipelines()} ({waitingPipelines.length})</h3>
-				<p style="font-size:12px; color:{textMuted}; margin:0 0 12px;">{m.doc_processor_dashboard_peak_wait_description()}</p>
+				<h3 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">
+					{m.doc_processor_dashboard_waiting_pipelines()} ({waitingPipelines.length})
+				</h3>
+				<p style="font-size:12px; color:{textMuted}; margin:0 0 12px;">
+					{m.doc_processor_dashboard_peak_wait_description()}
+				</p>
 				<div class="space-y-2">
 					{#each waitingPipelines as record (record.id)}
-						<div class="flex items-center justify-between gap-3 rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
+						<div
+							class="flex items-center justify-between gap-3 rounded-xl p-4"
+							style="background:{cardBg}; border:1px solid {borderColor};"
+						>
 							<div class="flex min-w-0 items-center gap-2">
-								<ClockIcon class="h-4 w-4 flex-shrink-0" style="color:{colorWarning};" />
+								<ClockIcon class="h-4 w-4 shrink-0" style="color:{colorWarning};" />
 								<span style="color:{accent}; font-size:12px;">#{record.id}</span>
-								<span class="truncate" style="color:{textPrimary}; font-size:13px;" title={recordTitle(record)}>{recordTitle(record)}</span>
+								<span
+									class="truncate"
+									style="color:{textPrimary}; font-size:13px;"
+									title={recordTitle(record)}>{recordTitle(record)}</span
+								>
 							</div>
-							<div class="flex flex-shrink-0 gap-2">
-								<button onclick={() => openDetail(record)} class="rounded-lg px-2.5 py-1.5" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;">{m.doc_processor_dashboard_detail()}</button>
-								<button onclick={() => doStop(record)} disabled={stoppingIds.has(record.id)} class="rounded-lg px-2.5 py-1.5" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;">{stoppingIds.has(record.id) ? m.doc_processor_dashboard_stopping() : m.doc_processor_dashboard_stop()}</button>
+							<div class="flex shrink-0 gap-2">
+								<button
+									onclick={() => openDetail(record)}
+									class="rounded-lg px-2.5 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;"
+									>{m.doc_processor_dashboard_detail()}</button
+								>
+								<button
+									onclick={() => doStop(record)}
+									disabled={stoppingIds.has(record.id)}
+									class="rounded-lg px-2.5 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px;"
+									>{stoppingIds.has(record.id)
+										? m.doc_processor_dashboard_stopping()
+										: m.doc_processor_dashboard_stop()}</button
+								>
 							</div>
 						</div>
 					{/each}
@@ -1144,12 +1384,15 @@
 	     Section 1b — PDF Parsing Status
 	══════════════════════════════════════════════════════════ -->
 	<section class="p-6">
-
 		<!-- Section header -->
 		<div class="mb-4 flex items-start justify-between">
 			<div>
-				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_pdf_parsing()}</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_live_pdf_parse_status_throughput()}</p>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">
+					{m.doc_processor_dashboard_pdf_parsing()}
+				</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">
+					{m.doc_processor_dashboard_live_pdf_parse_status_throughput()}
+				</p>
 			</div>
 			<button
 				onclick={pollPdfParsing}
@@ -1174,25 +1417,33 @@
 				class="mb-4 flex items-center gap-3 rounded-xl p-4"
 				style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:13px;"
 			>
-				<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+				<AlertCircleIcon class="h-4 w-4 shrink-0" />
 				{pdfParsingError}
 			</div>
 		{/if}
 
 		<!-- Charts -->
 		<div class="mb-5 rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
-			<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">{m.doc_processor_dashboard_parse_state_distribution()}</div>
+			<div
+				style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;"
+			>
+				{m.doc_processor_dashboard_parse_state_distribution()}
+			</div>
 			<div class="flex flex-wrap items-center gap-8">
 				<!-- Pie / donut chart -->
 				<div class="flex items-center gap-5">
-					<div class="relative flex-shrink-0" style="width:120px; height:120px;">
+					<div class="relative shrink-0" style="width:120px; height:120px;">
 						<svg viewBox="0 0 120 120" style="width:120px; height:120px; transform:rotate(-90deg);">
 							<circle cx="60" cy="60" r="42" fill="none" stroke={surface2} stroke-width="18" />
 							{#if pieTotal > 0}
 								{#each pieSegments as seg (seg.key)}
 									<circle
-										cx="60" cy="60" r="42" fill="none"
-										stroke={seg.color} stroke-width="18"
+										cx="60"
+										cy="60"
+										r="42"
+										fill="none"
+										stroke={seg.color}
+										stroke-width="18"
 										stroke-dasharray="{seg.dash} {DONUT_C - seg.dash}"
 										stroke-dashoffset={seg.offset}
 									/>
@@ -1200,20 +1451,34 @@
 							{/if}
 						</svg>
 						<div class="absolute inset-0 flex flex-col items-center justify-center">
-							<span style="font-size:20px; font-weight:700; color:{textPrimary}; line-height:1;">{pieTotal}</span>
-							<span style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.06em;">{m.doc_processor_dashboard_total()}</span>
+							<span style="font-size:20px; font-weight:700; color:{textPrimary}; line-height:1;"
+								>{pieTotal}</span
+							>
+							<span
+								style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.06em;"
+								>{m.doc_processor_dashboard_total()}</span
+							>
 						</div>
 					</div>
 					<div class="w-48 space-y-1.5">
 						{#each pieData as d (d.key)}
 							<div class="flex items-center justify-between gap-2">
-								<div class="flex items-center gap-2 min-w-0">
-									<span style="width:9px; height:9px; border-radius:2px; background:{d.color}; flex-shrink:0;"></span>
-									<span style="font-size:12px; color:{textSecondary};" class="truncate">{d.label}</span>
+								<div class="flex min-w-0 items-center gap-2">
+									<span
+										style="width:9px; height:9px; border-radius:2px; background:{d.color}; flex-shrink:0;"
+									></span>
+									<span style="font-size:12px; color:{textSecondary};" class="truncate"
+										>{d.label}</span
+									>
 								</div>
-								<div class="flex items-center gap-2 flex-shrink-0">
-									<span style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;">{d.value}</span>
-									<span style="font-size:11px; color:{textMuted}; font-variant-numeric:tabular-nums; min-width:34px; text-align:right;">
+								<div class="flex shrink-0 items-center gap-2">
+									<span
+										style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;"
+										>{d.value}</span
+									>
+									<span
+										style="font-size:11px; color:{textMuted}; font-variant-numeric:tabular-nums; min-width:34px; text-align:right;"
+									>
 										{pieTotal > 0 ? Math.round((d.value / pieTotal) * 100) : 0}%
 									</span>
 								</div>
@@ -1226,12 +1491,21 @@
 				<div class="flex items-end gap-5" style="height:120px;">
 					{#each barData as b (b.label)}
 						<div class="flex h-full w-20 flex-col items-center justify-end gap-1.5">
-							<span style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;">{b.value}</span>
+							<span
+								style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;"
+								>{b.value}</span
+							>
 							<div
 								class="w-full rounded-t-md"
-								style="height:{Math.max(2, (b.value / barMax) * 84)}px; max-width:48px; background:{b.color}; transition:height 0.3s ease;"
+								style="height:{Math.max(
+									2,
+									(b.value / barMax) * 84
+								)}px; max-width:48px; background:{b.color}; transition:height 0.3s ease;"
 							></div>
-							<span style="font-size:10px; color:{textMuted}; text-align:center; line-height:1.2; height:24px;">{b.label}</span>
+							<span
+								style="font-size:10px; color:{textMuted}; text-align:center; line-height:1.2; height:24px;"
+								>{b.label}</span
+							>
 						</div>
 					{/each}
 				</div>
@@ -1240,126 +1514,194 @@
 
 		<!-- Active PDF parsing list -->
 		{#if pdfActiveParsing.length > 0}
-		<div class="w-full md:w-1/2">
-		<div class="mb-2" style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
-			{m.doc_processor_dashboard_active_pdf_parsing()}
-			<span style="color:{accent}; margin-left:4px;">({pdfStats.active})</span>
-		</div>
+			<div class="w-full md:w-1/2">
+				<div
+					class="mb-2"
+					style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;"
+				>
+					{m.doc_processor_dashboard_active_pdf_parsing()}
+					<span style="color:{accent}; margin-left:4px;">({pdfStats.active})</span>
+				</div>
 
-			<div class="space-y-2">
-				{#each pdfActiveParsing as record (record.id)}
-					{@const pct = parseProgressPercent(record)}
-					{@const progressText = parsingProgressText(record)}
-					{@const parseEntry = findParseEntry(record)}
-					<!-- Parses started before the parser listed only started phases stored pending placeholders. -->
-					{@const phases = parseEntry?.phases?.filter((phase) => phase.status !== 'pending')}
-					<div
-						class="rounded-xl p-3.5"
-						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
-					>
-						<div class="flex flex-wrap items-center justify-between gap-3">
-							<div class="flex items-center gap-2 min-w-0">
-								<span
-									style="font-family:monospace; font-size:10px; font-weight:600; color:{accent};
+				<div class="space-y-2">
+					{#each pdfActiveParsing as record (record.id)}
+						{@const pct = parseProgressPercent(record)}
+						{@const progressText = parsingProgressText(record)}
+						{@const parseEntry = findParseEntry(record)}
+						<!-- Parses started before the parser listed only started phases stored pending placeholders. -->
+						{@const phases = parseEntry?.phases?.filter((phase) => phase.status !== 'pending')}
+						<div
+							class="rounded-xl p-3.5"
+							style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
+						>
+							<div class="flex flex-wrap items-center justify-between gap-3">
+								<div class="flex min-w-0 items-center gap-2">
+									<span
+										style="font-family:monospace; font-size:10px; font-weight:600; color:{accent};
 									       background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 6px; flex-shrink:0;"
-								>#{record.id}</span>
-								<span
-									class="truncate"
-									style="font-size:13px; font-weight:500; color:{textPrimary}; max-width:360px;"
-									title={record.file_name ?? recordTitle(record)}
-								>{record.file_name?.trim() || recordTitle(record)}</span>
-								{#if parseEntry?.num_pages && parseEntry.num_pages > 0}
-									<span style="color:{textSecondary}; font-size:11px; white-space:nowrap;">{parseEntry.num_pages} {parseEntry.num_pages === 1 ? 'page' : 'pages'}</span>
-								{/if}
+										>#{record.id}</span
+									>
+									<span
+										class="truncate"
+										style="font-size:13px; font-weight:500; color:{textPrimary}; max-width:360px;"
+										title={record.file_name ?? recordTitle(record)}
+										>{record.file_name?.trim() || recordTitle(record)}</span
+									>
+									{#if parseEntry?.num_pages && parseEntry.num_pages > 0}
+										<span style="color:{textSecondary}; font-size:11px; white-space:nowrap;"
+											>{parseEntry.num_pages} {parseEntry.num_pages === 1 ? 'page' : 'pages'}</span
+										>
+									{/if}
+								</div>
+								<div class="flex shrink-0 items-center gap-2">
+									<!-- Detail -->
+									<button
+										onclick={() => openDetail(record)}
+										title={m.doc_processor_dashboard_view_status_details()}
+										class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+										style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
+										onmouseenter={(e) => {
+											(e.currentTarget as HTMLElement).style.background = accentTint;
+											(e.currentTarget as HTMLElement).style.color = accent;
+										}}
+										onmouseleave={(e) => {
+											(e.currentTarget as HTMLElement).style.background = surface2;
+											(e.currentTarget as HTMLElement).style.color = textMuted;
+										}}
+									>
+										<FileTextIcon class="h-3 w-3" />
+										{m.doc_processor_dashboard_detail()}
+									</button>
+									<!-- Restart -->
+									<button
+										onclick={() => openRestart(record)}
+										title={m.doc_processor_dashboard_restart_parsing()}
+										class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+										style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
+										onmouseenter={(e) => {
+											(e.currentTarget as HTMLElement).style.background = accent + '25';
+										}}
+										onmouseleave={(e) => {
+											(e.currentTarget as HTMLElement).style.background = accentTint;
+										}}
+									>
+										<PlayIcon class="h-3 w-3" />
+										{m.doc_processor_dashboard_restart()}
+									</button>
+									<!-- Abort -->
+									<button
+										onclick={() => doStop(record)}
+										disabled={stoppingIds.has(record.id)}
+										title={m.doc_processor_dashboard_abort_parsing()}
+										class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+										style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(
+											record.id
+										)
+											? 'not-allowed'
+											: 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
+										onmouseenter={(e) => {
+											if (!stoppingIds.has(record.id)) {
+												(e.currentTarget as HTMLElement).style.background = colorErrorTint;
+												(e.currentTarget as HTMLElement).style.color = colorError;
+											}
+										}}
+										onmouseleave={(e) => {
+											(e.currentTarget as HTMLElement).style.background = surface2;
+											(e.currentTarget as HTMLElement).style.color = textMuted;
+										}}
+									>
+										<XCircleIcon class="h-3 w-3" />
+										{stoppingIds.has(record.id)
+											? m.doc_processor_dashboard_aborting()
+											: m.doc_processor_dashboard_abort()}
+									</button>
+								</div>
 							</div>
-							<div class="flex flex-shrink-0 items-center gap-2">
-								<!-- Detail -->
-								<button
-									onclick={() => openDetail(record)}
-									title={m.doc_processor_dashboard_view_status_details()}
-									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
-									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
-									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; (e.currentTarget as HTMLElement).style.color = accent; }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
-								>
-									<FileTextIcon class="h-3 w-3" />
-									{m.doc_processor_dashboard_detail()}
-								</button>
-								<!-- Restart -->
-								<button
-									onclick={() => openRestart(record)}
-									title={m.doc_processor_dashboard_restart_parsing()}
-									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
-									style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
-									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
-								>
-									<PlayIcon class="h-3 w-3" />
-									{m.doc_processor_dashboard_restart()}
-								</button>
-								<!-- Abort -->
-								<button
-									onclick={() => doStop(record)}
-									disabled={stoppingIds.has(record.id)}
-									title={m.doc_processor_dashboard_abort_parsing()}
-									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
-									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(record.id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
-									onmouseenter={(e) => { if (!stoppingIds.has(record.id)) { (e.currentTarget as HTMLElement).style.background = colorErrorTint; (e.currentTarget as HTMLElement).style.color = colorError; } }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
-								>
-									<XCircleIcon class="h-3 w-3" />
-									{stoppingIds.has(record.id) ? m.doc_processor_dashboard_aborting() : m.doc_processor_dashboard_abort()}
-								</button>
-							</div>
-						</div>
 
-						{#if phases?.length}
-							<div class="pdf-phase-grid mt-3">
-								{#each phases as phase, index}
-									{@const phaseColor = phase.status === 'complete' ? colorSuccess : phase.status === 'active' ? accent : textMuted}
-									<div class="pdf-phase" style="background:{surface2}; border:1px solid {phase.status === 'active' ? accent : borderColor};" aria-label={`${phase.name}: ${phase.progress}%${phase.status === 'complete' && phase.elapsed_seconds !== undefined ? m.doc_processor_dashboard_seconds({ elapsed_seconds: phase.elapsed_seconds.toFixed(2) }) : ''}`}>
-										<div class="flex items-center justify-between gap-2">
-											<span class="truncate" style="color:{phaseColor}; font-size:11px; font-weight:600;" title={phase.name}>{index + 1}. {phase.name}</span>
-											<span style="color:{phaseColor}; font-size:11px; font-family:monospace; flex-shrink:0;">{phase.progress}%</span>
+							{#if phases?.length}
+								<div class="pdf-phase-grid mt-3">
+									{#each phases as phase, index}
+										{@const phaseColor =
+											phase.status === 'complete'
+												? colorSuccess
+												: phase.status === 'active'
+													? accent
+													: textMuted}
+										<div
+											class="pdf-phase"
+											style="background:{surface2}; border:1px solid {phase.status === 'active'
+												? accent
+												: borderColor};"
+											aria-label={`${phase.name}: ${phase.progress}%${phase.status === 'complete' && phase.elapsed_seconds !== undefined ? m.doc_processor_dashboard_seconds({ elapsed_seconds: phase.elapsed_seconds.toFixed(2) }) : ''}`}
+										>
+											<div class="flex items-center justify-between gap-2">
+												<span
+													class="truncate"
+													style="color:{phaseColor}; font-size:11px; font-weight:600;"
+													title={phase.name}>{index + 1}. {phase.name}</span
+												>
+												<span
+													style="color:{phaseColor}; font-size:11px; font-family:monospace; flex-shrink:0;"
+													>{phase.progress}%</span
+												>
+											</div>
+											<div
+												class="mt-2 overflow-hidden rounded-full"
+												style="height:5px; background:{borderColor};"
+												role="progressbar"
+												aria-label={phase.name}
+												aria-valuenow={phase.progress}
+												aria-valuemin="0"
+												aria-valuemax="100"
+											>
+												<div
+													class="h-full rounded-full"
+													style="width:{phase.progress}%; background:{phaseColor}; transition:width 0.3s ease;"
+												></div>
+											</div>
+											<div class="mt-1" style="color:{textMuted}; font-size:10px; min-height:14px;">
+												{phase.status === 'complete' && phase.elapsed_seconds !== undefined
+													? `${phase.elapsed_seconds.toFixed(2)} s`
+													: phase.status === 'active'
+														? m.doc_processor_dashboard_in_progress()
+														: m.doc_processor_dashboard_waiting()}
+											</div>
 										</div>
-										<div class="mt-2 overflow-hidden rounded-full" style="height:5px; background:{borderColor};" role="progressbar" aria-label={phase.name} aria-valuenow={phase.progress} aria-valuemin="0" aria-valuemax="100">
-											<div class="h-full rounded-full" style="width:{phase.progress}%; background:{phaseColor}; transition:width 0.3s ease;"></div>
-										</div>
-										<div class="mt-1" style="color:{textMuted}; font-size:10px; min-height:14px;">
-											{phase.status === 'complete' && phase.elapsed_seconds !== undefined ? `${phase.elapsed_seconds.toFixed(2)} s` : phase.status === 'active' ? m.doc_processor_dashboard_in_progress() : m.doc_processor_dashboard_waiting()}
-										</div>
+									{/each}
+								</div>
+							{:else}
+								<!-- Progress bar for parser backends without phase reporting -->
+								<div class="mt-3 flex items-center gap-3">
+									<div
+										class="relative flex-1 overflow-hidden rounded-full"
+										style="height:7px; background:{surface2};"
+									>
+										{#if pct !== null}
+											<div
+												class="h-full rounded-full"
+												style="width:{pct}%; background:{accent}; transition:width 0.3s ease;"
+											></div>
+										{:else}
+											<!-- Indeterminate stripe while parsing with no numeric progress -->
+											<div
+												class="absolute inset-y-0 rounded-full"
+												style="width:35%; background:{accent}; animation:pdf-parse-indeterminate 1.4s ease-in-out infinite;"
+											></div>
+										{/if}
 									</div>
-								{/each}
-							</div>
-						{:else}
-						<!-- Progress bar for parser backends without phase reporting -->
-						<div class="mt-3 flex items-center gap-3">
-							<div
-								class="relative flex-1 overflow-hidden rounded-full"
-								style="height:7px; background:{surface2};"
-							>
-								{#if pct !== null}
-									<div
-										class="h-full rounded-full"
-										style="width:{pct}%; background:{accent}; transition:width 0.3s ease;"
-									></div>
-								{:else}
-									<!-- Indeterminate stripe while parsing with no numeric progress -->
-									<div
-										class="absolute inset-y-0 rounded-full"
-										style="width:35%; background:{accent}; animation:pdf-parse-indeterminate 1.4s ease-in-out infinite;"
-									></div>
-								{/if}
-							</div>
-							<span style="font-size:11px; color:{textSecondary}; font-family:monospace; min-width:48px; text-align:right;">
-								{pct !== null ? `${Math.round(pct)}%` : (progressText || m.doc_processor_dashboard_parsing())}
-							</span>
+									<span
+										style="font-size:11px; color:{textSecondary}; font-family:monospace; min-width:48px; text-align:right;"
+									>
+										{pct !== null
+											? `${Math.round(pct)}%`
+											: progressText || m.doc_processor_dashboard_parsing()}
+									</span>
+								</div>
+							{/if}
 						</div>
-						{/if}
-					</div>
-				{/each}
+					{/each}
+				</div>
 			</div>
-		</div>
 		{/if}
 	</section>
 
@@ -1370,32 +1712,36 @@
 	<KbInputSearchDialog
 		bind:open={searchDialogOpen}
 		{darkMode}
-		onSelect={(records) => { selectedRecords = records; }}
+		onSelect={(records) => {
+			selectedRecords = records;
+		}}
 	/>
 
 	<!-- ════════════════════════════════════════════════════════
 	     Section 2 — Manual Launch
 	══════════════════════════════════════════════════════════ -->
 	<section class="p-6">
-
 		<div class="mb-4 flex items-start justify-between gap-4">
-			<div class="flex-shrink-0">
-				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">{m.doc_processor_dashboard_manual_launch()}</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_select_run_mode_and_click()}</p>
+			<div class="shrink-0">
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">
+					{m.doc_processor_dashboard_manual_launch()}
+				</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">
+					{m.doc_processor_dashboard_select_run_mode_and_click()}
+				</p>
 			</div>
 			<div class="flex flex-col items-end gap-2">
 				<!-- Run mode radio group + max records -->
 				<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-					{#each ([
-						{ value: 'unfinished', label: m.doc_processor_dashboard_run_unfinished_only() },
-						{ value: 'failed', label: m.doc_processor_dashboard_run_failed_only() },
-						{ value: 'unfinished_failed', label: m.doc_processor_dashboard_run_unfinished_failed() },
-						{ value: 'force', label: m.doc_processor_dashboard_force_run() }
-					] as const) as opt (opt.value)}
+					{#each [{ value: 'unfinished', label: m.doc_processor_dashboard_run_unfinished_only() }, { value: 'failed', label: m.doc_processor_dashboard_run_failed_only() }, { value: 'unfinished_failed', label: m.doc_processor_dashboard_run_unfinished_failed() }, { value: 'force', label: m.doc_processor_dashboard_force_run() }] as const as opt (opt.value)}
 						{@const isForceDisabled = opt.value === 'force' && selectedRecords.length === 0}
 						<label
 							class="flex items-center gap-1.5"
-							style="cursor:{isForceDisabled ? 'not-allowed' : 'pointer'}; font-size:12px; color:{runMode === opt.value ? accent : textSecondary}; user-select:none; opacity:{isForceDisabled ? 0.4 : 1};"
+							style="cursor:{isForceDisabled
+								? 'not-allowed'
+								: 'pointer'}; font-size:12px; color:{runMode === opt.value
+								? accent
+								: textSecondary}; user-select:none; opacity:{isForceDisabled ? 0.4 : 1};"
 						>
 							<input
 								type="radio"
@@ -1403,34 +1749,43 @@
 								value={opt.value}
 								checked={runMode === opt.value}
 								disabled={isForceDisabled}
-								onchange={() => { runMode = opt.value; }}
+								onchange={() => {
+									runMode = opt.value;
+								}}
 								style="accent-color:{accent}; cursor:{isForceDisabled ? 'not-allowed' : 'pointer'};"
 							/>
 							{opt.label}
 						</label>
 					{/each}
-						<label
-							class="flex items-center gap-1.5"
-							style="cursor:pointer; font-size:12px; color:{textSecondary}; user-select:none;"
-							title={m.doc_processor_dashboard_when_re_running_extract_metrics()}
-						>
-							<input
-								type="checkbox"
-								checked={forceClear}
-								onchange={(e) => { forceClear = (e.target as HTMLInputElement).checked; }}
-								style="accent-color:{accent};"
-							/>
-							{m.doc_processor_dashboard_force_clear_metrics_only_wipes()}
-						</label>
+					<label
+						class="flex items-center gap-1.5"
+						style="cursor:pointer; font-size:12px; color:{textSecondary}; user-select:none;"
+						title={m.doc_processor_dashboard_when_re_running_extract_metrics()}
+					>
+						<input
+							type="checkbox"
+							checked={forceClear}
+							onchange={(e) => {
+								forceClear = (e.target as HTMLInputElement).checked;
+							}}
+							style="accent-color:{accent};"
+						/>
+						{m.doc_processor_dashboard_force_clear_metrics_only_wipes()}
+					</label>
 					<div class="flex items-center gap-1.5" style="margin-left:8px;">
-						<span style="font-size:12px; color:{textSecondary}; white-space:nowrap;">{m.doc_processor_dashboard_max()}</span>
+						<span style="font-size:12px; color:{textSecondary}; white-space:nowrap;"
+							>{m.doc_processor_dashboard_max()}</span
+						>
 						<input
 							type="number"
 							min="1"
 							bind:value={maxRecords}
 							readonly={selectedRecords.length > 0}
 							class="rounded-md px-2 py-1"
-							style="width:52px; font-size:12px; background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; text-align:center;{selectedRecords.length > 0 ? ' opacity:0.7; cursor:default;' : ''}"
+							style="width:52px; font-size:12px; background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; text-align:center;{selectedRecords.length >
+							0
+								? ' opacity:0.7; cursor:default;'
+								: ''}"
 						/>
 					</div>
 				</div>
@@ -1438,21 +1793,60 @@
 				<div class="flex items-center gap-2">
 					<button
 						onclick={handleLaunchClick}
-						disabled={!someProcessorsSelected() || maxRecords < 1 || isNaN(maxRecords) || searchingRecords}
+						disabled={!someProcessorsSelected() ||
+							maxRecords < 1 ||
+							isNaN(maxRecords) ||
+							searchingRecords}
 						class="flex items-center gap-2 rounded-lg px-4 py-2"
-						style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? 'pointer' : 'not-allowed'}; opacity:{someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? '1' : '0.5'}; flex-shrink:0;"
-						onmouseenter={(e) => { if (someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords) (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? '1' : '0.5'; }}
+						style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{someProcessorsSelected() &&
+						maxRecords >= 1 &&
+						!isNaN(maxRecords) &&
+						!searchingRecords
+							? 'pointer'
+							: 'not-allowed'}; opacity:{someProcessorsSelected() &&
+						maxRecords >= 1 &&
+						!isNaN(maxRecords) &&
+						!searchingRecords
+							? '1'
+							: '0.5'}; flex-shrink:0;"
+						onmouseenter={(e) => {
+							if (
+								someProcessorsSelected() &&
+								maxRecords >= 1 &&
+								!isNaN(maxRecords) &&
+								!searchingRecords
+							)
+								(e.currentTarget as HTMLElement).style.opacity = '0.88';
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.opacity =
+								someProcessorsSelected() &&
+								maxRecords >= 1 &&
+								!isNaN(maxRecords) &&
+								!searchingRecords
+									? '1'
+									: '0.5';
+						}}
 					>
 						<PlayIcon class="h-4 w-4" />
-						{searchingRecords ? m.doc_processor_dashboard_searching() : m.doc_processor_dashboard_launch()}
+						{searchingRecords
+							? m.doc_processor_dashboard_searching()
+							: m.doc_processor_dashboard_launch()}
 					</button>
 					<button
-						onclick={() => { searchDialogOpen = true; }}
+						onclick={() => {
+							searchDialogOpen = true;
+						}}
 						class="flex items-center gap-1.5 rounded-lg px-4 py-2"
 						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; font-weight:600; cursor:pointer; flex-shrink:0;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textPrimary;
+							(e.currentTarget as HTMLElement).style.borderColor = accent + '60';
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textSecondary;
+							(e.currentTarget as HTMLElement).style.borderColor = borderColor;
+						}}
 					>
 						<SearchIcon class="h-4 w-4" />
 						{m.doc_processor_dashboard_search()}
@@ -1466,17 +1860,31 @@
 
 		<!-- Selected records chip list -->
 		{#if selectedRecords.length > 0}
-			<div class="mb-4 rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
+			<div
+				class="mb-4 rounded-xl p-3"
+				style="background:{surface2}; border:1px solid {borderColor};"
+			>
 				<div class="mb-2 flex items-center justify-between">
-					<span style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
-						{m.doc_processor_dashboard_record_selected({ selectedRecordsCount: selectedRecords.length, plural: selectedRecords.length !== 1 ? 's' : '' })}
+					<span
+						style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;"
+					>
+						{m.doc_processor_dashboard_record_selected({
+							selectedRecordsCount: selectedRecords.length,
+							plural: selectedRecords.length !== 1 ? 's' : ''
+						})}
 					</span>
 					<button
-						onclick={() => { selectedRecords = []; }}
+						onclick={() => {
+							selectedRecords = [];
+						}}
 						style="font-size:11px; color:{textMuted}; background:none; border:none; cursor:pointer; padding:0;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = colorError; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
-					>{m.doc_processor_dashboard_clear_all()}</button>
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = colorError;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textMuted;
+						}}>{m.doc_processor_dashboard_clear_all()}</button
+					>
 				</div>
 				<div class="flex flex-wrap gap-1.5">
 					{#each selectedRecords as rec (rec.id)}
@@ -1487,12 +1895,18 @@
 							<span style="font-family:monospace; color:{accent}; font-size:11px;">#{rec.id}</span>
 							<span class="max-w-32 truncate" title={recordTitle(rec)}>{recordTitle(rec)}</span>
 							<button
-								onclick={() => { selectedRecords = selectedRecords.filter(r => r.id !== rec.id); }}
+								onclick={() => {
+									selectedRecords = selectedRecords.filter((r) => r.id !== rec.id);
+								}}
 								style="background:none; border:none; cursor:pointer; color:{textMuted}; padding:0; line-height:1; font-size:14px; margin-left:2px;"
-								onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = colorError; }}
-								onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
-								title={m.doc_processor_dashboard_remove()}
-							>×</button>
+								onmouseenter={(e) => {
+									(e.currentTarget as HTMLElement).style.color = colorError;
+								}}
+								onmouseleave={(e) => {
+									(e.currentTarget as HTMLElement).style.color = textMuted;
+								}}
+								title={m.doc_processor_dashboard_remove()}>×</button
+							>
 						</span>
 					{/each}
 				</div>
@@ -1501,19 +1915,26 @@
 
 		<!-- Processor selection + launch (shown once records are selected) -->
 		{#if selectedRecords.length > 0}
-			<div
-				class="rounded-xl p-4"
-				style="background:{cardBg}; border:1px solid {borderColor};"
-			>
+			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
 				<div class="mb-3 flex items-center justify-between gap-4">
-					<div style="font-size:12px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">{m.doc_processor_dashboard_processors_to_run()}</div>
+					<div
+						style="font-size:12px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;"
+					>
+						{m.doc_processor_dashboard_processors_to_run()}
+					</div>
 					{#if Object.keys(processorPackages).length > 0}
 						<label class="flex items-center gap-2" style="font-size:12px; color:{textSecondary};">
-							<span style="white-space:nowrap;">{m.doc_processor_dashboard_select_processors()}</span>
+							<span style="white-space:nowrap;"
+								>{m.doc_processor_dashboard_select_processors()}</span
+							>
 							<select
 								bind:value={selectedProcessorPackage}
 								onchange={() => {
-									processors = processorSelectionForPackage(selectedProcessorPackage, processorPackages, selectableProcessorIds);
+									processors = processorSelectionForPackage(
+										selectedProcessorPackage,
+										processorPackages,
+										selectableProcessorIds
+									);
 								}}
 								class="rounded-lg px-3 py-2"
 								style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; font-size:12px; min-width:140px;"
@@ -1530,35 +1951,65 @@
 					<!-- Optional pre-processor: Parse File -->
 					<label
 						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
-						style="background:{parseFileChecked ? accentTint : surface2}; border:1px solid {parseFileChecked ? accent + '40' : borderColor};"
-						onmouseenter={(e) => { if (!parseFileChecked) (e.currentTarget as HTMLElement).style.background = surface3; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = parseFileChecked ? accentTint : surface2; }}
+						style="background:{parseFileChecked
+							? accentTint
+							: surface2}; border:1px solid {parseFileChecked ? accent + '40' : borderColor};"
+						onmouseenter={(e) => {
+							if (!parseFileChecked) (e.currentTarget as HTMLElement).style.background = surface3;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.background = parseFileChecked
+								? accentTint
+								: surface2;
+						}}
 					>
 						<input type="checkbox" bind:checked={parseFileChecked} class="sr-only" />
 						{#if parseFileChecked}
-							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+							<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 						{:else}
-							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+							<SquareIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 						{/if}
-						<span style="font-size:13px; color:{parseFileChecked ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_parse_file()}</span>
-						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_parse_file_2()}</span>
+						<span
+							style="font-size:13px; color:{parseFileChecked
+								? textPrimary
+								: textSecondary}; font-family:monospace;"
+							>{m.doc_processor_dashboard_parse_file()}</span
+						>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
+							>{m.doc_processor_dashboard_parse_file_2()}</span
+						>
 					</label>
 
 					<!-- Optional pre-processor: Convert Parse Result -->
 					<label
 						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
-						style="background:{convertChecked ? accentTint : surface2}; border:1px solid {convertChecked ? accent + '40' : borderColor};"
-						onmouseenter={(e) => { if (!convertChecked) (e.currentTarget as HTMLElement).style.background = surface3; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = convertChecked ? accentTint : surface2; }}
+						style="background:{convertChecked
+							? accentTint
+							: surface2}; border:1px solid {convertChecked ? accent + '40' : borderColor};"
+						onmouseenter={(e) => {
+							if (!convertChecked) (e.currentTarget as HTMLElement).style.background = surface3;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.background = convertChecked
+								? accentTint
+								: surface2;
+						}}
 					>
 						<input type="checkbox" bind:checked={convertChecked} class="sr-only" />
 						{#if convertChecked}
-							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+							<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 						{:else}
-							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+							<SquareIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 						{/if}
-						<span style="font-size:13px; color:{convertChecked ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_convert_parse_result()}</span>
-						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_convert_parse_result_2()}</span>
+						<span
+							style="font-size:13px; color:{convertChecked
+								? textPrimary
+								: textSecondary}; font-family:monospace;"
+							>{m.doc_processor_dashboard_convert_parse_result()}</span
+						>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
+							>{m.doc_processor_dashboard_convert_parse_result_2()}</span
+						>
 					</label>
 
 					<!-- Mandatory (always-on) processors -->
@@ -1567,10 +2018,15 @@
 							class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
 							style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;"
 						>
-							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
-							<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+							<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{colorSuccess};" />
+							<span style="font-size:13px; color:{textSecondary}; font-family:monospace;"
+								>{proc.id}</span
+							>
 							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
-							<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">{m.doc_processor_dashboard_mandatory()}</span>
+							<span
+								style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;"
+								>{m.doc_processor_dashboard_mandatory()}</span
+							>
 						</label>
 					{/each}
 
@@ -1578,25 +2034,30 @@
 					{#each CONFIGURABLE_PROCESSORS as proc}
 						<label
 							class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
-							style="background:{processors[proc.id] ? accentTint : surface2}; border:1px solid {processors[proc.id] ? accent + '40' : borderColor};"
+							style="background:{processors[proc.id]
+								? accentTint
+								: surface2}; border:1px solid {processors[proc.id] ? accent + '40' : borderColor};"
 							onmouseenter={(e) => {
-								if (!processors[proc.id]) (e.currentTarget as HTMLElement).style.background = surface3;
+								if (!processors[proc.id])
+									(e.currentTarget as HTMLElement).style.background = surface3;
 							}}
 							onmouseleave={(e) => {
-								(e.currentTarget as HTMLElement).style.background = processors[proc.id] ? accentTint : surface2;
+								(e.currentTarget as HTMLElement).style.background = processors[proc.id]
+									? accentTint
+									: surface2;
 							}}
 						>
-							<input
-								type="checkbox"
-								bind:checked={processors[proc.id]}
-								class="sr-only"
-							/>
+							<input type="checkbox" bind:checked={processors[proc.id]} class="sr-only" />
 							{#if processors[proc.id]}
-								<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+								<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 							{:else}
-								<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+								<SquareIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 							{/if}
-							<span style="font-size:13px; color:{processors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
+							<span
+								style="font-size:13px; color:{processors[proc.id]
+									? textPrimary
+									: textSecondary}; font-family:monospace;">{proc.id}</span
+							>
 							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
 						</label>
 					{/each}
@@ -1608,17 +2069,27 @@
 						onclick={toggleAll}
 						class="rounded-lg px-3 py-1.5"
 						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textPrimary;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textSecondary;
+						}}
 					>
-						{allProcessorsSelected() ? m.doc_processor_dashboard_deselect_all() : m.doc_processor_dashboard_select_all()}
+						{allProcessorsSelected()
+							? m.doc_processor_dashboard_deselect_all()
+							: m.doc_processor_dashboard_select_all()}
 					</button>
 					<button
 						onclick={selectFailedProcessors}
 						class="rounded-lg px-3 py-1.5"
 						style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:12px; cursor:pointer;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '60'; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '30'; }}
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.borderColor = colorError + '60';
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.borderColor = colorError + '30';
+						}}
 					>
 						{m.doc_processor_dashboard_select_failed()}
 					</button>
@@ -1626,8 +2097,12 @@
 						onclick={selectIncompletedProcessors}
 						class="rounded-lg px-3 py-1.5"
 						style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; cursor:pointer;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '30'; }}
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.borderColor = accent + '60';
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.borderColor = accent + '30';
+						}}
 					>
 						{m.doc_processor_dashboard_select_incompleted()}
 					</button>
@@ -1643,37 +2118,49 @@
 	     Section 3 — Failed Pipelines
 	══════════════════════════════════════════════════════════ -->
 	<section class="p-6">
-
 		<!-- Collapsible header -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="flex cursor-pointer items-center justify-between"
 			onclick={toggleFailedExpanded}
-			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFailedExpanded(); } }}
+			onkeydown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					toggleFailedExpanded();
+				}
+			}}
 			role="button"
 			tabindex="0"
 			style="user-select:none;"
 		>
 			<div class="flex items-center gap-2">
 				{#if failedExpanded}
-					<ChevronDownIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+					<ChevronDownIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 				{:else}
-					<ChevronRightIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+					<ChevronRightIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 				{/if}
 				<div>
 					<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 2px;">
 						{m.doc_processor_dashboard_failed_pipelines()}
 						{#if failedLoaded}
-							<span style="font-size:12px; font-weight:400; color:{colorError}; margin-left:6px;">({failedTotal})</span>
+							<span style="font-size:12px; font-weight:400; color:{colorError}; margin-left:6px;"
+								>({failedTotal})</span
+							>
 						{/if}
 					</h2>
-					<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_records_with_at_least_one()}</p>
+					<p style="font-size:12px; color:{textMuted}; margin:0;">
+						{m.doc_processor_dashboard_records_with_at_least_one()}
+					</p>
 				</div>
 			</div>
 			{#if failedExpanded}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<button
-					onclick={(e) => { e.stopPropagation(); failedPage = 1; void loadFailedPipelines(); }}
+					onclick={(e) => {
+						e.stopPropagation();
+						failedPage = 1;
+						void loadFailedPipelines();
+					}}
 					class="flex items-center gap-1.5 rounded-lg px-3 py-1.5"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-weight:500; cursor:pointer;"
 					onmouseenter={(e) => {
@@ -1693,40 +2180,44 @@
 
 		{#if failedExpanded}
 			<div class="mt-4">
-
 				<!-- Loading -->
 				{#if failedLoading && !failedLoaded}
 					<div class="space-y-2">
 						{#each Array(4) as _, i}
 							<div
 								class="rounded-lg"
-								style="height:44px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 - i * 0.2};"
+								style="height:44px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 -
+									i * 0.2};"
 							></div>
 						{/each}
 					</div>
 
-				<!-- Error -->
+					<!-- Error -->
 				{:else if failedError}
 					<div
 						class="flex items-center gap-3 rounded-xl p-4"
 						style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:13px;"
 					>
-						<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+						<AlertCircleIcon class="h-4 w-4 shrink-0" />
 						{failedError}
 					</div>
 
-				<!-- Empty -->
+					<!-- Empty -->
 				{:else if failedRecords.length === 0}
 					<div
 						class="flex flex-col items-center rounded-xl py-10"
 						style="background:{surface2}; border:1px solid {borderColor};"
 					>
 						<CircleCheckIcon class="mb-3 h-8 w-8" style="color:{colorSuccess}; opacity:0.5;" />
-						<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">{m.doc_processor_dashboard_no_failed_pipelines()}</p>
-						<p style="font-size:12px; color:{textMuted}; margin:0;">{m.doc_processor_dashboard_all_processed_records_completed_without()}</p>
+						<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">
+							{m.doc_processor_dashboard_no_failed_pipelines()}
+						</p>
+						<p style="font-size:12px; color:{textMuted}; margin:0;">
+							{m.doc_processor_dashboard_all_processed_records_completed_without()}
+						</p>
 					</div>
 
-				<!-- Table -->
+					<!-- Table -->
 				{:else}
 					<div class="overflow-hidden rounded-xl" style="border:1px solid {borderColor};">
 						<table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -1736,7 +2227,8 @@
 										<th
 											class="px-3 py-2 text-left"
 											style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap;"
-										>{col}</th>
+											>{col}</th
+										>
 									{/each}
 								</tr>
 							</thead>
@@ -1745,9 +2237,14 @@
 									{@const failedSteps = getFailedSteps(rec)}
 									{@const triageOnly = isMappingTriageOnly(failedSteps)}
 									<tr style="border-bottom:1px solid {borderColor}; background:transparent;">
-										<td class="px-3 py-2.5" style="font-family:monospace; color:{accent}; font-size:12px; white-space:nowrap;">{rec.id}</td>
-										<td class="px-3 py-2.5 max-w-xs" style="color:{textPrimary};">
-											<span class="block truncate" title={recordTitle(rec)}>{recordTitle(rec)}</span>
+										<td
+											class="px-3 py-2.5"
+											style="font-family:monospace; color:{accent}; font-size:12px; white-space:nowrap;"
+											>{rec.id}</td
+										>
+										<td class="max-w-xs px-3 py-2.5" style="color:{textPrimary};">
+											<span class="block truncate" title={recordTitle(rec)}>{recordTitle(rec)}</span
+											>
 										</td>
 										<td class="px-3 py-2.5">
 											<div class="flex flex-wrap gap-1">
@@ -1760,24 +2257,36 @@
 														       {step.isMappingTriage
 															? `background:${colorWarningTint}; color:${colorWarning}; border:1px solid ${colorWarning}30;`
 															: `background:${colorErrorTint}; color:${colorError}; border:1px solid ${colorError}30;`}"
-													>{step.operation}{step.isMappingTriage ? m.doc_processor_dashboard_mapping_triage() : ''}</span>
+														>{step.operation}{step.isMappingTriage
+															? m.doc_processor_dashboard_mapping_triage()
+															: ''}</span
+													>
 												{/each}
 											</div>
 										</td>
-										<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px; white-space:nowrap;">{formatTime(rec.create_time)}</td>
+										<td
+											class="px-3 py-2.5"
+											style="color:{textMuted}; font-family:monospace; font-size:11px; white-space:nowrap;"
+											>{formatTime(rec.create_time)}</td
+										>
 										<td class="px-3 py-2.5 text-right">
 											{#if triageOnly}
 												<span
 													style="font-size:11px; color:{textMuted}; white-space:nowrap;"
 													title={m.doc_processor_dashboard_restart_will_reproduce_this_identically()}
-												>{m.doc_processor_dashboard_needs_mapping_triage_not_restart()}</span>
+													>{m.doc_processor_dashboard_needs_mapping_triage_not_restart()}</span
+												>
 											{:else}
 												<button
 													onclick={() => openRestart(rec)}
 													class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
 													style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:11px; font-weight:500; cursor:pointer; white-space:nowrap;"
-													onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
-													onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
+													onmouseenter={(e) => {
+														(e.currentTarget as HTMLElement).style.background = accent + '25';
+													}}
+													onmouseleave={(e) => {
+														(e.currentTarget as HTMLElement).style.background = accentTint;
+													}}
 												>
 													<PlayIcon class="h-3 w-3" />
 													{m.doc_processor_dashboard_restart()}
@@ -1794,28 +2303,55 @@
 					{#if failedTotalPages > 1}
 						<div class="mt-3 flex items-center justify-between">
 							<span style="font-size:12px; color:{textMuted};">
-								{m.doc_processor_dashboard_of({ value: (failedPage - 1) * FAILED_PAGE_SIZE + 1, value2: Math.min(failedPage * FAILED_PAGE_SIZE, failedTotal), failedTotal })}
+								{m.doc_processor_dashboard_of({
+									value: (failedPage - 1) * FAILED_PAGE_SIZE + 1,
+									value2: Math.min(failedPage * FAILED_PAGE_SIZE, failedTotal),
+									failedTotal
+								})}
 							</span>
 							<div class="flex items-center gap-1.5">
 								<button
 									onclick={() => failedGoToPage(failedPage - 1)}
 									disabled={failedPage <= 1}
 									class="rounded-lg px-3 py-1.5"
-									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage <= 1 ? textMuted : textSecondary}; font-size:12px; cursor:{failedPage <= 1 ? 'not-allowed' : 'pointer'}; opacity:{failedPage <= 1 ? '0.45' : '1'};"
-									onmouseenter={(e) => { if (failedPage > 1) (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = failedPage <= 1 ? textMuted : textSecondary; }}
-								>{m.doc_processor_dashboard_prev()}</button>
-								<span style="font-size:12px; color:{textSecondary}; font-family:monospace; padding:0 6px;">
+									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage <=
+									1
+										? textMuted
+										: textSecondary}; font-size:12px; cursor:{failedPage <= 1
+										? 'not-allowed'
+										: 'pointer'}; opacity:{failedPage <= 1 ? '0.45' : '1'};"
+									onmouseenter={(e) => {
+										if (failedPage > 1) (e.currentTarget as HTMLElement).style.color = textPrimary;
+									}}
+									onmouseleave={(e) => {
+										(e.currentTarget as HTMLElement).style.color =
+											failedPage <= 1 ? textMuted : textSecondary;
+									}}>{m.doc_processor_dashboard_prev()}</button
+								>
+								<span
+									style="font-size:12px; color:{textSecondary}; font-family:monospace; padding:0 6px;"
+								>
 									{failedPage} / {failedTotalPages}
 								</span>
 								<button
 									onclick={() => failedGoToPage(failedPage + 1)}
 									disabled={failedPage >= failedTotalPages}
 									class="rounded-lg px-3 py-1.5"
-									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage >= failedTotalPages ? textMuted : textSecondary}; font-size:12px; cursor:{failedPage >= failedTotalPages ? 'not-allowed' : 'pointer'}; opacity:{failedPage >= failedTotalPages ? '0.45' : '1'};"
-									onmouseenter={(e) => { if (failedPage < failedTotalPages) (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = failedPage >= failedTotalPages ? textMuted : textSecondary; }}
-								>{m.doc_processor_dashboard_next()}</button>
+									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage >=
+									failedTotalPages
+										? textMuted
+										: textSecondary}; font-size:12px; cursor:{failedPage >= failedTotalPages
+										? 'not-allowed'
+										: 'pointer'}; opacity:{failedPage >= failedTotalPages ? '0.45' : '1'};"
+									onmouseenter={(e) => {
+										if (failedPage < failedTotalPages)
+											(e.currentTarget as HTMLElement).style.color = textPrimary;
+									}}
+									onmouseleave={(e) => {
+										(e.currentTarget as HTMLElement).style.color =
+											failedPage >= failedTotalPages ? textMuted : textSecondary;
+									}}>{m.doc_processor_dashboard_next()}</button
+								>
 							</div>
 						</div>
 					{/if}
@@ -1833,23 +2369,33 @@
 	<div
 		class="fixed inset-0 z-40 flex items-center justify-center"
 		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
-		onmousedown={(e) => { if (e.target === e.currentTarget) { showConfirm = false; launchError = ''; } }}
+		onmousedown={(e) => {
+			if (e.target === e.currentTarget) {
+				showConfirm = false;
+				launchError = '';
+			}
+		}}
 	>
 		<div
 			class="mx-4 w-full max-w-md rounded-2xl p-6"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
-			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 8px;">{m.doc_processor_dashboard_confirm_launch()}</h3>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 8px;">
+				{m.doc_processor_dashboard_confirm_launch()}
+			</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 12px; line-height:1.5;">
-				{m.doc_processor_dashboard_launch_processing_for_record({ selectedRecordsCount: selectedRecords.length, plural: selectedRecords.length !== 1 ? 's' : '' })}
+				{m.doc_processor_dashboard_launch_processing_for_record({
+					selectedRecordsCount: selectedRecords.length,
+					plural: selectedRecords.length !== 1 ? 's' : ''
+				})}
 			</p>
 			<div class="mb-4 flex flex-wrap gap-1.5">
 				{#each selectedRecords as rec (rec.id)}
 					<span
 						style="font-family:monospace; font-size:11px; padding:2px 8px; border-radius:999px;
 						       background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
-						title={recordTitle(rec)}
-					>#{rec.id}</span>
+						title={recordTitle(rec)}>#{rec.id}</span
+					>
 				{/each}
 			</div>
 
@@ -1858,25 +2404,45 @@
 				class="mb-4 rounded-lg px-3 py-2.5"
 				style="background:{surface2}; border:1px solid {borderColor}; font-size:12px; color:{textSecondary};"
 			>
-				<div style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;">{m.doc_processor_dashboard_processors()}</div>
+				<div
+					style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;"
+				>
+					{m.doc_processor_dashboard_processors()}
+				</div>
 				<div class="flex flex-wrap gap-1.5">
 					{#if parseFileChecked}
-						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{m.doc_processor_dashboard_parse_file()}</span>
+						<span
+							style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};"
+							>{m.doc_processor_dashboard_parse_file()}</span
+						>
 					{/if}
 					{#if convertChecked}
-						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{m.doc_processor_dashboard_convert_parse_result()}</span>
+						<span
+							style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};"
+							>{m.doc_processor_dashboard_convert_parse_result()}</span
+						>
 					{/if}
 					{#each MANDATORY_DISPLAY_STAGES as stage}
-						<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{stage.id}</span>
+						<span
+							style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};"
+							>{stage.id}</span
+						>
 					{/each}
-					{#each selectableProcessorIds.filter(p => processors[p]) as p}
-						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
+					{#each selectableProcessorIds.filter((p) => processors[p]) as p}
+						<span
+							style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};"
+							>{p}</span
+						>
 					{/each}
 				</div>
 				{#if parseFileChecked}
-					<div style="margin-top:6px; font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_triggers_parse_convert_all_doc()}</div>
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">
+						{m.doc_processor_dashboard_triggers_parse_convert_all_doc()}
+					</div>
 				{:else if convertChecked}
-					<div style="margin-top:6px; font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_triggers_convert_all_doc_processors()}</div>
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">
+						{m.doc_processor_dashboard_triggers_convert_all_doc_processors()}
+					</div>
 				{/if}
 			</div>
 
@@ -1886,22 +2452,37 @@
 
 			<div class="flex justify-end gap-2">
 				<button
-					onclick={() => { showConfirm = false; launchError = ''; }}
+					onclick={() => {
+						showConfirm = false;
+						launchError = '';
+					}}
 					class="rounded-lg px-4 py-2"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>{m.doc_processor_dashboard_cancel()}</button>
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textPrimary;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textSecondary;
+					}}>{m.doc_processor_dashboard_cancel()}</button
+				>
 				<button
 					onclick={confirmLaunch}
 					disabled={launching}
 					class="flex items-center gap-2 rounded-lg px-4 py-2"
-					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{launching ? 'not-allowed' : 'pointer'}; opacity:{launching ? '0.7' : '1'};"
-					onmouseenter={(e) => { if (!launching) (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = launching ? '0.7' : '1'; }}
+					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{launching
+						? 'not-allowed'
+						: 'pointer'}; opacity:{launching ? '0.7' : '1'};"
+					onmouseenter={(e) => {
+						if (!launching) (e.currentTarget as HTMLElement).style.opacity = '0.88';
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.opacity = launching ? '0.7' : '1';
+					}}
 				>
 					<PlayIcon class="h-4 w-4" />
-					{launching ? m.doc_processor_dashboard_launching() : m.doc_processor_dashboard_confirm_launch_2()}
+					{launching
+						? m.doc_processor_dashboard_launching()
+						: m.doc_processor_dashboard_confirm_launch_2()}
 				</button>
 			</div>
 		</div>
@@ -1916,33 +2497,53 @@
 	<div
 		class="fixed inset-0 z-40 flex items-center justify-center"
 		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
-		onmousedown={(e) => { if (e.target === e.currentTarget) noEligibleDialog = null; }}
+		onmousedown={(e) => {
+			if (e.target === e.currentTarget) noEligibleDialog = null;
+		}}
 	>
 		<div
 			class="mx-4 w-full max-w-sm rounded-2xl p-6"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
 			<div class="mb-3 flex items-center gap-2">
-				<XCircleIcon class="h-5 w-5 flex-shrink-0" style="color:{colorError};" />
-				<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0;">{m.doc_processor_dashboard_nothing_to_launch()}</h3>
+				<XCircleIcon class="h-5 w-5 shrink-0" style="color:{colorError};" />
+				<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0;">
+					{m.doc_processor_dashboard_nothing_to_launch()}
+				</h3>
 			</div>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 20px; line-height:1.6;">
 				{#if noEligibleDialog.fromSearch}
-					{m.doc_processor_dashboard_no()} <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> {m.doc_processor_dashboard_records_found_to_launch_try()}
+					{m.doc_processor_dashboard_no()}
+					<strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong>
+					{m.doc_processor_dashboard_records_found_to_launch_try()}
 				{:else}
-					{m.doc_processor_dashboard_no_2({ value: noEligibleDialog.recordCount === 1
-						? m.doc_processor_dashboard_the_selected_record_has()
-						: m.doc_processor_dashboard_all_selected_records_have({ recordCount: noEligibleDialog.recordCount }) })} <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> {m.doc_processor_dashboard_processors_switch_to()} <em>{m.doc_processor_dashboard_force_run()}</em> {m.doc_processor_dashboard_to_re_run_regardless_of()}
+					{m.doc_processor_dashboard_no_2({
+						value:
+							noEligibleDialog.recordCount === 1
+								? m.doc_processor_dashboard_the_selected_record_has()
+								: m.doc_processor_dashboard_all_selected_records_have({
+										recordCount: noEligibleDialog.recordCount
+									})
+					})} <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong>
+					{m.doc_processor_dashboard_processors_switch_to()}
+					<em>{m.doc_processor_dashboard_force_run()}</em>
+					{m.doc_processor_dashboard_to_re_run_regardless_of()}
 				{/if}
 			</p>
 			<div class="flex justify-end">
 				<button
-					onclick={() => { noEligibleDialog = null; }}
+					onclick={() => {
+						noEligibleDialog = null;
+					}}
 					class="rounded-lg px-5 py-2"
 					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:pointer;"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-				>{m.doc_processor_dashboard_ok()}</button>
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.opacity = '0.88';
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.opacity = '1';
+					}}>{m.doc_processor_dashboard_ok()}</button
+				>
 			</div>
 		</div>
 	</div>
@@ -1956,15 +2557,25 @@
 	<div
 		class="fixed inset-0 z-40 flex items-center justify-center"
 		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
-		onmousedown={(e) => { if (e.target === e.currentTarget) { showRestartDialog = false; restartError = ''; } }}
+		onmousedown={(e) => {
+			if (e.target === e.currentTarget) {
+				showRestartDialog = false;
+				restartError = '';
+			}
+		}}
 	>
 		<div
 			class="mx-4 w-full max-w-md rounded-2xl p-6"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
-			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">{m.doc_processor_dashboard_restart_pipeline()}</h3>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">
+				{m.doc_processor_dashboard_restart_pipeline()}
+			</h3>
 			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px;">
-				{m.doc_processor_dashboard_record()} <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
+				{m.doc_processor_dashboard_record()}
+				<span style="color:{accent}; font-family:monospace; font-weight:600;"
+					>#{restartTarget.id}</span
+				>
 				{m.doc_processor_dashboard_select_processors_to_re_run()}
 			</p>
 
@@ -1972,44 +2583,82 @@
 				<!-- Optional pre-processor: Parse File -->
 				<label
 					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
-					style="background:{restartParseFile ? accentTint : surface2}; border:1px solid {restartParseFile ? accent + '40' : borderColor};"
-					onmouseenter={(e) => { if (!restartParseFile) (e.currentTarget as HTMLElement).style.background = surface3; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartParseFile ? accentTint : surface2; }}
+					style="background:{restartParseFile
+						? accentTint
+						: surface2}; border:1px solid {restartParseFile ? accent + '40' : borderColor};"
+					onmouseenter={(e) => {
+						if (!restartParseFile) (e.currentTarget as HTMLElement).style.background = surface3;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.background = restartParseFile
+							? accentTint
+							: surface2;
+					}}
 				>
 					<input type="checkbox" bind:checked={restartParseFile} class="sr-only" />
 					{#if restartParseFile}
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 					{:else}
-						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						<SquareIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 					{/if}
-					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_parse_file()}</span>
-					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_parse_file_2()}</span>
+					<span
+						style="font-size:13px; color:{restartParseFile
+							? textPrimary
+							: textSecondary}; font-family:monospace;"
+						>{m.doc_processor_dashboard_parse_file()}</span
+					>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
+						>{m.doc_processor_dashboard_parse_file_2()}</span
+					>
 				</label>
 
 				<!-- Optional pre-processor: Convert Parse Result -->
 				<label
 					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
-					style="background:{restartConvert ? accentTint : surface2}; border:1px solid {restartConvert ? accent + '40' : borderColor};"
-					onmouseenter={(e) => { if (!restartConvert) (e.currentTarget as HTMLElement).style.background = surface3; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartConvert ? accentTint : surface2; }}
+					style="background:{restartConvert
+						? accentTint
+						: surface2}; border:1px solid {restartConvert ? accent + '40' : borderColor};"
+					onmouseenter={(e) => {
+						if (!restartConvert) (e.currentTarget as HTMLElement).style.background = surface3;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.background = restartConvert
+							? accentTint
+							: surface2;
+					}}
 				>
 					<input type="checkbox" bind:checked={restartConvert} class="sr-only" />
 					{#if restartConvert}
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 					{:else}
-						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						<SquareIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 					{/if}
-					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">{m.doc_processor_dashboard_convert_parse_result()}</span>
-					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{m.doc_processor_dashboard_convert_parse_result_2()}</span>
+					<span
+						style="font-size:13px; color:{restartConvert
+							? textPrimary
+							: textSecondary}; font-family:monospace;"
+						>{m.doc_processor_dashboard_convert_parse_result()}</span
+					>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
+						>{m.doc_processor_dashboard_convert_parse_result_2()}</span
+					>
 				</label>
 
 				<!-- Mandatory (always-on) processors -->
 				{#each MANDATORY_DISPLAY_STAGES as proc}
-					<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
-						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+					<label
+						class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
+						style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;"
+					>
+						<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{colorSuccess};" />
+						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;"
+							>{proc.id}</span
+						>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
-						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">{m.doc_processor_dashboard_mandatory()}</span>
+						<span
+							style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;"
+							>{m.doc_processor_dashboard_mandatory()}</span
+						>
 					</label>
 				{/each}
 
@@ -2017,17 +2666,32 @@
 				{#each CONFIGURABLE_PROCESSORS as proc}
 					<label
 						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
-						style="background:{restartProcessors[proc.id] ? accentTint : surface2}; border:1px solid {restartProcessors[proc.id] ? accent + '40' : borderColor};"
-						onmouseenter={(e) => { if (!restartProcessors[proc.id]) (e.currentTarget as HTMLElement).style.background = surface3; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartProcessors[proc.id] ? accentTint : surface2; }}
+						style="background:{restartProcessors[proc.id]
+							? accentTint
+							: surface2}; border:1px solid {restartProcessors[proc.id]
+							? accent + '40'
+							: borderColor};"
+						onmouseenter={(e) => {
+							if (!restartProcessors[proc.id])
+								(e.currentTarget as HTMLElement).style.background = surface3;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.background = restartProcessors[proc.id]
+								? accentTint
+								: surface2;
+						}}
 					>
 						<input type="checkbox" bind:checked={restartProcessors[proc.id]} class="sr-only" />
 						{#if restartProcessors[proc.id]}
-							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+							<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 						{:else}
-							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+							<SquareIcon class="h-4 w-4 shrink-0" style="color:{textMuted};" />
 						{/if}
-						<span style="font-size:13px; color:{restartProcessors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
+						<span
+							style="font-size:13px; color:{restartProcessors[proc.id]
+								? textPrimary
+								: textSecondary}; font-family:monospace;">{proc.id}</span
+						>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
 					</label>
 				{/each}
@@ -2038,9 +2702,16 @@
 					onclick={toggleAllRestart}
 					class="rounded-lg px-3 py-1.5"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>{allRestartSelected() ? m.doc_processor_dashboard_deselect_all() : m.doc_processor_dashboard_select_all()}</button>
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textPrimary;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textSecondary;
+					}}
+					>{allRestartSelected()
+						? m.doc_processor_dashboard_deselect_all()
+						: m.doc_processor_dashboard_select_all()}</button
+				>
 			</div>
 
 			{#if restartError}
@@ -2049,19 +2720,38 @@
 
 			<div class="flex justify-end gap-2">
 				<button
-					onclick={() => { showRestartDialog = false; restartError = ''; }}
+					onclick={() => {
+						showRestartDialog = false;
+						restartError = '';
+					}}
 					class="rounded-lg px-4 py-2"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>{m.doc_processor_dashboard_cancel()}</button>
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textPrimary;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textSecondary;
+					}}>{m.doc_processor_dashboard_cancel()}</button
+				>
 				<button
 					onclick={confirmRestart}
-					disabled={restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p]))}
+					disabled={restarting ||
+						!(
+							restartParseFile ||
+							restartConvert ||
+							selectableProcessorIds.some((p) => restartProcessors[p])
+						)}
 					class="flex items-center gap-2 rounded-lg px-4 py-2"
 					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none;
 					       cursor:{restarting ? 'not-allowed' : 'pointer'};
-					       opacity:{restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p])) ? '0.6' : '1'};"
+					       opacity:{restarting ||
+					!(
+						restartParseFile ||
+						restartConvert ||
+						selectableProcessorIds.some((p) => restartProcessors[p])
+					)
+						? '0.6'
+						: '1'};"
 					onmouseenter={(e) => {
 						if (!restarting) (e.currentTarget as HTMLElement).style.opacity = '0.88';
 					}}
@@ -2070,7 +2760,9 @@
 					}}
 				>
 					<RefreshCwIcon class="h-4 w-4" />
-					{restarting ? m.doc_processor_dashboard_restarting() : m.doc_processor_dashboard_restart()}
+					{restarting
+						? m.doc_processor_dashboard_restarting()
+						: m.doc_processor_dashboard_restart()}
 				</button>
 			</div>
 		</div>
@@ -2085,10 +2777,12 @@
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center"
 		style="background:rgba(0,0,0,0.65); backdrop-filter:blur(6px);"
-		onmousedown={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
+		onmousedown={(e) => {
+			if (e.target === e.currentTarget) closeDetail();
+		}}
 	>
 		<div
-			class="mx-4 w-full max-w-4xl rounded-2xl overflow-hidden"
+			class="mx-4 w-full max-w-4xl overflow-hidden rounded-2xl"
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.45); max-height:90vh; display:flex; flex-direction:column;"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
@@ -2097,51 +2791,106 @@
 			tabindex="0"
 		>
 			<!-- Header -->
-			<div class="flex items-center justify-between px-5 py-3.5 flex-shrink-0" style="border-bottom:1px solid {borderColor};">
+			<div
+				class="flex shrink-0 items-center justify-between px-5 py-3.5"
+				style="border-bottom:1px solid {borderColor};"
+			>
 				<div class="flex items-center gap-2">
-					<span style="font-family:monospace; font-size:11px; font-weight:600; color:{accent}; background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 7px;">#{detailRecord.id}</span>
-					<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin:0;">{m.doc_processor_dashboard_status({ detailRecord: recordTitle(detailRecord) })}</h3>
+					<span
+						style="font-family:monospace; font-size:11px; font-weight:600; color:{accent}; background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 7px;"
+						>#{detailRecord.id}</span
+					>
+					<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin:0;">
+						{m.doc_processor_dashboard_status({ detailRecord: recordTitle(detailRecord) })}
+					</h3>
 				</div>
 				<button
 					onclick={closeDetail}
 					style="height:30px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-				>{m.doc_processor_dashboard_close()}</button>
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textPrimary;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textSecondary;
+					}}>{m.doc_processor_dashboard_close()}</button
+				>
 			</div>
 
 			<!-- Body -->
-			<div class="grid gap-4 p-5 overflow-auto flex-1" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items:start;">
+			<div
+				class="grid flex-1 gap-4 overflow-auto p-5"
+				style="grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items:start;"
+			>
 				<!-- Readable -->
 				<div class="rounded-xl p-3" style="border:1px solid {borderColor}; background:{surface2};">
-					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">{m.doc_processor_dashboard_readable()}</div>
+					<div
+						style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;"
+					>
+						{m.doc_processor_dashboard_readable()}
+					</div>
 					{#if !detailRecord.status?.length}
-						<div style="font-size:12px; color:{textMuted};">{m.doc_processor_dashboard_no_status_entries()}</div>
+						<div style="font-size:12px; color:{textMuted};">
+							{m.doc_processor_dashboard_no_status_entries()}
+						</div>
 					{:else}
 						<div class="space-y-2">
 							{#each detailRecord.status as item, idx}
-								{@const ps = (item.proc_status ?? item['proc-status'] ?? item.status ?? '').toLowerCase()}
-								<div class="rounded-lg p-2.5" style="border:1px solid {borderColor}; background:{cardBg};">
-									<div style="font-size:11px; font-weight:600; color:{textSecondary}; margin-bottom:7px; text-transform:uppercase; letter-spacing:0.08em;">
+								{@const ps = (
+									item.proc_status ??
+									item['proc-status'] ??
+									item.status ??
+									''
+								).toLowerCase()}
+								<div
+									class="rounded-lg p-2.5"
+									style="border:1px solid {borderColor}; background:{cardBg};"
+								>
+									<div
+										style="font-size:11px; font-weight:600; color:{textSecondary}; margin-bottom:7px; text-transform:uppercase; letter-spacing:0.08em;"
+									>
 										{m.doc_processor_dashboard_entry({ value: idx + 1 })}
 									</div>
-									<div class="grid gap-y-1 gap-x-3" style="grid-template-columns: 110px 1fr;">
-										<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_operation()}</span>
-										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.operation ?? '—'}</span>
-										<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_proc_status()}</span>
-										<span style="font-size:12px; font-family:monospace; font-weight:600;
-											color:{ps === 'success' ? colorSuccess : ps === 'failed' || ps === 'fail' ? colorError : textPrimary};">
+									<div class="grid gap-x-3 gap-y-1" style="grid-template-columns: 110px 1fr;">
+										<span style="font-size:11px; color:{textMuted};"
+											>{m.doc_processor_dashboard_operation()}</span
+										>
+										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;"
+											>{item.operation ?? '—'}</span
+										>
+										<span style="font-size:11px; color:{textMuted};"
+											>{m.doc_processor_dashboard_proc_status()}</span
+										>
+										<span
+											style="font-size:12px; font-family:monospace; font-weight:600;
+											color:{ps === 'success'
+												? colorSuccess
+												: ps === 'failed' || ps === 'fail'
+													? colorError
+													: textPrimary};"
+										>
 											{item.proc_status ?? item['proc-status'] ?? '—'}
 										</span>
-										<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_start_time()}</span>
-										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.start_time ?? '—'}</span>
+										<span style="font-size:11px; color:{textMuted};"
+											>{m.doc_processor_dashboard_start_time()}</span
+										>
+										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;"
+											>{item.start_time ?? '—'}</span
+										>
 										{#if item.doc_processor_name}
-											<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_processor()}</span>
-											<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.doc_processor_name}</span>
+											<span style="font-size:11px; color:{textMuted};"
+												>{m.doc_processor_dashboard_processor()}</span
+											>
+											<span style="font-size:12px; color:{textPrimary}; font-family:monospace;"
+												>{item.doc_processor_name}</span
+											>
 										{/if}
 										{#if item.error}
-											<span style="font-size:11px; color:{textMuted};">{m.doc_processor_dashboard_error()}</span>
-											<span style="font-size:12px; color:{colorError}; word-break:break-word;">{item.error}</span>
+											<span style="font-size:11px; color:{textMuted};"
+												>{m.doc_processor_dashboard_error()}</span
+											>
+											<span style="font-size:12px; color:{colorError}; word-break:break-word;"
+												>{item.error}</span
+											>
 										{/if}
 									</div>
 								</div>
@@ -2151,12 +2900,24 @@
 				</div>
 
 				<!-- Raw JSON -->
-				<div class="rounded-xl p-3 flex flex-col" style="border:1px solid {borderColor}; background:{surface2}; min-height:0;">
-					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">{m.doc_processor_dashboard_raw_json()}</div>
+				<div
+					class="flex flex-col rounded-xl p-3"
+					style="border:1px solid {borderColor}; background:{surface2}; min-height:0;"
+				>
+					<div
+						style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;"
+					>
+						{m.doc_processor_dashboard_raw_json()}
+					</div>
 					<pre
 						bind:this={detailRawJsonEl}
-						style="margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; color:{textPrimary}; overflow-y:{detailHasOverflow ? 'auto' : 'visible'}; max-height:420px;"
-					>{JSON.stringify(detailRecord.status ?? [], null, 2)}</pre>
+						style="margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; color:{textPrimary}; overflow-y:{detailHasOverflow
+							? 'auto'
+							: 'visible'}; max-height:420px;">{JSON.stringify(
+							detailRecord.status ?? [],
+							null,
+							2
+						)}</pre>
 				</div>
 			</div>
 		</div>
@@ -2175,21 +2936,41 @@
 		padding: 8px 10px;
 	}
 	@media (max-width: 900px) {
-		.pdf-phase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.pdf-phase-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 	@media (max-width: 600px) {
-		.pdf-phase-grid { grid-template-columns: minmax(0, 1fr); }
+		.pdf-phase-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 	@keyframes pulse {
-		0%, 100% { opacity: 1; transform: scale(1); }
-		50%       { opacity: 0.5; transform: scale(0.85); }
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 0.5;
+			transform: scale(0.85);
+		}
 	}
 	@keyframes pulse-ring {
-		0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4); }
-		50%       { box-shadow: 0 0 0 4px rgba(129, 140, 248, 0); }
+		0%,
+		100% {
+			box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4);
+		}
+		50% {
+			box-shadow: 0 0 0 4px rgba(129, 140, 248, 0);
+		}
 	}
 	@keyframes pdf-parse-indeterminate {
-		0%   { left: -35%; }
-		100% { left: 100%; }
+		0% {
+			left: -35%;
+		}
+		100% {
+			left: 100%;
+		}
 	}
 </style>

@@ -19,7 +19,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { loadClassVersions, listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -32,6 +32,7 @@
 	import { ELEMENT_CLASS_PREFIX, VALIDATOR_CLASS_PREFIX, elementPaletteTypes, validatorPaletteTypes } from './canvas/element-palette';
 	import { addValidator, elementModule } from './canvas/validator-drop';
 	import { acceptsValidators, type ValidatorClass } from '$lib/wpi/validators';
+	import { classVersion, makeInstanceId, newDynamicInstanceId, nextSeqno, stampInstances, stripInstanceIds } from '$lib/wpi/instance-ids';
 	import { validatorCategoryLabel } from '$lib/wpi/validators/messages';
 	import WpiCanvasToolbar, { type WpiNodeKind } from './canvas/WpiCanvasToolbar.svelte';
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
@@ -55,6 +56,7 @@
 	import { resizePageDimension } from './canvas/page-resize';
 	import { addPane, deletePane, mergePane, resizePane, adjustPaneLimits, nodesUnder, renamePane, rootOf, setPageLayouter, setPanelConfig, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
+	import { moveElementNode } from './canvas/element-order';
 	import { canvasThemeVars } from './canvas/canvas-theme';
 	import { pageMinimapBounds } from './canvas/page-minimap';
 	import { blankPage, centeredPageViewport, DEFAULT_PREVIEW_SIZE, isInsidePage } from './canvas/page-placement';
@@ -612,7 +614,8 @@
 		activeFlow = flow;
 		savedName = flow.flow_name;
 		configMode = null;
-		loadedPage = (flow.flow_data?.wpi_page as JsonObject | undefined) ?? blankPage();
+		const stored = flow.flow_data?.wpi_page as JsonObject | undefined;
+		loadedPage = stored ? stampInstances(stored, null) : stampInstances(blankPage(), []);
 		previewSize = flow.flow_data?.wpi_preview_size ?? { ...DEFAULT_PREVIEW_SIZE };
 		if (loadedPage) centerPreview();
 		nodes = (flow.flow_data?.nodes ?? []) as Node[];
@@ -658,7 +661,7 @@
 		takeSnapshot();
 		nodes = next.map((node) => ({ ...node, hidden: true }));
 		edges = [];
-		loadedPage = page;
+		loadedPage = stampInstances(page, null);
 		activeLayouterView = null;
 		propertiesTab = 'properties';
 		configMode = null;
@@ -752,7 +755,7 @@
 			const from = fresh.filter((f) => f.data.pane === pane)[index];
 			return from ? { ...n, data: { ...n.data, attrs: from.data.attrs, ...(from.data.class ? { class: from.data.class } : {}) } } : n;
 		});
-		loadedPage = stored;
+		loadedPage = stampInstances(stored, null);
 	}
 
 	// ── Pane edits (Panes in the page controls; undoable) ──────────────────
@@ -760,7 +763,7 @@
 		if (!loadedPage) return;
 		takeSnapshot();
 		const next = fn({ page: loadedPage, nodes });
-		loadedPage = next.page;
+		loadedPage = stampedPage(next.page);
 		nodes = next.nodes;
 	}
 	const paneActions = {
@@ -789,6 +792,25 @@
 	function snapToGridValue(value: number): number {
 		if (!snapToGrid) return value;
 		return Math.round(value / gridResolution) * gridResolution;
+	}
+
+	// The descriptors of the page whose instance_id seqnos are in use: its own
+	// (layouters, page-level actions) and its element nodes (with their validators
+	// and actions).
+	function takenIds(): JsonObject[] {
+		return [loadedPage ?? {}, ...nodes.filter(isElementNode).map((n) => ({ instance_id: n.data.instance_id, attrs: n.data.attrs }) as JsonObject)];
+	}
+
+	// The IDs of an element copied onto this page: instance_id is saved, the dynamic
+	// one is not (devdoc 2026102601 §3.4). Both are made when the copy is placed.
+	function newInstanceIds(cls: string) {
+		const version = classVersion('element', cls) ?? elementClasses.find((c) => c.descriptor_id === cls)?.version ?? 1;
+		return { instance_id: makeInstanceId(cls, version, nextSeqno(takenIds())), dynamic_instance_id: newDynamicInstanceId() };
+	}
+
+	// The page with the layouter, action and validator copies it holds numbered.
+	function stampedPage(page: JsonObject): JsonObject {
+		return stampInstances(page, [page, ...takenIds().slice(1)]);
 	}
 
 	function onCanvasDrop(event: DragEvent) {
@@ -826,10 +848,16 @@
 				hidden: !!loadedPage && type === 'wpi-element',
 				position,
 				selected: true,
-				data: cls ? { label: cls, element: cls, pane } : { ...nodeType.defaultData, label: nodeType.label }
+				data: cls ? { label: cls, element: cls, pane, ...newInstanceIds(cls) } : { ...nodeType.defaultData, label: nodeType.label }
 			}
 		];
 		selectedNodeId = id;
+		if (cls && loadedPage && pane) {
+			// The pane's panel, with its element layouter, is created by the first element dropped.
+			const panels = (loadedPage.panels ?? {}) as JsonObject;
+			const page = panels[pane] ? loadedPage : { ...loadedPage, panels: { ...panels, [pane]: { elem_layouter: { layouter: 'flow-layouter' }, elem_list: [] } } };
+			loadedPage = stampedPage(page);
+		}
 		checkLimits();
 	}
 
@@ -848,7 +876,7 @@
 			return;
 		}
 		takeSnapshot();
-		nodes = addValidator(nodes, node.id, cls);
+		nodes = addValidator(nodes, node.id, cls, takenIds());
 		configMode = null;
 		selectedNodeId = node.id;
 		propertiesTab = 'properties';
@@ -897,6 +925,11 @@
 			const newId = `${src.type}-${Date.now()}`;
 			takeSnapshot();
 			nodes = duplicateNode(nodes, id, newId, gridResolution);
+			if (isElementNode(src) && typeof src.data.element === 'string') {
+				const ids = newInstanceIds(src.data.element);
+				const attrs = stripInstanceIds((src.data.attrs as JsonObject | undefined) ?? {});
+				nodes = nodes.map((n) => (n.id === newId ? { ...n, data: { ...n.data, ...ids, attrs: stampInstances(attrs, [...takenIds(), { instance_id: ids.instance_id }]) } } : n));
+			}
 			selectedNodeId = newId;
 			checkLimits();
 		},
@@ -970,14 +1003,16 @@
 		const node = nodes.find((n) => n.id === nodeId);
 		if (!node || JSON.stringify(node.data) === JSON.stringify(data)) return;
 		recordEdit();
-		nodes = nodes.map((n) => (n.id === nodeId ? { ...n, data } : n));
+		// Actions and validators the properties panel just added get their IDs.
+		const stamped = isElementNode(node) && data.attrs ? { ...data, attrs: stampInstances(data.attrs, takenIds()) } : data;
+		nodes = nodes.map((n) => (n.id === nodeId ? { ...n, data: stamped } : n));
 	}
 
 	// ── New empty flow ───────────────────────────────────────────────────────
 	async function createNewEmpty() {
 		activeLayouterView = null;
 		propertiesTab = 'properties';
-		loadedPage = blankPage();
+		loadedPage = stampInstances(blankPage(), []);
 		configMode = null;
 		previewSize = { ...DEFAULT_PREVIEW_SIZE };
 		centerPreview();
@@ -1068,6 +1103,7 @@
 		recoveryTimer = setInterval(autoSavePages, 1000);
 		restorePanel();
 		loadElementClasses();
+		loadClassVersions().catch(() => showError(m.wpi_class_versions_failed()));
 		listValidatorClasses().then((classes) => (validatorClasses = classes)).catch((error) => showError(m.wpi_vld_classes_failed({ detail: error instanceof Error ? error.message : String(error) })));
 		listTriggerActions().then((actions) => triggerActions = actions).catch(() => showError(m.propertiespanel_actions_failed()));
 		listActionClasses().then((actions) => actionClasses = actions).catch(() => showError(m.propertiespanel_actions_failed()));
@@ -1241,7 +1277,7 @@
 					<CenterPage width={canvasWidth} height={canvasHeight} size={previewSize} />
 					<ViewportPortal target="front">
 						{#key `${loadedPage.descriptor_id}-${canvasRevision}`}
-							<PagePreview {darkMode} pageName={tabTitle(tabs.find((tab) => tab.id === activeTabId)!)} dirty={isDirty} openedAt={tabs.find((tab) => tab.id === activeTabId)?.openedAt ?? null} autoSavedAt={tabs.find((tab) => tab.id === activeTabId)?.autoSavedAt ?? null} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} pageLayouterAvailable={pageLayouterId !== null} elementLayouterAvailable={elementLayouterId !== null} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onElementResize={(id, size, changes) => { const node = nodes.find((n) => n.id === id); if (!node || !loadedPage) return; const attrs = { ...(node.data.attrs as JsonObject ?? {}) }; if (size.width !== undefined) attrs.width = `${size.width}px`; if (size.height !== undefined) attrs.height = `${size.height}px`; for (const change of changes) if (change.source === 'element') attrs[change.key] = change.value; const pane = String(node.data.pane ?? ''); const panel = (loadedPage.panels as JsonObject | undefined)?.[pane] as JsonObject | undefined; const layouter = panel?.elem_layouter as JsonObject | undefined; const copy = layouter?.class as JsonObject | undefined; const config = { ...((layouter?.config ?? copy?.config ?? {}) as JsonObject) }; for (const change of changes) if (change.source === 'panel') config[change.key] = change.value; takeSnapshot(); nodes = nodes.map((n) => n.id === id ? { ...n, data: { ...n.data, attrs } } : n); if (changes.some((change) => change.source === 'panel')) loadedPage = setPanelConfig(loadedPage, pane, config); }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; if (nodes.some((n) => !!n.selected !== (n.id === id))) nodes = nodes.map((n) => ({ ...n, selected: n.id === id })); }} onSelectPane={(pane) => { selectedPane = pane; deselectNodes(); if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} onViewLayouter={chooseLayouterView} onSelectionGeometry={(g) => (selectionGeometry = g)} />
+							<PagePreview {darkMode} pageName={tabTitle(tabs.find((tab) => tab.id === activeTabId)!)} dirty={isDirty} openedAt={tabs.find((tab) => tab.id === activeTabId)?.openedAt ?? null} autoSavedAt={tabs.find((tab) => tab.id === activeTabId)?.autoSavedAt ?? null} descriptor={loadedPage} {nodes} selectedId={selectedNodeId} {selectedPane} pageLayouterAvailable={pageLayouterId !== null} elementLayouterAvailable={elementLayouterId !== null} size={previewSize} zoom={viewport.zoom} onMeasure={(id, size) => { const old = measuredSizes[id]; if (!old || old.width !== size.width || old.height !== size.height) measuredSizes = { ...measuredSizes, [id]: size }; }} onMeasurePanes={(panes) => { if (!loadedPage) return; let next = loadedPage; for (const pane of panes) { next = adjustPaneLimits(next, pane.id, 'width', pane.width, pane.parentWidth); next = adjustPaneLimits(next, pane.id, 'height', pane.height, pane.parentHeight); } loadedPage = next; }} onPaneResize={(a, b, axis, first, second, parentSize) => paneEdit((e) => ({ ...e, page: resizePane(resizePane(e.page, a, axis, first, parentSize), b, axis, second, parentSize) }))} onPageResize={(axis, value) => { if (loadedPage) loadedPage = resizePageDimension(loadedPage, axis, value); }} onPageCancel={(original) => { loadedPage = original; }} onElementResize={(id, size, changes) => { const node = nodes.find((n) => n.id === id); if (!node || !loadedPage) return; const attrs = { ...(node.data.attrs as JsonObject ?? {}) }; if (size.width !== undefined) attrs.width = `${size.width}px`; if (size.height !== undefined) attrs.height = `${size.height}px`; for (const change of changes) if (change.source === 'element') attrs[change.key] = change.value; const pane = String(node.data.pane ?? ''); const panel = (loadedPage.panels as JsonObject | undefined)?.[pane] as JsonObject | undefined; const layouter = panel?.elem_layouter as JsonObject | undefined; const copy = layouter?.class as JsonObject | undefined; const config = { ...((layouter?.config ?? copy?.config ?? {}) as JsonObject) }; for (const change of changes) if (change.source === 'panel') config[change.key] = change.value; takeSnapshot(); nodes = nodes.map((n) => n.id === id ? { ...n, data: { ...n.data, attrs } } : n); if (changes.some((change) => change.source === 'panel')) loadedPage = setPanelConfig(loadedPage, pane, config); }} onMoveElement={(id, index) => { takeSnapshot(); nodes = moveElementNode(nodes, id, index); }} onResizeStart={takeSnapshot} onResize={(size) => (previewSize = size)} onSelect={(id) => { configMode = null; selectedNodeId = id; if (nodes.some((n) => !!n.selected !== (n.id === id))) nodes = nodes.map((n) => ({ ...n, selected: n.id === id })); }} onSelectPane={(pane) => { selectedPane = pane; deselectNodes(); if (configMode !== 'panes' && configMode !== 'panel') configMode = 'panes'; }} onViewLayouter={chooseLayouterView} onSelectionGeometry={(g) => (selectionGeometry = g)} />
 						{/key}
 					</ViewportPortal>
 				{/if}
@@ -1398,7 +1434,7 @@
 		<WpiProperties page={loadedPage} app={loadedApp} mode={configMode} {selectedPane} node={selectedNode}
 			elementClass={selectedElementClass} flowConfig={selectedFlowConfig} {triggerActions} {pageLayouters} {validatorClasses}
 			positions={selectionGeometry}
-			onPage={(page) => { recordEdit(); loadedPage = page; }}
+			onPage={(page) => { recordEdit(); loadedPage = stampedPage(page); }}
 			onApp={(app) => { recordEdit(); loadedApp = app; }}
 			onNode={updateNodeData}
 			onLayouter={(cls) => { paneEdit((edit) => setPageLayouter(edit, cls)); selectedPane = null; }}
@@ -1470,7 +1506,7 @@
 				const removed = new Set(nodes.filter(isElementNode).map((node) => node.id));
 				nodes = [...nodes.filter((node) => !isElementNode(node)), ...next.map((node) => ({ ...node, hidden: true }))];
 				edges = edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target));
-				loadedPage = value;
+				loadedPage = stampedPage(value);
 				canvasRevision++;
 			}
 			return true;

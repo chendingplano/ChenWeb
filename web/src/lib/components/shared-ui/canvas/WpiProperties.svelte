@@ -116,6 +116,12 @@
 		{:else}
 			{@const source = withValidatorSource(elementSource(attrs, elementClass ?? null, moduleFallbacks(module), (next) => onNode(node.id, { ...node.data, attrs: next })))}
 			<div class="scroll">
+				{#if node.data.instance_id}
+					<div class="instance-id select-text" title={m.wpi_instance_id_note()}>
+						<span class="label">{m.wpi_prop_instance_id()}</span>
+						<code>{String(node.data.instance_id)}</code>
+					</div>
+				{/if}
 				<PropertyEditor
 					title={m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}
 					def={withValidatorGroups(withClassEditors(elementEditor(module), elementClassDefinitions(elementClass)), source.get('validators'))}
@@ -191,6 +197,17 @@
 		overflow-y: auto;
 		scrollbar-width: thin;
 		scrollbar-color: var(--cv-border) transparent;
+	}
+	.instance-id {
+		display: flex;
+		gap: 8px;
+		align-items: baseline;
+		padding: 8px 12px 0;
+		font-size: 11px;
+		color: var(--cv-text);
+	}
+	.instance-id .label {
+		color: var(--cv-text-faint);
 	}
 	.missing {
 		padding: 12px;
