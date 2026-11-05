@@ -83,6 +83,6 @@
 	.length-row { display: flex; align-items: flex-start; gap: 4px; min-width: 0; width: 100%; }
 	.type { width: auto; flex: none; }
 	.type-label { padding: 4px; font-size: 11px; }
-	.value-label { display: block; box-sizing: border-box; min-width: 0; flex: 1; min-height: 25px; padding: 4px 8px; border-radius: 4px; background: var(--cv-group-header, #f3f4f6); color: inherit; font-size: 11px; }
+	.value-label { display: block; box-sizing: border-box; min-width: 0; flex: 1; min-height: 25px; padding: 4px 8px; border-radius: 4px; background: var(--ve-length-label-bg, var(--cv-group-header, #f3f4f6)); color: inherit; font-size: 11px; }
 	.editable { border: 0; text-align: left; cursor: text; }
 </style>

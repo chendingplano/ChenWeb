@@ -174,6 +174,7 @@
 				source={panelSource(page, selectedPane, onPage)}
 				context={common}
 				idPrefix={`prop-panel-${selectedPane}`}
+				compactRows
 				{onEditStart}
 				{onEditEnd}
 			/>

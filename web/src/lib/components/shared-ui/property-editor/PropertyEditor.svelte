@@ -30,7 +30,8 @@
 		idPrefix,
 		onEditStart,
 		onEditEnd,
-		children
+		children,
+		compactRows = false
 	}: {
 		title: string;
 		def: EditorDef;
@@ -40,6 +41,7 @@
 		onEditStart?: () => void;
 		onEditEnd?: () => void;
 		children?: Snippet;
+		compactRows?: boolean;
 	} = $props();
 
 	const ctx: PropertyContext = $derived({ ...context, get: (name: string) => source.get(name) });
@@ -157,6 +159,7 @@
 <section
 	bind:this={root}
 	class="property-editor select-text"
+	class:compact-rows={compactRows}
 	aria-label={title}
 	onfocusin={focusIn}
 	onfocusout={focusOut}
@@ -187,7 +190,7 @@
 					{@const Editor = editorOf(p)}
 					{@const help = tip(p)}
 					{@const warn = warning(p)}
-					<div class="property" class:length-property={p.editor === 'length' || p.name === 'editor_options.displayType'} data-property={p.name}>
+					<div class="property" class:length-property={p.editor === 'length' || p.name === 'editor_options.displayType' || (compactRows && !isEditableColor(p))} data-property={p.name}>
 						<div class="heading" class:string-heading={isEditableString(p)}>
 							<label for={id}>
 								{p.label?.() ?? p.name}{#if source.required(p.name)}<span
@@ -261,6 +264,7 @@
 		color: var(--cv-text);
 		user-select: text;
 	}
+	.compact-rows { --ve-length-label-bg: var(--cv-surface); }
 	.title {
 		position: sticky;
 		top: 0;
