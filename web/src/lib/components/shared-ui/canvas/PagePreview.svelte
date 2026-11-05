@@ -10,6 +10,8 @@
  import CopyIcon from '@lucide/svelte/icons/copy';
  import Trash2Icon from '@lucide/svelte/icons/trash-2';
  import PencilIcon from '@lucide/svelte/icons/pencil';
+ import EyeIcon from '@lucide/svelte/icons/eye';
+ import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
  import { getNodeActions } from './node-actions';
  import type { Node } from '@xyflow/svelte';
  import { m } from '$lib/paraglide/messages.js';
@@ -26,12 +28,14 @@
  import { pageDragSize, type PageSide } from './page-resize';
  import { resizeElement, resizeHandles, resizeOutline as elementResizeOutline, resizeLimitChanges, type ResizeLimit, type ResizeLimitChange, type ElementHandle } from './element-resize';
 
- let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize }: {
+ let { darkMode, pageName, dirty, openedAt, autoSavedAt, descriptor, nodes, selectedId, selectedPane, pageLayouterAvailable, elementLayouterAvailable, size, zoom, onResizeStart, onResize, onSelect, onSelectPane, onViewLayouter, onMeasure, onPaneResize, onPageResize, onPageCancel, onMeasurePanes, onSelectionGeometry, onElementResize }: {
   darkMode: boolean; pageName: string; dirty: boolean; openedAt: number | null; autoSavedAt: number | null; descriptor: JsonObject; nodes: Node[]; selectedId: string | null; selectedPane: string | null;
+  pageLayouterAvailable: boolean; elementLayouterAvailable: boolean;
   size: { width: number; height: number }; zoom: number;
   onElementResize: (id: string, size: { width?: number; height?: number }, changes: ResizeLimitChange[]) => void;
   onResizeStart: () => void; onResize: (size: { width: number; height: number }) => void;
   onSelect: (id: string) => void; onSelectPane: (pane: string) => void;
+  onViewLayouter: (view: 'page-layouter' | 'element-layouter') => void;
   onPaneResize: (a: string, b: string, axis: 'width' | 'height', first: number, second: number, parentSize: number) => void;
   onMeasurePanes: (panes: { id: string; width: number; height: number; parentWidth: number; parentHeight: number }[]) => void;
   onPageResize: (axis: 'width' | 'height', value: number) => void;
@@ -431,6 +435,17 @@
 </div>
  {#if actions && selectedId && toolbarPosition}
   <div class="element-toolbar nodrag nopan" role="group" aria-label={m.wpi_element_actions()} style:left="{toolbarPosition.left}px" style:top="{toolbarPosition.top}px" onpointerdown={(event) => event.stopPropagation()}>
+   <DropdownMenu.Root>
+    <DropdownMenu.Trigger>
+     {#snippet child({ props })}
+      <button {...props} title={m.wpi_preview_layouter_view_tooltip()} aria-label={m.wpi_preview_layouter_view_label()}><EyeIcon class="w-3 h-3" /></button>
+     {/snippet}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Content align="start" class="min-w-40">
+     <DropdownMenu.Item disabled={!pageLayouterAvailable} onclick={() => onViewLayouter('page-layouter')}>{m.wpi_preview_page_layouter()}</DropdownMenu.Item>
+     <DropdownMenu.Item disabled={!elementLayouterAvailable} onclick={() => onViewLayouter('element-layouter')}>{m.wpi_preview_element_layouter()}</DropdownMenu.Item>
+    </DropdownMenu.Content>
+   </DropdownMenu.Root>
    {#if actions.editClass}<button title={m.basenode_edit_class()} aria-label={m.basenode_edit_class()} onclick={(event) => { event.stopPropagation(); actions.editClass?.(selectedId!); }}><PencilIcon class="w-3 h-3" /></button>{/if}
    <button title={m.basenode_duplicate()} aria-label={m.basenode_duplicate()} onclick={(event) => { event.stopPropagation(); actions.duplicate(selectedId!); }}><CopyIcon class="w-3 h-3" /></button>
    <button title={m.basenode_delete()} aria-label={m.basenode_delete()} onclick={(event) => { event.stopPropagation(); actions.remove(selectedId!); }}><Trash2Icon class="w-3 h-3" /></button>
