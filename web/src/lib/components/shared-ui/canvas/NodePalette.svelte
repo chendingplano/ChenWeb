@@ -32,6 +32,18 @@
 
   let search = $state('');
   let settingsOpen = $state(false);
+  let settingsButton: HTMLButtonElement;
+  let settingsMenu: HTMLDivElement;
+
+  $effect(() => {
+    if (!settingsOpen) return;
+    function dismiss(event: PointerEvent) {
+      const target = event.target as Node;
+      if (!settingsButton.contains(target) && !settingsMenu.contains(target)) settingsOpen = false;
+    }
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  });
   // Folders start folded; while searching, every folder with a match is shown open.
   let expanded = $state<Record<string, boolean>>({});
 
@@ -91,9 +103,9 @@
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; position:relative;">
       <span style="font-size:9px; color:var(--cv-accent); letter-spacing:1px;">{m.nodepalette_node_palette()}</span>
       {#if onDropModeChange}
-        <button type="button" aria-label={m.nodepalette_settings()} title={m.nodepalette_settings()} aria-expanded={settingsOpen} aria-haspopup="menu" onclick={() => settingsOpen = !settingsOpen} style="border:0; background:transparent; color:var(--cv-text-2); cursor:pointer; padding:3px;"><SettingsIcon size={14} /></button>
+        <button bind:this={settingsButton} type="button" aria-label={m.nodepalette_settings()} title={m.nodepalette_settings()} aria-expanded={settingsOpen} aria-haspopup="menu" onclick={() => settingsOpen = !settingsOpen} style="border:0; background:transparent; color:var(--cv-text-2); cursor:pointer; padding:3px;"><SettingsIcon size={14} /></button>
         {#if settingsOpen}
-          <div role="menu" style="position:absolute; right:0; top:100%; z-index:2; min-width:180px; padding:4px; background:var(--cv-panel); border:1px solid var(--cv-border); box-shadow:0 4px 12px var(--cv-shadow);">
+          <div bind:this={settingsMenu} role="menu" style="position:absolute; right:0; top:100%; z-index:2; min-width:180px; padding:4px; background:var(--cv-panel); border:1px solid var(--cv-border); box-shadow:0 4px 12px var(--cv-shadow);">
             <button type="button" role="menuitemradio" aria-checked={!doubleClickDrop} onclick={() => { onDropModeChange(false); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{!doubleClickDrop ? '✓ ' : '　'}{m.nodepalette_drag_to_drop()}</button>
             <button type="button" role="menuitemradio" aria-checked={doubleClickDrop} onclick={() => { onDropModeChange(true); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{doubleClickDrop ? '✓ ' : '　'}{m.nodepalette_double_click_to_drop()}</button>
           </div>
