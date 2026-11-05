@@ -2,7 +2,7 @@
 // code_modules/interpreter-page.md, interpreter-layouter-page.md and
 // interpreter-layouter-flow.md, Property editor).
 import { m } from '$lib/paraglide/messages.js';
-import { flowDefaults, flowOptions, type FlowField } from '$lib/components/shared-ui/canvas/flow-config';
+import { flowOptions, type FlowField } from '$lib/components/shared-ui/canvas/flow-config';
 import type { Json } from '../types';
 import { allUnits, position } from './shared';
 import type { EditorDef, PropertyDef } from './types';
@@ -253,9 +253,19 @@ function flowProperty(key: FlowField): PropertyDef {
 export const panel: EditorDef = {
 	groups: [
 		{
-			id: 'layouter',
-			label: m.wpi_layouter_title,
+			id: 'general',
+			label: m.wpi_input_group_general,
 			properties: [{ name: 'layouter', label: m.wpi_layouter_type, helpTip: m.wpi_prop_tip_panel_layouter, readOnly: true }]
+		},
+		{
+			id: 'geometry',
+			label: m.wpi_page_group_geometry,
+			properties: (['column_gap', 'row_gap', 'min_row_height', 'max_row_height', 'min_elem_width', 'max_elem_width'] as FlowField[]).map(flowProperty)
+		},
+		{
+			id: 'layout',
+			label: m.wpi_prop_group_layout_parameters,
+			properties: (['horizontal_alignment', 'vertical_alignment', 'rows_alignment', 'max_num_elems', 'row_separator', 'elem_separator'] as FlowField[]).map(flowProperty)
 		},
 		{
 			id: 'colors',
@@ -264,7 +274,6 @@ export const panel: EditorDef = {
 				color('background_color', m.wpi_prop_background_color, m.wpi_prop_tip_surface_color, true),
 				color('foreground_color', m.wpi_prop_foreground_color, m.wpi_prop_tip_surface_color, true)
 			]
-		},
-		{ id: 'flow', label: m.wpi_prop_group_flow, properties: (Object.keys(flowDefaults) as FlowField[]).map(flowProperty) }
+		}
 	]
 };
