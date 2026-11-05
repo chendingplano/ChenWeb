@@ -438,7 +438,7 @@
    <DropdownMenu.Root>
     <DropdownMenu.Trigger>
      {#snippet child({ props })}
-      <button {...props} title={m.wpi_preview_layouter_view_tooltip()} aria-label={m.wpi_preview_layouter_view_label()}><EyeIcon class="w-3 h-3" /></button>
+      <button {...props} title={m.wpi_preview_layouter_view_tooltip()} aria-label={m.wpi_preview_layouter_view_label()}><EyeIcon class="w-4 h-4" /></button>
      {/snippet}
     </DropdownMenu.Trigger>
     <DropdownMenu.Content align="start" class="min-w-40">
