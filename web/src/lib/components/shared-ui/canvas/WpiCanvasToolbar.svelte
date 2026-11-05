@@ -39,6 +39,7 @@
     onLoadPage,
     onViewJson,
     onViewTree,
+    onViewComponentTree,
     onPreview,
     previewing,
     onUndo,
@@ -56,6 +57,7 @@
     onLoadPage:       () => void;
     onViewJson:       () => void;
     onViewTree:       () => void;
+    onViewComponentTree: () => void;
     onPreview:        () => void;
     previewing:       boolean;
     onUndo:           () => void;
@@ -138,6 +140,7 @@
     <DropdownMenu.Content align="start" class="min-w-40">
       <DropdownMenu.Item class={itemClass} onclick={onViewJson}>{m.wpi_toolbar_view_json()}</DropdownMenu.Item>
       <DropdownMenu.Item class={itemClass} onclick={onViewTree}>{m.wpi_toolbar_view_tree()}</DropdownMenu.Item>
+      <DropdownMenu.Item class={itemClass} onclick={onViewComponentTree}>{m.wpi_toolbar_component_tree()}</DropdownMenu.Item>
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 

@@ -94,6 +94,29 @@
 			if (request === controller) loadingId = '';
 		}
 	}
+	let drag: { x: number; y: number } | undefined;
+	// Dragging moves the dialog by its header; the buttons in it keep their own clicks.
+	function startDrag(e: PointerEvent) {
+		if (e.button !== 0 || (e.target as Element).closest('button')) return;
+		const rect = dialog.getBoundingClientRect();
+		dialog.style.margin = '0';
+		dialog.style.left = `${rect.left}px`;
+		dialog.style.top = `${rect.top}px`;
+		dialog.style.right = 'auto';
+		dialog.style.bottom = 'auto';
+		drag = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+	function moveDrag(e: PointerEvent) {
+		if (!drag) return;
+		const left = Math.min(Math.max(0, e.clientX - drag.x), window.innerWidth - dialog.offsetWidth);
+		const top = Math.min(Math.max(0, e.clientY - drag.y), window.innerHeight - dialog.offsetHeight);
+		dialog.style.left = `${left}px`;
+		dialog.style.top = `${top}px`;
+	}
+	function endDrag() {
+		drag = undefined;
+	}
 	onMount(() => {
 		dialog.showModal();
 		void list(0, true);
@@ -108,7 +131,12 @@
 	style={canvasThemeVars(darkMode)}
 	aria-labelledby="wpi-load-title"
 >
-	<header>
+	<header
+		onpointerdown={startDrag}
+		onpointermove={moveDrag}
+		onpointerup={endDrag}
+		onpointercancel={endDrag}
+	>
 		<h2 id="wpi-load-title">{m.wpi_load_title()}</h2>
 		<button type="button" onclick={onClose} aria-label={m.wpi_load_close()}>✕</button>
 	</header>
@@ -157,38 +185,45 @@
 		{#if busy}<p role="status">{m.wpi_load_searching()}</p>
 		{:else if !pages.length}<p>{m.wpi_load_empty()}</p>
 		{:else}
-			<table>
-				<thead
-					><tr
-						><th>{m.wpi_load_descriptor()}</th><th>{m.wpi_load_description_label()}</th><th
-							>{m.wpi_load_created()}</th
-						><th>{m.wpi_load_updated()}</th><th>{m.wpi_load_title()}</th></tr
-					></thead
-				>
-				<tbody>
-					{#each pages as page (page.descriptor_id)}
-						<tr>
-							<td
-								><strong>{page.descriptor_id}</strong>
-								<div>{localized(page.page_name ?? undefined)}</div></td
-							>
-							<td>{localized(page.description ?? undefined)}</td>
-							<td>{new Date(page.created_at).toLocaleString(getLocale())}</td>
-							<td>{new Date(page.updated_at).toLocaleString(getLocale())}</td>
-							<td
-								><button
-									type="button"
-									disabled={!!loadingId}
-									onclick={() => load(page.descriptor_id)}
-									>{loadingId === page.descriptor_id
-										? m.wpi_load_loading()
-										: m.wpi_load_open()}</button
-								></td
-							>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
+			<div class="cards">
+				{#each pages as page (page.descriptor_id)}
+					{@const description = localized(page.description ?? undefined) ?? ''}
+					<div
+						class="card"
+						role="button"
+						tabindex="0"
+						aria-disabled={!!loadingId}
+						ondblclick={() => !loadingId && load(page.descriptor_id)}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' && !loadingId) load(page.descriptor_id);
+						}}
+					>
+						<div class="thumb">
+							{#if page.page_image}
+								<img
+									src={`/api/v1/wpi/page-images/${encodeURIComponent(page.page_image)}`}
+									alt={localized(page.page_name ?? undefined)}
+									loading="lazy"
+								/>
+							{/if}
+						</div>
+						<div class="body">
+							<strong>{m.wpi_load_card_name({ name: localized(page.page_name ?? undefined) ?? '' })}</strong>
+							<span class="id">{m.wpi_load_card_id({ id: page.descriptor_id })}</span>
+							<p class="desc" title={description}>
+								{m.wpi_load_card_description({ description })}
+							</p>
+							<dl>
+								<dt>{m.wpi_load_created()}</dt>
+								<dd>{new Date(page.created_at).toLocaleString(getLocale())}</dd>
+								<dt>{m.wpi_load_updated()}</dt>
+								<dd>{new Date(page.updated_at).toLocaleString(getLocale())}</dd>
+							</dl>
+							{#if loadingId === page.descriptor_id}<span class="loading">{m.wpi_load_loading()}</span>{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
 		{/if}
 	</div>
 	<footer>
@@ -209,9 +244,16 @@
 <style>
 	dialog {
 		margin: auto;
+		display: flex;
+		flex-direction: column;
 		width: 1000px;
+		height: 85vh;
+		min-width: min(480px, calc(100vw - 32px));
+		min-height: 360px;
 		max-width: calc(100vw - 32px);
-		max-height: 85vh;
+		max-height: calc(100vh - 32px);
+		overflow: hidden;
+		resize: both;
 		padding: 0;
 		border: 1px solid var(--cv-divider);
 		border-radius: 12px;
@@ -224,7 +266,9 @@
 	}
 	header,
 	footer {
+		flex-shrink: 0;
 		display: flex;
+		cursor: move;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
@@ -236,6 +280,7 @@
 		margin: 0;
 	}
 	form {
+		flex-shrink: 0;
 		padding: 0 20px 16px;
 		border-bottom: 1px solid var(--cv-divider);
 	}
@@ -268,9 +313,6 @@
 		border-radius: 4px;
 		cursor: pointer;
 	}
-	.results button {
-		white-space: nowrap;
-	}
 	button:disabled {
 		opacity: 0.45;
 		cursor: default;
@@ -279,25 +321,87 @@
 		background: var(--cv-hover);
 	}
 	.results {
+		flex: 1;
 		overflow: auto;
-		max-height: 40vh;
 		min-height: 120px;
 	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		text-align: left;
+	.cards {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+		gap: 16px;
+		padding: 0 20px 20px;
 	}
-	th,
-	td {
+	.card {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		border: 1px solid var(--cv-divider);
+		border-radius: 12px;
+		background: var(--cv-raised);
+		cursor: pointer;
+	}
+	.card:hover,
+	.card:focus-visible {
+		background: var(--cv-hover);
+		outline: none;
+		border-color: var(--cv-text-muted);
+	}
+	.thumb {
+		box-sizing: border-box;
+		padding: 15px 10px 0;
+		aspect-ratio: 16 / 10;
+		/* Mixing in the text colour gives a tint that stands out from the card in both themes. */
+		background: color-mix(in srgb, var(--cv-text) 10%, var(--cv-panel));
+	}
+	.thumb img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: top;
+	}
+	.body {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
 		padding: 12px;
-		border-bottom: 1px solid var(--cv-divider);
-		vertical-align: top;
+		min-width: 0;
+
+		background: color-mix(in srgb, var(--cv-text) 10%, var(--cv-panel));
+	}
+	.body strong {
+		font-size: 13px;
 		overflow-wrap: anywhere;
 	}
-	th {
+	.body .id {
 		color: var(--cv-text-muted);
-		font-weight: 500;
+		overflow-wrap: anywhere;
+	}
+	.desc {
+		margin: 0;
+		padding: 0;
+		line-height: 1.4;
+		min-height: 2.8em;
+		color: var(--cv-text-muted);
+		display: -webkit-box;
+		line-clamp: 2;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	dl {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 2px 8px;
+		margin: 0;
+		color: var(--cv-text-muted);
+	}
+	dt,
+	dd {
+		margin: 0;
+	}
+	.loading {
+		color: var(--cv-text-muted);
 	}
 	p {
 		padding: 12px 20px;

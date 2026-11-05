@@ -343,7 +343,7 @@ func (v *validator) app(b map[string]any) {
 func (v *validator) page(b map[string]any) {
 	v.keys(b, "", []string{"descriptor_id", "schema_version", "page_layouter"}, "panels", "input", "save_action", "refresh",
 		"page_name", "description", "binding_mode", "access_controls", "keywords", "page_tags",
-		"page_policy", "page_style", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar", "bkgd_color", "frgd_color",
+		"page_policy", "page_style", "page_image", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar", "bkgd_color", "frgd_color",
 		"width", "height", "min_width", "min_height", "max_width", "max_height")
 	var leaves map[string]bool
 	if pl, ok := b["page_layouter"]; ok {
@@ -359,6 +359,7 @@ func (v *validator) page(b map[string]any) {
 	// page_policy and page_style are reserved: accepted and ignored.
 	v.str(b, "page_policy", "")
 	v.str(b, "page_style", "")
+	v.matching(b, "page_image", "", pageImageName)
 	v.oneOf(b, "hori_align", "", []string{"left", "center", "right"})
 	v.oneOf(b, "vert_align", "", []string{"top", "center", "bottom"})
 	v.oneOf(b, "hori_scrollbar", "", scrollbars)

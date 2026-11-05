@@ -19,7 +19,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { loadClassVersions, listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, saveApp, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { loadClassVersions, listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, fetchPageApp, getPageRecovery, saveApp, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -38,7 +38,8 @@
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import WpiTreeDialog from './canvas/WpiTreeDialog.svelte';
-	import { elementTree } from './canvas/wpi-json';
+	import { componentTree, elementTree, type ComponentTarget } from './canvas/wpi-json';
+	import WpiComponentTreeWindow from './canvas/WpiComponentTreeWindow.svelte';
  import { normalizeElementLengths } from './canvas/element-attributes';
 	import PagePreview from './canvas/PagePreview.svelte';
 	import WpiApp from '$lib/wpi/WpiApp.svelte';
@@ -53,6 +54,7 @@
 	import { localized } from '$lib/wpi/text';
 	import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 	import { elementIssueLocation, isElementNode, nodeData, nodeViewJson, nodePane, pageJson, pageNodes, paneNodes } from './canvas/wpi-json';
+	import { capturePageImage, uploadPageImage } from '$lib/wpi/page-image';
 	import { resizePageDimension } from './canvas/page-resize';
 	import { addPane, deletePane, mergePane, resizePane, adjustPaneLimits, nodesUnder, renamePane, rootOf, setPageLayouter, setPanelConfig, splitPane, type Edit } from './canvas/pane-edit';
 	import { duplicateNode, removeNode, setNodeActions } from './canvas/node-actions';
@@ -175,6 +177,7 @@
 	// View JSON shows the selected node's descriptor JSON, else the page's.
 	let showJson = $state(false);
 	let showTree = $state(false);
+	let showComponentTree = $state(false);
 	let previewBundle = $state<Bundle | null>(null);
 	let previewLoading = $state(false);
 	let previewIsDraft = $state(false);
@@ -309,6 +312,10 @@
 	// Undo / redo
 	type PageSnapshot = Snapshot & { page: JsonObject | null; app?: JsonObject | null; previewSize: { width: number; height: number } };
 	let loadedApp = $state<JsonObject | null>(null);
+	// The app that opens the loaded page, shown read-only by the component tree's App node.
+	// Not loadedApp: Save saves loadedApp instead of the page.
+	let pageApp = $state<JsonObject | null>(null);
+	const shownApp = $derived(loadedApp ?? (pageApp && loadedPage && pageApp.initial_page === loadedPage.descriptor_id ? pageApp : null));
 	let undoStack = $state<PageSnapshot[]>([]);
 	let redoStack = $state<PageSnapshot[]>([]);
 	let lastSavedSnapshot = $state<PageSnapshot | null>(null);
@@ -492,6 +499,35 @@
 	});
 	// Choosing the page, a pane or a panel leaves no node selected, so the Properties
 	// panel shows that one entity (OpenSpec wpi-property-editors, design D6).
+	async function loadPageApp() {
+		const pageId = loadedPage?.descriptor_id;
+		if (loadedApp || typeof pageId !== 'string' || !pageId) return;
+		try {
+			pageApp = await fetchPageApp(pageId);
+			if (!pageApp) showError(m.wpi_component_tree_no_app());
+		} catch {
+			pageApp = null;
+			showError(m.wpi_component_tree_app_failed());
+		}
+	}
+
+	function selectComponent(target: ComponentTarget) {
+		deselectNodes();
+		if (target.kind === 'element') {
+			selectedNodeId = target.node;
+			nodes = nodes.map((n) => ({ ...n, selected: n.id === target.node }));
+			return;
+		}
+		if (target.kind === 'app') {
+			configMode = 'app';
+			void loadPageApp();
+		} else if (target.kind === 'page') configMode = 'page';
+		else {
+			configMode = target.kind === 'panel' ? 'panel' : 'panes';
+			selectedPane = target.pane;
+		}
+	}
+
 	function deselectNodes() {
 		selectedNodeId = null;
 		activeLayouterView = null;
@@ -691,6 +727,10 @@
 			return false;
 		}
 	}
+	function warnImageFailed(error: unknown) {
+		console.warn('WPI page image failed', error);
+		toast(m.wpi_page_image_failed({ detail: error instanceof Error ? error.message : String(error) }));
+	}
 	async function save(metadata?: ReturnType<typeof newPageMetadata>): Promise<boolean> {
 		if (loadedApp) return saveLoadedApp(loadedApp);
 		if (savingTabs.has(activeTabId)) return false;
@@ -710,6 +750,16 @@
 		const page = pageJson(snapshot.nodes, { ...snapshot.page, ...metadata } as JsonObject);
 		try {
 			await recovering.get(id);
+			// The page's image is made first so that the saved page names it
+			// (OpenSpec wpi-page-images); a failure never stops the save.
+			try {
+				const surface = document.querySelector<HTMLElement>('[data-wpi-page-preview]');
+				if (!surface) throw new Error('page preview is not shown');
+				const image = await capturePageImage(surface, darkMode ? '#0a0a0a' : '#ffffff');
+				page.page_image = await uploadPageImage(String(page.descriptor_id), image);
+			} catch (error) {
+				warnImageFailed(error);
+			}
 			const recoveryID = recoveryIDs.get(id) ?? '';
 			let result;
 			try {
@@ -1178,7 +1228,7 @@
 			{canRedo}
 			selectedCount={selectedTotal}
 			onCreate={(kind) => {
-				if (kind === 'app') { addTab(); loadedApp = { descriptor_id: '', schema_version: '0.5' }; configMode = 'page'; centerPreview(); }
+				if (kind === 'app') { addTab(); loadedApp = { descriptor_id: '', schema_version: '0.5' }; configMode = 'app'; centerPreview(); }
 				else if (kind === 'element') showCreateElement = true;
 				else createWpiNode(kind);
 			}}
@@ -1189,6 +1239,7 @@
 				} else showJson = true;
 			}}
 			onViewTree={() => (showTree = true)}
+			onViewComponentTree={() => (showComponentTree = true)}
 			onPreview={togglePreview}
 			previewing={!!previewBundle}
 			onUndo={undo}
@@ -1446,7 +1497,7 @@
 			onUpdate={updateNodeData}
 		/>
 		{:else}
-		<WpiProperties page={loadedPage} app={loadedApp} mode={configMode} {selectedPane} node={selectedNode}
+		<WpiProperties page={loadedPage} app={shownApp} appReadOnly={!loadedApp} mode={configMode} {selectedPane} node={selectedNode}
 			elementClass={selectedElementClass} flowConfig={selectedFlowConfig} {triggerActions} {pageLayouters} {validatorClasses}
 			positions={selectionGeometry}
 			onPage={(page) => { recordEdit(); loadedPage = stampedPage(page); }}
@@ -1596,4 +1647,8 @@
 
 {#if showTree}
 	<WpiTreeDialog {darkMode} tree={elementTree(nodes, loadedPage ?? {}, { pane: m.wpi_tree_pane(), panel: m.wpi_tree_panel(), layouter: m.wpi_tree_layouter(), elements: m.wpi_tree_elements() })} onClose={() => (showTree = false)} />
+{/if}
+
+{#if showComponentTree}
+	<WpiComponentTreeWindow {darkMode} onSelect={selectComponent} tree={componentTree(nodes, loadedPage ?? {}, { app: m.wpi_component_tree_app(), page: m.wpi_component_tree_page(), pageLayouter: m.wpi_component_tree_page_layouter(), elementLayouter: m.wpi_component_tree_element_layouter(), elements: m.wpi_component_tree_elements() })} onClose={() => (showComponentTree = false)} />
 {/if}

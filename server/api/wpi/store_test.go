@@ -229,3 +229,42 @@ func TestStoreCodeModules(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+const appForPageQuery = `SELECT descriptor_id, version, body FROM \(SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_apps WHERE status = 'active' ORDER BY descriptor_id, version DESC\) apps WHERE body->>'initial_page' = \$1 ORDER BY descriptor_id LIMIT 1`
+
+func TestStoreAppForPage(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(appForPageQuery).WithArgs("customer-form").
+		WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}).
+			AddRow("customer-app", 3, []byte(`{"descriptor_id": "customer-app", "initial_page": "customer-form"}`)))
+	d, found, err := store{db}.appForPage(context.Background(), "customer-form")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || d.ID != "customer-app" || d.Version != 3 || d.Kind != KindApp {
+		t.Fatalf("got found=%v %+v", found, d)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreAppForPageNone(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(appForPageQuery).WithArgs("loose-page").WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "body"}))
+	_, found, err := store{db}.appForPage(context.Background(), "loose-page")
+	if err != nil || found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

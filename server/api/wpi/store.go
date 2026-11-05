@@ -122,6 +122,27 @@ func (s store) latest(ctx context.Context, kind Kind, ids []string) (map[string]
 	return out, rows.Err()
 }
 
+// appForPage returns the latest active version of the first app, by ID, whose
+// initial_page is the page. Several apps may open one page; found is false when none does.
+const appForPageSQL = `SELECT descriptor_id, version, body FROM (` + latestAppsSQL + latestOrder + `) apps WHERE body->>'initial_page' = $1 ORDER BY descriptor_id LIMIT 1`
+
+func (s store) appForPage(ctx context.Context, pageID string) (d Descriptor, found bool, err error) {
+	var raw []byte
+	err = s.db.QueryRowContext(ctx, appForPageSQL, pageID).Scan(&d.ID, &d.Version, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return d, false, nil
+	}
+	if err != nil {
+		return d, false, err
+	}
+	body, err := decodeBody(raw)
+	if err != nil {
+		return d, false, fmt.Errorf("app %q version %d: %w", d.ID, d.Version, err)
+	}
+	d.Kind, d.Raw, d.Body = KindApp, raw, body
+	return d, true, nil
+}
+
 // insertVersion stores body as the next active version of the descriptor.
 func (s store) insertVersion(ctx context.Context, kind Kind, id string, raw []byte, actor string) (int, error) {
 	var version int
@@ -146,6 +167,7 @@ type PageSummary struct {
 	Version      int       `json:"version"`
 	PageName     any       `json:"page_name"`
 	Description  any       `json:"description"`
+	PageImage    any       `json:"page_image"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -164,9 +186,10 @@ func (s store) searchPages(ctx context.Context, f pageSearch) ([]PageSummary, er
  ), shown AS (
  SELECT descriptor_id, version, created_at, updated_at,
   body->'page_name' AS page_name,
-  body->'description' AS description
+  body->'description' AS description,
+  body->'page_image' AS page_image
  FROM latest
- ) SELECT descriptor_id, version, page_name, description, created_at, updated_at
+ ) SELECT descriptor_id, version, page_name, description, page_image, created_at, updated_at
  FROM shown WHERE
  ($1 = '' OR strpos(lower(descriptor_id), $1) > 0 OR strpos(lower(COALESCE(page_name #>> '{}', '')), $1) > 0 OR strpos(lower(COALESCE(description #>> '{}', '')), $1) > 0)
  AND ($2 = '' OR strpos(lower(descriptor_id), $2) > 0)
@@ -184,8 +207,8 @@ func (s store) searchPages(ctx context.Context, f pageSearch) ([]PageSummary, er
 	out := []PageSummary{}
 	for rows.Next() {
 		var p PageSummary
-		var name, desc []byte
-		if err := rows.Scan(&p.DescriptorID, &p.Version, &name, &desc, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var name, desc, image []byte
+		if err := rows.Scan(&p.DescriptorID, &p.Version, &name, &desc, &image, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if name != nil {
@@ -193,6 +216,9 @@ func (s store) searchPages(ctx context.Context, f pageSearch) ([]PageSummary, er
 		}
 		if desc != nil {
 			_ = json.Unmarshal(desc, &p.Description)
+		}
+		if image != nil {
+			_ = json.Unmarshal(image, &p.PageImage)
 		}
 		out = append(out, p)
 	}

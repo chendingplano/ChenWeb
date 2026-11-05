@@ -190,9 +190,9 @@ func TestSearchPages(t *testing.T) {
 		t.Run(tc.query, func(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
-			rows := sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "created_at", "updated_at"})
+			rows := sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "page_image", "created_at", "updated_at"})
 			for i := 0; i < tc.rows; i++ {
-				rows.AddRow("customer-form", 3, []byte(`"Customer"`), []byte(`{"zh-cn":"编辑客户"}`), at, at)
+				rows.AddRow("customer-form", 3, []byte(`"Customer"`), []byte(`{"zh-cn":"编辑客户"}`), []byte(`"customer-form-20261105.png"`), at, at)
 			}
 			mock.ExpectQuery(summariesQuery).WithArgs(tc.q, tc.id, tc.desc, nil, nil, nil, nil, tc.limit+1, tc.offset).WillReturnRows(rows)
 			rec := callQuery(t, testHandler(db, plainUser).SearchPages, tc.query)
@@ -219,7 +219,7 @@ func TestSearchPages(t *testing.T) {
 		defer db.Close()
 		from := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
 		to := from.Add(24 * time.Hour)
-		mock.ExpectQuery(summariesQuery).WithArgs("", "", "", from, to, from, to, 51, 0).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "created_at", "updated_at"}))
+		mock.ExpectQuery(summariesQuery).WithArgs("", "", "", from, to, from, to, 51, 0).WillReturnRows(sqlmock.NewRows([]string{"descriptor_id", "version", "page_name", "description", "page_image", "created_at", "updated_at"}))
 		rec := callQuery(t, testHandler(db, plainUser).SearchPages, "created_from=2026-10-27T00:00:00Z&created_to=2026-10-28T00:00:00Z&updated_from=2026-10-27T00:00:00Z&updated_to=2026-10-28T00:00:00Z")
 		if rec.Code != 200 {
 			t.Fatalf("%d: %s", rec.Code, rec.Body)

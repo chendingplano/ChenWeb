@@ -24,6 +24,15 @@ async function parse(res: Response): Promise<Record<string, unknown>> {
 	}
 }
 
+// The app that opens a page (the first by ID when several do), or null when none does.
+export async function fetchPageApp(pageId: string, fetchFn: typeof fetch = fetch): Promise<JsonObject | null> {
+	const res = await fetchFn(`/api/v1/wpi/pages/${encodeURIComponent(pageId)}/app`, { credentials: 'same-origin' });
+	if (res.status === 404) return null;
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status);
+	return body.app as JsonObject;
+}
+
 export async function fetchApp(appId: string, fetchFn: typeof fetch = fetch): Promise<Bundle> {
 	const res = await fetchFn(`/api/v1/wpi/apps/${encodeURIComponent(appId)}`, { credentials: 'same-origin' });
 	const body = await parse(res);
@@ -248,6 +257,7 @@ export type PageSummary = {
 	version: number;
 	page_name: Text | null;
 	description: Text | null;
+	page_image: string | null;
 	created_at: string;
 	updated_at: string;
 };

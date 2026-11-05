@@ -1,6 +1,6 @@
 <script lang="ts" module>
 	// Which page part the page control shows: the page, a pane or a leaf pane's panel.
-	export type ConfigMode = 'page' | 'panes' | 'panel';
+	export type ConfigMode = 'app' | 'page' | 'panes' | 'panel';
 </script>
 
 <!-- The WPI editor's Properties panel (OpenSpec wpi-property-editors, design D6):
@@ -24,8 +24,8 @@
 	const appDef: EditorDef = { groups: [{ id: 'app', label: m.wpi_app_properties, properties: [
 		{ name: 'descriptor_id', label: m.wpi_prop_descriptor_id, editor: 'text' },
 		{ name: 'initial_page', label: m.wpi_app_initial_page, editor: 'text' },
-		{ name: 'app_name', label: m.wpi_app_name, editor: 'localized-text' },
-		{ name: 'app_description', label: m.wpi_prop_description, editor: 'localized-text', options: { rows: 2 } },
+		{ name: 'app_name', label: m.wpi_app_name, editor: 'string-editor', options: { mode: 'multilingual', languages: ['en', 'zh-cn'] } },
+		{ name: 'app_description', label: m.wpi_prop_description, editor: 'string-editor', options: { mode: 'multilingual', languages: ['en', 'zh-cn'] } },
 		{ name: 'keywords', label: m.wpi_prop_keywords, editor: 'string-list' },
 		{ name: 'tags', label: m.wpi_prop_page_tags, editor: 'string-list' }
 	] }] };
@@ -34,6 +34,7 @@
 	let {
 		page,
 		app,
+		appReadOnly = false,
 		mode,
 		selectedPane,
 		node,
@@ -58,6 +59,7 @@
 	}: {
 		page: JsonObject | null;
 		app: JsonObject | null;
+		appReadOnly?: boolean;
 		mode: ConfigMode | null;
 		selectedPane: string | null;
 		// The selected element node, if exactly one is selected.
@@ -130,9 +132,9 @@
 			</div>
 		{/if}
 	{/key}
-{:else if app && mode === 'page'}
+{:else if app && mode === 'app'}
 	<div class="scroll">
-		<PropertyEditor title={m.wpi_app_properties()} def={appDef} source={pageSource(app, onApp, () => {})}
+		<PropertyEditor title={m.wpi_app_properties()} def={appDef} source={appReadOnly ? { ...pageSource(app, onApp, () => {}), fixed: () => true } : pageSource(app, onApp, () => {})}
 			context={common} idPrefix="prop-app" {onEditStart} {onEditEnd} />
 	</div>
 {:else if page && mode === 'page'}

@@ -141,3 +141,36 @@ export function elementTree(nodes: Node[], page: JsonObject, labels: { pane: str
  }
  return lines(root, 0).join('\n');
 }
+
+// What a component-tree node selects in the editor: an element's canvas node, or
+// the Properties panel's view of the app, the page, a pane or a panel.
+export type ComponentTarget =
+ | { kind: 'app' } | { kind: 'page' } | { kind: 'pane'; pane: string } | { kind: 'panel'; pane: string } | { kind: 'element'; node: string };
+export type ComponentNode = { id: string; label: string; target?: ComponentTarget; children: ComponentNode[] };
+
+// The page as a component tree: App, the page with its page layouter (whose panes
+// nest as in the page layouter), its element layouters per leaf pane, and its
+// elements in pane order. Elements hold no nested elements yet, so they are leaves.
+export function componentTree(nodes: Node[], page: JsonObject, labels: { app: string; page: string; pageLayouter: string; elementLayouter: string; elements: string }): ComponentNode {
+ const root = effectiveRoot(page as unknown as PageDescriptor);
+ const leaves = leafPanes(root);
+ const placed = nodes.filter(isElementNode).map((n) => (leaves.includes(nodePane(n)) ? n : { ...n, data: { ...n.data, pane: leaves[0] } }));
+ const panels = pageJson(nodes, page).panels as Record<string, { elem_layouter?: { layouter?: string } }>;
+ function pane(spec: PaneSpec): ComponentNode {
+  return { id: 'pane:' + spec.pane_id, label: spec.split ? spec.pane_id + ' (' + spec.split + ')' : spec.pane_id, target: { kind: 'pane', pane: spec.pane_id }, children: (spec.children ?? []).map(pane) };
+ }
+ return {
+  id: 'app', label: labels.app, target: { kind: 'app' }, children: [{
+   id: 'page', label: labels.page, target: { kind: 'page' }, children: [
+    { id: 'page-layouter', label: labels.pageLayouter, target: { kind: 'pane', pane: root.pane_id }, children: [pane(root)] },
+    { id: 'element-layouter', label: labels.elementLayouter, target: { kind: 'panel', pane: leaves[0] }, children: leaves.map(id => {
+     const layouter = panels[id]?.elem_layouter?.layouter;
+     return { id: 'element-layouter:' + id, label: layouter ? id + ': ' + layouter : id, target: { kind: 'panel', pane: id }, children: [] };
+    }) },
+    { id: 'elements', label: labels.elements, children: leaves.flatMap(id => paneNodes(placed, id).map((node, index) => ({
+     id: 'element:' + id + ':' + index, label: 'element:' + String(node.data.element ?? ''), target: { kind: 'element', node: node.id }, children: [],
+    }))) },
+   ],
+  }],
+ };
+}

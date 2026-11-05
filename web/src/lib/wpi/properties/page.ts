@@ -77,7 +77,8 @@ export const page: EditorDef = {
 				{ name: 'page_name', label: m.wpi_prop_page_name, helpTip: m.wpi_prop_tip_page_name, editor: 'localized-text' },
 				{ name: 'description', label: m.wpi_prop_description, helpTip: m.wpi_prop_tip_description, editor: 'localized-text', options: { rows: 2 } },
 				{ name: 'keywords', label: m.wpi_prop_keywords, helpTip: m.wpi_prop_tip_keywords, editor: 'string-list' },
-				{ name: 'page_tags', label: m.wpi_prop_page_tags, helpTip: m.wpi_prop_tip_page_tags, editor: 'string-list' }
+				{ name: 'page_tags', label: m.wpi_prop_page_tags, helpTip: m.wpi_prop_tip_page_tags, editor: 'string-list' },
+				{ name: 'page_image', label: m.wpi_prop_page_image, helpTip: m.wpi_prop_tip_page_image, readOnly: true }
 			]
 		},
 		{

@@ -619,6 +619,29 @@ func (h *Handler) GetPage(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"version": d.Version, "page": d.Raw})
 }
 
+// GetPageApp returns the app that opens a page, so the editor can show its attributes.
+// Endpoint: GET /api/v1/wpi/pages/:pageId/app
+func (h *Handler) GetPageApp(c echo.Context) error {
+	user := h.User(c)
+	if user == nil {
+		return errorJSON(c, http.StatusUnauthorized, "Authentication required")
+	}
+	id := c.Param("pageId")
+	if !idPattern.MatchString(id) {
+		return errorJSON(c, http.StatusNotFound, "No app opens this page")
+	}
+	d, found, err := store{h.DB}.appForPage(c.Request().Context(), id)
+	if err != nil {
+		handlerLog.Error("WPI page app read failed", "page", id, "user", actorName(user), "error", err)
+		return errorJSON(c, http.StatusInternalServerError, "Unable to read app")
+	}
+	if !found {
+		return errorJSON(c, http.StatusNotFound, "No app opens this page")
+	}
+	handlerLog.Info("WPI page app read", "page", id, "app", d.ID, "version", d.Version, "user", actorName(user))
+	return c.JSON(http.StatusOK, map[string]any{"version": d.Version, "app": d.Raw})
+}
+
 // dropRestrictedPages removes the pages whose access_controls exclude the user,
 // so opening one reports a missing page.
 func dropRestrictedPages(b *Bundle, user *ApiTypes.UserInfo) {
