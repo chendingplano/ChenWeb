@@ -1,6 +1,6 @@
 <script lang="ts" module>
 	// Which page part the page control shows: the page, a pane or a leaf pane's panel.
-	export type ConfigMode = 'app' | 'page' | 'panes' | 'panel';
+	export type ConfigMode = 'app' | 'page' | 'page-layouter' | 'panes' | 'panel';
 </script>
 
 <!-- The WPI editor's Properties panel (OpenSpec wpi-property-editors, design D6):
@@ -29,6 +29,8 @@
 		{ name: 'keywords', label: m.wpi_prop_keywords, editor: 'string-list' },
 		{ name: 'tags', label: m.wpi_prop_page_tags, editor: 'string-list' }
 	] }] };
+
+	const pageLayouterDef: EditorDef = { groups: [{ id: 'layouter', label: m.wpi_page_layouter_type, properties: [pageDef.groups.flatMap((group) => group.properties).find((property) => property.name === 'page_layouter')!] }] };
 
 	type Point = { x: number; y: number };
 	let {
@@ -148,6 +150,12 @@
 			{onEditStart}
 			{onEditEnd}
 		/>
+	</div>
+{:else if page && mode === 'page-layouter'}
+	<div class="scroll">
+		<PropertyEditor title={m.wpi_component_tree_page_layouter()} def={pageLayouterDef}
+			source={{ ...pageSource(page, onPage, chooseLayouter), names: [] }} context={common}
+			idPrefix="prop-page-layouter" {onEditStart} {onEditEnd} />
 	</div>
 {:else if page && mode === 'panes' && selectedPane}
 	{#key selectedPane}

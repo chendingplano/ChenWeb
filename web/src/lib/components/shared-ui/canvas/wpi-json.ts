@@ -8,7 +8,8 @@
 import type { Node } from '@xyflow/svelte';
 import { effectiveRoot, leafPanes } from '$lib/wpi/layout';
 import { newDynamicInstanceId, stampInstances, stripDynamicIds } from '$lib/wpi/instance-ids';
-import type { Json, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
+import type { Bundle, Json, JsonObject, PageDescriptor, PaneSpec } from '$lib/wpi/types';
+import { paneInstanceId } from '$lib/wpi/panel-cache';
 import { normalizeElementLengths, withListSourceDefaults } from './element-attributes';
 
 export const PAGE_SCHEMA_VERSION = '0.5';
@@ -145,32 +146,74 @@ export function elementTree(nodes: Node[], page: JsonObject, labels: { pane: str
 // What a component-tree node selects in the editor: an element's canvas node, or
 // the Properties panel's view of the app, the page, a pane or a panel.
 export type ComponentTarget =
- | { kind: 'app' } | { kind: 'page' } | { kind: 'pane'; pane: string } | { kind: 'panel'; pane: string } | { kind: 'element'; node: string };
+ | { kind: 'app' } | { kind: 'page' } | { kind: 'page-layouter' } | { kind: 'pane'; pane: string } | { kind: 'panel'; pane: string } | { kind: 'element'; node: string };
 export type ComponentNode = { id: string; label: string; target?: ComponentTarget; children: ComponentNode[] };
 
-// The page as a component tree: App, the page with its page layouter (whose panes
-// nest as in the page layouter), its element layouters per leaf pane, and its
-// elements in pane order. Elements hold no nested elements yet, so they are leaves.
-export function componentTree(nodes: Node[], page: JsonObject, labels: { app: string; page: string; pageLayouter: string; elementLayouter: string; elements: string }): ComponentNode {
+export type ComponentTreeLabels = { app: string; page: string; pageLayouter: string; paneTree: string; headlessPage: string; compoundPage: string; elementLayouter: string; elements: string };
+
+// Page → Page Layouter → Pane Tree → root Pane. Only leaf panes own content:
+// a Headless Page (the descriptor's panel), with its layouter and element list.
+export function componentTree(nodes: Node[], page: JsonObject, labels: ComponentTreeLabels): ComponentNode {
  const root = effectiveRoot(page as unknown as PageDescriptor);
  const leaves = leafPanes(root);
  const placed = nodes.filter(isElementNode).map((n) => (leaves.includes(nodePane(n)) ? n : { ...n, data: { ...n.data, pane: leaves[0] } }));
  const panels = pageJson(nodes, page).panels as Record<string, { elem_layouter?: { layouter?: string } }>;
  function pane(spec: PaneSpec): ComponentNode {
-  return { id: 'pane:' + spec.pane_id, label: spec.split ? spec.pane_id + ' (' + spec.split + ')' : spec.pane_id, target: { kind: 'pane', pane: spec.pane_id }, children: (spec.children ?? []).map(pane) };
+  const id = spec.pane_id;
+  const layouter = panels[id]?.elem_layouter?.layouter ?? 'flow-layouter';
+  const children: ComponentNode[] = spec.split ? (spec.children ?? []).map(pane) : [{
+   id: 'headless-page:' + id, label: labels.headlessPage, target: { kind: 'panel', pane: id }, children: [
+    { id: 'element-layouter:' + id, label: labels.elementLayouter + ': ' + layouter, target: { kind: 'panel', pane: id }, children: [] },
+    { id: 'elements:' + id, label: labels.elements, children: paneNodes(placed, id).map(node => ({
+     id: 'element:' + node.id, label: [String(node.data.element ?? ''), node.data.instance_id].filter(Boolean).join(':'), target: { kind: 'element', node: node.id }, children: [],
+    })) },
+   ],
+  }];
+  return { id: 'pane:' + id, label: spec.split ? id + ' (' + spec.split + ')' : id, target: { kind: 'pane', pane: id }, children };
  }
  return {
   id: 'app', label: labels.app, target: { kind: 'app' }, children: [{
    id: 'page', label: labels.page, target: { kind: 'page' }, children: [
-    { id: 'page-layouter', label: labels.pageLayouter, target: { kind: 'pane', pane: root.pane_id }, children: [pane(root)] },
-    { id: 'element-layouter', label: labels.elementLayouter, target: { kind: 'panel', pane: leaves[0] }, children: leaves.map(id => {
-     const layouter = panels[id]?.elem_layouter?.layouter;
-     return { id: 'element-layouter:' + id, label: layouter ? id + ': ' + layouter : id, target: { kind: 'panel', pane: id }, children: [] };
-    }) },
-    { id: 'elements', label: labels.elements, children: leaves.flatMap(id => paneNodes(placed, id).map((node, index) => ({
-     id: 'element:' + id + ':' + index, label: 'element:' + String(node.data.element ?? ''), target: { kind: 'element', node: node.id }, children: [],
-    }))) },
+    { id: 'page-layouter', label: labels.pageLayouter, target: { kind: 'page-layouter' }, children: [{ id: 'pane-tree', label: labels.paneTree, children: [pane(root)] }] },
    ],
   }],
  };
+}
+
+// Preview follows visible page instances, not open-page action references. The
+// cache may also contain hidden instances; they are not children of the visible
+// tree. Preview nodes are read-only because their canvas belongs to another page.
+export function runtimeComponentTree(runtime: {
+ bundle: Pick<Bundle, 'pages'>;
+ root: string | null;
+ pages: Record<string, { pageId: string }>;
+ panes: Record<string, { visible: string | null }>;
+}, labels: ComponentTreeLabels): ComponentNode | null {
+ function pageTree(instanceId: string): ComponentNode {
+  const page = runtime.bundle.pages[runtime.pages[instanceId].pageId];
+  const json = page as unknown as JsonObject;
+  const tree = componentTree(pageNodes(json), json, labels);
+  function visit(node: ComponentNode): ComponentNode {
+   let children = node.children;
+   if (node.target?.kind === 'pane') {
+    const visible = runtime.panes[paneInstanceId(instanceId, node.target.pane)]?.visible;
+    if (visible) {
+     const opened = runtime.bundle.pages[runtime.pages[visible].pageId];
+     const nested = pageTree(visible).children[0];
+     const root = effectiveRoot(opened);
+     if (root.split) {
+      children = [{ ...nested, label: labels.compoundPage + ': ' + opened.descriptor_id }];
+     } else {
+      const content = nested.children[0].children[0].children[0].children[0];
+      children = [{ ...content, label: labels.headlessPage + ': ' + opened.descriptor_id }];
+     }
+     // Nested trees already have their own instance-prefixed IDs.
+     return { id: instanceId + ':' + node.id, label: node.label, children };
+    }
+   }
+   return { id: instanceId + ':' + node.id, label: node.label, children: children.map(visit) };
+  }
+  return visit(tree);
+ }
+ return runtime.root ? pageTree(runtime.root) : null;
 }

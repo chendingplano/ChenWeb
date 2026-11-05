@@ -5,14 +5,18 @@
 	import { AppRuntime, setRuntime } from './runtime.svelte';
 	import type { Bundle } from './types';
 
-	let { bundle, editorPreview = false }: { bundle: Bundle; editorPreview?: boolean } = $props();
+	let { bundle, editorPreview = false, onRuntime }: { bundle: Bundle; editorPreview?: boolean; onRuntime?: (runtime: AppRuntime | null) => void } = $props();
 
 	// The route remounts this component for another app, so the runtime is
 	// created once from the first bundle. The app shows its initial page in its
 	// page area (devdoc 2026102601 §3.1.1).
 	const rt = new AppRuntime(untrack(() => bundle), editorPreview);
 	setRuntime(rt);
-	onMount(() => rt.start());
+	onMount(() => {
+		onRuntime?.(rt);
+		rt.start();
+		return () => onRuntime?.(null);
+	});
 
 	function beforeUnload(event: BeforeUnloadEvent) {
 		if (rt.anyDirty()) event.preventDefault();

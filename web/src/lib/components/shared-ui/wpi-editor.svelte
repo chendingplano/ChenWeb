@@ -38,7 +38,8 @@
 	import CreateElementDialog from './canvas/CreateElementDialog.svelte';
 	import WpiJsonDialog from './canvas/WpiJsonDialog.svelte';
 	import WpiTreeDialog from './canvas/WpiTreeDialog.svelte';
-	import { componentTree, elementTree, type ComponentTarget } from './canvas/wpi-json';
+	import { componentTree, runtimeComponentTree, elementTree, type ComponentTarget } from './canvas/wpi-json';
+	import type { AppRuntime } from '$lib/wpi/runtime.svelte';
 	import WpiComponentTreeWindow from './canvas/WpiComponentTreeWindow.svelte';
  import { normalizeElementLengths } from './canvas/element-attributes';
 	import PagePreview from './canvas/PagePreview.svelte';
@@ -179,6 +180,9 @@
 	let showTree = $state(false);
 	let showComponentTree = $state(false);
 	let previewBundle = $state<Bundle | null>(null);
+	let previewRuntime = $state<AppRuntime | null>(null);
+	const componentTreeLabels = $derived({ app: m.wpi_component_tree_app(), page: m.wpi_component_tree_page(), pageLayouter: m.wpi_component_tree_page_layouter(), paneTree: m.wpi_component_tree_pane_tree(), headlessPage: m.wpi_component_tree_headless_page(), compoundPage: m.wpi_component_tree_compound_page(), elementLayouter: m.wpi_component_tree_element_layouter(), elements: m.wpi_component_tree_elements() });
+	const currentComponentTree = $derived(previewRuntime ? runtimeComponentTree(previewRuntime, componentTreeLabels) : componentTree(nodes, loadedPage ?? {}, componentTreeLabels));
 	let previewLoading = $state(false);
 	let previewIsDraft = $state(false);
 	let previewRequest = 0;
@@ -576,6 +580,7 @@
 			configMode = 'app';
 			void loadPageApp();
 		} else if (target.kind === 'page') configMode = 'page';
+		else if (target.kind === 'page-layouter') configMode = 'page-layouter';
 		else {
 			configMode = target.kind === 'panel' ? 'panel' : 'panes';
 			selectedPane = target.pane;
@@ -1346,7 +1351,7 @@
 			<button type="button" class="add-tab" aria-label={m.wpi_add_canvas_tab()} title={m.wpi_add_canvas_tab()} onclick={() => addTab()}>+</button>
 		</div>
 		{#if previewBundle}
-			<div class="min-h-0 flex-1 overflow-auto bg-background text-foreground"><WpiApp bundle={previewBundle} editorPreview={previewIsDraft} /></div>
+			<div class="min-h-0 flex-1 overflow-auto bg-background text-foreground"><WpiApp bundle={previewBundle} editorPreview={previewIsDraft} onRuntime={(runtime) => (previewRuntime = runtime)} /></div>
 		{:else}
 		<div
 			class="min-h-0 flex-1 overflow-hidden"
@@ -1734,6 +1739,6 @@
 	<WpiTreeDialog {darkMode} tree={elementTree(nodes, loadedPage ?? {}, { pane: m.wpi_tree_pane(), panel: m.wpi_tree_panel(), layouter: m.wpi_tree_layouter(), elements: m.wpi_tree_elements() })} onClose={() => (showTree = false)} />
 {/if}
 
-{#if showComponentTree}
-	<WpiComponentTreeWindow {darkMode} selectedTarget={selectedNodeId ? { kind: 'element', node: selectedNodeId } : configMode === 'app' ? { kind: 'app' } : configMode === 'page' ? { kind: 'page' } : selectedPane && configMode === 'panel' ? { kind: 'panel', pane: selectedPane } : selectedPane && configMode === 'panes' ? { kind: 'pane', pane: selectedPane } : null} onSelect={selectComponent} tree={componentTree(nodes, loadedPage ?? {}, { app: m.wpi_component_tree_app(), page: m.wpi_component_tree_page(), pageLayouter: m.wpi_component_tree_page_layouter(), elementLayouter: m.wpi_component_tree_element_layouter(), elements: m.wpi_component_tree_elements() })} onClose={() => (showComponentTree = false)} />
+{#if showComponentTree && currentComponentTree}
+	<WpiComponentTreeWindow {darkMode} selectedTarget={selectedNodeId ? { kind: 'element', node: selectedNodeId } : configMode === 'app' ? { kind: 'app' } : configMode === 'page' ? { kind: 'page' } : configMode === 'page-layouter' ? { kind: 'page-layouter' } : selectedPane && configMode === 'panel' ? { kind: 'panel', pane: selectedPane } : selectedPane && configMode === 'panes' ? { kind: 'pane', pane: selectedPane } : null} onSelect={selectComponent} tree={currentComponentTree} onClose={() => (showComponentTree = false)} />
 {/if}
