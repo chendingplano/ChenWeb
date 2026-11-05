@@ -8,6 +8,7 @@
     nodeTypes       = [],
     extraCategories = [],
     darkMode        = true,
+    width = 200,
     subcategoryLabel = (sub: string) => sub.toUpperCase(),
     onDragStart,
   }: {
@@ -15,6 +16,7 @@
     // Folders shown after the node-type categories, even while no node type belongs to them.
     extraCategories?: string[];
     darkMode?:        boolean;
+    width?: number;
     // The label of a sub-folder: node types with a subcategory are listed in one
     // inside their category's folder (OpenSpec wpi-primitive-validators, D9).
     subcategoryLabel?: (sub: string) => string;
@@ -74,7 +76,7 @@
 
 <aside
   class="flex flex-col h-full overflow-hidden shrink-0"
-  style="width:200px; background:var(--cv-panel); border-right:1px solid var(--cv-divider);"
+  style="width:{width}px; background:var(--cv-panel); border-right:1px solid var(--cv-divider);"
 >
   <div style="padding:8px; border-bottom:1px solid var(--cv-divider);">
     <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:6px;">{m.nodepalette_node_palette()}</div>

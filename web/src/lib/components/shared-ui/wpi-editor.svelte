@@ -304,10 +304,62 @@
 	});
 
 	function keepPanelVisible() {
-		if (!active || !detached) return;
-		movePanel(panelPosition.x, panelPosition.y);
-		resizeFloating(propsWidth, panelHeight);
+		if (!active) return;
+		if (detached) { movePanel(panelPosition.x, panelPosition.y); resizeFloating(propsWidth, panelHeight); }
+		if (paletteDetached) { movePalette(palettePosition.x, palettePosition.y); resizePalette(paletteWidth, paletteHeight); }
 	}
+
+	const deleteKeys = ['Backspace', 'Delete'];
+	let paletteWidth = $state(200), paletteHeight = $state(500), paletteDetached = $state(false);
+	let palettePosition = $state({ x: 0, y: 0 });
+	let paletteElement: HTMLElement;
+	let paletteDrag: { id: number; dx: number; dy: number; x: number; y: number } | null = null;
+	let paletteResize: { id: number; x: number; y: number; width: number; height: number } | null = null;
+	let paletteDockResize: number | null = null;
+	let paletteRestored = $state(false);
+	const PALETTE_KEY = 'wpi-editor-palette-panel';
+	function movePalette(x: number, y: number) {
+		const b = body.getBoundingClientRect();
+		palettePosition = { x: Math.max(b.left, Math.min(x, Math.max(b.left, b.right - paletteWidth))), y: Math.max(b.top, Math.min(y, b.bottom - 40)) };
+	}
+	function resizePalette(width: number, height: number) {
+		const b = body.getBoundingClientRect();
+		paletteWidth = Math.round(Math.max(PROPS_MIN_WIDTH, Math.min(PROPS_MAX_WIDTH, b.right - palettePosition.x, width)));
+		paletteHeight = Math.round(Math.max(100, Math.min(b.bottom - palettePosition.y, height)));
+	}
+	function togglePalette() {
+		if (!paletteDetached) { const b = body.getBoundingClientRect(); palettePosition = { x: b.left + 16, y: b.top + 16 }; paletteHeight = Math.min(700, b.height - 32); }
+		paletteDetached = !paletteDetached;
+	}
+	function startPaletteDrag(event: PointerEvent) {
+		if (event.button !== 0) return;
+		const r = paletteElement.getBoundingClientRect();
+		paletteDrag = { id: event.pointerId, dx: event.clientX - r.left, dy: event.clientY - r.top, x: event.clientX, y: event.clientY };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); event.preventDefault();
+	}
+	function dragPalette(event: PointerEvent) {
+		if (paletteDrag?.id !== event.pointerId) return;
+		if (!paletteDetached) {
+			if (Math.hypot(event.clientX - paletteDrag.x, event.clientY - paletteDrag.y) < 5) return;
+			paletteHeight = Math.min(700, body.getBoundingClientRect().height - 32); paletteDetached = true;
+		}
+		movePalette(event.clientX - paletteDrag.dx, event.clientY - paletteDrag.dy);
+	}
+	function restorePalette() {
+		try {
+			const saved = JSON.parse(localStorage.getItem(PALETTE_KEY) ?? 'null');
+			if (saved && typeof saved.detached === 'boolean' && [saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) {
+				paletteWidth = Math.max(PROPS_MIN_WIDTH, Math.min(PROPS_MAX_WIDTH, saved.width)); paletteHeight = Math.max(100, saved.height); paletteDetached = saved.detached;
+				if (paletteDetached) { movePalette(saved.x, saved.y); resizePalette(paletteWidth, paletteHeight); }
+			}
+		} catch { /* Storage is optional. */ }
+		paletteRestored = true;
+	}
+	$effect(() => {
+		if (!paletteRestored) return;
+		const layout = { detached: paletteDetached, x: palettePosition.x, y: palettePosition.y, width: paletteWidth, height: paletteHeight };
+		try { localStorage.setItem(PALETTE_KEY, JSON.stringify(layout)); } catch { /* Storage is optional. */ }
+	});
 
 	// Undo / redo
 	type PageSnapshot = Snapshot & { page: JsonObject | null; app?: JsonObject | null; previewSize: { width: number; height: number } };
@@ -1167,6 +1219,7 @@
 	onMount(async () => {
 		recoveryTimer = setInterval(autoSavePages, 1000);
 		restorePanel();
+		restorePalette();
 		loadElementClasses();
 		loadClassVersions().catch(() => showError(m.wpi_class_versions_failed()));
 		listValidatorClasses().then((classes) => (validatorClasses = classes)).catch((error) => showError(m.wpi_vld_classes_failed({ detail: error instanceof Error ? error.message : String(error) })));
@@ -1212,13 +1265,27 @@
 	<!-- 3-panel body -->
 	<div bind:this={body} class="flex flex-1 overflow-hidden">
 		<!-- Node Palette -->
-		{#if !previewBundle}<NodePalette
-			nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]}
-			extraCategories={WPI_PALETTE_CATEGORIES}
-			subcategoryLabel={validatorCategoryLabel}
-			{darkMode}
-			onDragStart={onPaletteDragStart}
-		/>{/if}
+		{#if !previewBundle}
+		<div bind:this={paletteElement} class="properties-container" class:detached={paletteDetached} style:width="{paletteWidth}px" style:height={paletteDetached ? `${paletteHeight}px` : undefined} style:left={paletteDetached ? `${palettePosition.x}px` : undefined} style:top={paletteDetached ? `${palettePosition.y}px` : undefined}>
+			<div class="properties-controls">
+				<button type="button" class="panel-handle" aria-label={m.wpi_editor_move_panel()} title={m.wpi_editor_move_panel()} onpointerdown={startPaletteDrag} onpointermove={dragPalette} onpointerup={() => paletteDrag = null} onpointercancel={() => paletteDrag = null}
+					onkeydown={(event) => { if (!paletteDetached) return; const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') movePalette(palettePosition.x - d, palettePosition.y); else if (event.key === 'ArrowRight') movePalette(palettePosition.x + d, palettePosition.y); else if (event.key === 'ArrowUp') movePalette(palettePosition.x, palettePosition.y - d); else if (event.key === 'ArrowDown') movePalette(palettePosition.x, palettePosition.y + d); else return; event.preventDefault(); }}>⋮⋮</button>
+				<button type="button" class="panel-toggle" onclick={togglePalette} aria-label={paletteDetached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={paletteDetached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{paletteDetached ? '↪' : '↗'}</button>
+			</div>
+			<div class="properties-content"><NodePalette nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]} extraCategories={WPI_PALETTE_CATEGORIES} subcategoryLabel={validatorCategoryLabel} {darkMode} width={paletteWidth} onDragStart={onPaletteDragStart} /></div>
+			{#if paletteDetached}
+				<button type="button" class="floating-resize" aria-label={m.wpi_editor_resize_floating()} title={m.wpi_editor_resize_floating()}
+					onpointerdown={(event) => { if (event.button !== 0) return; paletteResize = { id: event.pointerId, x: event.clientX, y: event.clientY, width: paletteWidth, height: paletteHeight }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); event.preventDefault(); }}
+					onpointermove={(event) => { if (paletteResize?.id === event.pointerId) resizePalette(paletteResize.width + event.clientX - paletteResize.x, paletteResize.height + event.clientY - paletteResize.y); }} onpointerup={() => paletteResize = null} onpointercancel={() => paletteResize = null}
+					onkeydown={(event) => { const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') resizePalette(paletteWidth - d, paletteHeight); else if (event.key === 'ArrowRight') resizePalette(paletteWidth + d, paletteHeight); else if (event.key === 'ArrowUp') resizePalette(paletteWidth, paletteHeight - d); else if (event.key === 'ArrowDown') resizePalette(paletteWidth, paletteHeight + d); else return; event.preventDefault(); }}></button>
+			{/if}
+		</div>
+		{#if !paletteDetached}
+			<div role="separator" aria-orientation="vertical" aria-label={m.wpi_editor_resize_palette()} class="relative z-10 -mx-0.75 w-1.5 shrink-0 cursor-col-resize select-none hover:bg-(--cv-accent)/40"
+				onpointerdown={(event) => { if (event.button !== 0) return; paletteDockResize = event.pointerId; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); event.preventDefault(); }}
+				onpointermove={(event) => { if (paletteDockResize === event.pointerId) paletteWidth = Math.round(Math.min(PROPS_MAX_WIDTH, Math.max(PROPS_MIN_WIDTH, event.clientX - body.getBoundingClientRect().left))); }} onpointerup={() => paletteDockResize = null} onpointercancel={() => paletteDockResize = null}></div>
+		{/if}
+		{/if}
 
 		<!-- Canvas column: tool bar + canvas -->
 		<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1282,7 +1349,7 @@
 				bind:viewport
 				initialViewport={viewport}
 				nodeTypes={NODE_TYPES}
-				deleteKey={['Backspace', 'Delete']}
+				deleteKey={deleteKeys}
 				colorMode={darkMode ? 'dark' : 'light'}
 				fitView={nodes.length > 0 && !loadedPage}
 				fitViewOptions={{ maxZoom: 1 }}
