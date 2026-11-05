@@ -356,6 +356,7 @@
 		if (!tab) return;
 		activeTabId = id;
 		activeLayouterView = null;
+		propertiesTab = 'properties';
 		activeFlow = tab.flow;
 		savedName = tab.savedName;
 		({ nodes, edges, page: loadedPage, previewSize } = JSON.parse(JSON.stringify(tab.snapshot)));
@@ -482,13 +483,17 @@
 		propertiesTab = 'class';
 	}
 	$effect(() => {
-		if (!selectedNodeId) activeLayouterView = null;
+		if (!selectedNodeId) {
+			activeLayouterView = null;
+			propertiesTab = 'properties';
+		}
 	});
 	// Choosing the page, a pane or a panel leaves no node selected, so the Properties
 	// panel shows that one entity (OpenSpec wpi-property-editors, design D6).
 	function deselectNodes() {
 		selectedNodeId = null;
 		activeLayouterView = null;
+		propertiesTab = 'properties';
 		if (nodes.some((n) => n.selected)) nodes = nodes.map((n) => (n.selected ? { ...n, selected: false } : n));
 	}
 	const selectedFlowConfig = $derived.by(() => {
@@ -603,6 +608,7 @@
 	async function loadFlow(flow: Flow) {
 		const tabID = activeTabId;
 		activeLayouterView = null;
+		propertiesTab = 'properties';
 		activeFlow = flow;
 		savedName = flow.flow_name;
 		configMode = null;
@@ -654,6 +660,7 @@
 		edges = [];
 		loadedPage = page;
 		activeLayouterView = null;
+		propertiesTab = 'properties';
 		configMode = null;
 		previewSize = { ...DEFAULT_PREVIEW_SIZE };
 		centerPreview();
@@ -904,6 +911,7 @@
 			const cls = nodes.find((n) => n.id === id)?.data.element;
 			if (typeof cls === 'string' && cls !== '') {
 				configMode = null;
+				activeLayouterView = null;
 				selectedNodeId = id;
 				nodes = nodes.map(n => ({ ...n, selected: n.id === id }));
 				propertiesTab = 'class';
@@ -968,6 +976,7 @@
 	// ── New empty flow ───────────────────────────────────────────────────────
 	async function createNewEmpty() {
 		activeLayouterView = null;
+		propertiesTab = 'properties';
 		loadedPage = blankPage();
 		configMode = null;
 		previewSize = { ...DEFAULT_PREVIEW_SIZE };
