@@ -40,10 +40,13 @@ is chosen.
 
 ## Missing targets
 
-If the page or pane has no non-empty layouter descriptor ID, the corresponding
-menu item is disabled. The menu remains available for the other target when
-possible. A non-empty ID that cannot be loaded is handled by the existing class
-editor's unavailable-class state.
+For this feature, a usable target means a non-empty string layouter descriptor
+ID; it does not require a successful fetch. If the page or pane has no such ID,
+the corresponding menu item is disabled and, when the view was already chosen,
+the panel temporarily falls back to the selected element's default Class target.
+The menu remains available for the other target when possible. If a non-empty ID
+cannot be loaded, the selected layouter view remains active and the existing
+class editor shows its unavailable-class state.
 
 ## Acceptance criteria
 
