@@ -23,15 +23,11 @@
 
 	const appDef: EditorDef = { groups: [{ id: 'app', label: m.wpi_app_properties, properties: [
 		{ name: 'descriptor_id', label: m.wpi_prop_descriptor_id, editor: 'text' },
+		{ name: 'initial_page', label: m.wpi_app_initial_page, editor: 'text' },
 		{ name: 'app_name', label: m.wpi_app_name, editor: 'localized-text' },
 		{ name: 'app_description', label: m.wpi_prop_description, editor: 'localized-text', options: { rows: 2 } },
 		{ name: 'keywords', label: m.wpi_prop_keywords, editor: 'string-list' },
-		{ name: 'tags', label: m.wpi_prop_page_tags, editor: 'string-list' },
-		{ name: 'scope', label: m.wpi_app_scope, editor: 'text' },
-		{ name: 'access_controls', label: m.wpi_prop_access_controls, editor: 'string-list' },
-		{ name: 'pane_layouter', label: m.wpi_app_pane_layouter, editor: 'json', options: { rows: 2 } },
-		{ name: 'app_image', label: m.wpi_app_image, editor: 'text' },
-		{ name: 'app_icon', label: m.wpi_app_icon, editor: 'text' }
+		{ name: 'tags', label: m.wpi_prop_page_tags, editor: 'string-list' }
 	] }] };
 
 	type Point = { x: number; y: number };

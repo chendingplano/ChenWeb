@@ -19,7 +19,7 @@
 
 	import { flowService } from '$lib/services/flowService';
 	import type { Flow, NodeType, Snapshot } from '$lib/types/flow';
-	import { loadClassVersions, listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
+	import { loadClassVersions, listElementClasses, listValidatorClasses, listPageLayouters, listTriggerActions, getPage, getPageRecovery, saveApp, savePage, savePageRecovery, deletePageRecovery, listUnsavedRecoveries, fetchPagePreview, previewDraftPage, WpiError, type ElementClassSummary } from '$lib/wpi/api';
 
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -449,7 +449,7 @@
 	function tabTitle(tab: CanvasTab): string {
 		const page = tab.id === activeTabId ? loadedPage : tab.snapshot.page;
 		const app = tab.id === activeTabId ? loadedApp : tab.snapshot.app;
-		return localized((app?.app_name ?? page?.page_name ?? (page?.app as JsonObject | undefined)?.page_name) as Text | undefined) || String(app?.descriptor_id || page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
+		return localized((app?.app_name ?? page?.page_name) as Text | undefined) || String(app?.descriptor_id || page?.descriptor_id || (tab.id === activeTabId ? activeFlow : tab.flow)?.flow_name || m.canvas_01_untitled_flow());
 	}
 	const pageOverview = $derived(pageMinimapBounds(previewSize, { width: canvasWidth, height: canvasHeight }, viewport));
 	function movePageOverview(event: PointerEvent) {
@@ -676,8 +676,23 @@
 	// ── Save ────────────────────────────────────────────────────────────────
 	let savingTabs = new Set<number>();
 	let showCreatePage = $state(false);
+	// An app is a descriptor of its own that names its page by ID; saving it stores no page.
+	async function saveLoadedApp(app: JsonObject): Promise<boolean> {
+		const id = typeof app.descriptor_id === 'string' ? app.descriptor_id : '';
+		if (!id) { showError(m.wpi_app_id_required()); return false; }
+		try {
+			await saveApp(id, app);
+			lastSavedSnapshot = currentSnapshot();
+			toast(m.canvas_01_saved());
+			return true;
+		} catch (error) {
+			const detail = error instanceof WpiError ? (error.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ') || error.message) : '';
+			editorError = detail ? m.wpi_save_failed_detail({ detail }) : m.canvas_01_failed_to_save_your_changes();
+			return false;
+		}
+	}
 	async function save(metadata?: ReturnType<typeof newPageMetadata>): Promise<boolean> {
-		if (loadedApp) { showError(m.wpi_app_save_unavailable()); return false; }
+		if (loadedApp) return saveLoadedApp(loadedApp);
 		if (savingTabs.has(activeTabId)) return false;
 		if (!loadedPage) return false;
 		if (!metadata && (typeof loadedPage.descriptor_id !== 'string' || !loadedPage.descriptor_id)) {
@@ -717,16 +732,16 @@
 				const unchanged = JSON.stringify(currentSnapshot()) === JSON.stringify(snapshot);
 				if (unchanged) adoptStored(stored);
 				else if (metadata && loadedPage) loadedPage = { ...loadedPage, ...metadata };
-				if (metadata && activeFlow) activeFlow = { ...activeFlow, flow_name: metadata.app.page_name };
+				if (metadata && activeFlow) activeFlow = { ...activeFlow, flow_name: metadata.page_name };
 				lastSavedSnapshot = unchanged ? currentSnapshot() : { ...snapshot, page: stored };
-				savedName = metadata?.app.page_name ?? name;
+				savedName = metadata?.page_name ?? name;
 			} else {
 				tabs = tabs.map((tab) => {
 					if (tab.id !== id) return tab;
 					const saved = { ...snapshot, page: stored };
 					const unchanged = JSON.stringify(tab.snapshot) === JSON.stringify(snapshot);
 					const current = unchanged ? saved : { ...tab.snapshot, page: metadata && tab.snapshot.page ? { ...tab.snapshot.page, ...metadata } : tab.snapshot.page };
-					return { ...tab, flow: metadata && tab.flow ? { ...tab.flow, flow_name: metadata.app.page_name } : tab.flow, snapshot: current, savedName: metadata?.app.page_name ?? name, saved, dirty: !unchanged };
+					return { ...tab, flow: metadata && tab.flow ? { ...tab.flow, flow_name: metadata.page_name } : tab.flow, snapshot: current, savedName: metadata?.page_name ?? name, saved, dirty: !unchanged };
 				});
 			}
 			toast(m.canvas_01_saved());
@@ -1562,7 +1577,7 @@
 {#if showCreatePage}
  <CreatePageDialog {darkMode} onClose={() => { showCreatePage = false; closeAfterSave = null; }} onCreate={async (name, description, keywords, tags) => {
   const tabID = closeAfterSave;
-  const done = await save(newPageMetadata(name, description, keywords, tags, { width: String(loadedPage?.width || previewSize.width + 'px'), height: String(loadedPage?.height || previewSize.height + 'px'), schema_version: String(loadedPage?.schema_version ?? '0.5') }));
+  const done = await save(newPageMetadata(name, description, keywords, tags, { width: String(loadedPage?.width || previewSize.width + 'px'), height: String(loadedPage?.height || previewSize.height + 'px') }));
   // The save stores the page and deletes its recovery record; only then does the tab close.
   if (done && tabID !== null && pageVersions.has(tabID)) closeTab(tabID, true);
   return done;

@@ -139,7 +139,12 @@ func TestValidateApp(t *testing.T) {
 		{`, "initial_page": "customer-admin-home"`, ``, `missing attribute "initial_page"`},
 		{`"initial_page": "customer-admin-home"`, `"initial_page": "h", "layout_template": "single-pane"`, `unknown attribute "layout_template"`},
 		{`"schema_version": "0.5"`, `"schema_version": "0.2"`, `schema_version "0.2" is not supported`},
+		{`"initial_page": "customer-admin-home"`, `"initial_page": "customer-admin-home", "app_name": {"zh-cn": "客户"}`, `/app_name texts by language need an "en" entry`},
+		{`"initial_page": "customer-admin-home"`, `"initial_page": "customer-admin-home", "keywords": [""]`, `/keywords`},
+		{`"initial_page": "customer-admin-home"`, `"initial_page": "customer-admin-home", "pages": ["a"]`, `unknown attribute "pages"`},
 	}
+	expectIssue(t, ValidateDescriptor(KindApp, "customer-admin", decode(t, strings.Replace(validApp, `"initial_page": "customer-admin-home"`,
+		`"initial_page": "customer-admin-home", "app_name": {"en": "Admin", "zh-cn": "管理"}, "app_description": "d", "keywords": ["a"], "tags": ["b"]`, 1))), "")
 	for _, c := range cases {
 		body := strings.Replace(validApp, c.from, c.to, 1)
 		expectIssue(t, ValidateDescriptor(KindApp, "customer-admin", decode(t, body)), c.want)
@@ -178,11 +183,7 @@ func TestValidatePage(t *testing.T) {
 		  "bkgd_color": "#fff", "frgd_color": "auto", "access_controls": ["admin"],
 		  "keywords": ["customer"], "page_tags": ["crm"], "page_policy": "default", "page_style": "plain", "binding_mode": "read-only"`, ""},
 		{`"input": {}`, `"input": {"title": "Customer admin", "nested": {"tags": [1, 2]}}`, ""},
-		{`"input": {}`, `"input": {}, "app": {"descriptor_id": "customer-form", "schema_version": "0.5", "description": "d", "width": "1000px", "height": "650px", "keywords": ["a"], "page_name": "customer-form-page", "page_tags": ["b"]}`, ""},
-		{`"input": {}`, `"input": {}, "app": {"descriptor_id": "other", "schema_version": "0.5"}`, `/app/descriptor_id "other" must equal the page's descriptor_id`},
-		{`"input": {}`, `"input": {}, "app": {"descriptor_id": "customer-form"}`, `missing attribute "schema_version"`},
-		{`"input": {}`, `"input": {}, "app": {"descriptor_id": "customer-form", "schema_version": "0.5", "keywords": [""]}`, `/app/keywords/0 must be a non-empty string`},
-		{`"input": {}`, `"input": {}, "app": {"descriptor_id": "customer-form", "schema_version": "0.5", "color": "red"}`, `unknown attribute "color"`},
+		{`"input": {}`, `"input": {}, "app": {"descriptor_id": "customer-form", "schema_version": "0.5"}`, `unknown attribute "app"`},
 		{`"input": {}`, `"input": {}, "page_name": {"zh-cn": "客户"}`, `/page_name texts by language need an "en" entry`},
 		{`"input": {}`, `"input": {}, "description": ""`, `/description must be a non-empty string`},
 		{`"input": {}`, `"input": {}, "hori_align": "justify"`, `"justify" is not supported`},

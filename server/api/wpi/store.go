@@ -77,11 +77,12 @@ func (s store) savePage(ctx context.Context, id string, raw []byte, actor, recov
 	return version, nil
 }
 
-// Pages live in kb.frontend_pages, the other kinds in kb.wpi_descriptors
-// (devdoc 2026102601 §6, design D1).
+// Pages live in kb.frontend_pages, apps in kb.wpi_apps, the other kinds in
+// kb.wpi_descriptors (devdoc 2026102601 §6, design D1; OpenSpec wpi-apps-table).
 const (
 	latestSQL      = `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body FROM kb.wpi_descriptors WHERE kind = $1 AND status = 'active'`
 	latestPagesSQL = `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body FROM kb.frontend_pages WHERE status = 'active'`
+	latestAppsSQL  = `SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body FROM kb.wpi_apps WHERE status = 'active'`
 	latestOrder    = ` ORDER BY descriptor_id, version DESC`
 )
 
@@ -89,8 +90,11 @@ const (
 // of every descriptor of the kind when ids is nil.
 func (s store) latest(ctx context.Context, kind Kind, ids []string) (map[string]Descriptor, error) {
 	q, args := latestSQL, []any{string(kind)}
-	if kind == KindPage {
+	switch kind {
+	case KindPage:
 		q, args = latestPagesSQL, nil
+	case KindApp:
+		q, args = latestAppsSQL, nil
 	}
 	if ids != nil {
 		args = append(args, pq.Array(ids))
@@ -121,6 +125,13 @@ func (s store) latest(ctx context.Context, kind Kind, ids []string) (map[string]
 // insertVersion stores body as the next active version of the descriptor.
 func (s store) insertVersion(ctx context.Context, kind Kind, id string, raw []byte, actor string) (int, error) {
 	var version int
+	if kind == KindApp {
+		err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_apps (descriptor_id, version, schema_version, body, status, created_by, updated_by)
+		SELECT $1::text, COALESCE(MAX(version), 0) + 1, $2::text, $3::jsonb, 'active', $4::text, $4::text
+		FROM kb.wpi_apps WHERE descriptor_id = $1::text
+		RETURNING version`, id, schemaVersionOf(kind), string(raw), actor).Scan(&version)
+		return version, err
+	}
 	err := s.db.QueryRowContext(ctx, `INSERT INTO kb.wpi_descriptors (kind, descriptor_id, version, schema_version, body, status, created_by, updated_by)
 		SELECT $1::text, $2::text, COALESCE(MAX(version), 0) + 1, $3::text, $4::jsonb, 'active', $5::text, $5::text
 		FROM kb.wpi_descriptors WHERE kind = $1::text AND descriptor_id = $2::text
@@ -147,15 +158,13 @@ type pageSearch struct {
 }
 
 func (s store) searchPages(ctx context.Context, f pageSearch) ([]PageSummary, error) {
-	// A page made by the Create app dialog keeps its name and description in the root
-	// attribute "app"; an older page keeps them at the root.
 	query := `WITH latest AS (
  SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body, created_at, updated_at
  FROM kb.frontend_pages WHERE status = 'active' ORDER BY descriptor_id, version DESC
  ), shown AS (
  SELECT descriptor_id, version, created_at, updated_at,
-  COALESCE(body->'page_name', body->'app'->'page_name') AS page_name,
-  COALESCE(body->'description', body->'app'->'description') AS description
+  body->'page_name' AS page_name,
+  body->'description' AS description
  FROM latest
  ) SELECT descriptor_id, version, page_name, description, created_at, updated_at
  FROM shown WHERE

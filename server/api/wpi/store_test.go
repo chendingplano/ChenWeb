@@ -14,6 +14,8 @@ const latestAllQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, vers
 
 const latestQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_descriptors WHERE kind = \$1 AND status = 'active' AND descriptor_id = ANY\(\$2\) ORDER BY descriptor_id, version DESC`
 
+const latestAppsQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.wpi_apps WHERE status = 'active' AND descriptor_id = ANY\(\$1\) ORDER BY descriptor_id, version DESC`
+
 const latestPagesQuery = `SELECT DISTINCT ON \(descriptor_id\) descriptor_id, version, body FROM kb\.frontend_pages WHERE status = 'active' AND descriptor_id = ANY\(\$1\) ORDER BY descriptor_id, version DESC`
 
 func TestStoreLatest(t *testing.T) {

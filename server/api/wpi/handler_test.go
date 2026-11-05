@@ -108,7 +108,7 @@ func TestGetApp(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
+		mock.ExpectQuery(latestAppsQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
 		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", filledPage(greetingRaw)}))
 		expectAllModules(mock, "text")
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
@@ -126,7 +126,7 @@ func TestGetApp(t *testing.T) {
 	t.Run("unknown app", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(latestQuery).WillReturnRows(descriptorRows())
+		mock.ExpectQuery(latestAppsQuery).WillReturnRows(descriptorRows())
 		if rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "nope"); rec.Code != 404 {
 			t.Fatalf("status %d", rec.Code)
 		}
@@ -134,7 +134,7 @@ func TestGetApp(t *testing.T) {
 	t.Run("invalid app", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(latestQuery).WithArgs("app", sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
+		mock.ExpectQuery(latestAppsQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"hello", singlePaneApp}))
 		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows())
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 422 || !strings.Contains(rec.Body.String(), `page \"greeting\" does not exist`) {
@@ -149,7 +149,7 @@ func TestGetApp(t *testing.T) {
 	t.Run("database error", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(latestQuery).WillReturnError(sql.ErrConnDone)
+		mock.ExpectQuery(latestAppsQuery).WillReturnError(sql.ErrConnDone)
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 500 || strings.Contains(rec.Body.String(), "connection") {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -158,7 +158,7 @@ func TestGetApp(t *testing.T) {
 	t.Run("cancellation error on an active request is still a failure", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
-		mock.ExpectQuery(latestQuery).WillReturnError(context.Canceled)
+		mock.ExpectQuery(latestAppsQuery).WillReturnError(context.Canceled)
 		rec := call(t, testHandler(db, plainUser).GetApp, "GET", "", "appId", "hello")
 		if rec.Code != 500 {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
@@ -222,6 +222,34 @@ func TestPutDescriptor(t *testing.T) {
 		page := strings.Replace(greetingRaw, `"text": "Hello"`, `"text": "Hello", "data_binding": "$input_doc.x"`, 1)
 		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", page, "kind", "page", "descriptorId", "greeting")
 		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "exactly one of") {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal("nothing may be stored: ", err)
+		}
+	})
+	t.Run("stores an app that names a stored page", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		body := `{"descriptor_id": "hello", "schema_version": "0.5", "initial_page": "greeting", "app_name": "Hello"}`
+		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows([2]string{"greeting", greetingRaw}))
+		mock.ExpectQuery(`INSERT INTO kb\.wpi_apps`).WithArgs("hello", SchemaVersion, body, "admin@example.com").
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", body, "kind", "app", "descriptorId", "hello")
+		if rec.Code != 200 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("app naming a page that is not stored", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		body := `{"descriptor_id": "hello", "schema_version": "0.5", "initial_page": "nope"}`
+		mock.ExpectQuery(latestPagesQuery).WithArgs(sqlmock.AnyArg()).WillReturnRows(descriptorRows())
+		rec := call(t, testHandler(db, adminUser).PutDescriptor, "PUT", body, "kind", "app", "descriptorId", "hello")
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), `page \"nope\" does not exist`) {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {

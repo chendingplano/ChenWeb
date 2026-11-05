@@ -209,6 +209,18 @@ func (h *Handler) PutDescriptor(c echo.Context) error {
 	if len(issues) > 0 {
 		return c.JSON(http.StatusBadRequest, map[string]any{"errors": issues})
 	}
+	if Kind(kind) == KindApp {
+		// An app names its page by ID, so the page must be stored first.
+		initial := str(body["initial_page"])
+		pages, err := st.latest(ctx, KindPage, []string{initial})
+		if err != nil {
+			handlerLog.Error("WPI app page check failed", "id", id, "user", actorName(user), "error", err)
+			return errorJSON(c, http.StatusInternalServerError, "Unable to check descriptor")
+		}
+		if _, ok := pages[initial]; !ok {
+			return c.JSON(http.StatusBadRequest, map[string]any{"errors": []Issue{{KindApp, id, "/initial_page", fmt.Sprintf("page %q does not exist", initial)}}})
+		}
+	}
 	switch Kind(kind) {
 	case KindElement, KindPageLayouter, KindElementLayouter, KindValidator:
 		if refused, err := checkModule(c, st, Kind(kind), id, body, user); refused {

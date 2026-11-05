@@ -305,6 +305,17 @@ export async function listUnsavedRecoveries(): Promise<{ id: string; page: JsonO
 // Saves a page as a new version. The server copies the active classes into
 // instances and layouter copies that have none, and returns the stored page
 // (OpenSpec wpi-pages-own-panes, design D4).
+// Saves an app descriptor as a new version. The app names its page by descriptor ID, so
+// the server refuses an `initial_page` that is not stored (OpenSpec wpi-apps-table).
+export async function saveApp(id: string, app: JsonObject, fetchFn: typeof fetch = fetch): Promise<{ version: number }> {
+	const res = await fetchFn(`/api/v1/wpi/descriptors/app/${encodeURIComponent(id)}`, {
+		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(app)
+	});
+	const body = await parse(res);
+	if (!res.ok) throw new WpiError(String(body.error ?? res.statusText), res.status, (body.errors as Issue[]) ?? []);
+	return { version: body.version as number };
+}
+
 export async function savePage(id: string, page: JsonObject, fetchFn: typeof fetch = fetch, createOnly = false, recoveryID = ''): Promise<{ version: number; page: JsonObject }> {
 	const res = await fetchFn(`/api/v1/wpi/descriptors/page/${encodeURIComponent(id)}`, {
 		method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(createOnly ? { 'If-None-Match': '*' } : {}), ...(recoveryID ? { 'X-WPI-Recovery-ID': recoveryID } : {}) }, body: JSON.stringify(page)

@@ -1,0 +1,8 @@
+- [x] 1. Migration creating `kb.wpi_apps`, moving app rows and page `app` attributes
+- [x] 2. Store routes apps to `kb.wpi_apps`; page search no longer reads `app`
+- [x] 3. Validator: app attributes; page `app` rejected
+- [x] 4. App write checks `initial_page` exists
+- [x] 5. Go tests (store, handler, validate)
+- [x] 6. Editor: save app, page dialog, app form, en + zh-cn messages
+- [x] 7. Devdoc 2026102601 updated
+- [ ] 8. Browser check of Create App / Create Page; archive this change
