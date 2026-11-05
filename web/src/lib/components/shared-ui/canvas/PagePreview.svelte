@@ -18,7 +18,7 @@
  import { getElementClass } from '$lib/wpi/api';
  import { AppRuntime, setRuntime } from '$lib/wpi/runtime.svelte';
  import { resolveEntry, isFixed } from '$lib/wpi/entries';
- import { cssLength, effectiveRoot, flowItemStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
+ import { cssLength, effectiveRoot, flowItemStyle, flowMarginStyle, flowStyle, inheritPaneColors, inheritPaneBorder, paneBorderStyle, isLeaf, pageBoxStyle, panelStyle, paneStyle, rootPaneStyle, placeStyle, splitStyle, surfaceColorStyle } from '$lib/wpi/layout';
  import { flowGeometry } from '$lib/wpi/layouters/flow-geometry';
  import ElementView from '$lib/wpi/elements/Element.svelte';
  import ErrorBox from '$lib/wpi/ErrorBox.svelte';
@@ -420,9 +420,10 @@
    {@const items = entries(pane.pane_id)}
    {@const config = panelConfig(pane.pane_id)}
    {@const panel = page.panels?.[pane.pane_id]}
+   {@const stretches = items.some((it) => !('error' in it.entry) && (it.entry.desc.width === 'elastic' || (typeof it.entry.desc.width === 'string' && it.entry.desc.width.endsWith('%'))))}
    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
    <div style={placeStyle(pane)} onclick={(event) => { event.stopPropagation(); onSelectPane(pane.pane_id); }}>
-    <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}; {surfaceColorStyle(panel ?? {}, !!colors.background_color)}" data-flow-layout use:flowGeometry={{ config, count: items.length, sizeToRows: !items.some((it) => !('error' in it.entry) && (it.entry.desc.width === 'elastic' || (typeof it.entry.desc.width === 'string' && it.entry.desc.width.endsWith('%')))) }}>
+    <div class="flow flex flex-wrap select-text" style="{flowStyle(config)}; {panelStyle(items.map((it) => ('error' in it.entry ? {} : it.entry.desc)))}; {surfaceColorStyle(panel ?? {}, !!colors.background_color)}; {flowMarginStyle(config)}; box-sizing: {stretches ? 'border-box' : 'content-box'}" data-flow-layout use:flowGeometry={{ config, count: items.length, sizeToRows: !items.some((it) => !('error' in it.entry) && (it.entry.desc.width === 'elastic' || (typeof it.entry.desc.width === 'string' && it.entry.desc.width.endsWith('%')))) }}>
      {#each items as item (item.node.id)}
       <div class="element min-w-0" class:flow-text={!('error' in item.entry) && item.entry.module === 'text'} class:stretch={!('error' in item.entry) && config.vertical_alignment === 'stretch' && (item.entry.desc.height === undefined || item.entry.desc.height === 'auto' || item.entry.desc.height === 'elastic')} use:measureElement={item.node.id} use:measure={'error' in item.entry || item.entry.module !== 'button' ? null : item.node.id} style={'error' in item.entry ? '' : flowItemStyle(item.entry.desc, config, elementMinimum(item.entry.module, item.entry.desc.editor))} data-flow-item data-editor-element={item.node.id}>
        {#if 'error' in item.entry}

@@ -214,6 +214,10 @@ export const pane: EditorDef = {
 
 function flowLabel(key: FlowField): string {
 	const labels: Record<FlowField, () => string> = {
+		left_margin: m.wpi_prop_left_margin,
+		right_margin: m.wpi_prop_right_margin,
+		top_margin: m.wpi_prop_top_margin,
+		bottom_margin: m.wpi_prop_bottom_margin,
 		column_gap: m.wpi_flow_column_gap,
 		row_gap: m.wpi_flow_row_gap,
 		horizontal_alignment: m.wpi_flow_horizontal_alignment,
@@ -261,6 +265,11 @@ export const panel: EditorDef = {
 			id: 'geometry',
 			label: m.wpi_page_group_geometry,
 			properties: (['column_gap', 'row_gap', 'min_row_height', 'max_row_height', 'min_elem_width', 'max_elem_width'] as FlowField[]).map(flowProperty)
+		},
+		{
+			id: 'margins',
+			label: m.wpi_prop_group_margins,
+			properties: (['left_margin', 'right_margin', 'top_margin', 'bottom_margin'] as FlowField[]).map(flowProperty)
 		},
 		{
 			id: 'layout',

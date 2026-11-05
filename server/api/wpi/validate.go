@@ -46,7 +46,7 @@ var (
 var (
 	pageLayouterModules    = []string{"page-layouter"}
 	elementLayouterModules = map[string][]string{
-		"flow-layouter": {"column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment", "min_row_height", "max_row_height", "min_elem_width", "max_elem_width", "max_num_elems", "row_separator", "elem_separator"},
+		"flow-layouter": {"left_margin", "right_margin", "top_margin", "bottom_margin", "column_gap", "row_gap", "horizontal_alignment", "vertical_alignment", "rows_alignment", "min_row_height", "max_row_height", "min_elem_width", "max_elem_width", "max_num_elems", "row_separator", "elem_separator"},
 	}
 )
 
@@ -505,7 +505,7 @@ func (v *validator) layouterConfig(module string, val any, path string) {
 	if module == "flow-layouter" {
 		v.matching(m, "column_gap", path, flowGapPattern)
 		v.matching(m, "row_gap", path, flowGapPattern)
-		for _, key := range []string{"min_row_height", "max_row_height", "min_elem_width", "max_elem_width"} {
+		for _, key := range []string{"left_margin", "right_margin", "top_margin", "bottom_margin", "min_row_height", "max_row_height", "min_elem_width", "max_elem_width"} {
 			v.matching(m, key, path, flowGapPattern)
 		}
 		if value, present := m["max_num_elems"]; present {

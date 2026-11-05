@@ -164,6 +164,10 @@ export type ClassRow = {
 };
 
 export type FlowLayouterConfig = {
+	left_margin?: string;
+	right_margin?: string;
+	top_margin?: string;
+	bottom_margin?: string;
 	column_gap?: string;
 	row_gap?: string;
 	horizontal_alignment?: 'start' | 'center' | 'end' | 'space-between';

@@ -40,6 +40,10 @@ export function findPane(pane: PaneSpec, id: string): PaneSpec | undefined {
 	return undefined;
 }
 
+export function flowMarginStyle(config: FlowLayouterConfig = {}): string {
+	return `padding: ${config.top_margin ?? '20px'} ${config.right_margin ?? '20px'} ${config.bottom_margin ?? '20px'} ${config.left_margin ?? '20px'}`;
+}
+
 // Safe alignment keeps the start of overflowing content reachable. Explicit
 // align-content also prevents flexbox's default stretching of row heights.
 export function flowStyle(config: FlowLayouterConfig = {}): string {

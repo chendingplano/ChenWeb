@@ -224,3 +224,13 @@ test('string editor choices and empty handling preserve other options', () => {
 	assert.deepEqual(saved, { editor_options: { mode: 'list', emptyAsNull: true, choices: ['red', 'blue'] } });
 	assert.equal(prop(elementEditor('value-editor'), 'editor_options.choices').visible!(ctx({ editor: 'string-editor', 'editor_options.mode': 'list' })), true);
 });
+
+test('element layouter margins default to 20px and persist in config', () => {
+ const group = panel.groups.find((g) => g.id === 'margins');
+ assert.deepEqual(group?.properties.map((p) => p.name), ['left_margin', 'right_margin', 'top_margin', 'bottom_margin']);
+ let next: JsonObject | undefined;
+ const source = panelSource(tree, 'a', (page) => (next = page));
+ for (const p of group!.properties) assert.equal(source.defaultValue(p.name), '20px');
+ source.set('left_margin', '12px');
+ assert.equal(((((next!.panels as JsonObject).a as JsonObject).elem_layouter as JsonObject).config as JsonObject).left_margin, '12px');
+});

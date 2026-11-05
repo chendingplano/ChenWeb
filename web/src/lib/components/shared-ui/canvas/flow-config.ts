@@ -1,6 +1,10 @@
 import type { Json, JsonObject } from '$lib/wpi/types';
 
 export const flowDefaults = {
+	left_margin: '20px',
+	right_margin: '20px',
+	top_margin: '20px',
+	bottom_margin: '20px',
 	column_gap: '0.75rem',
 	row_gap: '0.75rem',
 	horizontal_alignment: 'start',

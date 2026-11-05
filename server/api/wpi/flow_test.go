@@ -12,7 +12,7 @@ func TestFlowLayouterConfig(t *testing.T) {
 		return p
 	}
 	for _, config := range []string{
-		`{}`, `{"column_gap":"0px","row_gap":"1.5rem"}`,
+		`{}`, `{"left_margin":"0px","right_margin":"1rem","top_margin":"20px","bottom_margin":"30px"}`, `{"column_gap":"0px","row_gap":"1.5rem"}`,
 		`{"horizontal_alignment":"start","vertical_alignment":"top","rows_alignment":"top"}`,
 		`{"horizontal_alignment":"center","vertical_alignment":"center","rows_alignment":"center"}`,
 		`{"horizontal_alignment":"end","vertical_alignment":"bottom","rows_alignment":"bottom"}`,
@@ -27,6 +27,7 @@ func TestFlowLayouterConfig(t *testing.T) {
 	for _, tc := range []struct{ config, path string }{
 		{`null`, path}, {`[]`, path}, {`"center"`, path},
 		{`{"gap":"12px"}`, path + `/gap unknown attribute "gap"`},
+		{`{"left_margin":"-1px"}`, path + "/left_margin"},
 		{`{"column_gap":"-1px"}`, path + "/column_gap"},
 		{`{"row_gap":"10%"}`, path + "/row_gap"},
 		{`{"row_gap":"1em"}`, path + "/row_gap"},

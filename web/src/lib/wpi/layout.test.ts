@@ -11,7 +11,7 @@ import {
 	fillsHeight,
 	findPane,
 	flowItemStyle,
-	flowStyle,
+	flowStyle, flowMarginStyle,
 	isResizable,
 	leafPanes,
 	pageBoxStyle,
@@ -186,4 +186,9 @@ test('pane border attributes inherit independently and zero disables drawing', (
  assert.match(paneBorderStyle(middle), /outline: 2px solid light-dark\(red, white\); outline-offset: -2px/);
  assert.equal(paneBorderStyle(inheritPaneBorder({ border_thickness: '0px' }, middle)), '');
  assert.match(paneBorderStyle({ border_thickness: '1px' }), /light-dark\(#000, #fff\)/);
+});
+
+test('flow margins default to 20px and respect overrides', () => {
+ assert.match(flowMarginStyle({}), /padding: 20px 20px 20px 20px/);
+ assert.match(flowMarginStyle({ left_margin: '5px', top_margin: '2rem' }), /padding: 2rem 20px 20px 5px/);
 });

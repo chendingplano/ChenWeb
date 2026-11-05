@@ -92,6 +92,7 @@ application theme, so the page follows light and dark mode.
 
 ### Requirement: Flow spacing and alignment
 A panel MAY set `elem_layouter.config` for `flow-layouter`. It SHALL accept
+`left_margin`, `right_margin`, `top_margin`, and `bottom_margin` (each defaulting to `20px`),
 `column_gap` and `row_gap` (nonnegative decimal lengths in `px` or `rem`, default
 `0.75rem`), `horizontal_alignment` (`start`, `center`, `end`, `space-between`,
 default `start`), `vertical_alignment` (`top`, `center`, `bottom`, `stretch`, default
