@@ -1141,6 +1141,7 @@
 				bind:viewport
 				initialViewport={viewport}
 				nodeTypes={NODE_TYPES}
+				deleteKey={['Backspace', 'Delete']}
 				colorMode={darkMode ? 'dark' : 'light'}
 				fitView={nodes.length > 0 && !loadedPage}
 				fitViewOptions={{ maxZoom: 1 }}
