@@ -147,14 +147,21 @@ type pageSearch struct {
 }
 
 func (s store) searchPages(ctx context.Context, f pageSearch) ([]PageSummary, error) {
+	// A page made by the Create app dialog keeps its name and description in the root
+	// attribute "app"; an older page keeps them at the root.
 	query := `WITH latest AS (
  SELECT DISTINCT ON (descriptor_id) descriptor_id, version, body, created_at, updated_at
  FROM kb.frontend_pages WHERE status = 'active' ORDER BY descriptor_id, version DESC
- ) SELECT descriptor_id, version, body->'page_name', body->'description', created_at, updated_at
- FROM latest WHERE
- ($1 = '' OR strpos(lower(descriptor_id), $1) > 0 OR strpos(lower(COALESCE(body->>'page_name', '')), $1) > 0 OR strpos(lower(COALESCE(body->>'description', '')), $1) > 0)
+ ), shown AS (
+ SELECT descriptor_id, version, created_at, updated_at,
+  COALESCE(body->'page_name', body->'app'->'page_name') AS page_name,
+  COALESCE(body->'description', body->'app'->'description') AS description
+ FROM latest
+ ) SELECT descriptor_id, version, page_name, description, created_at, updated_at
+ FROM shown WHERE
+ ($1 = '' OR strpos(lower(descriptor_id), $1) > 0 OR strpos(lower(COALESCE(page_name #>> '{}', '')), $1) > 0 OR strpos(lower(COALESCE(description #>> '{}', '')), $1) > 0)
  AND ($2 = '' OR strpos(lower(descriptor_id), $2) > 0)
- AND ($3 = '' OR strpos(lower(COALESCE(body->>'description', '')), $3) > 0)
+ AND ($3 = '' OR strpos(lower(COALESCE(description #>> '{}', '')), $3) > 0)
  AND ($4::timestamptz IS NULL OR created_at >= $4)
  AND ($5::timestamptz IS NULL OR created_at < $5)
  AND ($6::timestamptz IS NULL OR updated_at >= $6)

@@ -333,10 +333,43 @@ func (v *validator) app(b map[string]any) {
 	v.matching(b, "initial_page", "", idPattern)
 }
 
+// appAttribute checks the page's root attribute "app": the identity the author
+// gave the app when creating it. Its descriptor_id must be the page's own.
+func (v *validator) appAttribute(page map[string]any, val any) {
+	m, ok := v.object(val, "/app")
+	if !ok {
+		return
+	}
+	v.keys(m, "/app", []string{"descriptor_id", "schema_version"}, "description", "width", "height", "keywords", "page_name", "page_tags")
+	if id, ok := v.matching(m, "descriptor_id", "/app", idPattern); ok && id != str(page["descriptor_id"]) {
+		v.errf("/app/descriptor_id", "%q must equal the page's descriptor_id", id)
+	}
+	v.str(m, "schema_version", "/app")
+	v.str(m, "description", "/app")
+	v.str(m, "page_name", "/app")
+	v.size(m, "width", "/app")
+	v.size(m, "height", "/app")
+	for _, k := range []string{"keywords", "page_tags"} {
+		list, ok := m[k]
+		if !ok || list == nil {
+			continue
+		}
+		items, ok := v.array(list, "/app/"+k, false)
+		if !ok {
+			continue
+		}
+		for i, item := range items {
+			if s, ok := item.(string); !ok || s == "" {
+				v.errf("/app/"+k+"/"+strconv.Itoa(i), "must be a non-empty string")
+			}
+		}
+	}
+}
+
 func (v *validator) page(b map[string]any) {
 	v.keys(b, "", []string{"descriptor_id", "schema_version", "page_layouter"}, "panels", "input", "save_action", "refresh",
 		"page_name", "description", "binding_mode", "access_controls", "keywords", "page_tags",
-		"page_policy", "page_style", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar", "bkgd_color", "frgd_color",
+		"page_policy", "page_style", "app", "hori_align", "vert_align", "hori_scrollbar", "vert_scrollbar", "bkgd_color", "frgd_color",
 		"width", "height", "min_width", "min_height", "max_width", "max_height")
 	var leaves map[string]bool
 	if pl, ok := b["page_layouter"]; ok {
@@ -349,6 +382,9 @@ func (v *validator) page(b map[string]any) {
 	v.stringList(b, "access_controls", 0)
 	v.stringList(b, "keywords", 200)
 	v.stringList(b, "page_tags", 200)
+	if a, ok := b["app"]; ok {
+		v.appAttribute(b, a)
+	}
 	// page_policy and page_style are reserved: accepted and ignored.
 	v.str(b, "page_policy", "")
 	v.str(b, "page_style", "")
