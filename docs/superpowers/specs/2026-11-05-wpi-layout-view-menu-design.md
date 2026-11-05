@@ -26,8 +26,9 @@ descriptor target and passes it to the existing `WpiClassPanel` and
 page data model. The selected element remains available as the context for the
 element's pane. If the selected element changes while a layouter view is active,
 the selected layouter view continues to follow the selection. If the new
-selection has no usable target for that view, the editor returns to the selected
-element's default Class target.
+selection has no usable target for that view, the editor temporarily shows the
+selected element's default Class target while retaining the chosen view. If a
+later selection has a usable target, the layouter view resumes.
 
 The chosen view persists while the same page remains open, including across
 element selection changes. It resets to the default element view when selection
@@ -57,5 +58,7 @@ editor's unavailable-class state.
 6. Missing or empty layouter IDs disable only their corresponding menu item; if
    such a target becomes unavailable after selection changes, the panel falls
    back to the selected element's default Class target.
-7. The selected layouter view persists across selections on the same page and
-   resets when selection is cleared or the page or tab changes.
+7. The selected layouter view persists across selections on the same page,
+   temporarily falls back to the selected element's default Class target when
+   its layouter ID is missing, and resumes when a later selection has a usable
+   target. It resets when selection is cleared or the page or tab changes.
