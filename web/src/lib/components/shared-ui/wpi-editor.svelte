@@ -318,6 +318,7 @@
 	let paletteDockResize: number | null = null;
 	let paletteRestored = $state(false);
 	const PALETTE_KEY = 'wpi-editor-palette-panel';
+	let doubleClickDrop = $state(false);
 	function movePalette(x: number, y: number) {
 		const b = body.getBoundingClientRect();
 		palettePosition = { x: Math.max(b.left, Math.min(x, Math.max(b.left, b.right - paletteWidth))), y: Math.max(b.top, Math.min(y, b.bottom - 40)) };
@@ -348,6 +349,7 @@
 	function restorePalette() {
 		try {
 			const saved = JSON.parse(localStorage.getItem(PALETTE_KEY) ?? 'null');
+			doubleClickDrop = saved?.doubleClickDrop === true;
 			if (saved && typeof saved.detached === 'boolean' && [saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) {
 				paletteWidth = Math.max(PROPS_MIN_WIDTH, Math.min(PROPS_MAX_WIDTH, saved.width)); paletteHeight = Math.max(100, saved.height); paletteDetached = saved.detached;
 				if (paletteDetached) { movePalette(saved.x, saved.y); resizePalette(paletteWidth, paletteHeight); }
@@ -357,7 +359,7 @@
 	}
 	$effect(() => {
 		if (!paletteRestored) return;
-		const layout = { detached: paletteDetached, x: palettePosition.x, y: palettePosition.y, width: paletteWidth, height: paletteHeight };
+		const layout = { doubleClickDrop, detached: paletteDetached, x: palettePosition.x, y: palettePosition.y, width: paletteWidth, height: paletteHeight };
 		try { localStorage.setItem(PALETTE_KEY, JSON.stringify(layout)); } catch { /* Storage is optional. */ }
 	});
 
@@ -954,6 +956,12 @@
 			showError(m.wpi_drop_element_inside_pane());
 			return;
 		}
+		addPaletteNode(nodeType, position, pane);
+	}
+
+	function addPaletteNode(nodeType: NodeType, position: { x: number; y: number }, pane?: string) {
+		const cls = nodeType.id.startsWith(ELEMENT_CLASS_PREFIX) ? nodeType.id.slice(ELEMENT_CLASS_PREFIX.length) : null;
+		const type = cls ? 'wpi-element' : nodeType.id;
 		const id = `${type}-${Date.now()}`;
 		takeSnapshot();
 		// The new node becomes the selection, so its resize grips show without a click.
@@ -976,6 +984,16 @@
 			loadedPage = stampedPage(page);
 		}
 		checkLimits();
+	}
+
+	function doubleClickPalette(nodeType: NodeType) {
+		if (!nodeType.id.startsWith(ELEMENT_CLASS_PREFIX)) return;
+		if (!loadedPage || !leaves.length) { showError(m.wpi_drop_element_inside_pane()); return; }
+		const nodePane = selectedNode && isElementNode(selectedNode) ? String(selectedNode.data.pane ?? '') : '';
+		const pane = leaves.includes(selectedPane ?? '') ? selectedPane! : leaves.includes(nodePane) ? nodePane : leaves[0];
+		const paneElements = nodes.filter((node) => isElementNode(node) && node.data.pane === pane);
+		const y = paneElements.length ? Math.max(...paneElements.map((node) => node.position.y)) + 1 : 0;
+		addPaletteNode(nodeType, { x: 0, y }, pane);
 	}
 
 	// A validator goes onto the element under the pointer, if that element takes
@@ -1272,7 +1290,7 @@
 					onkeydown={(event) => { if (!paletteDetached) return; const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') movePalette(palettePosition.x - d, palettePosition.y); else if (event.key === 'ArrowRight') movePalette(palettePosition.x + d, palettePosition.y); else if (event.key === 'ArrowUp') movePalette(palettePosition.x, palettePosition.y - d); else if (event.key === 'ArrowDown') movePalette(palettePosition.x, palettePosition.y + d); else return; event.preventDefault(); }}>⋮⋮</button>
 				<button type="button" class="panel-toggle" onclick={togglePalette} aria-label={paletteDetached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={paletteDetached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{paletteDetached ? '↪' : '↗'}</button>
 			</div>
-			<div class="properties-content"><NodePalette nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]} extraCategories={WPI_PALETTE_CATEGORIES} subcategoryLabel={validatorCategoryLabel} {darkMode} width={paletteWidth} onDragStart={onPaletteDragStart} /></div>
+			<div class="properties-content"><NodePalette nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]} extraCategories={WPI_PALETTE_CATEGORIES} subcategoryLabel={validatorCategoryLabel} {darkMode} width={paletteWidth} onDragStart={onPaletteDragStart} {doubleClickDrop} onDropModeChange={(enabled) => doubleClickDrop = enabled} onDoubleClick={doubleClickPalette} /></div>
 			{#if paletteDetached}
 				<button type="button" class="floating-resize" aria-label={m.wpi_editor_resize_floating()} title={m.wpi_editor_resize_floating()}
 					onpointerdown={(event) => { if (event.button !== 0) return; paletteResize = { id: event.pointerId, x: event.clientX, y: event.clientY, width: paletteWidth, height: paletteHeight }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); event.preventDefault(); }}

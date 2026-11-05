@@ -1,6 +1,7 @@
 <!-- web/src/lib/components/shared-ui/canvas/NodePalette.svelte -->
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import type { NodeType } from '$lib/types/flow';
 
@@ -11,6 +12,9 @@
     width = 200,
     subcategoryLabel = (sub: string) => sub.toUpperCase(),
     onDragStart,
+    doubleClickDrop = false,
+    onDropModeChange,
+    onDoubleClick,
   }: {
     nodeTypes:        NodeType[];
     // Folders shown after the node-type categories, even while no node type belongs to them.
@@ -21,9 +25,13 @@
     // inside their category's folder (OpenSpec wpi-primitive-validators, D9).
     subcategoryLabel?: (sub: string) => string;
     onDragStart:      (event: DragEvent, nodeType: NodeType) => void;
+    doubleClickDrop?: boolean;
+    onDropModeChange?: (enabled: boolean) => void;
+    onDoubleClick?: (nodeType: NodeType) => void;
   } = $props();
 
   let search = $state('');
+  let settingsOpen = $state(false);
   // Folders start folded; while searching, every folder with a match is shown open.
   let expanded = $state<Record<string, boolean>>({});
 
@@ -65,6 +73,7 @@
   <div
     draggable="true"
     ondragstart={(e) => onDragStart(e, nodeType)}
+    ondblclick={() => { if (doubleClickDrop) onDoubleClick?.(nodeType); }}
     class="flex items-center gap-2 rounded px-2 py-1.5 mb-1 cursor-grab hover:bg-(--cv-hover) transition-colors select-none"
     style="background:var(--cv-surface); border:1px solid transparent; font-size:10px; color:var(--cv-text);"
     title={nodeType.title ?? m.nodepalette_drag_onto_canvas()}
@@ -79,7 +88,18 @@
   style="width:{width}px; background:var(--cv-panel); border-right:1px solid var(--cv-divider);"
 >
   <div style="padding:8px; border-bottom:1px solid var(--cv-divider);">
-    <div style="font-size:9px; color:var(--cv-accent); letter-spacing:1px; margin-bottom:6px;">{m.nodepalette_node_palette()}</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; position:relative;">
+      <span style="font-size:9px; color:var(--cv-accent); letter-spacing:1px;">{m.nodepalette_node_palette()}</span>
+      {#if onDropModeChange}
+        <button type="button" aria-label={m.nodepalette_settings()} title={m.nodepalette_settings()} aria-expanded={settingsOpen} aria-haspopup="menu" onclick={() => settingsOpen = !settingsOpen} style="border:0; background:transparent; color:var(--cv-text-2); cursor:pointer; padding:3px;"><SettingsIcon size={14} /></button>
+        {#if settingsOpen}
+          <div role="menu" style="position:absolute; right:0; top:100%; z-index:2; min-width:180px; padding:4px; background:var(--cv-panel); border:1px solid var(--cv-border); box-shadow:0 4px 12px var(--cv-shadow);">
+            <button type="button" role="menuitemradio" aria-checked={!doubleClickDrop} onclick={() => { onDropModeChange(false); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{!doubleClickDrop ? '✓ ' : '　'}{m.nodepalette_drag_to_drop()}</button>
+            <button type="button" role="menuitemradio" aria-checked={doubleClickDrop} onclick={() => { onDropModeChange(true); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{doubleClickDrop ? '✓ ' : '　'}{m.nodepalette_double_click_to_drop()}</button>
+          </div>
+        {/if}
+      {/if}
+    </div>
     <input
       bind:value={search}
       placeholder={m.nodepalette_search_nodes()}
