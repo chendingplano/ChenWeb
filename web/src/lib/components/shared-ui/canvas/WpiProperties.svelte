@@ -169,7 +169,7 @@
 	{#key selectedPane}
 		<div class="scroll">
 			<PropertyEditor
-				title={m.wpi_config_panel_identity({ id: selectedPane })}
+				title={m.wpi_config_element_layouter_identity({ id: String((page as unknown as PageDescriptor).panels?.[selectedPane]?.elem_layouter?.layouter ?? '') })}
 				def={withClassEditors(panelDef, panelClassDefinitions, '/config')}
 				source={panelSource(page, selectedPane, onPage)}
 				context={common}

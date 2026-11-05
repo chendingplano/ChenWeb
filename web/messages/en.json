@@ -7849,6 +7849,7 @@
 	"wpi_page_config_title": "Page configuration",
 	"wpi_config_page_identity": "Page: {id}",
 	"wpi_config_pane_identity": "Pane: {id}",
+	"wpi_config_element_layouter_identity": "Element layouter: {id}",
 	"wpi_config_panel_identity": "Panel: {id}",
 	"wpi_config_layouter_identity": "Layouter: {id}",
 	"wpi_layouter_type": "Layouter type",

@@ -1650,5 +1650,5 @@
 {/if}
 
 {#if showComponentTree}
-	<WpiComponentTreeWindow {darkMode} onSelect={selectComponent} tree={componentTree(nodes, loadedPage ?? {}, { app: m.wpi_component_tree_app(), page: m.wpi_component_tree_page(), pageLayouter: m.wpi_component_tree_page_layouter(), elementLayouter: m.wpi_component_tree_element_layouter(), elements: m.wpi_component_tree_elements() })} onClose={() => (showComponentTree = false)} />
+	<WpiComponentTreeWindow {darkMode} selectedTarget={selectedNodeId ? { kind: 'element', node: selectedNodeId } : configMode === 'app' ? { kind: 'app' } : configMode === 'page' ? { kind: 'page' } : selectedPane && configMode === 'panel' ? { kind: 'panel', pane: selectedPane } : selectedPane && configMode === 'panes' ? { kind: 'pane', pane: selectedPane } : null} onSelect={selectComponent} tree={componentTree(nodes, loadedPage ?? {}, { app: m.wpi_component_tree_app(), page: m.wpi_component_tree_page(), pageLayouter: m.wpi_component_tree_page_layouter(), elementLayouter: m.wpi_component_tree_element_layouter(), elements: m.wpi_component_tree_elements() })} onClose={() => (showComponentTree = false)} />
 {/if}

@@ -2,13 +2,14 @@
   import { m } from '$lib/paraglide/messages.js';
   import { canvasThemeVars } from './canvas-theme';
   import type { ComponentNode, ComponentTarget } from './wpi-json';
-  let { tree, darkMode, onClose, onSelect }: { tree: ComponentNode; darkMode: boolean; onClose: () => void; onSelect: (target: ComponentTarget) => void } = $props();
+  let { tree, darkMode, selectedTarget, onClose, onSelect }: { tree: ComponentNode; darkMode: boolean; selectedTarget: ComponentTarget | null; onClose: () => void; onSelect: (target: ComponentTarget) => void } = $props();
 
   // A floating window: not modal, so the canvas stays usable behind it.
   let x = $state(Math.max(16, window.innerWidth - 440));
   let y = $state(140);
   let width = $state(400);
   let height = $state(420);
+  let selectedId = $state<string | null>(null);
 
   // Drag by the header; pointer capture is not needed because the listeners sit on window.
   function startMove(event: PointerEvent) {
@@ -40,7 +41,7 @@
 
 {#snippet branch(node: ComponentNode, depth: number)}
   {#if node.target}
-    <button onclick={() => onSelect(node.target!)} class="node hover:underline" style="margin-left:{depth * 16}px;">{node.label}</button>
+    <button onclick={() => { selectedId = node.id; onSelect(node.target!); }} class="node hover:underline" class:selected={selectedId === node.id && JSON.stringify(node.target) === JSON.stringify(selectedTarget)} aria-pressed={selectedId === node.id && JSON.stringify(node.target) === JSON.stringify(selectedTarget)} style="margin-left:{depth * 16}px;">{node.label}</button>
   {:else}
     <div class="node" style="margin-left:{depth * 16}px;">{node.label}</div>
   {/if}
@@ -80,4 +81,5 @@
     text-align: left;
   }
   button.node { cursor: pointer; }
+  button.node.selected { border-color: var(--cv-accent); background: var(--cv-accent); color: white; }
 </style>
