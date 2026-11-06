@@ -106,6 +106,10 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	promptText, promptRef, promptPath, promptErr := loadProvisionsPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_NAME", "EXTRACT_PROVISIONS_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_FALLBACK", "EXTRACT_PROVISIONS_MODELS_FILE")
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
+		modelCfg = forceDisableThinking(modelCfg)
+		fallbackModelCfg = forceDisableThinking(fallbackModelCfg)
+	}
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	var fallbackExtractor LLMJSONExtractor
 	if fallbackModelErr == nil && strings.TrimSpace(fallbackModelCfg.ModelName) != "" {
@@ -520,8 +524,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			"prompt name", p.PromptRef,
 		)
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
-		// Canonical chunk InputText (shared, cacheable prefix); schema/task in the prompt.
-		// See ADR 2026062701 §Phase 2.3.
+		// Keep canonical chunk serialization; the stable task is the cacheable prefix.
 		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
 		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, inputText, provisionChunkTask(p.PromptText, chunk))
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
@@ -597,11 +600,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 	}, nil
 }
 
-// provisionChunkTask is the chunk-mode task prompt (base prompt + output schema + chunk index).
-// The chunk lines are NOT included here — they are the canonical InputText (document section)
-// under document-first layout, shared byte-for-byte with the other chunk processors so DeepSeek
-// can reuse the prefix. See ADR 2026062701 §Phase 2.3.
-func provisionChunkTask(base string, chunk Chunk) string {
+// provisionChunkTask is identical across chunks so its instructions can be cached.
+func provisionChunkTask(base string, _ Chunk) string {
 	schema := map[string]any{
 		"language": "string",
 		"provisions": []map[string]any{{
@@ -641,8 +641,7 @@ func provisionChunkTask(base string, chunk Chunk) string {
 		}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nChunk index: " + strconv.Itoa(chunk.SeqNo)
+	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON)
 	if strings.TrimSpace(base) == "" {
 		return task
 	}
@@ -831,6 +830,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 
 func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText, promptText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
 	in := newLLMJSONInput(ctx, p.PromptRef, promptText, modelName, inputText, "extract_provisions", "MID-CWB-EXTRACT-PROVISIONS")
+	in.DocumentFirst = false
 	var (
 		payload map[string]any
 		err     error
