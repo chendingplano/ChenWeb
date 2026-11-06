@@ -86,6 +86,7 @@
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 	// ---------- State ----------
 	let recordBrowserFolded = $state(false);
+	let goldRecordsFolded = $state(false);
 	let keywordFilter = $state('');
 	let confidenceFilter = $state('');
 	let metricNameDropdownValue = $state<number | ''>('');
@@ -1451,6 +1452,20 @@
 			: `grid-template-columns: auto ${provListWidth}px minmax(0, 1fr)`}
 	>
 		{#if !recordBrowserFolded}
+			<div class="record-browser-column" class:folded={source === 'testbed' && goldRecordsFolded}>
+				{#if source === 'testbed'}
+					<button
+						type="button"
+						class="record-browser-toggle"
+						title={goldRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
+						aria-label={goldRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
+						aria-expanded={!goldRecordsFolded}
+						onclick={() => (goldRecordsFolded = !goldRecordsFolded)}
+					>
+						{#if goldRecordsFolded}<ChevronRightIcon size={16} />{:else}<ChevronLeftIcon size={16} />{/if}
+					</button>
+				{/if}
+				<div class="record-browser-content" hidden={source === 'testbed' && goldRecordsFolded}>
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey={source === 'testbed' ? 'gold-provisions-record-browser' : 'provisions-record-browser'}
@@ -1473,6 +1488,8 @@
 					{#if source === 'testbed'}<GoldRunFilters filter={gold} onChange={clearGoldRecord} />{/if}
 				{/snippet}
 			</KbInputRecordBrowser>
+				</div>
+			</div>
 
 			<aside class="metric-sidebar">
 				<div class="left-meta">
@@ -2353,6 +2370,32 @@
 	}
 
 	/* ---------- METRIC SIDEBAR ---------- */
+	.record-browser-column {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		min-width: 0;
+		background: var(--panel-bg);
+	}
+	.record-browser-column.folded { width: 32px; }
+	.record-browser-content { flex: 1; min-height: 0; }
+	.record-browser-content[hidden] { display: none; }
+	.record-browser-toggle {
+		align-self: flex-end;
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		flex-shrink: 0;
+		margin: 2px;
+		padding: 0;
+		border: 1px solid var(--ink-line);
+		border-radius: 5px;
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		cursor: pointer;
+	}
+	.record-browser-toggle:hover { color: var(--brass); }
 	.metric-sidebar {
 		position: relative;
 		display: flex;

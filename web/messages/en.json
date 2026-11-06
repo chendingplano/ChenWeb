@@ -8634,5 +8634,7 @@
 	"psc_missed": "Missed provisions ({count})",
 	"psc_no_matching_pairs": "No matched provisions satisfy this filter.",
 	"psc_pairs": "Matched provisions ({count})",
-	"psc_predicted_rows": "Extracted provisions"
+	"psc_predicted_rows": "Extracted provisions",
+	"provision_mgmt_fold_records": "Collapse record list",
+	"provision_mgmt_expand_records": "Expand record list"
 }

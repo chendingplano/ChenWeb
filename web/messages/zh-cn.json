@@ -8634,5 +8634,7 @@
 	"psc_missed": "遗漏条款（{count}）",
 	"psc_no_matching_pairs": "没有符合此筛选条件的匹配条款。",
 	"psc_pairs": "匹配条款（{count}）",
-	"psc_predicted_rows": "提取条款数"
+	"psc_predicted_rows": "提取条款数",
+	"provision_mgmt_fold_records": "收起记录列表",
+	"provision_mgmt_expand_records": "展开记录列表"
 }

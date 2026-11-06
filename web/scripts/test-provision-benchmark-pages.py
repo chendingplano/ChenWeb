@@ -128,6 +128,15 @@ async def check_gold_page(ctx, labels, locale):
     await expect(root.locator('.browser-shell')).to_be_visible()
     await expect(rail).to_have_attribute('style', rail_style)
     await expect(page.locator('.metric-card').first).to_have_class(re.compile(r'\bselected\b'))
+    for _ in range(2):
+        await page.get_by_role('button', name=labels['provision_mgmt_fold_records'], exact=True).click(timeout=3000)
+        await expect(root.locator('.browser-shell')).to_be_hidden()
+        await expect(page.locator('.metric-card').first).to_be_visible()
+        await expect(rail).to_have_attribute('style', rail_style)
+        await page.get_by_role('button', name=labels['provision_mgmt_expand_records'], exact=True).click()
+        await expect(root.locator('.browser-shell')).to_be_visible()
+        await expect(page.locator('.metric-card').first).to_have_class(re.compile(r'\bselected\b'))
+    assert len(calls) == 1, 'folding the record list reloaded provisions'
     # Read-only: no line edit/delete/add tools in the PDF toolbar.
     for key in ['provision_mgmt_edit_lines', 'provision_mgmt_delete_lines', 'provision_mgmt_add_line']:
         assert await page.locator(f'button[title="{labels[key]}"]').count() == 0, key
