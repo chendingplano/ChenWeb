@@ -37,13 +37,16 @@ type ControlService struct {
 	Processors        []Processor
 	DefaultProcessors []string  // selected for events without an explicit processor override
 	BlockingProcessor Processor // always runs before Processors, regardless of requested operations
-	Logger            ApiTypes.JimoLogger
-	InputStore        DocMetadataStore
-	EventStore        EventStore
-	StopStore         StopRequestStore
-	RunStore          DocProcessRunStore
-	PlanStore         DocProcessPlanStore
-	FacetStore        DocFacetStore
+	// Production processors hold mutable batch state and LLM clients. Build a
+	// separate graph per admitted run; Processors remains the configured catalog.
+	newRunProcessors func() ([]Processor, Processor, error)
+	Logger           ApiTypes.JimoLogger
+	InputStore       DocMetadataStore
+	EventStore       EventStore
+	StopStore        StopRequestStore
+	RunStore         DocProcessRunStore
+	PlanStore        DocProcessPlanStore
+	FacetStore       DocFacetStore
 	// Facets persists tier-1/tier-2 facet observations (spec 2026072901
 	// S16.1 "Facet tiers 1-2"). Deliberately independent of Resolver.Facets:
 	// Resolver is nil whenever the tier-3 LLM classifier isn't configured
@@ -633,6 +636,7 @@ func MaxDocProcessPipelinesFromEnv() int {
 func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error {
 	requestStart := s.now()
 	processors := s.Processors
+	blockingProcessor := s.BlockingProcessor
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
 		if s.Logger != nil {
@@ -748,6 +752,17 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		return err
 	}
 	ctx = s.applyCrossPeakRule(ctx, cancelTask, evt.RecordID, peakMode)
+	if s.newRunProcessors != nil {
+		processors, blockingProcessor, err = s.newRunProcessors()
+		if err != nil {
+			err = fmt.Errorf("(MID-20261106-01) build processors for record_id=%d: %w", evt.RecordID, err)
+			if s.Logger != nil {
+				s.Logger.Error("failed building document run processors", "record_id", evt.RecordID, "error", err)
+			}
+			return err
+		}
+	}
+	availableProcessors := processors
 	// ADR 2026081001 DR3: the "active policy pointer that can fail to load"
 	// failure mode (spec 2026080102 section 11) no longer exists -- bindings/
 	// rules are read from the in-process cache loaded at startup, not a
@@ -859,7 +874,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}
 	if len(evt.Operations) > 0 {
-		processors = s.selectProcessors(evt.Operations)
+		processors = s.selectRunProcessors(availableProcessors, evt.Operations)
 		processors = s.skipSatisfiedAutoDependencies(ctx, evt, processors)
 		if len(processors) == 0 {
 			if s.Logger != nil {
@@ -877,7 +892,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	} else if len(s.DefaultProcessors) > 0 {
-		processors = s.selectProcessors(s.defaultProcessorNames())
+		processors = s.selectRunProcessors(availableProcessors, s.defaultProcessorNames())
 	}
 	if err := metricProcessorConflict(processors); err != nil {
 		if s.Logger != nil {
@@ -1037,8 +1052,8 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	var allProcResults []procResult
 
 	// Always run the blocking processor first, regardless of requested operations.
-	if s.BlockingProcessor != nil {
-		s.runSingleProcessor(ctx, payload, s.BlockingProcessor, evt.RecordID, &requestFailed, &firstErr, &allProcResults)
+	if blockingProcessor != nil {
+		s.runSingleProcessor(ctx, payload, blockingProcessor, evt.RecordID, &requestFailed, &firstErr, &allProcResults)
 	}
 
 	if RunDocProcessorConcurrentFromEnv() {
@@ -2029,12 +2044,16 @@ func appendControlStatus(raw string, now time.Time, procErr error) (string, erro
 }
 
 func (s *ControlService) selectProcessors(ops []string) []Processor {
+	return s.selectRunProcessors(s.Processors, ops)
+}
+
+func (s *ControlService) selectRunProcessors(processors []Processor, ops []string) []Processor {
 	if len(ops) == 0 {
-		return s.Processors
+		return processors
 	}
 
-	available := make(map[string]Processor, len(s.Processors))
-	for _, p := range s.Processors {
+	available := make(map[string]Processor, len(processors))
+	for _, p := range processors {
 		if p == nil {
 			continue
 		}

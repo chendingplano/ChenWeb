@@ -192,17 +192,44 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if len(planFacts.RequestedProcessors) == 0 {
 		planFacts.RequestedProcessors = append([]string(nil), required...)
 	}
-	components := buildProductionRuntimeComponents(logger)
+	// Keep configuration overrides private to this runtime's graph factory.
+	// Each event gets new processors, mutexes, accumulators and LLM clients;
+	// database pools and the ControlService's pipeline admission stay shared.
+	required = append([]string(nil), required...)
+	overrides = cloneStringMap(overrides)
+	buildComponents := buildProductionRuntimeComponents
+	newComponents := func() (productionRuntimeComponents, error) {
+		components := buildComponents(logger)
+		if components.fixed == nil {
+			return components, fmt.Errorf("production runtime: missing chunking service")
+		}
+		if err := applyRuntimeOverrides(components.fixed, overrides); err != nil {
+			return components, err
+		}
+		if err := validateFixedRuntimeConfig(components.fixed, required, explicitSelection); err != nil {
+			return components, err
+		}
+		components.processors = filterProcessors(components.processors, required)
+		for _, p := range components.processors {
+			if err := processorInitError(p); err != nil {
+				return components, err
+			}
+			if m, ok := p.(*MetricsProcessor); ok {
+				if err := applyMetricsRuntimeOverrides(m, overrides); err != nil {
+					return components, err
+				}
+				if err := processorInitError(m); err != nil {
+					return components, err
+				}
+			}
+		}
+		return components, nil
+	}
+	components, err := newComponents()
+	if err != nil {
+		return nil, err
+	}
 	fixed := components.fixed
-	if fixed == nil {
-		return nil, fmt.Errorf("production runtime: missing chunking service")
-	}
-	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
-		return nil, err
-	}
-	if err := validateFixedRuntimeConfig(fixed, required, explicitSelection); err != nil {
-		return nil, err
-	}
 	if _, err := DocPipelineModeFromEnv(); err != nil {
 		return nil, err
 	}
@@ -224,6 +251,10 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 		}
 	}
 	control := &ControlService{Logger: logger, InputStore: components.inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, PlanStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, FacetStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, Facets: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, RoutingClearances: RoutingClearanceStore{DB: ApiTypes.ProjectDBHandle}, RoutingAlarms: RoutingAlarmSQLWriter{DB: ApiTypes.ProjectDBHandle}, PolicyAudit: policyaudit.SQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: components.blocking, Processors: filterProcessors(components.processors, required), DefaultProcessors: defaults}
+	control.newRunProcessors = func() ([]Processor, Processor, error) {
+		run, err := newComponents()
+		return run.processors, run.blocking, err
+	}
 	// The tier-3 applicability resolver is always constructed; classify_document
 	// itself is a routed processor (processor_plan.go) gated per-document via
 	// an authored kb.pipeline_rules row, not an env var.
@@ -254,21 +285,6 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	plan, err := BuildProductionProcessorPlanFromFacts(planFacts)
 	if err != nil {
 		return nil, err
-	}
-	for _, p := range control.Processors {
-		if err := processorInitError(p); err != nil {
-			return nil, err
-		}
-	}
-	for _, p := range control.Processors {
-		if m, ok := p.(*MetricsProcessor); ok {
-			if err := applyMetricsRuntimeOverrides(m, overrides); err != nil {
-				return nil, err
-			}
-			if err := processorInitError(m); err != nil {
-				return nil, err
-			}
-		}
 	}
 	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}, plan: plan}
 	for _, p := range control.Processors {
