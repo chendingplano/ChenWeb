@@ -357,7 +357,7 @@
 	const deleteKeys = ['Backspace', 'Delete'];
 	let paletteWidth = $state(200), paletteHeight = $state(500), paletteDetached = $state(false);
 	let palettePosition = $state({ x: 0, y: 0 });
-	let paletteElement: HTMLElement;
+	let paletteElement = $state<HTMLElement>();
 	let paletteDrag: { id: number; dx: number; dy: number; x: number; y: number } | null = null;
 	let paletteResize: { id: number; x: number; y: number; width: number; height: number } | null = null;
 	let paletteDockResize: number | null = null;
@@ -380,7 +380,7 @@
 	}
 	function startPaletteDrag(event: PointerEvent) {
 		if (event.button !== 0) return;
-		const r = paletteElement.getBoundingClientRect();
+		const r = paletteElement!.getBoundingClientRect();
 		paletteDrag = { id: event.pointerId, dx: event.clientX - r.left, dy: event.clientY - r.top, x: event.clientX, y: event.clientY };
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); event.preventDefault();
 	}
