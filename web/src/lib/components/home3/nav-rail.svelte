@@ -269,34 +269,9 @@
 					id: 'sysadmin-llm',
 					label: m.nav_sysadmin_llm(),
 					children: [
-						// Keep the development metric and decision tools above account management.
+						// Keep the development decision tools above account management.
 						...(pageKey === 'development'
 							? [
-									{
-										id: 'sysadmin-llm-metrics',
-										label: m.nav_sysadmin_llm_metrics(),
-										children: [
-											{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
-											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() },
-											{ id: 'sysadmin-llm-metrics-benchmark', label: m.nav_sysadmin_llm_metrics_benchmark() }
-										]
-									},
-									{
-										id: 'sysadmin-llm-summaries',
-										label: m.nav_sysadmin_llm_summaries(),
-										children: [
-											{ id: 'sysadmin-llm-summaries-gold', label: m.nav_sysadmin_llm_summaries_gold() },
-											{ id: 'sysadmin-llm-summaries-benchmark', label: m.nav_sysadmin_llm_summaries_benchmark() }
-										]
-									},
-									{
-										id: 'sysadmin-llm-references',
-										label: m.nav_sysadmin_llm_references(),
-										children: [
-											{ id: 'sysadmin-llm-references-gold', label: m.nav_sysadmin_llm_references_gold() },
-											{ id: 'sysadmin-llm-references-benchmark', label: m.nav_sysadmin_llm_references_benchmark() }
-										]
-									},
 									{
 										id: 'sysadmin-llm-decision-models',
 										label: m.nav_sysadmin_llm_decision_models(),
@@ -347,6 +322,31 @@
 						{ id: 'sysadmin-question-generator', label: m.nav_sysadmin_question_generator() },
 						...(pageKey === 'development'
 							? [
+									{
+										id: 'sysadmin-llm-metrics',
+										label: m.nav_sysadmin_llm_metrics(),
+										children: [
+											{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
+											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() },
+											{ id: 'sysadmin-llm-metrics-benchmark', label: m.nav_sysadmin_llm_metrics_benchmark() }
+										]
+									},
+									{
+										id: 'sysadmin-llm-summaries',
+										label: m.nav_sysadmin_llm_summaries(),
+										children: [
+											{ id: 'sysadmin-llm-summaries-gold', label: m.nav_sysadmin_llm_summaries_gold() },
+											{ id: 'sysadmin-llm-summaries-benchmark', label: m.nav_sysadmin_llm_summaries_benchmark() }
+										]
+									},
+									{
+										id: 'sysadmin-llm-references',
+										label: m.nav_sysadmin_llm_references(),
+										children: [
+											{ id: 'sysadmin-llm-references-gold', label: m.nav_sysadmin_llm_references_gold() },
+											{ id: 'sysadmin-llm-references-benchmark', label: m.nav_sysadmin_llm_references_benchmark() }
+										]
+									},
 									{
 										id: 'sysadmin-hybrid-search-benchmark',
 										label: m.nav_sysadmin_hybrid_search_benchmark(),
