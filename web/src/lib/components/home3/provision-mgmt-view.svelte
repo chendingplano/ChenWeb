@@ -1155,7 +1155,8 @@
 	async function selectMetric(m: KbProvisionRecord) {
 		selectedMetricId = m.id;
 		highlightSelectionVersion += 1;
-		enterFocusMode();
+		// Keep the record browser and navigation available while reviewing gold provisions.
+		if (source !== 'testbed') enterFocusMode();
 		const first = normalizeMetricSpans(m)[0];
 		if (!first) return;
 

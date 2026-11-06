@@ -5,10 +5,11 @@ import argparse
 import asyncio
 import json
 import pathlib
+import re
 import tempfile
 from urllib.parse import urlparse, parse_qs
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -121,7 +122,12 @@ async def check_gold_page(ctx, labels, locale):
     await page.get_by_text('c6 · X2', exact=True).first.wait_for()
     assert await page.locator('.metric-card').count() == 1
     await page.locator('.gold-view-select').select_option('gold')
+    rail = page.locator('aside').first
+    rail_style = await rail.get_attribute('style')
     await page.locator('.metric-card').first.click()
+    await expect(root.locator('.browser-shell')).to_be_visible()
+    await expect(rail).to_have_attribute('style', rail_style)
+    await expect(page.locator('.metric-card').first).to_have_class(re.compile(r'\bselected\b'))
     # Read-only: no line edit/delete/add tools in the PDF toolbar.
     for key in ['provision_mgmt_edit_lines', 'provision_mgmt_delete_lines', 'provision_mgmt_add_line']:
         assert await page.locator(f'button[title="{labels[key]}"]').count() == 0, key
