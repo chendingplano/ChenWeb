@@ -82,6 +82,7 @@ func NewAmbiguousObjectLLMResolverFromEnv() (AmbiguousObjectLLMResolver, float64
 	if err != nil {
 		return nil, minConfidence, err
 	}
+	client.(*llmclients.OpenAIJSONClient).ThinkingType = "disabled"
 	return ambiguousObjectLLMJSONResolver{client: client, modelName: modelName}, minConfidence, nil
 }
 
