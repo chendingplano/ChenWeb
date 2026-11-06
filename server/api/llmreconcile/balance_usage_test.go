@@ -66,7 +66,7 @@ func TestBalanceFetchPersistsFailedRequestThroughDefaultSink(t *testing.T) {
 		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		int64(0), int64(0), int64(0), int64(0), int64(0), sqlmock.AnyArg(), 0,
 		"deepseek balance request failed: status 401", response, "", sqlmock.AnyArg(), "",
-		`{"capture_source":"shared_llm"}`, nil, "provider_balance", "LLM_BALANCE_001", nil,
+		`{"capture_source":"shared_llm"}`, nil, "provider_balance", "LLM_BALANCE_001", nil, "request",
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 	original := sharedllm.DefaultUsageCaptureSink
 	sharedllm.DefaultUsageCaptureSink = &llmusage.Sink{
@@ -80,6 +80,28 @@ func TestBalanceFetchPersistsFailedRequestThroughDefaultSink(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEnsureSchedulerIdentityConcurrentCreation(t *testing.T) {
+	lookups := 0
+	kratos := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		lookups++
+		if lookups == 1 {
+			w.Write([]byte(`[]`))
+			return
+		}
+		w.Write([]byte(`[{"id":"other-instance-id","state":"active"}]`))
+	}))
+	defer kratos.Close()
+	t.Setenv("KRATOS_ADMIN_URL", kratos.URL)
+	id, err := ensureSchedulerIdentity(context.Background())
+	if err != nil || id != "other-instance-id" {
+		t.Fatalf("id=%q err=%v", id, err)
 	}
 }
 
@@ -107,5 +129,48 @@ func TestBalanceFetchRequiresActiveScheduler(t *testing.T) {
 				t.Fatal("provider called without an active scheduler identity")
 			}
 		})
+	}
+}
+
+func TestBalanceFetchCreatesMissingScheduler(t *testing.T) {
+	created := false
+	kratos := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			var body struct {
+				Traits      map[string]any `json:"traits"`
+				Credentials map[string]any `json:"credentials"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Traits["username"] != "scheduler" || body.Credentials["password"] == nil {
+				t.Error("missing scheduler credentials")
+			}
+			created = true
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":"new-id","state":"active","traits":{"username":"scheduler"}}`))
+			return
+		}
+		if created {
+			w.Write([]byte(`[{"id":"new-id","state":"active","traits":{"username":"scheduler"}}]`))
+			return
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer kratos.Close()
+	t.Setenv("KRATOS_ADMIN_URL", kratos.URL)
+	providerCalled := false
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalled = true
+		w.Write([]byte(`{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"10"}]}`))
+	}))
+	defer provider.Close()
+	client := &DeepSeekBalanceClient{HTTPClient: provider.Client()}
+	if _, err := client.FetchBalance(context.Background(), provider.URL, "key"); err != nil {
+		t.Fatal(err)
+	}
+	if !created || !providerCalled {
+		t.Fatalf("created=%v provider called=%v", created, providerCalled)
 	}
 }

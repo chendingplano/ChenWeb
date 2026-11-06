@@ -12,9 +12,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/cmd/config"
-	"github.com/chendingplano/shared/go/api/auth"
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
-	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 type AccountStore interface {
@@ -243,20 +241,13 @@ type DeepSeekBalanceClient struct {
 }
 
 func (c *DeepSeekBalanceClient) FetchBalance(ctx context.Context, baseURL string, apiKey string) (BalanceFetchResult, error) {
-	logger := loggerutil.CreateDefaultLogger("20261027-726")
-	defer logger.Close()
-	// This helper queries Kratos credentials_identifier, which accepts usernames
-	// as well as emails. Resolve the real internal identity rather than a fixed ID.
-	user, err := auth.KratosGetIdentityByEmail(logger, "scheduler")
+	userID, err := ensureSchedulerIdentity(ctx)
 	if err != nil {
 		return BalanceFetchResult{}, fmt.Errorf("resolve scheduler identity for balance capture: %w", err)
 	}
-	if user == nil || strings.TrimSpace(user.UserId) == "" || user.UserStatus != "active" {
-		return BalanceFetchResult{}, errors.New("balance capture requires an active scheduler identity")
-	}
 	client := sharedllm.NewDeepSeekBalanceClient(c.HTTPClient)
 	client.ModelName = config.AppConfig.ModelBalanceQueries["deepseek"]
-	result, err := client.Fetch(ctx, baseURL, apiKey, &sharedllm.RequestCapture{UserID: user.UserId})
+	result, err := client.Fetch(ctx, baseURL, apiKey, &sharedllm.RequestCapture{UserID: userID})
 	if err != nil {
 		return BalanceFetchResult{}, err
 	}
