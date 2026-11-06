@@ -4,6 +4,10 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, **({'executable_path': os.environ['CHROMIUM_PATH']} if os.environ.get('CHROMIUM_PATH') else {}))
     page = browser.new_page()
     page.goto('http://localhost:5187/', wait_until='networkidle')
+    length_type = page.locator('select.type').first
+    expect(length_type.locator('option[value=none]')).to_have_count(1)
+    length_type.select_option('none')
+    expect(page.locator('#length-output')).to_have_text('none')
     page.locator('select.type').first.select_option('auto')
     page.locator('select.type').first.select_option('px')
     field = page.locator('#length')

@@ -264,7 +264,7 @@ export const panel: EditorDef = {
 		{
 			id: 'geometry',
 			label: m.wpi_page_group_geometry,
-			properties: (['column_gap', 'row_gap', 'min_row_height', 'max_row_height', 'min_elem_width', 'max_elem_width'] as FlowField[]).map((key) => ({ ...flowProperty(key), options: { keywords: ['none'], units: ['px', 'rem'] } }))
+			properties: (['column_gap', 'row_gap', 'min_row_height', 'max_row_height', 'min_elem_width', 'max_elem_width'] as FlowField[]).map(flowProperty)
 		},
 		{
 			id: 'margins',

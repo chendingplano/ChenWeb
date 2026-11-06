@@ -7,7 +7,7 @@
 	import './value-editors.css';
 
 	let { id, label, value, options, check, onChange }: ValueEditorProps = $props();
-	const keywords = $derived(options.keywords ?? []);
+	const keywords = $derived(['none', ...(options.keywords ?? []).filter((keyword) => keyword !== 'none')]);
 	const units = $derived(options.units ?? ['px', 'rem', 'em', '%']);
 	const parts = $derived(lengthParts(value));
 	const type = $derived(options.useDefault && options.defaultValue !== undefined ? 'default' : (parts.type || 'value'));

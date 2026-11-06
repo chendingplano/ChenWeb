@@ -116,12 +116,6 @@ test('page: scroll bars, refresh and the page layouter', () => {
 	assert.equal(options(prop(panel, 'column_gap'), ctx()).units?.join(), 'px,rem');
 });
 
-test('flow geometry length properties offer none', () => {
-	for (const name of ['column_gap', 'row_gap', 'min_row_height', 'max_row_height', 'min_elem_width', 'max_elem_width']) {
-		assert.ok(options(prop(panel, name), ctx()).keywords?.includes('none'), name);
-	}
-});
-
 const cls: ElementClassSummary = {
 	descriptor_id: 'input',
 	version: 1,
