@@ -36,14 +36,14 @@
 
   let search = $state('');
   let settingsOpen = $state(false);
-  let settingsButton: HTMLButtonElement;
-  let settingsMenu: HTMLDivElement;
+  let settingsButton = $state<HTMLButtonElement>();
+  let settingsMenu = $state<HTMLDivElement>();
 
   $effect(() => {
     if (!settingsOpen) return;
     function dismiss(event: PointerEvent) {
       const target = event.target as Node;
-      if (!settingsButton.contains(target) && !settingsMenu.contains(target)) settingsOpen = false;
+      if (!settingsButton?.contains(target) && !settingsMenu?.contains(target)) settingsOpen = false;
     }
     document.addEventListener('pointerdown', dismiss, true);
     return () => document.removeEventListener('pointerdown', dismiss, true);
