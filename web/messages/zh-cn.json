@@ -8636,5 +8636,18 @@
 	"psc_pairs": "匹配条款（{count}）",
 	"psc_predicted_rows": "提取条款数",
 	"provision_mgmt_fold_records": "收起记录列表",
-	"provision_mgmt_expand_records": "展开记录列表"
+	"provision_mgmt_expand_records": "展开记录列表",
+	"provision_mgmt_filters": "筛选",
+	"provision_mgmt_filter_name": "按条款名称筛选",
+	"provision_mgmt_filter_id": "按条款 ID 筛选",
+	"provision_mgmt_filter_description": "按描述筛选…",
+	"provision_mgmt_order": "排序方式",
+	"provision_mgmt_order_source": "排序：原文顺序",
+	"provision_mgmt_order_id_asc": "排序：条款 ID 升序",
+	"provision_mgmt_order_id_desc": "排序：条款 ID 降序",
+	"provision_mgmt_order_name_asc": "排序：条款名称升序",
+	"provision_mgmt_order_name_desc": "排序：条款名称降序",
+	"provision_mgmt_prev": "上一条",
+	"provision_mgmt_next": "下一条",
+	"provision_mgmt_no_filter_matches": "没有符合这些筛选条件的条款。"
 }

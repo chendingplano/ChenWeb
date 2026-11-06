@@ -137,6 +137,46 @@ async def check_gold_page(ctx, labels, locale):
         await expect(root.locator('.browser-shell')).to_be_visible()
         await expect(page.locator('.metric-card').first).to_have_class(re.compile(r'\bselected\b'))
     assert len(calls) == 1, 'folding the record list reloaded provisions'
+    sidebar = root.locator('.metric-sidebar')
+    prev = sidebar.get_by_role('button', name=labels['provision_mgmt_prev'], exact=True)
+    next_button = sidebar.get_by_role('button', name=labels['provision_mgmt_next'], exact=True)
+    await expect(prev).to_be_disabled()
+    await next_button.click(timeout=3000)
+    await expect(sidebar.locator('.metric-card.selected')).to_contain_text(GOLD[1]['prov_name'])
+    await expect(next_button).to_be_disabled()
+    await prev.click()
+    for key, query in [('provision_mgmt_filter_name', GOLD[1]['prov_name_en']),
+                       ('provision_mgmt_filter_id', GOLD[1]['prov_id']),
+                       ('provision_mgmt_filter_by_keyword', GOLD[1]['provision_subject']),
+                       ('provision_mgmt_filter_description', '户分类垃圾容器')]:
+        field = sidebar.get_by_placeholder(labels[key], exact=True)
+        await field.fill(query)
+        await expect(sidebar.locator('.metric-card')).to_have_count(1)
+        await expect(sidebar.locator('.metric-card').first).to_contain_text(GOLD[1]['prov_name'])
+        await expect(prev).to_be_disabled()
+        await expect(next_button).to_be_disabled()
+        await field.fill('no matching provision')
+        await expect(sidebar.locator('.metric-card')).to_have_count(0)
+        await expect(sidebar.get_by_text(labels['provision_mgmt_no_filter_matches'])).to_be_visible()
+        await field.fill('')
+    confidence = sidebar.get_by_placeholder(labels['provision_mgmt_confidence_2'], exact=True)
+    await confidence.fill('0.96')
+    await expect(sidebar.locator('.metric-card')).to_have_count(0)
+    await confidence.fill('<0.96')
+    await expect(sidebar.locator('.metric-card')).to_have_count(2)
+    await confidence.fill('')
+    order = sidebar.get_by_role('combobox', name=labels['provision_mgmt_order'], exact=True)
+    await order.select_option('id_desc')
+    await expect(sidebar.locator('.metric-card').first).to_contain_text(GOLD[1]['prov_name'])
+    await sidebar.locator('.metric-card').first.click()
+    await next_button.click()
+    await expect(sidebar.locator('.metric-card.selected')).to_contain_text(GOLD[0]['prov_name'])
+    await order.select_option('source')
+    await expect(root.locator('.browser-shell')).to_be_visible()
+    await expect(rail).to_have_attribute('style', rail_style)
+    await sidebar.locator('summary').click()
+    await expect(next_button).to_be_visible()
+    await sidebar.locator('summary').click()
     # Read-only: no line edit/delete/add tools in the PDF toolbar.
     for key in ['provision_mgmt_edit_lines', 'provision_mgmt_delete_lines', 'provision_mgmt_add_line']:
         assert await page.locator(f'button[title="{labels[key]}"]').count() == 0, key

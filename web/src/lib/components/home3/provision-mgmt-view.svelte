@@ -89,6 +89,10 @@
 	let goldRecordsFolded = $state(false);
 	let keywordFilter = $state('');
 	let confidenceFilter = $state('');
+	let provisionNameFilter = $state('');
+	let provisionIdFilter = $state('');
+	let descriptionFilter = $state('');
+	let provisionOrder = $state('source');
 	let metricNameDropdownValue = $state<number | ''>('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbProvisionRecord[]>([]);
@@ -841,14 +845,24 @@
 
 	let filteredMetrics = $derived.by(() => {
 		let result = metrics;
+		const name = provisionNameFilter.trim().toLowerCase();
+		if (name) result = result.filter((m) =>
+			[m.prov_name, m.prov_name_en, m.provision_subject, m.provision_subject_en]
+				.some((value) => value?.toLowerCase().includes(name)));
+		const id = provisionIdFilter.trim().toLowerCase();
+		if (id) result = result.filter((m) => m.prov_id.toLowerCase().includes(id));
+		const description = descriptionFilter.trim().toLowerCase();
+		if (description) result = result.filter((m) =>
+			[m.prov_desc, m.prov_desc_en, m.provision, m.provision_en, m.prov_context, m.prov_context_en]
+				.some((value) => value?.toLowerCase().includes(description)));
 		const kw = keywordFilter.trim().toLowerCase();
 		if (kw) {
 			result = result.filter(
 				(m) =>
 					(m.provision_keywords ?? []).some((k) => k.toLowerCase().includes(kw)) ||
 					(m.provision_keywords_en ?? []).some((k) => k.toLowerCase().includes(kw)) ||
-					(m.prov_name ?? '').toLowerCase().includes(kw) ||
-					(m.provision_subject ?? '').toLowerCase().includes(kw)
+					[m.prov_name, m.prov_name_en, m.provision_subject, m.provision_subject_en]
+						.some((value) => value?.toLowerCase().includes(kw))
 			);
 		}
 		const cf = confidenceFilter.trim();
@@ -865,7 +879,16 @@
 				}
 			}
 		}
-		return [...result].sort((a, b) => provIdSeqno(a.prov_id) - provIdSeqno(b.prov_id));
+		const byText = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+		return [...result].sort((a, b) => {
+			switch (provisionOrder) {
+				case 'id_asc': return byText(a.prov_id, b.prov_id);
+				case 'id_desc': return byText(b.prov_id, a.prov_id);
+				case 'name_asc': return byText(metricNameOf(a), metricNameOf(b));
+				case 'name_desc': return byText(metricNameOf(b), metricNameOf(a));
+				default: return provIdSeqno(a.prov_id) - provIdSeqno(b.prov_id);
+			}
+		});
 	});
 
 	let selectedMetricInFilteredIndex = $derived(
@@ -1113,6 +1136,10 @@
 
 	async function loadMetricsForRecord(id: number, goldRun?: GoldRun) {
 		keywordFilter = '';
+		confidenceFilter = '';
+		provisionNameFilter = '';
+		provisionIdFilter = '';
+		descriptionFilter = '';
 		errorMsg = '';
 		loading = true;
 		metrics = [];
@@ -1494,19 +1521,46 @@
 			<aside class="metric-sidebar">
 				<div class="left-meta">
 					<div class="left-meta-title">{i18n.provision_mgmt_provisions()}</div>
-					<div class="left-meta-count">{i18n.provision_mgmt_found({ metricsCount: metrics.length })}</div>
-					{#if source === 'testbed'}
-						<select
-							class="gold-view-select"
-							aria-label={i18n.provision_mgmt_list_view()}
-							value={provisionView}
-							onchange={(event) => changeProvisionView(event.currentTarget.value as 'gold' | 'dropped')}
-						>
-							<option value="gold">{i18n.provision_mgmt_list_view_gold()}</option>
-							<option value="dropped">{i18n.provision_mgmt_list_view_dropped()}</option>
-						</select>
-					{/if}
+					<div class="left-meta-count">{i18n.provision_mgmt_found({ metricsCount: filteredMetrics.length })}</div>
 				</div>
+				{#if source === 'testbed'}
+					<details class="provision-filter-disclosure" open>
+						<summary>{i18n.provision_mgmt_filters()}</summary>
+						<div class="provision-local-filters">
+							<input class="toolbar-kw-input" type="search" placeholder={i18n.provision_mgmt_filter_name()} aria-label={i18n.provision_mgmt_filter_name()} bind:value={provisionNameFilter} />
+							<input class="toolbar-kw-input" type="search" placeholder={i18n.provision_mgmt_filter_id()} aria-label={i18n.provision_mgmt_filter_id()} bind:value={provisionIdFilter} />
+							<input class="toolbar-kw-input" type="search" list="gold-provision-keywords" placeholder={i18n.provision_mgmt_filter_by_keyword()} aria-label={i18n.provision_mgmt_filter_by_keyword()} bind:value={keywordFilter} />
+							<datalist id="gold-provision-keywords">
+								{#each allKeywords as kw (kw)}<option value={kw}></option>{/each}
+							</datalist>
+							<input class="toolbar-kw-input" type="search" placeholder={i18n.provision_mgmt_filter_description()} aria-label={i18n.provision_mgmt_filter_description()} bind:value={descriptionFilter} />
+							<input class="toolbar-kw-input" type="search" list="gold-provision-confidence" placeholder={i18n.provision_mgmt_confidence_2()} aria-label={i18n.provision_mgmt_confidence_2()} title={i18n.provision_mgmt_filter_by_confidence_threshold_select()} bind:value={confidenceFilter} />
+							<datalist id="gold-provision-confidence">
+								<option value="0.90"></option><option value="0.80"></option><option value="0.70"></option><option value="0.60"></option><option value="0.50"></option><option value="<0.50"></option>
+							</datalist>
+							<select class="toolbar-select" aria-label={i18n.provision_mgmt_order()} bind:value={provisionOrder}>
+								<option value="source">{i18n.provision_mgmt_order_source()}</option>
+								<option value="id_asc">{i18n.provision_mgmt_order_id_asc()}</option>
+								<option value="id_desc">{i18n.provision_mgmt_order_id_desc()}</option>
+								<option value="name_asc">{i18n.provision_mgmt_order_name_asc()}</option>
+								<option value="name_desc">{i18n.provision_mgmt_order_name_desc()}</option>
+							</select>
+							<select
+								class="toolbar-select gold-view-select"
+								aria-label={i18n.provision_mgmt_list_view()}
+								value={provisionView}
+								onchange={(event) => changeProvisionView(event.currentTarget.value as 'gold' | 'dropped')}
+							>
+								<option value="gold">{i18n.provision_mgmt_list_view_gold()}</option>
+								<option value="dropped">{i18n.provision_mgmt_list_view_dropped()}</option>
+							</select>
+						</div>
+					</details>
+					<div class="provision-sidebar-nav">
+						<button type="button" onclick={goToPrevMetric} disabled={!prevMetric}>{i18n.provision_mgmt_prev()}</button>
+						<button type="button" onclick={goToNextMetric} disabled={!nextMetric}>{i18n.provision_mgmt_next()}</button>
+					</div>
+				{/if}
 
 				<div class="metrics-list">
 					{#if errorMsg}
@@ -1519,18 +1573,12 @@
 								{i18n.provision_mgmt_select_a_record_from_kb()}
 							</div>
 						</div>
-					{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
+					{:else if !loading && filteredMetrics.length === 0}
 						<div class="empty">
 							<div class="empty-glyph">§</div>
 							<div class="empty-title">{i18n.provision_mgmt_no_matches()}</div>
 							<div class="empty-sub">
-								{#if keywordFilter && confidenceFilter}
-									{i18n.provision_mgmt_no_provisions_match_keyword_and({ keywordFilter, confidenceFilter })}
-								{:else if keywordFilter}
-									{i18n.provision_mgmt_no_provisions_match_the_keyword({ keywordFilter })}
-								{:else}
-									{i18n.provision_mgmt_no_provisions_match_confidence({ confidenceFilter })}
-								{/if}
+								{i18n.provision_mgmt_no_filter_matches()}
 							</div>
 						</div>
 					{:else}
@@ -2396,6 +2444,51 @@
 		cursor: pointer;
 	}
 	.record-browser-toggle:hover { color: var(--brass); }
+	.provision-filter-disclosure {
+		flex-shrink: 0;
+		margin: 0 16px 14px;
+		border: 1px solid var(--ink-line-soft);
+		background: var(--panel-bg-alt);
+	}
+	.provision-filter-disclosure summary {
+		padding: 8px;
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.provision-local-filters {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding: 0 8px 10px;
+	}
+	.provision-local-filters .toolbar-kw-input,
+	.provision-local-filters .toolbar-select,
+	.provision-local-filters .gold-view-select {
+		box-sizing: border-box;
+		width: 100%;
+		max-width: none;
+		margin-left: 0;
+	}
+	.provision-sidebar-nav {
+		display: flex;
+		flex-shrink: 0;
+		gap: 8px;
+		margin: -6px 16px 14px;
+	}
+	.provision-sidebar-nav button {
+		flex: 1;
+		padding: 7px 10px;
+		border: 1px solid var(--ink-line-soft);
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.provision-sidebar-nav button:disabled { opacity: 0.45; cursor: not-allowed; }
+	.provision-sidebar-nav button:not(:disabled):hover { border-color: var(--brass); color: var(--text-primary); }
 	.metric-sidebar {
 		position: relative;
 		display: flex;

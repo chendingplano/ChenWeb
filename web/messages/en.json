@@ -8636,5 +8636,18 @@
 	"psc_pairs": "Matched provisions ({count})",
 	"psc_predicted_rows": "Extracted provisions",
 	"provision_mgmt_fold_records": "Collapse record list",
-	"provision_mgmt_expand_records": "Expand record list"
+	"provision_mgmt_expand_records": "Expand record list",
+	"provision_mgmt_filters": "Filters",
+	"provision_mgmt_filter_name": "Filter by provision name",
+	"provision_mgmt_filter_id": "Filter by provision ID",
+	"provision_mgmt_filter_description": "Filter by description…",
+	"provision_mgmt_order": "Order by",
+	"provision_mgmt_order_source": "Order by: source order",
+	"provision_mgmt_order_id_asc": "Order by: provision ID ↑",
+	"provision_mgmt_order_id_desc": "Order by: provision ID ↓",
+	"provision_mgmt_order_name_asc": "Order by: provision name ↑",
+	"provision_mgmt_order_name_desc": "Order by: provision name ↓",
+	"provision_mgmt_prev": "Prev",
+	"provision_mgmt_next": "Next",
+	"provision_mgmt_no_filter_matches": "No provisions match these filters."
 }
