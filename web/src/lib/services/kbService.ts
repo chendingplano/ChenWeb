@@ -423,8 +423,8 @@ export type GoldMetricOptionsResponse = {
 };
 
 // Which gold benchmark set a gold view reads: testbed.metrics or the
-// testbed reference tables.
-export type GoldKind = 'metrics' | 'references' | 'summaries';
+// testbed reference, summary or provision tables.
+export type GoldKind = 'metrics' | 'references' | 'summaries' | 'provisions';
 
 // Skill versions and models present in a gold set, for the gold views' filters.
 export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptionsResponse> {
@@ -434,7 +434,9 @@ export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptions
 			? 'Failed to list gold metric options'
 			: kind === 'references'
 				? 'Failed to list gold reference options'
-				: 'Failed to list gold summary options'
+				: kind === 'provisions'
+					? 'Failed to list gold provision options'
+					: 'Failed to list gold summary options'
 	);
 }
 
@@ -1855,19 +1857,43 @@ export type KbProvisionRecord = {
 	prompt_name?: string;
 	created_at?: string;
 	objects?: KbProvisionObjectLink[];
+	// Gold-only fields (testbed.provisions).
+	section?: string;
+	provision_kind?: string;
+	evidence?: string;
+	source_table_rows?: Array<{ line: number; rows: string[] }>;
+};
+
+// A candidate a gold provision run excluded or merged (testbed.provisions_dropped).
+export type KbDroppedProvision = {
+	id: number;
+	candidate_id: string;
+	decision: string;
+	drop_reason: string;
+	reason?: string;
+	text?: string;
+	source_line_spans: string[];
+	prov_ids: string[];
 };
 
 export type ListKbProvisionsResponse = {
 	status: boolean;
 	results: KbProvisionRecord[];
 	total: number;
+	dropped?: KbDroppedProvision[];
 };
 
-export async function listKbProvisions(inputRecordId: number): Promise<ListKbProvisionsResponse> {
-	return fetchOrThrow<ListKbProvisionsResponse>(
-		`${BASE}/provisions?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
-		'Failed to list kb provisions'
-	);
+// Without goldRun: production provisions (kb.provisions). With goldRun: that
+// benchmark run's gold provisions plus its dropped candidates.
+export async function listKbProvisions(inputRecordId: number, goldRun?: GoldRun): Promise<ListKbProvisionsResponse> {
+	const query = new URLSearchParams({ input_record_id: String(inputRecordId) });
+	if (goldRun) {
+		query.set('source', 'testbed');
+		query.set('skill_version', goldRun.skill_version);
+		query.set('model_name', goldRun.model_name);
+		query.set('run_id', goldRun.run_id);
+	}
+	return fetchOrThrow<ListKbProvisionsResponse>(`${BASE}/provisions?${query}`, 'Failed to list kb provisions');
 }
 
 export type CreateKbProvisionPayload = {

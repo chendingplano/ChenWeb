@@ -990,6 +990,11 @@ type provisionRecordJSON struct {
 	PromptName          *string               `json:"prompt_name,omitempty"`
 	CreatedAt           string                `json:"created_at,omitempty"`
 	Objects             []provisionObjectJSON `json:"objects,omitempty"`
+	// Gold-only fields (source=testbed); production rows leave them empty.
+	Section         string          `json:"section,omitempty"`
+	ProvisionKind   string          `json:"provision_kind,omitempty"`
+	Evidence        string          `json:"evidence,omitempty"`
+	SourceTableRows json.RawMessage `json:"source_table_rows,omitempty"`
 }
 
 // provisionObjectJSON is one kb.artifact_objects row extracted for a
@@ -1004,6 +1009,8 @@ type listProvisionsResponse struct {
 	Status  bool                  `json:"status"`
 	Results []provisionRecordJSON `json:"results"`
 	Total   int                   `json:"total"`
+	// Dropped holds a gold run's excluded/duplicate candidates (source=testbed only).
+	Dropped []droppedProvision `json:"dropped,omitempty"`
 }
 
 // ListProvisions handles GET /api/v1/kb/provisions?input_record_id=N.
@@ -1011,6 +1018,7 @@ type listProvisionsResponse struct {
 // numeric seqno suffix of prov_id (e.g. "..._PRV_2" before "..._PRV_18"),
 // mirroring ListMetrics so the Provision Window can render the same
 // record-browser → list → focus-mode flow used by the Metric Window.
+// With source=testbed it returns the gold provisions of one benchmark run.
 func ListProvisions(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_LPROV_001")
 	defer rc.Close()
@@ -1029,6 +1037,9 @@ func ListProvisions(c echo.Context) error {
 			Status:   false,
 			ErrorMsg: "invalid input_record_id (CWB_KB_LPROV_011)",
 		})
+	}
+	if strings.TrimSpace(c.QueryParam("source")) == "testbed" {
+		return listGoldProvisions(c, logger, inputID)
 	}
 
 	db := ApiTypes.ProjectDBHandle

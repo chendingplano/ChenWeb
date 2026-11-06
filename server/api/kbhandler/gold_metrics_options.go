@@ -20,6 +20,7 @@ var goldRunTables = map[string]string{
 	"":             "testbed.metrics",
 	"metrics":      "testbed.metrics",
 	"references":   "testbed.reference_benchmark_runs",
+	"provisions":   "testbed.provision_benchmark_runs",
 	"summaries":    "testbed.summary_benchmark_runs",
 	"summary_rows": "testbed.summaries",
 }
@@ -135,6 +136,12 @@ func ListGoldMetricOptions(c echo.Context) error {
 // skill versions and models available for the Reference Benchmark view's filters.
 func ListGoldReferenceOptions(c echo.Context) error {
 	return listGoldOptions(c, "CWB_KB_REF_010", goldRunTables["references"])
+}
+
+// ListGoldProvisionOptions handles GET /api/v1/kb/provisions/gold-options: the
+// skill versions and models available for the Gold Provisions view's filters.
+func ListGoldProvisionOptions(c echo.Context) error {
+	return listGoldOptions(c, "CWB_KB_PROV_G_010", goldRunTables["provisions"])
 }
 
 // ListGoldSummaryOptions handles GET /api/v1/kb/summaries/gold-options.

@@ -348,6 +348,14 @@
 										]
 									},
 									{
+										id: 'sysadmin-llm-provisions',
+										label: m.nav_sysadmin_llm_provisions(),
+										children: [
+											{ id: 'sysadmin-llm-provisions-gold', label: m.nav_sysadmin_llm_provisions_gold() },
+											{ id: 'sysadmin-llm-provisions-benchmark', label: m.nav_sysadmin_llm_provisions_benchmark() }
+										]
+									},
+									{
 										id: 'sysadmin-hybrid-search-benchmark',
 										label: m.nav_sysadmin_hybrid_search_benchmark(),
 										children: [

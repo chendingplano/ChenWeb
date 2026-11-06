@@ -163,7 +163,7 @@ func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) 
 				line := strings.SplitN(strings.TrimSpace(string(exit.Stderr)), "\n", 2)[0]
 				if line != "" {
 					reason := strings.TrimPrefix(line, "score_io: ")
-					for _, prefix := range []string{"gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
+					for _, prefix := range []string{"gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "unknown gold provision IDs:", "unknown predicted provision IDs:", "pair ", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
 						if strings.HasPrefix(reason, prefix) {
 							return metricScoreValidationError{Reason: reason}
 						}
@@ -323,7 +323,7 @@ func freezeScoreTools(root, script, scoreSkill, goldSkill string) (string, map[s
 	return filepath.Join(root, "skills", scoreSkill, "scripts", "score_io.py"), hashes, nil
 }
 
-// scoreKind names what differs between the metric and reference benchmarks; the scoring flow
+// scoreKind names what differs between the metric, reference and provision benchmarks; the scoring flow
 // (export, LLM matching, score) is shared.
 type scoreKind struct {
 	scriptEnv, scoreSkill, goldSkill string
@@ -483,7 +483,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 			}
 			logger.Warn("benchmark matching validation failed", "run_id", id, "attempt", attempt, "validation_reason", validation.Reason)
 			// Reference matching retains its existing scoring flow.
-			if kind.matchBasis != "metric" || attempt == 2 {
+			if (kind.matchBasis != "metric" && kind.matchBasis != "provision") || attempt == 2 {
 				return e, scoreErr
 			}
 			if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), e.Matches, 0600); err != nil {

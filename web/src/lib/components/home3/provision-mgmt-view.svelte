@@ -11,10 +11,16 @@
 		updateRawLine,
 		type KbInputRecord,
 		type KbProvisionRecord,
+		type KbDroppedProvision,
+		type KbMetricSource,
 		type ExtractedKbProvision,
+		type GoldRun,
 		type RawLine
 	} from '$lib/services/kbService';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
+	import { GoldRunFilter, goldRunBadges } from '$lib/components/home3/gold-run-filter.svelte';
+	import GoldRunFilters from '$lib/components/home3/gold-run-filters.svelte';
+	import { kbInputRecordKey } from '$lib/components/home3/metric-benchmark-record';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
@@ -34,13 +40,26 @@
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import BoxIcon from '@lucide/svelte/icons/box';
 
+	// 'testbed' is Gold Provisions: read-only gold provisions (testbed.provisions) written by the
+	// extract-provisions-benchmark skill, one record-list entry per run, plus each run's dropped
+	// candidates. Extract, save and line editing are production-only.
 	let {
 		darkMode = true,
-		onFocusModeChange
+		onFocusModeChange,
+		source = 'kb'
 	}: {
 		darkMode: boolean;
 		onFocusModeChange?: (focused: boolean) => void;
+		source?: KbMetricSource;
 	} = $props();
+	const gold = new GoldRunFilter('provisions', { allowAllVersions: true });
+	$effect(() => {
+		if (source === 'testbed') void gold.load();
+	});
+	let provisionView = $state<'gold' | 'dropped'>('gold');
+	let goldRows = $state<KbProvisionRecord[]>([]);
+	let droppedRows = $state<KbProvisionRecord[]>([]);
+	let selectedRecordKey = $state<string | null>(null);
 
 	// ---------- Aesthetic tokens: "archival reading room" ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
@@ -561,6 +580,9 @@
 			textAttr('provision_id', 'ID', HashIcon, String(m.id), true),
 			textAttr('name', i18n.provision_mgmt_name(), TypeIcon, fmt(m.prov_name), has(m.prov_name)),
 			textAttr('type', i18n.provision_mgmt_type_2(), ListIcon, fmt(m.provision_type), has(m.provision_type)),
+			...(source === 'testbed'
+				? [textAttr('kind', i18n.provision_mgmt_kind(), ListIcon, fmt(m.provision_kind), has(m.provision_kind))]
+				: []),
 			textAttr(
 				'confidence',
 				i18n.provision_mgmt_confidence(),
@@ -618,6 +640,9 @@
 		];
 
 		const provenance: AttrDef[] = [
+			...(source === 'testbed'
+				? [textAttr('section', i18n.provision_mgmt_section(), BookOpenIcon, fmt(m.section), has(m.section))]
+				: []),
 			textAttr('model', i18n.provision_mgmt_model(), HashIcon, fmt(m.model_name), has(m.model_name)),
 			textAttr('prompt', i18n.provision_mgmt_prompt(), FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
 			textAttr('location_type', i18n.provision_mgmt_location(), MapPinIcon, fmt(m.location_type), has(m.location_type))
@@ -958,7 +983,7 @@
 		}
 		pdfSelectedLines = selected;
 		addMetricBufferLines = selected;
-		if (selected.length > 0) {
+		if (selected.length > 0 && source !== 'testbed') {
 			resetAddMetricPreview();
 			addMetricOpen = true;
 		}
@@ -1009,9 +1034,43 @@
 	});
 
 	function handleUserRecordSelect(record: KbInputRecord) {
-		if (currentInput?.id === record.id) return;
+		const key = kbInputRecordKey(record);
+		if (selectedRecordKey === key) return;
+		selectedRecordKey = key;
 		currentInput = record;
-		void loadMetricsForRecord(record.id);
+		// Benchmark entries carry exactly one run; the gold rows are that run's.
+		void loadMetricsForRecord(record.id, source === 'testbed' ? record.gold_metric_runs?.[0] : undefined);
+	}
+
+	function clearGoldRecord() {
+		selectedRecordKey = null;
+		currentInput = null;
+		metrics = [];
+		goldRows = [];
+		droppedRows = [];
+		selectedMetricId = null;
+	}
+
+	// A dropped candidate shown in the provision list: its ledger entry mapped onto the provision
+	// fields the list, attribute map and highlights read. Negative IDs keep it apart from gold rows.
+	function droppedAsProvision(d: KbDroppedProvision, inputRecordId: number): KbProvisionRecord {
+		return {
+			id: -d.id,
+			input_record_id: inputRecordId,
+			prov_id: d.candidate_id,
+			prov_name: `${d.candidate_id} · ${d.drop_reason}`,
+			provision_type: d.drop_reason,
+			provision_kind: d.decision,
+			provision: d.text,
+			prov_context: d.reason,
+			source_line_spans: d.source_line_spans
+		};
+	}
+
+	function changeProvisionView(view: 'gold' | 'dropped') {
+		provisionView = view;
+		selectedMetricId = null;
+		metrics = view === 'dropped' ? droppedRows : goldRows;
 	}
 
 	function enterFocusMode() {
@@ -1051,7 +1110,7 @@
 		return { x1: x1 + ux * d1, y1: y1 + uy * d1, x2: x2 - ux * d2, y2: y2 - uy * d2 };
 	}
 
-	async function loadMetricsForRecord(id: number) {
+	async function loadMetricsForRecord(id: number, goldRun?: GoldRun) {
 		keywordFilter = '';
 		errorMsg = '';
 		loading = true;
@@ -1072,13 +1131,16 @@
 		docPage = 1;
 		pdfNumPages = 0;
 		try {
+			if (source === 'testbed' && !goldRun) throw new Error(i18n.provision_mgmt_failed_to_retrieve_metrics());
 			rawLoading = true;
 			const [metricRes, inputRes, rawRes] = await Promise.all([
-				listKbProvisions(id),
+				listKbProvisions(id, goldRun),
 				getKbInput(id).catch(() => null),
 				getRawLines(id).catch(() => null)
 			]);
-			metrics = metricRes.results ?? [];
+			goldRows = metricRes.results ?? [];
+			droppedRows = (metricRes.dropped ?? []).map((d) => droppedAsProvision(d, id));
+			metrics = provisionView === 'dropped' ? droppedRows : goldRows;
 			currentInput = inputRes?.record ?? null;
 			rawLines = rawRes?.lines ?? [];
 			rawError = rawRes ? '' : i18n.provision_mgmt_failed_to_load_raw_lines();
@@ -1137,7 +1199,8 @@
 			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
 			status: record.type?.trim() || '—',
 			description: formatMaybeDate(record.create_time),
-			badges: [record.type?.trim() || '—']
+			badges: [record.type?.trim() || '—'],
+			benchmarkRuns: source === 'testbed' ? goldRunBadges(record) : []
 		};
 	}
 
@@ -1328,7 +1391,7 @@
 />
 
 <div
-	class="metric-mgmt"
+	class="metric-mgmt select-text"
 	style="
 		--page-bg:{pageBg};
 		--doc-frame-bg:{docFrameBg};
@@ -1356,17 +1419,27 @@
 	<header class="header">
 		<div class="header-left">
 			<div class="eyebrow">{i18n.provision_mgmt_knowledge_system_vol_iii()}</div>
-			<h1 class="display">{i18n.provision_mgmt_provisions()};<span class="amp">&amp;</span>&{i18n.provision_mgmt_provenance()}</h1>
-			<div class="subtitle">
-				{i18n.provision_mgmt_a_reading_room_for_extracted()}
-			</div>
+			{#if source === 'testbed'}
+				<h1 class="display">{i18n.provision_mgmt_gold_title()}</h1>
+				<div class="subtitle">{i18n.provision_mgmt_gold_subtitle()}</div>
+			{:else}
+				<h1 class="display">{i18n.provision_mgmt_provisions()};<span class="amp">&amp;</span>&{i18n.provision_mgmt_provenance()}</h1>
+				<div class="subtitle">
+					{i18n.provision_mgmt_a_reading_room_for_extracted()}
+				</div>
+			{/if}
 		</div>
 		<div class="header-right">
 			<span class="meta-label">{i18n.provision_mgmt_record()}</span><span class="meta-val">{currentInput?.id ?? '—'}</span>
 			<span class="meta-label">{i18n.provision_mgmt_type()}</span><span class="meta-val">{currentInput?.type ?? '—'}</span>
 			<span class="meta-label">{i18n.provision_mgmt_provisions_2()}</span><span class="meta-val"
-				>{metrics.length.toString().padStart(3, '0')}</span
+				>{(source === 'testbed' ? goldRows : metrics).length.toString().padStart(3, '0')}</span
 			>
+			{#if source === 'testbed'}
+				<span class="meta-label">{i18n.provision_mgmt_dropped()}</span><span class="meta-val"
+					>{droppedRows.length.toString().padStart(3, '0')}</span
+				>
+			{/if}
 		</div>
 	</header>
 
@@ -1379,24 +1452,42 @@
 		{#if !recordBrowserFolded}
 			<KbInputRecordBrowser
 				{darkMode}
-				instanceKey="provisions-record-browser"
+				instanceKey={source === 'testbed' ? 'gold-provisions-record-browser' : 'provisions-record-browser'}
 				title={i18n.provision_mgmt_kb_inputs()}
 				subtitle={i18n.provision_mgmt_search_filter_and_select_input()}
 				emptyTitle={i18n.provision_mgmt_no_records_yet()}
 				emptySubtitle={i18n.provision_mgmt_use_search_or_retrieve_to()}
 				autoSelectFirstRecord={false}
 				selectedRecordId={currentInput?.id ?? null}
+				{selectedRecordKey}
+				listPausedMessage={source === 'testbed' ? gold.pausedMessage : ''}
+				listParams={source === 'testbed' ? gold.listParams : undefined}
 				mapRecord={mapBrowserRecord}
 				onSelect={handleUserRecordSelect}
 				onError={(error) => {
 					errorMsg = error.message;
 				}}
-			/>
+			>
+				{#snippet extraControls()}
+					{#if source === 'testbed'}<GoldRunFilters filter={gold} onChange={clearGoldRecord} />{/if}
+				{/snippet}
+			</KbInputRecordBrowser>
 
 			<aside class="metric-sidebar">
 				<div class="left-meta">
 					<div class="left-meta-title">{i18n.provision_mgmt_provisions()}</div>
 					<div class="left-meta-count">{i18n.provision_mgmt_found({ metricsCount: metrics.length })}</div>
+					{#if source === 'testbed'}
+						<select
+							class="gold-view-select"
+							aria-label={i18n.provision_mgmt_list_view()}
+							value={provisionView}
+							onchange={(event) => changeProvisionView(event.currentTarget.value as 'gold' | 'dropped')}
+						>
+							<option value="gold">{i18n.provision_mgmt_list_view_gold()}</option>
+							<option value="dropped">{i18n.provision_mgmt_list_view_dropped()}</option>
+						</select>
+					{/if}
 				</div>
 
 				<div class="metrics-list">
@@ -1677,6 +1768,7 @@
 							bind:selectedLines={pdfSelectedLines}
 						>
 							{#snippet toolbar()}
+								{#if source !== 'testbed'}
 								<button
 									type="button"
 									class="pvw-tool-btn"
@@ -1709,6 +1801,7 @@
 									title={i18n.provision_mgmt_add_line()}><ListPlusIcon class="pvw-tb-icon" /></button
 								>
 								<div class="pvw-tool-sep"></div>
+								{/if}
 								<button
 									type="button"
 									class="pvw-tool-btn"
@@ -2329,6 +2422,16 @@
 	}
 	.left-meta-count {
 		margin-left: auto;
+	}
+	.gold-view-select {
+		margin-left: 10px;
+		padding: 2px 6px;
+		border: 1px solid var(--ink-line);
+		border-radius: 4px;
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-family: var(--font-sans);
+		font-size: 12px;
 	}
 	.left-meta-title {
 		font-family: var(--font-serif);
