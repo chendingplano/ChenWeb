@@ -31,8 +31,6 @@ export type ValueEditorOptions = {
 	integer?: boolean;
 	// color: whether separate light and dark colours are allowed.
 	theme?: boolean;
-	// The property panel places the color mode selector in its heading.
-	colorModeInHeading?: boolean;
 	// string-editor: the property panel places the mode menu in its heading and
 	// passes the current mode as `mode`.
 	modeInHeading?: boolean;

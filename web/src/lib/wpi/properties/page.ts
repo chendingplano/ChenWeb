@@ -10,7 +10,7 @@ import type { EditorDef, PropertyDef } from './types';
 // Colour strings the server accepts on pages (colorPattern, server/api/wpi/validate.go).
 const colorPattern = /^(auto|#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(rgb|rgba|hsl|hsla)\([0-9.,%\s/-]+\)|[a-zA-Z]{3,30})$/;
 
-function validColor(value: Json, auto: boolean): boolean {
+export function validColor(value: Json, auto: boolean): boolean {
 	const ok = (s: Json | undefined) => typeof s === 'string' && colorPattern.test(s) && (auto || s !== 'auto');
 	if (typeof value === 'string') return ok(value);
 	return !!value && typeof value === 'object' && !Array.isArray(value) && ok(value.light) && ok(value.dark) && value.light !== 'auto' && value.dark !== 'auto';

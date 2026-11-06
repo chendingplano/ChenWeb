@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { actionRef } from '../entries';
+	import { surfaceColorValue } from '../layout';
 	import { listQueryAvailability, previewColumns, requestWithTimeout, RequestTimeoutError } from '../list-request';
 	import ErrorBox from '../ErrorBox.svelte';
 	import { getRuntime } from '../runtime.svelte';
@@ -70,7 +71,7 @@
 	}
 </script>
 
-<div class="flex h-full min-h-0 w-full select-text flex-col text-sm">
+<div class="list-element flex h-full min-h-0 w-full select-text flex-col text-sm" class:custom-font={!!d.font_color && d.font_color !== 'inherit'} style:background-color={d.background_color ? surfaceColorValue(d.background_color) : undefined} style:color={d.font_color ? surfaceColorValue(d.font_color) : undefined}>
 	<div class="min-h-0 flex-1 overflow-auto">
 	<div class="text-muted-foreground grid gap-x-3 border-b px-2 py-1.5 font-medium" style="grid-template-columns: {grid}">
 		{#each columns as c (c.field)}<span class="truncate">{c.label}</span>{/each}
@@ -92,11 +93,11 @@
 	{:else}
 		{#each visibleRecords as record, i (i)}
 			{#if d.on_row_click}
-				<button type="button" class="hover:bg-muted grid w-full gap-x-3 border-b px-2 py-1.5 text-left" style="grid-template-columns: {grid}" onclick={() => open(record)}>
+				<button type="button" class="list-row clickable grid w-full gap-x-3 border-b px-2 py-1.5 text-left" style="grid-template-columns: {grid}; --row-color: {(i + (paginated ? (currentPage - 1) * pageSize : 0)) % 2 === 0 ? surfaceColorValue(d.odd_row_background_color ?? 'transparent') : surfaceColorValue(d.even_row_background_color ?? 'transparent')}" onclick={() => open(record)}>
 					{#each columns as c (c.field)}<span class="truncate">{display(record[c.field])}</span>{/each}
 				</button>
 			{:else}
-				<div class="grid gap-x-3 border-b px-2 py-1.5" style="grid-template-columns: {grid}">
+				<div class="list-row grid gap-x-3 border-b px-2 py-1.5" style="grid-template-columns: {grid}; --row-color: {(i + (paginated ? (currentPage - 1) * pageSize : 0)) % 2 === 0 ? surfaceColorValue(d.odd_row_background_color ?? 'transparent') : surfaceColorValue(d.even_row_background_color ?? 'transparent')}">
 					{#each columns as c (c.field)}<span class="truncate">{display(record[c.field])}</span>{/each}
 				</div>
 			{/if}
@@ -111,3 +112,9 @@
 		</nav>
 	{/if}
 </div>
+
+<style>
+ .list-row { background: var(--row-color, transparent); }
+ .list-row.clickable:hover { background: var(--muted); }
+ .custom-font :global(.text-muted-foreground) { color: inherit; }
+</style>

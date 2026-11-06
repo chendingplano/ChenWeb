@@ -1,3 +1,9 @@
+<script module lang="ts">
+	// Shared by all picker instances until the page is reloaded.
+	let lastDialogPosition: { x: number; y: number } | null = null;
+	let lastDialogSize: { width: number; height: number } | null = null;
+</script>
+
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import DraftField from './DraftField.svelte';
@@ -25,6 +31,7 @@
 		width = $state(350),
 		height = $state(560);
 	let opener: HTMLElement | null = null;
+	let dialog: HTMLElement | undefined = $state();
 	$effect(() => {
 		if (
 			opened &&
@@ -71,17 +78,23 @@
 		const [r, g, b, alpha] = read(colorPart(value, variant));
 		[h, s, v] = rgbToHsv(r, g, b);
 		a = alpha;
+		if (lastDialogSize) {
+			width = Math.min(lastDialogSize.width, window.innerWidth);
+			height = Math.min(lastDialogSize.height, window.innerHeight);
+		}
 		const rect = target.getBoundingClientRect();
-		x = Math.max(0, Math.min(rect.left, window.innerWidth - Math.min(width, window.innerWidth)));
-		y = Math.max(
-			0,
-			Math.min(rect.bottom + 5, window.innerHeight - Math.min(height, window.innerHeight))
-		);
+		if (lastDialogPosition) {
+			x = Math.max(0, Math.min(lastDialogPosition.x, window.innerWidth - 80));
+			y = Math.max(0, Math.min(lastDialogPosition.y, window.innerHeight - 40));
+		} else {
+			x = Math.max(0, Math.min(rect.left, window.innerWidth - Math.min(width, window.innerWidth)));
+			y = Math.max(0, Math.min(rect.bottom + 5, window.innerHeight - Math.min(height, window.innerHeight)));
+		}
 		opened = variant;
 	}
-	function close() {
+	function close(restoreFocus = true) {
 		opened = null;
-		opener?.focus();
+		if (restoreFocus) opener?.focus();
 	}
 	function apply() {
 		if (opened) setPart(opened, rgbaHex(...rgb, a));
@@ -121,6 +134,7 @@
 		const move = (ev: PointerEvent) => {
 			x = Math.max(0, Math.min(window.innerWidth - 80, ox + ev.clientX - sx));
 			y = Math.max(0, Math.min(window.innerHeight - 40, oy + ev.clientY - sy));
+			lastDialogPosition = { x, y };
 		};
 		const end = () => {
 			el.removeEventListener('pointermove', move);
@@ -142,6 +156,7 @@
 		const move = (ev: PointerEvent) => {
 			width = Math.max(280, Math.min(window.innerWidth, ow + ev.clientX - sx));
 			height = Math.max(300, Math.min(window.innerHeight, oh + ev.clientY - sy));
+			lastDialogSize = { width, height };
 		};
 		const end = () => {
 			el.removeEventListener('pointermove', move);
@@ -161,20 +176,24 @@
 		if (resize) {
 			width = Math.max(280, Math.min(window.innerWidth, width + dx));
 			height = Math.max(300, Math.min(window.innerHeight, height + dy));
+			lastDialogSize = { width, height };
 		} else {
 			x = Math.max(0, Math.min(window.innerWidth - 80, x + dx));
 			y = Math.max(0, Math.min(window.innerHeight - 40, y + dy));
+			lastDialogPosition = { x, y };
 		}
 	}
 </script>
 
+<svelte:document onpointerdown={(event) => {
+	if (opened && event.target instanceof Node && !dialog?.contains(event.target) && !opener?.contains(event.target)) close(false);
+}} />
 <svelte:window
 	onkeydown={(e) => {
 		if (e.key === 'Escape' && opened) close();
 	}}
 />
 <div class="color-line" class:theme-colors={mode === 'theme'}>
-	{#if !options.colorModeInHeading}
 		<ColorModeSelect
 			{id}
 			{label}
@@ -185,7 +204,6 @@
 				onChange(next);
 			}}
 		/>
-	{/if}
 	{#if mode !== 'none'}{#each variants as variant (variant)}<div class="color-variant">
 				{#if variant !== 'single'}<span class="ve-variant">{variantLabel(variant)}</span>{/if}
 				<div class="color-value">
@@ -217,6 +235,7 @@
 </div>
 {#if opened}<div
 		class="color-dialog"
+		bind:this={dialog}
 		use:portal
 		role="dialog"
 		aria-label={m.wpi_color_picker_label({ field: label, variant: variantLabel(opened) })}
@@ -232,7 +251,7 @@
 				aria-label={m.wpi_color_move()}
 				onpointerdown={drag}
 				onkeydown={(e) => arrows(e)}>{m.wpi_color_custom()}</button
-			><button type="button" class="color-close" aria-label={m.wpi_color_close()} onclick={close}
+			><button type="button" class="color-close" aria-label={m.wpi_color_close()} onclick={() => close()}
 				>×</button
 			>
 		</div>
@@ -341,6 +360,10 @@
 		flex-direction: column;
 		align-items: stretch;
 	}
+	.theme-colors .color-variant {
+		padding-left: 16px;
+	}
+	.color-line :global(.color-mode) { min-width: 60px; flex: 0 1 auto; }
 	.color-percent {
 		flex: none;
 		padding: 0 4px;
@@ -368,7 +391,7 @@
 		background: color-mix(in srgb, var(--cv-surface, #1e293b) 82%, white);
 	}
 	.color-value :global(.ve-input) {
-		min-width: 65px;
+		min-width: 0;
 		width: 65px;
 		border: 0;
 		background: transparent;
@@ -388,7 +411,6 @@
 		min-height: 300px;
 		max-width: 100vw;
 		max-height: 100vh;
-		resize: both;
 		overflow: auto;
 		box-sizing: border-box;
 		background: var(--cv-surface, #fff);

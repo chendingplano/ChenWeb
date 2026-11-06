@@ -121,7 +121,7 @@ export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
 	font_style?: 'normal' | 'italic' | 'oblique';
 	line_height?: 'normal' | number;
 	color?: string;
-	background_color?: string;
+	background_color?: SurfaceColor;
 	text_align?: 'start' | 'center' | 'end' | 'justify';
 	white_space?: 'normal' | 'pre-wrap';
 	padding?: string;
@@ -131,10 +131,15 @@ export type ElementInstance = Omit<SizeAttrs, 'width' | 'height'> & {
 	presentation?: string;
 	columns?: ListColumn[];
 	pagination?: 'yes' | 'no';
+	font_color?: SurfaceColor;
+	odd_row_background_color?: SurfaceColor;
+	even_row_background_color?: SurfaceColor;
 	on_row_click?: ActionInstance;
 	items?: MenuItem[];
 	initial_item?: string;
 	// chat-composer and chat-panel (code_modules/interpreter-chat-*.md).
+	message_box_height?: string;
+	toolbar_height?: string;
 	rows?: number;
 	slash_commands?: boolean;
 	toolbar?: string[];

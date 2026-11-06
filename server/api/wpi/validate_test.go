@@ -37,6 +37,21 @@ func TestListPaginationAndPixelSizes(t *testing.T) {
 	}
 }
 
+func TestListColorAttributes(t *testing.T) {
+	for _, tc := range []struct{ attrs, want string }{
+		{`"background_color":"#fff","font_color":"inherit","odd_row_background_color":"transparent","even_row_background_color":"rgb(10, 20, 30)"`, ""},
+		{`"background_color":{"light":"#fff","dark":"#123456"},"font_color":{"light":"red","dark":"white"},"odd_row_background_color":{"light":"#fff","dark":"#000"},"even_row_background_color":{"light":"#ddd","dark":"#222"}`, ""},
+		{`"background_color":{"light":"#fff","dark":"auto"}`, "/background_color/dark"},
+		{`"odd_row_background_color":"not a color"`, "/odd_row_background_color"},
+		{`"even_row_background_color":42`, "/even_row_background_color"},
+		{`"font_color":"auto"`, "/font_color"},
+	} {
+		v := &validator{kind: KindElement, id: "list"}
+		v.element("list", decode(t, `{`+tc.attrs+`}`), "")
+		expectIssue(t, v.issues, tc.want)
+	}
+}
+
 // expectIssue fails unless exactly one issue mentions want (or none when want is "").
 func expectIssue(t *testing.T, issues []Issue, want string) {
 	t.Helper()

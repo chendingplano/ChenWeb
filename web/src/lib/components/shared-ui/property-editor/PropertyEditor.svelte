@@ -17,7 +17,6 @@
 	} from '$lib/wpi/properties/types';
 	import { valueEditors } from './editors';
 	import HelpTip from './HelpTip.svelte';
-	import ColorModeSelect from '../value-editors/ColorModeSelect.svelte';
 	import StringModeMenu from '../value-editors/StringModeMenu.svelte';
 	import StringChoicesEditor from '../value-editors/StringChoicesEditor.svelte';
 	import { currentStringMode, stringLanguages, type StringMode } from '../value-editors/string-value';
@@ -190,7 +189,7 @@
 					{@const Editor = editorOf(p)}
 					{@const help = tip(p)}
 					{@const warn = warning(p)}
-					<div class="property" class:length-property={p.editor === 'length' || p.name === 'editor_options.displayType' || (compactRows && !isEditableColor(p))} data-property={p.name}>
+					<div class="property" class:length-property={p.editor === 'length' || p.name === 'editor_options.displayType' || isEditableColor(p) || compactRows} data-property={p.name}>
 						<div class="heading" class:string-heading={isEditableString(p)}>
 							<label for={id}>
 								{p.label?.() ?? p.name}{#if source.required(p.name)}<span
@@ -211,15 +210,6 @@
 									onChange={(v) => source.set(p.name, toStored(p, v))}
 								/>
 							{/if}
-							{#if isEditableColor(p)}
-								<ColorModeSelect
-									{id}
-									label={p.label?.() ?? p.name}
-									value={edited(p)}
-									theme={optionsOf(p).theme}
-									onChange={(v) => source.set(p.name, toStored(p, v))}
-								/>
-							{/if}
 							{#if Editor !== valueEditors.length && source.resettable(p.name) && source.isSet(p.name) && !readOnly(p)}
 								<button type="button" class="reset" onclick={() => source.set(p.name, undefined)}
 									>{m.wpi_input_reset()}</button
@@ -231,7 +221,7 @@
 								{id}
 								label={p.label?.() ?? p.name}
 								value={edited(p)}
-								options={{ ...optionsOf(p), colorModeInHeading: isEditableColor(p), ...(isEditableString(p) ? { modeInHeading: true, mode: stringModeOf(p), choices: (choicesOf(p) as string[] | undefined) ?? [] } : {}), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
+								options={{ ...optionsOf(p), ...(isEditableString(p) ? { modeInHeading: true, mode: stringModeOf(p), choices: (choicesOf(p) as string[] | undefined) ?? [] } : {}), ...(p.editor === 'length' ? { defaultValue: typeof source.defaultValue(p.name) === 'string' ? source.defaultValue(p.name) as string : undefined, useDefault: !source.isSet(p.name), readOnly: readOnly(p) } : {}) }}
 								check={check(p)}
 								onChange={(v) => source.set(p.name, toStored(p, v))}
 							/>

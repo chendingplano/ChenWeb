@@ -41,6 +41,7 @@
 	import { componentTree, runtimeComponentTree, elementTree, type ComponentTarget } from './canvas/wpi-json';
 	import type { AppRuntime } from '$lib/wpi/runtime.svelte';
 	import WpiComponentTreeWindow from './canvas/WpiComponentTreeWindow.svelte';
+	import { readTreeLayout, writeTreeLayout } from './canvas/wpi-tree-layout';
  import { normalizeElementLengths } from './canvas/element-attributes';
 	import PagePreview from './canvas/PagePreview.svelte';
 	import WpiApp from '$lib/wpi/WpiApp.svelte';
@@ -168,7 +169,7 @@
 	let validatorClasses = $state<ValidatorClass[]>([]);
 	const validatorClassTypes = $derived<NodeType[]>(validatorPaletteTypes(validatorClasses, m.nodepalette_drop_onto_element()));
 	let showCreateElement = $state(false);
-	let propertiesTab = $state<'properties' | 'class'>('properties');
+	let propertiesTab = $state<'properties' | 'class' | 'components'>('properties');
 	let activeLayouterView = $state<'page-layouter' | 'element-layouter' | null>(null);
 	let classPanel = $state<{ viewClassJson: () => boolean }>();
 	let hasClassChanges = $state(false);
@@ -179,6 +180,46 @@
 	let showJson = $state(false);
 	let showTree = $state(false);
 	let showComponentTree = $state(false);
+	let treeDocked = $state(false);
+	let treeX = $state(0), treeY = $state(140), treeRestored = $state(false);
+	$effect(() => {
+		if (treeRestored) {
+			try { writeTreeLayout(localStorage, { open: showComponentTree, x: treeX, y: treeY, docked: treeDocked }); } catch { /* Storage is optional. */ }
+		}
+	});
+	let cancelTreeTabDrag: (() => void) | null = null;
+	function startTreeTabDrag(event: PointerEvent) {
+		if (event.button !== 0) return;
+		cancelTreeTabDrag?.();
+		const { pointerId, clientX: startX, clientY: startY } = event;
+		let moving = false;
+		const cleanup = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', end);
+			window.removeEventListener('pointercancel', end);
+			window.removeEventListener('blur', cleanup);
+			cancelTreeTabDrag = null;
+		};
+		const move = (e: PointerEvent) => {
+			if (e.pointerId !== pointerId) return;
+			if (!moving && Math.hypot(e.clientX - startX, e.clientY - startY) < 5) return;
+			if (!moving) {
+				moving = true;
+				treeDocked = false;
+				propertiesTab = 'properties';
+			}
+			const bounds = body.getBoundingClientRect();
+			treeX = Math.max(bounds.left, Math.min(e.clientX - 50, bounds.right - 80));
+			treeY = Math.max(bounds.top, Math.min(e.clientY - 15, bounds.bottom - 40));
+			e.preventDefault();
+		};
+		const end = (e: PointerEvent) => { if (e.pointerId === pointerId) cleanup(); };
+		cancelTreeTabDrag = cleanup;
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', end);
+		window.addEventListener('pointercancel', end);
+		window.addEventListener('blur', cleanup);
+	}
 	let previewBundle = $state<Bundle | null>(null);
 	let previewRuntime = $state<AppRuntime | null>(null);
 	const componentTreeLabels = $derived({ app: m.wpi_component_tree_app(), page: m.wpi_component_tree_page(), pageLayouter: m.wpi_component_tree_page_layouter(), paneTree: m.wpi_component_tree_pane_tree(), headlessPage: m.wpi_component_tree_headless_page(), compoundPage: m.wpi_component_tree_compound_page(), elementLayouter: m.wpi_component_tree_element_layouter(), elements: m.wpi_component_tree_elements() });
@@ -323,6 +364,7 @@
 	let paletteRestored = $state(false);
 	const PALETTE_KEY = 'wpi-editor-palette-panel';
 	let doubleClickDrop = $state(false);
+	let wheelZoom = $state(false);
 	function movePalette(x: number, y: number) {
 		const b = body.getBoundingClientRect();
 		palettePosition = { x: Math.max(b.left, Math.min(x, Math.max(b.left, b.right - paletteWidth))), y: Math.max(b.top, Math.min(y, b.bottom - 40)) };
@@ -354,6 +396,7 @@
 		try {
 			const saved = JSON.parse(localStorage.getItem(PALETTE_KEY) ?? 'null');
 			doubleClickDrop = saved?.doubleClickDrop === true;
+			wheelZoom = saved?.wheelZoom === true;
 			if (saved && typeof saved.detached === 'boolean' && [saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) {
 				paletteWidth = Math.max(PROPS_MIN_WIDTH, Math.min(PROPS_MAX_WIDTH, saved.width)); paletteHeight = Math.max(100, saved.height); paletteDetached = saved.detached;
 				if (paletteDetached) { movePalette(saved.x, saved.y); resizePalette(paletteWidth, paletteHeight); }
@@ -363,7 +406,7 @@
 	}
 	$effect(() => {
 		if (!paletteRestored) return;
-		const layout = { doubleClickDrop, detached: paletteDetached, x: palettePosition.x, y: palettePosition.y, width: paletteWidth, height: paletteHeight };
+		const layout = { doubleClickDrop, wheelZoom, detached: paletteDetached, x: palettePosition.x, y: palettePosition.y, width: paletteWidth, height: paletteHeight };
 		try { localStorage.setItem(PALETTE_KEY, JSON.stringify(layout)); } catch { /* Storage is optional. */ }
 	});
 
@@ -1241,6 +1284,14 @@
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(async () => {
 		recoveryTimer = setInterval(autoSavePages, 1000);
+		try {
+			const saved = readTreeLayout(localStorage);
+			showComponentTree = saved?.open ?? false;
+			treeDocked = saved?.docked ?? false;
+			treeX = Math.max(0, Math.min(saved?.x ?? Math.max(16, window.innerWidth - 440), window.innerWidth - 80));
+			treeY = Math.max(0, Math.min(saved?.y ?? 140, window.innerHeight - 40));
+		} catch { treeX = Math.max(16, window.innerWidth - 440); }
+		treeRestored = true;
 		restorePanel();
 		restorePalette();
 		loadElementClasses();
@@ -1276,6 +1327,7 @@
 	});
 
 	onDestroy(() => {
+		cancelTreeTabDrag?.();
 		clearInterval(recoveryTimer);
 		if (toastTimeout) clearTimeout(toastTimeout);
 	});
@@ -1295,7 +1347,7 @@
 					onkeydown={(event) => { if (!paletteDetached) return; const d = event.shiftKey ? 20 : 5; if (event.key === 'ArrowLeft') movePalette(palettePosition.x - d, palettePosition.y); else if (event.key === 'ArrowRight') movePalette(palettePosition.x + d, palettePosition.y); else if (event.key === 'ArrowUp') movePalette(palettePosition.x, palettePosition.y - d); else if (event.key === 'ArrowDown') movePalette(palettePosition.x, palettePosition.y + d); else return; event.preventDefault(); }}>⋮⋮</button>
 				<button type="button" class="panel-toggle" onclick={togglePalette} aria-label={paletteDetached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={paletteDetached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{paletteDetached ? '↪' : '↗'}</button>
 			</div>
-			<div class="properties-content"><NodePalette nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]} extraCategories={WPI_PALETTE_CATEGORIES} subcategoryLabel={validatorCategoryLabel} {darkMode} width={paletteWidth} onDragStart={onPaletteDragStart} {doubleClickDrop} onDropModeChange={(enabled) => doubleClickDrop = enabled} onDoubleClick={doubleClickPalette} /></div>
+			<div class="properties-content"><NodePalette nodeTypes={[...nodeTypes, ...elementClassTypes, ...validatorClassTypes]} extraCategories={WPI_PALETTE_CATEGORIES} subcategoryLabel={validatorCategoryLabel} {darkMode} width={paletteWidth} onDragStart={onPaletteDragStart} {doubleClickDrop} onDropModeChange={(enabled) => doubleClickDrop = enabled} {wheelZoom} onWheelModeChange={(enabled) => wheelZoom = enabled} onDoubleClick={doubleClickPalette} /></div>
 			{#if paletteDetached}
 				<button type="button" class="floating-resize" aria-label={m.wpi_editor_resize_floating()} title={m.wpi_editor_resize_floating()}
 					onpointerdown={(event) => { if (event.button !== 0) return; paletteResize = { id: event.pointerId, x: event.clientX, y: event.clientY, width: paletteWidth, height: paletteHeight }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); event.preventDefault(); }}
@@ -1329,7 +1381,7 @@
 				} else showJson = true;
 			}}
 			onViewTree={() => (showTree = true)}
-			onViewComponentTree={() => (showComponentTree = true)}
+			onViewComponentTree={() => { showComponentTree = true; if (treeDocked) propertiesTab = 'components'; }}
 			onPreview={togglePreview}
 			previewing={!!previewBundle}
 			onUndo={undo}
@@ -1370,6 +1422,8 @@
 				bind:nodes
 				bind:edges
 				bind:viewport
+				zoomOnScroll={wheelZoom}
+				panOnScroll={!wheelZoom}
 				initialViewport={viewport}
 				nodeTypes={NODE_TYPES}
 				deleteKey={deleteKeys}
@@ -1570,7 +1624,7 @@
 				<button type="button" class="panel-toggle" onclick={togglePanel} aria-label={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()} title={detached ? m.wpi_editor_dock_panel() : m.wpi_editor_detach_panel()}>{detached ? '↪' : '↗'}</button>
 			</div>
 			<div class="properties-content">
-		<WpiClassPanel bind:this={classPanel} bind:tab={propertiesTab} {darkMode} onDirty={(dirty) => hasClassChanges = dirty}
+		<WpiClassPanel onComponentsDragStart={startTreeTabDrag} components={treeDocked && showComponentTree ? dockedComponentTree as any : undefined} bind:this={classPanel} bind:tab={propertiesTab} {darkMode} onDirty={(dirty) => hasClassChanges = dirty}
 			actionClass={selectedTotal <= 1 && selectedNode?.type === 'wpi-action' ? String(selectedNode.data.action ?? '') : undefined} {actionClasses}
 			onActionClass={(id) => { if (selectedNode?.type === 'wpi-action') updateNodeData(selectedNode.id, { ...selectedNode.data, action: id }); }}
 			target={selectedTotal > 1 ? null : activeLayouterTarget ?? classTarget(selectedNode, loadedPage, configMode, selectedPane)} onSaved={() => {
@@ -1739,6 +1793,12 @@
 	<WpiTreeDialog {darkMode} tree={elementTree(nodes, loadedPage ?? {}, { pane: m.wpi_tree_pane(), panel: m.wpi_tree_panel(), layouter: m.wpi_tree_layouter(), elements: m.wpi_tree_elements() })} onClose={() => (showTree = false)} />
 {/if}
 
-{#if showComponentTree && currentComponentTree}
-	<WpiComponentTreeWindow {darkMode} selectedTarget={selectedNodeId ? { kind: 'element', node: selectedNodeId } : configMode === 'app' ? { kind: 'app' } : configMode === 'page' ? { kind: 'page' } : configMode === 'page-layouter' ? { kind: 'page-layouter' } : selectedPane && configMode === 'panel' ? { kind: 'panel', pane: selectedPane } : selectedPane && configMode === 'panes' ? { kind: 'pane', pane: selectedPane } : null} onSelect={selectComponent} tree={currentComponentTree} onClose={() => (showComponentTree = false)} />
+{#if !previewBundle && showComponentTree && currentComponentTree && !treeDocked}
+	<WpiComponentTreeWindow bind:x={treeX} bind:y={treeY} {darkMode} selectedTarget={selectedNodeId ? { kind: 'element', node: selectedNodeId } : configMode === 'app' ? { kind: 'app' } : configMode === 'page' ? { kind: 'page' } : configMode === 'page-layouter' ? { kind: 'page-layouter' } : selectedPane && configMode === 'panel' ? { kind: 'panel', pane: selectedPane } : selectedPane && configMode === 'panes' ? { kind: 'pane', pane: selectedPane } : null} onSelect={selectComponent} tree={currentComponentTree} onDock={() => { treeDocked = true; propertiesTab = 'components'; }} onClose={() => (showComponentTree = false)} />
 {/if}
+
+{#snippet dockedComponentTree()}
+  {#if currentComponentTree}
+    <WpiComponentTreeWindow bind:x={treeX} bind:y={treeY} {darkMode} docked selectedTarget={selectedNodeId ? { kind: 'element', node: selectedNodeId } : configMode === 'app' ? { kind: 'app' } : configMode === 'page' ? { kind: 'page' } : configMode === 'page-layouter' ? { kind: 'page-layouter' } : selectedPane && configMode === 'panel' ? { kind: 'panel', pane: selectedPane } : selectedPane && configMode === 'panes' ? { kind: 'pane', pane: selectedPane } : null} onSelect={selectComponent} tree={currentComponentTree} onDock={() => { treeDocked = false; propertiesTab = 'properties'; }} onClose={() => (showComponentTree = false)} />
+  {/if}
+{/snippet}

@@ -4,7 +4,7 @@
 import { m } from '$lib/paraglide/messages.js';
 import { CHAT_AGENTS } from '../chat-agents';
 import type { Json } from '../types';
-import { elementPlacement, elementSize } from './shared';
+import { allUnits, elementPlacement, elementSize } from './shared';
 import type { EditorDef } from './types';
 
 export const chatControls = ['agent', 'model', 'prompt', 'text_editor', 'new_session'];
@@ -55,7 +55,14 @@ export const chatComposer: EditorDef = {
 				{ name: 'default_model', label: m.wpi_chat_attr_default_model, editor: 'text' }
 			]
 		},
-		elementSize()
+		{
+			...elementSize(),
+			properties: [
+				...elementSize().properties,
+				{ name: 'message_box_height', label: m.wpi_chat_message_box_height, editor: 'length', options: { units: allUnits } },
+				{ name: 'toolbar_height', label: m.wpi_chat_toolbar_height, editor: 'length', options: { units: allUnits } }
+			]
+		}
 	]
 };
 

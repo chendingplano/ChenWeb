@@ -1506,6 +1506,8 @@
 	"nodepalette_settings": "Settings",
 	"nodepalette_drag_to_drop": "Drag-to-drop",
 	"nodepalette_double_click_to_drop": "Double-click-to-drop",
+	"nodepalette_wheel_to_zoom": "Wheel to zoom",
+	"nodepalette_wheel_to_scroll": "Wheel to scroll",
 	"wpi_editor_resize_palette": "Resize the palette panel",
 	"wpi_editor_resize_properties": "Resize the properties panel",
 	"wpi_create_element_title": "Create Element",
@@ -8586,5 +8588,13 @@
 	"wpi_close_unsaved_title": "Save changes to {name}?",
 	"wpi_close_unsaved_body": "This page has not been saved yet. Save it under a name, or discard it.",
 	"wpi_close_unsaved_discard": "Discard",
-	"wpi_close_unsaved_save": "Save…"
+	"wpi_close_unsaved_save": "Save…",
+  "wpi_components_tab": "Components",
+  "wpi_list_colors_group": "Colors",
+  "wpi_list_background_color": "Background color",
+  "wpi_list_font_color": "Font color",
+  "wpi_list_odd_row_color": "Single-row background color",
+  "wpi_list_even_row_color": "Even-row background color",
+  "wpi_chat_message_box_height": "Message box height",
+  "wpi_chat_toolbar_height": "Toolbar height"
 }

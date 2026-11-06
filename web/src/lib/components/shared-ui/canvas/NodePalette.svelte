@@ -14,6 +14,8 @@
     onDragStart,
     doubleClickDrop = false,
     onDropModeChange,
+    wheelZoom = false,
+    onWheelModeChange,
     onDoubleClick,
   }: {
     nodeTypes:        NodeType[];
@@ -27,6 +29,8 @@
     onDragStart:      (event: DragEvent, nodeType: NodeType) => void;
     doubleClickDrop?: boolean;
     onDropModeChange?: (enabled: boolean) => void;
+    wheelZoom?: boolean;
+    onWheelModeChange?: (enabled: boolean) => void;
     onDoubleClick?: (nodeType: NodeType) => void;
   } = $props();
 
@@ -108,6 +112,11 @@
           <div bind:this={settingsMenu} role="menu" style="position:absolute; right:0; top:100%; z-index:2; min-width:180px; padding:4px; background:var(--cv-panel); border:1px solid var(--cv-border); box-shadow:0 4px 12px var(--cv-shadow);">
             <button type="button" role="menuitemradio" aria-checked={!doubleClickDrop} onclick={() => { onDropModeChange(false); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{!doubleClickDrop ? '✓ ' : '　'}{m.nodepalette_drag_to_drop()}</button>
             <button type="button" role="menuitemradio" aria-checked={doubleClickDrop} onclick={() => { onDropModeChange(true); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{doubleClickDrop ? '✓ ' : '　'}{m.nodepalette_double_click_to_drop()}</button>
+            {#if onWheelModeChange}
+              <div role="separator" style="border-top:1px solid var(--cv-border); margin:4px 0;"></div>
+              <button type="button" role="menuitemradio" aria-checked={wheelZoom} onclick={() => { onWheelModeChange(true); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{wheelZoom ? '✓ ' : '　'}{m.nodepalette_wheel_to_zoom()}</button>
+              <button type="button" role="menuitemradio" aria-checked={!wheelZoom} onclick={() => { onWheelModeChange(false); settingsOpen = false; }} style="display:block; width:100%; text-align:left; padding:6px; border:0; background:transparent; color:var(--cv-text); cursor:pointer;">{!wheelZoom ? '✓ ' : '　'}{m.nodepalette_wheel_to_scroll()}</button>
+            {/if}
           </div>
         {/if}
       {/if}

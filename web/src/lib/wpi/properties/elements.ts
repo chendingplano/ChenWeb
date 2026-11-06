@@ -6,6 +6,7 @@ import type { Json } from '../types';
 import { bindingModeLabel, elementPlacement, elementSize } from './shared';
 import type { EditorDef, PropertyDef } from './types';
 import { validatorsGroup } from './validators';
+import { validColor } from './page';
 
 export function actionLabel(id: string): string {
 	switch (id) {
@@ -69,6 +70,10 @@ export const button: EditorDef = {
 			label: m.wpi_input_group_general,
 			properties: [{ name: 'label', label: m.propertiespanel_attr_label, editor: 'string-editor', options: { mode: 'multilingual', languages: ['en', 'zh-cn'] } }, actionPicker('on_click', m.propertiespanel_attr_on_click)]
 		},
+		{
+			id: 'colors', label: m.wpi_list_colors_group,
+			properties: [{ name: 'background_color', validate: (v) => validColor(v, false) && (typeof v === 'string' || (!!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 2)) ? null : m.wpi_prop_invalid_color(), options: { theme: true }, label: m.wpi_prop_background_color, editor: 'color' }]
+		},
 		elementSize(m.wpi_element_width_limits_hint)
 	]
 };
@@ -85,6 +90,15 @@ export const list: EditorDef = {
 				{ name: 'presentation', label: m.wpi_prop_attr_presentation, editor: 'value-picker', options: { choices: ['rows'], choiceLabel: () => m.wpi_prop_presentation_rows() } },
 				{ name: 'pagination', label: m.wpi_prop_attr_pagination, editor: 'value-picker', options: { choices: ['yes', 'no'], choiceLabel: (v) => (v === 'yes' ? m.wpi_prop_yes() : m.wpi_prop_no()), emptyLabel: m.wpi_align_default } },
 				{ name: 'on_row_click', label: m.wpi_prop_attr_on_row_click, editor: 'json' }
+			]
+		},
+		{
+			id: 'colors', label: m.wpi_list_colors_group,
+			properties: [
+				{ name: 'background_color', validate: (v) => validColor(v, false) ? null : m.wpi_prop_invalid_color(), options: { theme: true }, label: m.wpi_list_background_color, editor: 'color' },
+				{ name: 'font_color', validate: (v) => validColor(v, false) ? null : m.wpi_prop_invalid_color(), options: { theme: true }, label: m.wpi_list_font_color, editor: 'color' },
+				{ name: 'odd_row_background_color', validate: (v) => validColor(v, false) ? null : m.wpi_prop_invalid_color(), options: { theme: true }, label: m.wpi_list_odd_row_color, editor: 'color' },
+				{ name: 'even_row_background_color', validate: (v) => validColor(v, false) ? null : m.wpi_prop_invalid_color(), options: { theme: true }, label: m.wpi_list_even_row_color, editor: 'color' }
 			]
 		},
 		elementSize()

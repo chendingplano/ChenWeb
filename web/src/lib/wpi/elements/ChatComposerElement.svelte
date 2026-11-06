@@ -14,6 +14,7 @@
 	import { CHAT_AGENTS, acquireChat, releaseChat } from '../chat-session.svelte';
 	import { getRuntime } from '../runtime.svelte';
 	import { localized } from '../text';
+	import { cssLength } from '../layout';
 	import type { ElementProps } from './index';
 
 	let { instanceId, element }: ElementProps = $props();
@@ -82,6 +83,7 @@
 		{id}
 		bind:value={draft}
 		rows={d.rows ?? 3}
+		style:height={cssLength(d.message_box_height)}
 		placeholder={localized(d.placeholder) || m.wpi_chat_placeholder()}
 		onkeydown={onKeydown}
 		oninput={() => (slashHidden = false)}
@@ -104,7 +106,7 @@
 		</ul>
 	{/if}
 
-	<div class="flex flex-wrap items-center gap-2" role="group" aria-label={m.wpi_chat_controls()}>
+	<div class="flex flex-wrap items-center gap-2" style:height={cssLength(d.toolbar_height)} style:overflow-y={d.toolbar_height ? 'auto' : undefined} role="group" aria-label={m.wpi_chat_controls()}>
 		{#each toolbar as control (control)}
 			{#if control === 'agent'}
 				<DropdownMenu.Root>

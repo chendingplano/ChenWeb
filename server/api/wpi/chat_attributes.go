@@ -11,7 +11,7 @@ import (
 // The two share the chat of their page instance; a page has at most one composer.
 
 var (
-	chatComposerAttributes = []string{"placeholder", "rows", "slash_commands", "toolbar", "agents", "default_agent", "default_model"}
+	chatComposerAttributes = []string{"placeholder", "rows", "slash_commands", "toolbar", "agents", "default_agent", "default_model", "message_box_height", "toolbar_height"}
 	chatPanelAttributes    = []string{"tabs", "initial_tab"}
 	// chatAgents are the assistants a chat may offer, in their default order: the
 	// harness-backed ones (HARNESS_BY_AGENT in web harnessFrontendService.ts).
@@ -22,6 +22,8 @@ var (
 
 func (v *validator) chatComposerAttributes(e map[string]any, path string) {
 	v.text(e, "placeholder", path)
+	v.length(e, "message_box_height", path, lengthKind{percent: true})
+	v.length(e, "toolbar_height", path, lengthKind{percent: true})
 	if val, ok := e["rows"]; ok {
 		if n, ok := asInt(val); !ok || n < 1 || n > 20 {
 			v.errf(path+"/rows", "must be an integer from 1 to 20")

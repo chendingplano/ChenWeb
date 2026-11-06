@@ -65,12 +65,32 @@ test('button: on_click is chosen from the action classes and stored as an action
 	assert.equal(onClick.write!(undefined), undefined);
 });
 
+test('button: background color uses the theme-aware color editor', () => {
+	const button = elementEditor('button');
+	assert.deepEqual(button.groups.map((g) => g.id), ['placement', 'general', 'colors', 'size']);
+	const color = prop(button, 'background_color');
+	assert.equal(color.editor, 'color');
+	assert.equal(options(color, ctx()).theme, true);
+	assert.equal(color.validate!({ light: '#fff', dark: '#000' }, ctx()), null);
+	assert.ok(color.validate!({ light: '#fff', dark: 'auto' }, ctx()));
+});
+
 test('menu and chat: choices from the element\'s other values', () => {
 	const items: JsonObject[] = [{ item_id: 'a' }, { item_id: 'b', children: [{ item_id: 'c' }] }];
 	assert.deepEqual(options(prop(elementEditor('menu'), 'initial_item'), ctx({ items })).choices, ['a', 'c']);
 	assert.deepEqual(options(prop(elementEditor('chat-composer'), 'default_agent'), ctx({ agents: ['Codex'] })).choices, ['Codex']);
 	assert.deepEqual(options(prop(elementEditor('chat-panel'), 'initial_tab'), ctx({})).choices, ['chat', 'dialog']);
 	assert.equal(prop(elementEditor('chat-composer'), 'slash_commands').read!(undefined), true);
+});
+
+test('chat composer: internal heights use length editors in Size', () => {
+ const size = elementEditor('chat-composer').groups.find((group) => group.id === 'size')!;
+ for (const name of ['message_box_height', 'toolbar_height']) {
+  const property = size.properties.find((item) => item.name === name);
+  assert.ok(property);
+  assert.equal(property.editor, 'length');
+  assert.deepEqual(options(property, ctx()).units, ['px', 'rem', 'em', '%']);
+ }
 });
 
 test('an unknown module shows its placement only; its attributes go to Other', () => {
@@ -233,4 +253,17 @@ test('element layouter margins default to 20px and persist in config', () => {
  for (const p of group!.properties) assert.equal(source.defaultValue(p.name), '20px');
  source.set('left_margin', '12px');
  assert.equal(((((next!.panels as JsonObject).a as JsonObject).elem_layouter as JsonObject).config as JsonObject).left_margin, '12px');
+});
+
+test('list colors use the shared color editor and reject invalid values', () => {
+ const group = elementEditor('list').groups.find((g) => g.id === 'colors')!;
+ assert.deepEqual(group.properties.map((p) => p.name), ['background_color', 'font_color', 'odd_row_background_color', 'even_row_background_color']);
+ for (const property of group.properties) {
+  assert.equal(property.editor, 'color');
+  assert.equal(property.validate!('#aabbcc', ctx()), null);
+  assert.ok(property.validate!('auto', ctx()));
+  assert.equal(property.validate!({ light: '#fff', dark: '#000' }, ctx()), null);
+  assert.ok(property.validate!({ light: '#fff', dark: 'auto' }, ctx()));
+  assert.equal(options(property, ctx()).theme, true);
+ }
 });

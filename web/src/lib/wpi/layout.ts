@@ -189,7 +189,7 @@ export function clampPx(value: number, min?: string, max?: string): number {
 	return Math.min(Math.max(value, lo), hi);
 }
 
-function surfaceColorValue(c: SurfaceColor): string {
+export function surfaceColorValue(c: SurfaceColor): string {
  return typeof c === 'string' ? c : `light-dark(${c.light}, ${c.dark})`;
 }
 

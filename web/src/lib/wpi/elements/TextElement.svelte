@@ -163,7 +163,7 @@
 	style:font-style={d.font_style ?? 'normal'}
 	style:line-height={lineHeight}
 	style:color={d.color ?? 'inherit'}
-	style:background-color={d.background_color ?? 'transparent'}
+	style:background-color={typeof d.background_color === 'string' ? d.background_color : 'transparent'}
 	style:padding={d.padding ?? '0.25rem 0px'}
 >
 	<div

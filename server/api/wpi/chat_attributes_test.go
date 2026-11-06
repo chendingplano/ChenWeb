@@ -10,6 +10,10 @@ func TestChatComposerAttributes(t *testing.T) {
 	for _, tc := range []struct{ attrs, want string }{
 		{`"placeholder": {"en": "Ask", "zh-cn": "提问"}, "rows": 4, "slash_commands": false, "toolbar": ["model", "agent"], "agents": ["pi", "Claude Code"], "default_agent": "pi", "default_model": "opus"`, ""},
 		{`"toolbar": []`, ""},
+		{`"message_box_height": "120px", "toolbar_height": "3rem"`, ""},
+		{`"message_box_height": "-1px"`, "/message_box_height"},
+		{`"toolbar_height": "101%"`, "/toolbar_height"},
+		{`"toolbar_height": "elastic"`, "/toolbar_height"},
 		{`"placeholder": ""`, "/placeholder"},
 		{`"rows": 0`, "/rows"},
 		{`"rows": 21`, "/rows"},
@@ -32,6 +36,12 @@ func TestChatComposerAttributes(t *testing.T) {
 			expectIssue(t, v.issues, tc.want)
 		})
 	}
+}
+
+func TestChatComposerHeightsWithOlderClassCopy(t *testing.T) {
+	v := &validator{kind: KindPage, id: "test"}
+	v.againstCopy(KindElement, "chat-composer", map[string]any{"code_module_id": "chat-composer"}, map[string]any{"message_box_height": "100px", "toolbar_height": "40px"}, "")
+	expectIssue(t, v.issues, "")
 }
 
 func TestChatPanelAttributes(t *testing.T) {

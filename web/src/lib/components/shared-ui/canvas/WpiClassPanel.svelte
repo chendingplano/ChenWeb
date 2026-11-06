@@ -8,7 +8,9 @@
 		onSaved,
 		onDirty,
 		children,
-		tab = $bindable<'properties' | 'class'>('properties'),
+		tab = $bindable<'properties' | 'class' | 'components'>('properties'),
+        components,
+        onComponentsDragStart,
 		actionClass,
 		actionClasses = [],
 		onActionClass,
@@ -18,7 +20,9 @@
 		onSaved: () => void;
 		onDirty?: (dirty: boolean) => void;
 		children: Snippet;
-		tab?: 'properties' | 'class';
+		tab?: 'properties' | 'class' | 'components';
+        components?: Snippet;
+        onComponentsDragStart?: (event: PointerEvent) => void;
 		actionClass?: string;
 		actionClasses?: string[];
 		onActionClass?: (id: string) => void;
@@ -48,7 +52,13 @@
 			aria-selected={tab === 'class'}
 			onclick={() => (tab = 'class')}>{m.wpi_class_tab()}</button
 		>
+        {#if components}
+            <button type="button" role="tab" id="wpi-components-tab" aria-controls="wpi-components-content" aria-selected={tab === 'components'} onpointerdown={onComponentsDragStart} onclick={() => (tab = 'components')}>{m.wpi_components_tab()}</button>
+        {/if}
 	</div>
+    {#if components}
+        <div role="tabpanel" id="wpi-components-content" aria-labelledby="wpi-components-tab" hidden={tab !== 'components'} class="content">{@render components()}</div>
+    {/if}
 	<div
 		role="tabpanel"
 		id="wpi-properties-content"
@@ -117,6 +127,7 @@
 		color: var(--cv-text-muted);
 		cursor: pointer;
 	}
+	#wpi-components-tab { touch-action: none; }
 	.tabs button[aria-selected='true'] {
 		border-bottom-color: var(--cv-accent);
 		color: var(--cv-accent);

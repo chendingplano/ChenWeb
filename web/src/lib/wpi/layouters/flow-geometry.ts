@@ -148,10 +148,16 @@ export function flowGeometry(
 		}
 		// A flex container's intrinsic width ignores forced row breaks. Size the
 		// panel to the widest actual row before the pane positions it.
+		// offsetLeft/offsetWidth are rounded; items are often fractional wide, so
+		// a width taken from them can be a fraction short and wrap the last item
+		// after the row gaps were measured. Use rects (undoing any canvas zoom)
+		// and round up, plus 1px for the rounding error in the zoom scale.
 		if (options.sizeToRows && rows.length) {
-			const width = Math.max(...rows.map((row) =>
-				Math.max(...row.map((item) => item.offsetLeft + item.offsetWidth)) -
-				Math.min(...row.map((item) => item.offsetLeft))));
+			const scale = node.offsetWidth ? node.getBoundingClientRect().width / node.offsetWidth : 1;
+			const width = Math.ceil(Math.max(...rows.map((row) => {
+				const rects = row.map((item) => item.getBoundingClientRect());
+				return (Math.max(...rects.map((r) => r.right)) - Math.min(...rects.map((r) => r.left))) / scale;
+			})) + 1);
 			rowWidth = `${width}px`;
 			target.style.width = rowWidth;
 		}

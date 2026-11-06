@@ -124,7 +124,7 @@
 				{/if}
 				<PropertyEditor
 					title={m.propertiespanel_element_title({ name: String(node.data.element ?? '') })}
-					def={withValidatorGroups(withClassEditors(elementEditor(module), elementClassDefinitions(elementClass)), source.get('validators'))}
+					def={withValidatorGroups(withClassEditors(module === 'list' ? { ...elementEditor(module), groups: elementEditor(module).groups.map((group) => group.id === 'colors' ? { ...group, properties: group.properties.filter((property) => source.names.includes(property.name)) } : group) } : elementEditor(module), elementClassDefinitions(elementClass)), source.get('validators'))}
 					{source}
 					context={{ ...common, pane: String(node.data.pane ?? ''), flowConfig, position: positions.element }}
 					idPrefix={`prop-${node.id}`}

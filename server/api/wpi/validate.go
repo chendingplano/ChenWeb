@@ -70,8 +70,8 @@ var codeModules = map[string]codeAttrs{
 	"text":   {nil, textAttributes},
 	"input":  {[]string{"label", "data_binding", "binding_mode"}, []string{"input_type", "placeholder", "help_text", "help_tip", "required", "max_length", "validation", "autocomplete", "label_placement", "label_horizontal_gap", "label_vertical_gap", "label_horizontal_align", "label_vertical_align", "label_max_width", "label_max_lines", "label_font_family", "label_font_size", "label_color", "label_font_weight", "label_font_style"}},
 	"select": {[]string{"label", "data_binding", "binding_mode", "options"}, nil},
-	"button": {[]string{"label", "on_click"}, nil},
-	"list":   {[]string{"source", "presentation", "columns"}, []string{"on_row_click", "pagination"}},
+	"button": {[]string{"label", "on_click"}, []string{"background_color"}},
+	"list":   {[]string{"source", "presentation", "columns"}, []string{"on_row_click", "pagination", "background_color", "font_color", "odd_row_background_color", "even_row_background_color"}},
 	"menu":   {[]string{"items"}, []string{"initial_item"}},
 	// chat_attributes.go
 	"chat-composer": {nil, chatComposerAttributes},
@@ -990,7 +990,29 @@ func (v *validator) element(module string, all map[string]any, path string) {
 		}
 	case "button":
 		v.text(e, "label", path)
+		if raw, exists := e["background_color"]; exists && raw != nil {
+			if value, ok := raw.(string); ok {
+				if value == "auto" || !colorPattern.MatchString(value) {
+					v.errf(path+"/background_color", "invalid color %q", value)
+				}
+			} else {
+				v.surfaceColorPair(raw, path+"/background_color")
+			}
+		}
 	case "list":
+		for _, key := range []string{"background_color", "font_color", "odd_row_background_color", "even_row_background_color"} {
+			raw, exists := e[key]
+			if !exists || raw == nil {
+				continue
+			}
+			if value, ok := raw.(string); ok {
+				if value == "auto" || !colorPattern.MatchString(value) {
+					v.errf(path+"/"+key, "invalid color %q", value)
+				}
+			} else {
+				v.surfaceColorPair(raw, path+"/"+key)
+			}
+		}
 		v.listColumns(e, path)
 		v.oneOf(e, "presentation", path, []string{"rows"})
 		v.oneOf(e, "pagination", path, []string{"yes", "no"})
@@ -1563,6 +1585,8 @@ func (v *validator) againstCopy(kind Kind, cls string, row, own map[string]any, 
 				v.errf(path+"/"+k, "attribute %q is fixed by element class %q; an instance cannot set it", k, cls)
 			case !named && k == "validators" && !acceptsValidators(str(row["code_module_id"])):
 				v.errf(path+"/"+k, "code module %q does not take validators; only %v elements do", str(row["code_module_id"]), validatorModules)
+			case !named && str(row["code_module_id"]) == "chat-composer" && (k == "message_box_height" || k == "toolbar_height"):
+				// These optional sizes also work with older embedded class copies.
 			case !named && !slices.Contains(elementSizeAttrs, k) && k != "validators":
 				v.errf(path+"/"+k, "element class %q has no attribute %q", cls, k)
 			}

@@ -1506,6 +1506,8 @@
 	"nodepalette_settings": "设置",
 	"nodepalette_drag_to_drop": "拖放添加",
 	"nodepalette_double_click_to_drop": "双击添加",
+	"nodepalette_wheel_to_zoom": "滚轮缩放",
+	"nodepalette_wheel_to_scroll": "滚轮滚动",
 	"wpi_editor_resize_palette": "调整组件面板宽度",
 	"wpi_editor_resize_properties": "调整属性面板宽度",
 	"wpi_create_element_title": "创建元素",
@@ -8586,5 +8588,13 @@
 	"wpi_close_unsaved_title": "要保存对 {name} 的更改吗？",
 	"wpi_close_unsaved_body": "此页面尚未保存。请为它命名后保存，或放弃。",
 	"wpi_close_unsaved_discard": "放弃",
-	"wpi_close_unsaved_save": "保存…"
+	"wpi_close_unsaved_save": "保存…",
+  "wpi_components_tab": "组件",
+  "wpi_list_colors_group": "颜色",
+  "wpi_list_background_color": "背景颜色",
+  "wpi_list_font_color": "字体颜色",
+  "wpi_list_odd_row_color": "单数行背景颜色",
+  "wpi_list_even_row_color": "偶数行背景颜色",
+  "wpi_chat_message_box_height": "消息框高度",
+  "wpi_chat_toolbar_height": "工具栏高度"
 }
