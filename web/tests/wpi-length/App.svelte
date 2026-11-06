@@ -9,7 +9,7 @@
  let value = $state<Json | undefined>('12px');
  let pageValue = $state<Json | undefined>(undefined);
  let attrs = $state<JsonObject>({ width: '24px', label: 'Test' });
- const cls: ElementClassSummary = { descriptor_id: 'length-editor', version: 1, status: 'active', description: null, attributes: { width: { default_value: 'elastic' }, label: {default_value: 'Label'}, editor: {scope: 'class', default_value: 'length'}, editor_options: {default_value: {keywords:['auto'], units:['px','%']}} } };
+ const cls: ElementClassSummary = { descriptor_id: 'length-editor', version: 1, status: 'active', description: null, attributes: { width: { default_value: 'elastic', help_tip: { en: 'Width help', 'zh-cn': '宽度帮助' } }, label: {default_value: 'Label'}, editor: {scope: 'class', default_value: 'length'}, editor_options: {default_value: {keywords:['auto'], units:['px','%']}} } };
  const source = $derived(elementSource(attrs, cls, {}, (next) => attrs = next));
 </script>
 <LengthEditor id="length" label="Width" {value} options={{units:['px','%'],keywords:['auto']}} onChange={(v) => value = v} />

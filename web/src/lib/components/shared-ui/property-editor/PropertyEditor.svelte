@@ -216,7 +216,7 @@
 								>
 							{/if}
 						</div>
-						<div class="editor" class:display-type-editor={p.name === 'editor_options.displayType'} class:indented={isEditableString(p)}>
+						<div class="editor" class:display-type-editor={p.name === 'editor_options.displayType'} class:indented={isEditableString(p)} class:has-options={!!help}>
 							<Editor
 								{id}
 								label={p.label?.() ?? p.name}
@@ -335,6 +335,7 @@
 	.editor {
 		position: relative;
 	}
+	.editor.has-options { padding-right: 15px; }
 	.display-type-editor {
 		display: flex;
 		align-items: center;

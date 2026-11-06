@@ -98,9 +98,11 @@
 	<div class="value-editor" class:length-editor={drawing === 'length'} class:color-editor={drawing === 'color' && d.binding_mode !== 'read-only'}>
 		<div class="heading">
 			<label class="caption" for={id}>{localized(d.label)}</label>
-		{#if options.helpTip}<span class="tip"><HelpTip id={`${id}-tip`} tip={localized(options.helpTip)} name={localized(d.label)} /></span>{/if}
 		</div>
-		<View {id} label={localized(d.label)} {value} {options} {check} onChange={change} />
+		<div class="editor" class:has-options={!!options.helpTip}>
+			<View {id} label={localized(d.label)} {value} {options} {check} onChange={change} />
+			{#if options.helpTip}<HelpTip id={`${id}-tip`} tip={localized(options.helpTip)} name={localized(d.label)} />{/if}
+		</div>
 		{#if loadFailed}<p class="error">{m.wpi_value_editor_choices_failed()}</p>{/if}
 		{#each errors as code (code)}<p class="error">{fieldErrorText(code)}</p>{/each}
 		{#each validatorTexts as text (text)}<p class="error">{text}</p>{/each}
@@ -122,7 +124,8 @@
 	}
 	.length-editor, .color-editor { display: grid; grid-template-columns: minmax(60px, 1fr) minmax(100px, 2fr); align-items: start; }
 	.length-editor .error, .color-editor .error { grid-column: 1 / -1; }
-	.tip { position: relative; width: 14px; height: 14px; }
+	.editor { position: relative; min-width: 0; }
+	.editor.has-options { padding-right: 15px; }
 	.heading {
 		display: flex;
 		align-items: center;

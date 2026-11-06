@@ -18,8 +18,8 @@
 </span>
 
 <style>
-	.help-tip { position: absolute; top: -7px; right: -5px; z-index: 5; }
-	.icon { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 5px; height: 16px; padding: 0; border: 1px solid var(--cv-accent, #6366f1); border-radius: 2px; background: var(--cv-panel, white); color: var(--cv-accent, #6366f1); font-size: 12px; line-height: 1; cursor: pointer; }
+	.help-tip { position: absolute; top: 0; right: 0; z-index: 5; }
+	.icon { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 10px; height: 16px; padding: 0; border: 1px solid var(--cv-accent, #6366f1); border-radius: 2px; background: var(--cv-panel, white); color: var(--cv-accent, #6366f1); font-size: 12px; line-height: 1; cursor: pointer; }
 	.icon:focus-visible, .menu button:focus-visible { outline: 2px solid var(--cv-accent, #6366f1); outline-offset: 1px; }
 	.menu { display: grid; position: absolute; right: 0; top: 19px; width: max-content; max-width: 240px; padding: 4px; border-radius: 4px; border: 1px solid var(--cv-border, #d1d5db); background: var(--cv-surface, white); color: var(--cv-text, inherit); box-shadow: 0 4px 12px rgb(0 0 0 / 0.18); }
 	.menu button { border: 0; padding: 4px 8px; text-align: left; background: transparent; color: inherit; cursor: pointer; font-size: 12px; }
