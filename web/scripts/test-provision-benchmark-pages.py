@@ -125,6 +125,15 @@ async def check_gold_page(ctx, labels, locale):
     # Read-only: no line edit/delete/add tools in the PDF toolbar.
     for key in ['provision_mgmt_edit_lines', 'provision_mgmt_delete_lines', 'provision_mgmt_add_line']:
         assert await page.locator(f'button[title="{labels[key]}"]').count() == 0, key
+    # The view toggle must remain reachable after replacing the PDF with source lines.
+    for _ in range(2):
+        await page.get_by_role('button', name=labels['provision_mgmt_show_lines'], exact=True).click()
+        await page.locator('.pvw-lines-host').wait_for()
+        back = page.get_by_role('button', name=labels['provision_mgmt_show_pdf_document'], exact=True)
+        await back.wait_for(timeout=3000)
+        await back.click()
+        await page.locator('.pvw-lines-host').wait_for(state='detached')
+        await page.get_by_role('button', name=labels['provision_mgmt_show_lines'], exact=True).wait_for()
     await page.screenshot(path=str(SCREENSHOTS / f'gold-{locale}.png'), full_page=True)
     assert not errors, errors
     await page.close()

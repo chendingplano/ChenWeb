@@ -343,8 +343,25 @@
 	});
 </script>
 
+{#snippet viewerToolbar()}
+	{#if toolbar}
+		<div
+			class="pvw-toolbar-pill"
+			style={`--pvw-surf:${pillSurface}; --pvw-bdc:${pillBorder}; --pvw-tc:${pillText}; --pvw-hvr:${pillHover};`}
+		>
+			{@render toolbar()}
+		</div>
+	{/if}
+{/snippet}
+
 <div class="pvw-container">
 	{#if showingLines && linesView}
+		<!-- Keep the view toggle reachable when the PDF viewer is unmounted. -->
+		{#if toolbar}
+			<div class="pvw-lines-toolbar">
+				{@render viewerToolbar()}
+			</div>
+		{/if}
 		<div class="pvw-lines-host">
 			{@render linesView()}
 		</div>
@@ -370,14 +387,7 @@
 			ondragmove={effectiveOnDragMove}
 		>
 			{#snippet pageBarTool()}
-				{#if toolbar}
-					<div
-						class="pvw-toolbar-pill"
-						style={`--pvw-surf:${pillSurface}; --pvw-bdc:${pillBorder}; --pvw-tc:${pillText}; --pvw-hvr:${pillHover};`}
-					>
-						{@render toolbar()}
-					</div>
-				{/if}
+				{@render viewerToolbar()}
 			{/snippet}
 			{#snippet sidebarContent()}
 				{#if sidebar && showSidebar}
@@ -512,6 +522,15 @@
 		padding: 3px;
 		position: relative;
 		z-index: 10;
+	}
+
+	.pvw-lines-toolbar {
+		display: flex;
+		justify-content: flex-end;
+		flex-shrink: 0;
+		padding: 10px 12px;
+		border-bottom: 1px solid var(--ink-line);
+		background: var(--panel-bg);
 	}
 
 	.pvw-lines-host {
