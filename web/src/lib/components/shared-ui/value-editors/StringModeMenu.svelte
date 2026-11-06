@@ -4,7 +4,7 @@
 <script lang="ts">
  import { getLocale } from '$lib/paraglide/runtime';
  import { m } from '$lib/paraglide/messages.js';
- import { convertStringMode, losesTranslations, type StringMode } from './string-value';
+ import { convertStringMode, warnsAboutTranslations, type StringMode } from './string-value';
  import type { Json } from '$lib/wpi/types';
  let { value, mode, languages, heading = false, check, onMode, onChange }: {
   value: Json | undefined;
@@ -27,7 +27,7 @@
   const locale = getLocale();
   const converted = convertStringMode(value, next, languages, locale);
   const map = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-  if (mode === 'multilingual' && next !== 'multilingual' && map && losesTranslations(map, languages, locale) && !window.confirm(m.wpi_string_discard_translations({ value: JSON.stringify(converted) }))) return;
+  if (mode === 'multilingual' && next !== 'multilingual' && map && warnsAboutTranslations(map, languages, locale, next) && !window.confirm(m.wpi_string_discard_translations({ value: JSON.stringify(converted) }))) return;
   if (check?.(converted)) return;
   if (next !== 'multilingual') onMode(next);
   onChange(converted);

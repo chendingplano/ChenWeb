@@ -29,7 +29,8 @@ export function convertStringMode(value: Json | undefined, mode: StringMode, lan
  return null;
 }
 
-export function losesTranslations(value: Record<string, Json>, languages: string[], locale: string): boolean {
+export function warnsAboutTranslations(value: Record<string, Json>, languages: string[], locale: string, mode: StringMode): boolean {
+ if (mode !== 'list') return false;
  const selected = typeof value[locale] === 'string' ? locale : languages.find(language => typeof value[language] === 'string');
  return Object.entries(value).some(([language, text]) => language !== selected && typeof text === 'string' && text !== '');
 }

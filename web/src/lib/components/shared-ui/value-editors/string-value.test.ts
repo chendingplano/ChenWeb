@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { convertStringMode, currentStringMode, emptyStringValue, losesTranslations, stringLanguages } from './string-value';
+import { convertStringMode, currentStringMode, emptyStringValue, warnsAboutTranslations, stringLanguages } from './string-value';
 
 describe('string value conversions', () => {
  test('preserves or unsets empty strings as configured', () => {
@@ -20,9 +20,13 @@ describe('string value conversions', () => {
   expect(stringLanguages([])).toEqual(['en', 'zh-cn']);
   expect(stringLanguages(['fr'])).toEqual(['fr']);
  });
+ test('switching to Single does not warn, while List still warns about discarded translations', () => {
+  expect(warnsAboutTranslations({en: 'Hello', 'zh-cn': '你好'}, ['en', 'zh-cn'], 'en', 'single')).toBe(false);
+  expect(warnsAboutTranslations({en: 'Hello', 'zh-cn': '你好'}, ['en', 'zh-cn'], 'en', 'list')).toBe(true);
+ });
  test('warns when a conversion drops a translation, including unconfigured languages', () => {
-  expect(losesTranslations({fr: 'Salut'}, ['en', 'zh-cn'], 'en')).toBe(true);
-  expect(losesTranslations({en: 'Hello'}, ['en', 'zh-cn'], 'en')).toBe(false);
-  expect(losesTranslations({en: 'Hello', 'zh-cn': '你好'}, ['en', 'zh-cn'], 'en')).toBe(true);
+  expect(warnsAboutTranslations({fr: 'Salut'}, ['en', 'zh-cn'], 'en', 'list')).toBe(true);
+  expect(warnsAboutTranslations({en: 'Hello'}, ['en', 'zh-cn'], 'en', 'list')).toBe(false);
+  expect(warnsAboutTranslations({en: 'Hello', 'zh-cn': '你好'}, ['en', 'zh-cn'], 'en', 'list')).toBe(true);
  });
 });
