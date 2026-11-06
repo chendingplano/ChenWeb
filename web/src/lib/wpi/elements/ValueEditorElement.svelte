@@ -98,7 +98,7 @@
 	<div class="value-editor" class:length-editor={drawing === 'length'} class:color-editor={drawing === 'color' && d.binding_mode !== 'read-only'}>
 		<div class="heading">
 			<label class="caption" for={id}>{localized(d.label)}</label>
-		{#if drawing === 'length' && options.helpTip}<span class="tip"><HelpTip id={`${id}-tip`} tip={localized(options.helpTip)} name={localized(d.label)} /></span>{/if}
+		{#if options.helpTip}<span class="tip"><HelpTip id={`${id}-tip`} tip={localized(options.helpTip)} name={localized(d.label)} /></span>{/if}
 		</div>
 		<View {id} label={localized(d.label)} {value} {options} {check} onChange={change} />
 		{#if loadFailed}<p class="error">{m.wpi_value_editor_choices_failed()}</p>{/if}

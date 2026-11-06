@@ -51,9 +51,14 @@ with sync_playwright() as p:
     assert abs(display_row.locator('label').bounding_box()['y'] - toggle_rect['y']) < toggle_rect['height']
     assert toggle_box.evaluate('(el) => getComputedStyle(el).backgroundColor') == default_input.evaluate('(el) => getComputedStyle(el).backgroundColor')
     help_button = display_row.locator('.help-tip button')
-    help_button.focus()
+    expect(help_button).to_have_attribute('aria-label', '选项')
+    assert help_button.bounding_box()['width'] == 5
+    help_button.click()
+    display_row.get_by_role('menuitem', name='帮助提示').click()
     expect(display_row.locator('[role=tooltip]')).to_be_visible()
     expect(display_row.locator('[role=tooltip]')).not_to_be_empty()
+    page.keyboard.press('Escape')
+    expect(display_row.get_by_role('menu')).to_have_count(0)
     expect(display).not_to_be_checked()
     page_length = page.locator('#page-length')
     expect(page_length.locator('select.type')).to_have_count(0)
