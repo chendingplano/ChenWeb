@@ -146,6 +146,7 @@ func TestProvisionsProcessorDoesNotSaveUnanchoredResults(t *testing.T) {
 			bad := map[string]any{"output_format": "compact-v1", "provisions": []any{map[string]any{"provision": "shall inspect"}}}
 			p := NewProvisionsProcessor(inputStore, store, &fakeJSONExtractor{out: bad}, nil)
 			p.PromptErr, p.ModelErr = nil, nil
+			p.PromptRef = "legacy-test"
 			p.PromptText, p.ModelName = "instructions", "test"
 			p.FallbackModelName = "fallback"
 			p.FallbackModelErr = nil

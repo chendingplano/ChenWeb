@@ -167,7 +167,7 @@ func structureExtractionContract() llmclients.StructuredOutputContract {
 }
 
 func provisionExtractionContract() llmclients.StructuredOutputContract {
-	return newDocProcessingContract("chenweb_provision_extraction", map[string]any{
+	legacy := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"language": schemaString(),
@@ -177,6 +177,10 @@ func provisionExtractionContract() llmclients.StructuredOutputContract {
 		},
 		"required":             []string{"provisions"},
 		"additionalProperties": true,
+		"not":                  map[string]any{"required": []string{"v"}},
+	}
+	return newDocProcessingContract("chenweb_provision_extraction", map[string]any{
+		"type": "object", "oneOf": []any{legacy, provisionV2Schema()},
 	})
 }
 

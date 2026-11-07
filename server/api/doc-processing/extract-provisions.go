@@ -794,7 +794,11 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 	)
 	if structuredExtractor, ok := extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
-		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, provisionExtractionContract())
+		contract := provisionExtractionContract()
+		if filepath.Base(p.PromptRef) == "prompt-extract-provisions-v6.md" {
+			contract = newDocProcessingContract("chenweb_provision_extraction_v2", provisionV2Schema())
+		}
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
 		if result != nil {
 			payload = result.Parsed
 		}
@@ -808,6 +812,16 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 		return nil, fmt.Errorf("(MID_26050842) failed extracting provisions, error:%w, payload:%v", err, payload)
 	}
 
+	_, shortFormat := payload["v"]
+	if filepath.Base(p.PromptRef) == "prompt-extract-provisions-v6.md" && !shortFormat {
+		return nil, errors.New("(MID_20261107_763) provision v6 prompt requires a v2 response")
+	}
+	if shortFormat {
+		payload, err = decodeProvisionV2(payload)
+		if err != nil {
+			return nil, err
+		}
+	}
 	payload = normalizeProvisionPayload(payload)
 	if len(payload) == 0 {
 		return nil, errors.New("(MID_26050546) empty llm json object")
@@ -1515,7 +1529,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v5.md")
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v6.md")
 	}
 
 	paths := make([]string, 0, 8)
