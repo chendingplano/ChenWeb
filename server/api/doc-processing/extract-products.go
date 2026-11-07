@@ -216,7 +216,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	translateModelCfg.ThinkingType = normalizeThinkingType(envString("TRANSLATE_PRODUCTS_THINKING", "disabled"))
 	mergedPromptText, mergedPromptRef, mergedPromptPath, mergedPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MERGED_PROMPT"},
-		"prompt-extract-products-merged-v1.md",
+		"prompt-extract-products-merged-v2.md",
 	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
@@ -1107,7 +1107,7 @@ func (p *ProductsProcessor) extractProductMentionsForChunk(
 	payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
 		"extract products", inputText,
 		taskText, p.MentionPromptRef,
-		p.MentionModelName, p.MentionModelCfg)
+		p.MentionModelName, p.MentionModelCfg, nil)
 	p.logLLMCall(ctx, fmt.Sprintf("%s_p1_b%d", eventID, idx), "extract_product_mentions", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now())
 	if err != nil {
 		return nil, modelName, false, err
@@ -1150,11 +1150,19 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 		"prompt_name", p.MergedPromptRef,
 	)
 	inputText := canonicalChunkInputText(chunk.Lines, docCtx)
-	taskText := p.MergedPromptText + "\n\n" + buildMergedProductsTaskPrompt(block.Index)
+	taskPrompt := buildMergedProductsTaskPrompt(block.Index)
+	var sourceLines productSourceLines
+	if productMergedPromptUsesV2(p.MergedPromptRef) {
+		// The compact prompt owns its response format, and its spans are
+		// resolved against exactly the lines this call sends.
+		taskPrompt = buildCompactMergedProductsTaskPrompt(block.Index)
+		sourceLines = productSourceLinesFromChunk(chunk.Lines)
+	}
+	taskText := p.MergedPromptText + "\n\n" + taskPrompt
 	payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
 		"extract products merged", inputText,
 		taskText, p.MergedPromptRef,
-		p.MergedModelName, p.MergedModelCfg)
+		p.MergedModelName, p.MergedModelCfg, sourceLines)
 	p.logLLMCall(ctx, fmt.Sprintf("%s_m_b%d", eventID, idx), "extract_products_merged", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MergedPromptRef), nil, err, callStart, p.Now())
 	if err != nil {
 		return nil, modelName, false, err
@@ -1283,7 +1291,7 @@ func (p *ProductsProcessor) enrichProductCandidatesWithLLM(
 		payload, modelName, err := p.extractProductPayloadWithFallback(concCtx,
 			"product relations", inputText,
 			taskText, p.RelationPromptRef,
-			p.RelationModelName, p.RelationModelCfg)
+			p.RelationModelName, p.RelationModelCfg, nil)
 		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_product_relations", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now())
 		if err != nil {
 			if isCtxStopped(concCtx) {
@@ -1316,6 +1324,8 @@ func (p *ProductsProcessor) enrichProductCandidatesWithLLM(
 	})
 }
 
+// sourceLines selects the compact merged v2 contract when non-nil (see
+// extractProductPayload); every other call passes nil.
 func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	ctx context.Context,
 	opr string,
@@ -1323,9 +1333,10 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	promptText string,
 	promptRef string,
 	modelName string,
-	cfg structureModelConfig) (map[string]any, string, error) {
+	cfg structureModelConfig,
+	sourceLines productSourceLines) (map[string]any, string, error) {
 	primaryStart := time.Now()
-	payload, err := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, modelName, cfg)
+	payload, err := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, modelName, cfg, sourceLines)
 	if err == nil {
 		return payload, strings.TrimSpace(modelName), nil
 	}
@@ -1345,7 +1356,8 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 
 	alarmOnTruncatedOutput(ctx, p.Logger, err, opr, modelName)
 
-	if isEmptyProductExtractionError(err) {
+	// The empty-JSON shortcut is legacy; a compact response must decode.
+	if sourceLines == nil && isEmptyProductExtractionError(err) {
 		p.Logger.Warn("primary products extraction returned empty JSON; treating as empty result without fallback",
 			"model_name", modelName,
 			"error", err,
@@ -1372,9 +1384,9 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 		"prompt_name", promptRef,
 	)
 
-	payload, fallbackErr := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, fallbackModelName, p.FallbackModelCfg)
+	payload, fallbackErr := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, fallbackModelName, p.FallbackModelCfg, sourceLines)
 	if fallbackErr != nil {
-		if isEmptyProductExtractionError(fallbackErr) {
+		if sourceLines == nil && isEmptyProductExtractionError(fallbackErr) {
 			p.Logger.Warn("fallback products extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
@@ -1441,7 +1453,8 @@ func (p *ProductsProcessor) extractProductPayload(
 	promptText string,
 	promptRef string,
 	modelName string,
-	cfg structureModelConfig) (map[string]any, error) {
+	cfg structureModelConfig,
+	sourceLines productSourceLines) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 
 	// startTime := time.Now()
@@ -1462,7 +1475,11 @@ func (p *ProductsProcessor) extractProductPayload(
 	)
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
-		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, productExtractionContract())
+		contract := productExtractionContract()
+		if sourceLines != nil {
+			contract = newDocProcessingContract("chenweb_product_extraction_merged_v2", productMergedV2Schema())
+		}
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
 		if result != nil {
 			payload = result.Parsed
 		}
@@ -1476,6 +1493,14 @@ func (p *ProductsProcessor) extractProductPayload(
 		return nil, fmt.Errorf("(MID_26052031) failed extracting products, error:%w, payload:%v", err, payload)
 	}
 
+	if sourceLines != nil {
+		if _, ok := payload["v"]; !ok {
+			return nil, errors.New("(MID_20261107_844) compact merged product prompt requires a v2 response")
+		}
+		if payload, err = decodeProductMergedV2(payload, sourceLines); err != nil {
+			return nil, err
+		}
+	}
 	payload = normalizeProductPayload(payload)
 	if len(payload) == 0 {
 		return nil, errors.New("(MID_26052032) empty llm json object")
@@ -1600,6 +1625,14 @@ func buildMergedProductsTaskPrompt(blockIndex int) string {
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nBlock index: " + strconv.Itoa(blockIndex)
+}
+
+// buildCompactMergedProductsTaskPrompt is the task suffix for
+// prompt-extract-products-merged-v2.md. That prompt owns the compact response
+// format, so unlike buildMergedProductsTaskPrompt this repeats no schema that
+// could contradict it.
+func buildCompactMergedProductsTaskPrompt(blockIndex int) string {
+	return "Return JSON only.\n\nBlock index: " + strconv.Itoa(blockIndex)
 }
 
 // buildProductRelationUserPrompt is the multi-block fallback document: used
@@ -2196,7 +2229,7 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 		payload, modelName, err := p.extractProductPayloadWithFallback(concCtx,
 			"product translation", string(rowInput),
 			p.TranslatePromptText, p.TranslatePromptRef,
-			p.TranslateModelName, p.TranslateModelCfg)
+			p.TranslateModelName, p.TranslateModelCfg, nil)
 		p.logLLMCall(ctx, fmt.Sprintf("%s_p3_t%d", eventID, b), "translate_products", 3, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.TranslatePromptRef), nil, err, callStart, p.Now())
 		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		outputTokens := outputTokenCount(p.Extractor)

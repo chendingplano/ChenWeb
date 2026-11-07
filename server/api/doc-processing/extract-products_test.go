@@ -575,6 +575,7 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 		"prompt-ref",
 		"deepseek-v4-flash",
 		structureModelConfig{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
@@ -611,7 +612,7 @@ func TestProductsProcessor_ExtractProductPayloadUsesStructuredContractWhenAvaila
 	p.ModelName = "gpt-test"
 
 	payload, err := p.extractProductPayload(context.Background(),
-		"action", "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{})
+		"action", "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{}, nil)
 	if err != nil {
 		t.Fatalf("extractProductPayload: %v", err)
 	}
