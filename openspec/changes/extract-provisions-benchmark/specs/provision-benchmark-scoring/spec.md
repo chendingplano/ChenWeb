@@ -51,7 +51,7 @@ The system SHALL expose `/api/v1/kb/provision-scores` to admin/root users: `GET 
 A started run SHALL execute in the background with the shared score runner and the prompt
 `prompt-score-extract-provisions-v1.md`. The runner SHALL freeze the scorer, `weights.json`, the
 gold helper and the rules into the run directory. Each run SHALL be stored in
-`kb.provision_score_runs` with its input, matches, score and report snapshots.
+`testbed.provision_score_runs` with its input, matches, score and report snapshots.
 
 A record SHALL have at most one running score at a time. Failures SHALL be stored with a stable
 error code: `NO_GOLD`, `NO_PREDICTIONS`, `INVALID_MATCHES`, `LLM_FAILED`, etc.

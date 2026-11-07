@@ -20,7 +20,7 @@ import (
 
 // Provision benchmark scoring: the same flow and run shape as the metric benchmark
 // (metric_score_handler.go), over the gold provisions of the extract-provisions-benchmark skill
-// and the score-extract-provisions scorer. Runs are stored in kb.provision_score_runs.
+// and the score-extract-provisions scorer. Runs are stored in testbed.provision_score_runs.
 
 const provisionScorePrompt = "prompt-score-extract-provisions-v1.md"
 
@@ -102,13 +102,13 @@ func StartProvisionScore(c echo.Context) error {
 	}
 	requestJSON, _ := json.Marshal(req)
 	var id int64
-	err = db.QueryRowContext(ctx, `INSERT INTO kb.provision_score_runs
+	err = db.QueryRowContext(ctx, `INSERT INTO testbed.provision_score_runs
 (input_record_id,title,lang,status,model_name,prompt_name,created_by,request)
 VALUES ($1,$2,$3,'running',$4,$5,$6,$7)
 ON CONFLICT (input_record_id) WHERE status='running' DO NOTHING RETURNING id`, req.RecordID, title, req.Lang, req.Model, provisionScorePrompt, c.Get("metric-score-user-name"), string(requestJSON)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existing int64
-		if err = db.QueryRowContext(ctx, `SELECT id FROM kb.provision_score_runs WHERE input_record_id=$1 AND status='running'`, req.RecordID).Scan(&existing); err != nil {
+		if err = db.QueryRowContext(ctx, `SELECT id FROM testbed.provision_score_runs WHERE input_record_id=$1 AND status='running'`, req.RecordID).Scan(&existing); err != nil {
 			return metricScoreHTTPError(c, 409, "RUN_CONFLICT")
 		}
 		run, err := loadProvisionScoreRun(ctx, db, existing)
@@ -131,13 +131,13 @@ ON CONFLICT (input_record_id) WHERE status='running' DO NOTHING RETURNING id`, r
 }
 
 func expireProvisionScoreRuns(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, `UPDATE kb.provision_score_runs SET status='failed',error_code='INTERRUPTED',error_msg='INTERRUPTED',finished_at=now()
+	_, err := db.ExecContext(ctx, `UPDATE testbed.provision_score_runs SET status='failed',error_code='INTERRUPTED',error_msg='INTERRUPTED',finished_at=now()
 WHERE status='running' AND created_at < now()-interval '12 minutes'`)
 	return err
 }
 
 func loadProvisionScoreRun(ctx context.Context, db *sql.DB, id int64) (*metricScoreRun, error) {
-	return scanMetricScoreRun(db.QueryRowContext(ctx, "SELECT "+metricScoreColumns+" FROM kb.provision_score_runs WHERE id=$1", id))
+	return scanMetricScoreRun(db.QueryRowContext(ctx, "SELECT "+metricScoreColumns+" FROM testbed.provision_score_runs WHERE id=$1", id))
 }
 
 func ListProvisionScores(c echo.Context) error {
@@ -163,12 +163,12 @@ func ListProvisionScores(c echo.Context) error {
 		return metricScoreHTTPError(c, 500, "DATABASE_ERROR")
 	}
 	var total int
-	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM kb.provision_score_runs WHERE ($1::bigint=0 OR input_record_id=$1)`, recordID).Scan(&total); err != nil {
+	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM testbed.provision_score_runs WHERE ($1::bigint=0 OR input_record_id=$1)`, recordID).Scan(&total); err != nil {
 		return metricScoreHTTPError(c, 500, "DATABASE_ERROR")
 	}
 	// Avoid fetching large evidence snapshots when polling history.
 	rows, err := db.QueryContext(ctx, `SELECT id,input_record_id,title,lang,status,model_name,prompt_name,created_by,created_at,finished_at,error_msg,error_code,NULL,NULL,score_snapshot,''
-FROM kb.provision_score_runs WHERE ($1::bigint=0 OR input_record_id=$1) ORDER BY id DESC LIMIT $2 OFFSET $3`, recordID, limit, offset)
+FROM testbed.provision_score_runs WHERE ($1::bigint=0 OR input_record_id=$1) ORDER BY id DESC LIMIT $2 OFFSET $3`, recordID, limit, offset)
 	if err != nil {
 		return metricScoreHTTPError(c, 500, "DATABASE_ERROR")
 	}
@@ -240,7 +240,7 @@ func runProvisionScore(db *sql.DB, id int64, req metricScoreRequest, userID stri
 		code = metricScoreErrorCode(err)
 		logger.Error("provision benchmark failed", "run_id", id, "error_code", code)
 	}
-	_, storeErr := db.ExecContext(finishCtx, `UPDATE kb.provision_score_runs SET status=$2,model_name=$3,input_snapshot=$4,matches_snapshot=$5,score_snapshot=$6,report=$7,error_msg=$8,error_code=$8,finished_at=now() WHERE id=$1 AND status='running'`,
+	_, storeErr := db.ExecContext(finishCtx, `UPDATE testbed.provision_score_runs SET status=$2,model_name=$3,input_snapshot=$4,matches_snapshot=$5,score_snapshot=$6,report=$7,error_msg=$8,error_code=$8,finished_at=now() WHERE id=$1 AND status='running'`,
 		id, status, evidence.Model, nullableMetricScoreJSON(evidence.Input), nullableMetricScoreJSON(evidence.Matches), nullableMetricScoreJSON(evidence.Score), evidence.Report, code)
 	if storeErr != nil {
 		logger.Error("store provision benchmark failed", "run_id", id, "err", storeErr)
