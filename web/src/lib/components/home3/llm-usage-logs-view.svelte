@@ -507,6 +507,15 @@
 			</span>
 			<div class="flex items-center gap-2">
 				<button
+					onclick={load}
+					disabled={loading}
+					class="inline-flex items-center gap-2 rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40"
+					style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
+				>
+					<RefreshCwIcon class="w-3 h-3 {loading ? 'animate-spin' : ''}" />
+					{m.llm_usage_logs_refresh()}
+				</button>
+				<button
 					onclick={prevPage}
 					disabled={page <= 1 || loading}
 					class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40"
