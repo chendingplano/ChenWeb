@@ -58,3 +58,4 @@
 - [x] 8.3 Prompt v2, frozen Python projection in UI, bounded compact repair, raw request/response artifacts and expanded API snapshots
 - [x] 8.4 Captured event `llm-6adc0b65` fixture: 57/100 and all scoring measures preserved; Python contract and local HTTP repair/source fallback tests
 - [x] 8.5 Update skill, formal scoring spec, benchmark devdoc and measured implementation record
+- [x] 8.6 Live run 3 (record 416) failed `INVALID_MATCHES`: deepseek-flash with reasoning disabled wrote `[i,i]` progressions. Provision matching now keeps the profile's reasoning despite `MODEL_DEFAULT_REASONING_POLICY=no-reasoning` (live replays: 0/3 valid without, 4/4 with, scores 83–84; explicit row IDs alone did not help, 0/2)

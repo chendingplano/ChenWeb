@@ -96,6 +96,10 @@ the verbose schema. Invalid responses SHALL NOT be persisted as successful match
 normalized. Failed compact validation SHALL leave the API matches snapshot null and retain raw
 attempts in the evidence directory. The runner MAY request one complete repair with the compact
 previous decisions and authoritative validation error; a second invalid response SHALL fail.
+Provision matching SHALL NOT apply `MODEL_DEFAULT_REASONING_POLICY=no-reasoning`; the model
+profile's own reasoning setting applies. Without reasoning, deepseek-flash does not keep the
+exhaustive compact index accounting (run 3 on record 416: 0 of 3 responses valid without
+reasoning, 4 of 4 with it).
 
 A record SHALL have at most one running score at a time. Failures SHALL be stored with a stable
 error code: `NO_GOLD`, `NO_PREDICTIONS`, `INVALID_MATCHES`, `LLM_FAILED`, etc.

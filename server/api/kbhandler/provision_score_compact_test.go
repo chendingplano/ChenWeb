@@ -94,14 +94,19 @@ else:
 			}
 			t.Setenv("PROVISION_BENCHMARK_SCORER_PATH", script)
 			t.Setenv("DATA_HOME_DIR", tmp)
+			t.Setenv("MODEL_DEFAULT_REASONING_POLICY", "no-reasoning")
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var body struct {
 					Messages []struct{ Content string } `json:"messages"`
+					Thinking any                        `json:"thinking"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Error(err)
 					return
+				}
+				if body.Thinking != nil {
+					t.Errorf("provision matching must keep the profile's reasoning, got thinking=%v", body.Thinking)
 				}
 				serialized, _ := json.Marshal(body)
 				request := string(serialized)

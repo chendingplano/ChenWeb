@@ -470,7 +470,10 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 			return e, err
 		}
 	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
+	// Compact provision matching keeps the profile's reasoning: without it deepseek-flash loses
+	// the exhaustive index accounting and emits [i,i] progressions (run 3, 2026-11-07: 0/3 valid
+	// responses without reasoning, 4/4 with it).
+	if kind.matchBasis != "provision" && strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		client.ThinkingType = "disabled"
 	}
 	originalInput := inputText
