@@ -418,6 +418,12 @@
 	let activeSection = $state<KbSectionId>(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
+	let provisionVisited = $state(false);
+	$effect(() => {
+		if (activeSection === 'kb-provision-tree' && knowledgeStoreState.activeStore) {
+			provisionVisited = true;
+		}
+	});
 	let metricDetails = $state<Snippet | null>(null);
 	let metricShelfOpen = $state(false);
 	let metricShelfWidth = $state(480);
@@ -881,6 +887,11 @@
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
+			{#if provisionVisited}
+				<div class="h-full" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
+					<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+				</div>
+			{/if}
 			{#if needsActiveStore && !knowledgeStoreState.activeStore && resolvingDefaultStore}
 				<!-- Wait for the configured default before showing the selection prompt. -->
 			{:else if needsActiveStore && !knowledgeStoreState.activeStore}
@@ -1022,7 +1033,7 @@
 						getProvisionCategory(categoryPath, knowledgeStoreState.activeStore?.id ?? null)}
 				/>
 			{:else if activeSection === 'kb-provision-tree'}
-				<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+				<!-- The provision view stays mounted above to retain its state. -->
 			{:else if activeSection === 'kb-inventory-items'}
 				<InventoryItemsView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
 			{:else if activeSection === 'kb-object-manager'}
