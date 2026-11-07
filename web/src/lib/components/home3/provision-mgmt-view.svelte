@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { provisionTableReferences } from './provision-table-references';
 	import { m as i18n } from '$lib/paraglide/messages.js';
-	import { tick } from 'svelte';
+	import { tick, type Snippet } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
 		listKbProvisions,
@@ -49,10 +49,14 @@
 	let {
 		darkMode = true,
 		onFocusModeChange,
+		onProvisionDetailsChange,
+		onProvisionDetailsClose,
 		source = 'kb'
 	}: {
 		darkMode: boolean;
 		onFocusModeChange?: (focused: boolean) => void;
+		onProvisionDetailsChange?: (details: Snippet | null) => void;
+		onProvisionDetailsClose?: () => void;
 		source?: KbMetricSource;
 	} = $props();
 	const gold = new GoldRunFilter('provisions', { allowAllVersions: true });
@@ -927,6 +931,10 @@
 		}
 	});
 
+	$effect(() => {
+		if (selectedMetricId == null) onProvisionDetailsChange?.(null);
+	});
+
 	// Keep metric name dropdown in sync with selected metric.
 	$effect(() => {
 		metricNameDropdownValue = selectedMetricId ?? '';
@@ -1208,6 +1216,7 @@
 
 	async function selectMetric(m: KbProvisionRecord) {
 		selectedMetricId = m.id;
+		onProvisionDetailsChange?.(provisionDetails as unknown as Snippet);
 		highlightSelectionVersion += 1;
 		const first = normalizeMetricSpans(m)[0];
 		if (!first) return;
@@ -1436,6 +1445,81 @@
 		}
 	}
 </script>
+
+{#snippet provisionDetails()}
+	<div class="provision-shelf select-text" style="--page-bg:{pageBg}; --panel-bg:{panelBg}; --panel-bg-alt:{panelBgAlt}; --ink-line:{inkLine}; --ink-line-soft:{inkLineSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --brass:{brass}; --font-serif:{fontSerif}; --font-mono:{fontMono}; --font-sans:{fontSans};">
+		{#if selectedMetric}
+			{@const attrs = buildMetricGroupAttrs(selectedMetric, normalizeMetricSpans(selectedMetric), rawLineByKey)}
+			{@const groups = [
+				{ key: 'statement', label: i18n.provision_mgmt_statement(), icon: FileTextIcon, attrs: attrs.statement },
+				{ key: 'metadata', label: i18n.provision_mgmt_metadata(), icon: BookOpenIcon, attrs: attrs.metadata },
+				{ key: 'context', label: i18n.provision_mgmt_context(), icon: TagIcon, attrs: attrs.context },
+				{ key: 'objects', label: i18n.provision_mgmt_objects(), icon: BoxIcon, attrs: attrs.objects },
+				{ key: 'provenance', label: i18n.provision_mgmt_provenance(), icon: ActivityIcon, attrs: attrs.provenance },
+				{ key: 'grounding', label: i18n.provision_mgmt_grounding(), icon: MapPinIcon, attrs: attrs.grounding }
+			].map(g => ({ ...g, count: g.attrs.length, filledCount: g.attrs.filter(a => a.hasValue).length, hasValue: g.attrs.some(a => a.hasValue) }))}
+			<div class="canvas-toolbar">
+				<button type="button" class="toolbar-back" onclick={onProvisionDetailsClose}><ArrowLeftIcon class="toolbar-icon" /> {i18n.metric_detail_close()}</button>
+				<div class="toolbar-nav">
+					<button type="button" class="toolbar-nav-btn" disabled={!prevMetric} onclick={goToPrevMetric} aria-label={i18n.provision_mgmt_previous_provision()}><ChevronLeftIcon class="toolbar-icon" /></button>
+					<span class="toolbar-nav-pos">{selectedMetricInFilteredIndex >= 0 ? selectedMetricInFilteredIndex + 1 : '—'} / {filteredMetrics.length}</span>
+					<button type="button" class="toolbar-nav-btn" disabled={!nextMetric} onclick={goToNextMetric} aria-label={i18n.provision_mgmt_next_provision()}><ChevronRightIcon class="toolbar-icon" /></button>
+				</div>
+			</div>
+			<div class="attr-view">
+				<div class="attr-view-header"><div class="attr-view-name">{metricNameOf(selectedMetric)}</div><div class="attr-view-subname">{selectedMetric.prov_id}</div></div>
+								{#each groups as g (g.key)}
+									{@const GIcon = g.icon}
+									<section class="attr-group" class:attr-group-empty={!g.hasValue}>
+										<div class="attr-group-head">
+											<span class="attr-group-ic"><GIcon class="h-4 w-4" /></span>
+											<span class="attr-group-label">{g.label}</span>
+											<span class="attr-group-count">{g.filledCount}/{g.count}</span>
+										</div>
+										<div class="attr-group-body">
+											{#each g.attrs as a (a.key)}
+												<div
+													class="gip-row"
+													class:gip-row-col={a.kind !== 'text'}
+													class:gip-row-empty={!a.hasValue}
+												>
+													<span class="gip-label">{a.label}</span>
+													{#if !a.hasValue}
+														<span class="gip-empty">—</span>
+													{:else if a.kind === 'text'}
+														<span class="gip-val">{a.value}</span>
+													{:else if a.kind === 'chips'}
+														<div class="gip-chips">
+															{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip"
+																	>{item}</span
+																>{/each}
+														</div>
+													{:else}
+														<div class="gip-line-cards">
+															{#each a.entries as entry, i (`${a.key}-${i}`)}
+																<div class="gip-line-card">
+																	<div class="gip-line-head">
+																		<span class="gip-line-loc">{entry.head}</span>
+																		{#if entry.lineType}
+																			<span class="gip-line-type">{entry.lineType}</span>
+																		{/if}
+																	</div>
+																	{#if entry.content}
+																		<div class="gip-line-body">{entry.content}</div>
+																	{/if}
+																</div>
+															{/each}
+														</div>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									</section>
+								{/each}
+			</div>
+		{/if}
+	</div>
+{/snippet}
 
 {#snippet provisionInfoCard(provision: KbProvisionRecord)}
 	<div class="provision-floating-card" class:light={!darkMode}>
@@ -2360,6 +2444,8 @@
 
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
+
+	.provision-shelf { background: var(--page-bg); color: var(--text-primary); min-height: 100%; }
 
 	.metric-mgmt {
 		height: 100%;

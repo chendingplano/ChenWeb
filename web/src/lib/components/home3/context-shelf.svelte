@@ -46,6 +46,7 @@
 		selectedMetrics = null,
 		selectedReferences = null,
 		metricDetails = null,
+		provisionDetails = null,
 		summaryDetails = null,
 		referenceDetails = null,
 		width       = 280,
@@ -56,6 +57,7 @@
 		darkMode:    boolean;
 		activeMenu:  ActiveSelection | null;
 		metricDetails?: Snippet | null;
+		provisionDetails?: Snippet | null;
 		summaryDetails?: Snippet | null;
 		referenceDetails?: KbReferenceDetails | null;
 		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
@@ -305,13 +307,14 @@
 		onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
 	></div>
 
-	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null || summaryDetails != null}>
+	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null || provisionDetails != null || summaryDetails != null}>
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
 				{#if referenceDetails}{msg.rsc_reference_details()}
 				{:else if selectedReferences}{msg.rsc_reference_details()}
 				{:else if summaryDetails}{msg.sgv_summary_detail()}
+				{:else if provisionDetails}{msg.context_shelf_provision_details()}
 				{:else if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
 				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
@@ -369,6 +372,8 @@
 			</div>
 		{:else if summaryDetails}
 			{@render summaryDetails?.()}
+		{:else if provisionDetails}
+			{@render provisionDetails?.()}
 		{:else if metricDetails}
 			{@render metricDetails?.()}
 		{:else if compare}

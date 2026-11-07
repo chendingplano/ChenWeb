@@ -430,6 +430,12 @@
 			metricsVisited = true;
 		}
 	});
+	let provisionDetails = $state<Snippet | null>(null);
+	let provisionShelfOpen = $state(false);
+	function handleProvisionDetailsChange(details: Snippet | null) {
+		provisionDetails = details;
+		provisionShelfOpen = details != null;
+	}
 	let metricDetails = $state<Snippet | null>(null);
 	let metricShelfOpen = $state(false);
 	let metricShelfWidth = $state(480);
@@ -875,17 +881,17 @@
 	{/if}
 
 	<main class="flex min-w-0 flex-1 flex-col overflow-hidden" style="background:{contentBg};">
-		{#if activeSection === 'kb-metrics' && metricDetails}
+		{#if (activeSection === 'kb-metrics' && metricDetails) || (activeSection === 'kb-provision-tree' && provisionDetails)}
 			<div class="flex flex-shrink-0 justify-end p-2" style="border-bottom:1px solid {borderColor};">
 				<button
 					type="button"
 					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs"
 					style="background:{accentTint}; color:{accent};"
-					onclick={() => (metricShelfOpen = !metricShelfOpen)}
-					aria-label={metricShelfOpen ? m.content_panel_close_context_panel() : m.content_panel_open_context_panel()}
+					onclick={() => activeSection === 'kb-metrics' ? (metricShelfOpen = !metricShelfOpen) : (provisionShelfOpen = !provisionShelfOpen)}
+					aria-label={(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen) ? m.content_panel_close_context_panel() : m.content_panel_open_context_panel()}
 				>
 					<PanelRightIcon class="h-3.5 w-3.5" />
-					{metricShelfOpen ? m.content_panel_close_panel() : m.content_panel_open_panel()}
+					{(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen) ? m.content_panel_close_panel() : m.content_panel_open_panel()}
 				</button>
 			</div>
 		{/if}
@@ -901,7 +907,7 @@
 			{/if}
 			{#if provisionVisited}
 				<div class="h-full" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
-					<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+					<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} onProvisionDetailsChange={handleProvisionDetailsChange} onProvisionDetailsClose={() => (provisionShelfOpen = false)} />
 				</div>
 			{/if}
 			{#if needsActiveStore && !knowledgeStoreState.activeStore && resolvingDefaultStore}
@@ -1087,6 +1093,11 @@
 				onDragStart={startMetricShelfDrag}
 				onClose={() => (metricShelfOpen = false)}
 			/>
+		</div>
+	{/if}
+	{#if provisionDetails && provisionShelfOpen}
+		<div class="h-full shrink-0" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
+			<ContextShelf {darkMode} {provisionDetails} activeMenu={null} width={metricShelfWidth} open={provisionShelfOpen} onDragStart={startMetricShelfDrag} onClose={() => (provisionShelfOpen = false)} />
 		</div>
 	{/if}
 </div>
