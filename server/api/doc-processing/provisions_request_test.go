@@ -75,7 +75,7 @@ func TestProvisionsDefaultPromptUsesCompactFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref != "prompt-extract-provisions-v6.md" || !strings.Contains(text, `"v":2`) {
+	if ref != "prompt-extract-provisions-v7.md" || !strings.Contains(text, `"v":2`) {
 		t.Fatalf("unexpected default ref=%q text=%q", ref, text)
 	}
 }

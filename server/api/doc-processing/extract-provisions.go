@@ -32,6 +32,10 @@ type ProvisionsProcessor struct {
 	PromptRef                     string
 	PromptPath                    string
 	PromptErr                     error
+	ReviewPromptText              string
+	ReviewPromptRef               string
+	ReviewPromptErr               error
+	forceV2                       bool // review contract is independent of its configured prompt filename
 	ModelRef                      string
 	ModelCfgPath                  string
 	ModelErr                      error
@@ -61,8 +65,8 @@ type ProvisionsProcessor struct {
 	batchRec      DocMetadataInputRecord
 	batchStart    time.Time
 	batchResult   provisionExtractionResult
-	batchResults  []provisionChunkResult // per-chunk results for final accumulation
-	batchMu       sync.Mutex             // protects batchResults append under concurrent Phase 3
+	batchResults  []provisionChunkResult // indexed by source chunk; nil payload means no successful result
+	batchMu       sync.Mutex             // protects batchResults writes under concurrent Phase 3
 	batchSkip     bool                   // set true by InitChunkBatch when data exists and !force
 }
 
@@ -149,6 +153,8 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		ExtractProvisionsMaxTasks: envInt("EXTRACT_PROVISIONS_MAX_TASKS", 1, 1),
 		ExtractProvisionsInput:    extractProvisionsInputFromEnv(),
 	}
+	p.ReviewPromptText, p.ReviewPromptRef, _, p.ReviewPromptErr = loadProductPromptFromEnvKeys(
+		[]string{"EXTRACT_PROVISIONS_REVIEW_PROMPT"}, "prompt-audit-provision-extraction-v1.md")
 	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
 		p.AmbiguousObjectLLMResolver = resolver
 		p.ResolveAmbiguousMinConfidence = minConfidence
@@ -552,6 +558,11 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			"cache_miss", cacheMiss,
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
+		payload, err = p.reviewProvisionPayload(jobCtx, inputText, provisionChunkTask(p.PromptText, chunk), payload, modelName, idx, len(chunks))
+		if err != nil {
+			return provisionChunkResult{}, err
+		}
+		numInChunk = len(payload["provisions"].([]any))
 		return provisionChunkResult{
 			payload:    payload,
 			modelName:  modelName,
@@ -573,7 +584,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 	var llmCallCount, fallbackCount int
 
 	for i, res := range results {
-		llmCallCount++
+		llmCallCount += 1 + int(toFloat(res.payload["review_calls"]))
 		if res.isFallback {
 			fallbackCount++
 		}
@@ -584,7 +595,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			language = strings.TrimSpace(asString(res.payload["language"]))
 		}
 		raw := res.payload["provisions"].([]any)
-		provisions = append(provisions, normalizeProvisionList(raw, chunkLineToPage(chunks[i]), chunkLineText(chunks[i]))...)
+		provisions = append(provisions, p.normalizeChunkProvisions(raw, chunks[i])...)
 	}
 
 	if language == "" {
@@ -593,7 +604,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 	return provisionExtractionResult{
 		ExtractID:     extractID,
 		Language:      language,
-		Provisions:    provisions,
+		Provisions:    p.deduplicateProvisions(provisions),
 		ModelName:     firstNonEmptyTrimmed(usedModelName, p.ModelName),
 		LLMCallCount:  llmCallCount,
 		FallbackCount: fallbackCount,
@@ -681,6 +692,11 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 			"record_id", record_id,
 			"extracted provisions", numInBlock,
 			"ms_used", time.Since(callStart).Milliseconds())
+		payload, err = p.reviewProvisionPayload(jobCtx, buildProvisionUserPrompt(block), p.PromptText, payload, modelName, idx, len(blocks))
+		if err != nil {
+			return blockResult{}, err
+		}
+		numInBlock = len(payload["provisions"].([]any))
 		return blockResult{
 			payload:    payload,
 			modelName:  modelName,
@@ -702,7 +718,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 	var llmCallCount, fallbackCount int
 
 	for i, res := range results {
-		llmCallCount++
+		llmCallCount += 1 + int(toFloat(res.payload["review_calls"]))
 		if res.isFallback {
 			fallbackCount++
 		}
@@ -713,7 +729,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 			language = strings.TrimSpace(asString(res.payload["language"]))
 		}
 		raw := res.payload["provisions"].([]any)
-		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(blocks[i]), blockLineText(blocks[i]))...)
+		provisions = append(provisions, p.normalizeBlockProvisions(raw, blocks[i])...)
 	}
 
 	if language == "" {
@@ -722,7 +738,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 	return provisionExtractionResult{
 		ExtractID:     extractID,
 		Language:      language,
-		Provisions:    provisions,
+		Provisions:    p.deduplicateProvisions(provisions),
 		ModelName:     firstNonEmptyTrimmed(usedModelName, p.ModelName),
 		LLMCallCount:  llmCallCount,
 		FallbackCount: fallbackCount,
@@ -795,7 +811,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 	if structuredExtractor, ok := extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		contract := provisionExtractionContract()
-		if filepath.Base(p.PromptRef) == "prompt-extract-provisions-v6.md" {
+		if p.forceV2 || provisionPromptUsesV2(p.PromptRef) {
 			contract = newDocProcessingContract("chenweb_provision_extraction_v2", provisionV2Schema())
 		}
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
@@ -813,8 +829,8 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 	}
 
 	_, shortFormat := payload["v"]
-	if filepath.Base(p.PromptRef) == "prompt-extract-provisions-v6.md" && !shortFormat {
-		return nil, errors.New("(MID_20261107_763) provision v6 prompt requires a v2 response")
+	if (p.forceV2 || provisionPromptUsesV2(p.PromptRef)) && !shortFormat {
+		return nil, errors.New("(MID_20261107_763) compact provision prompt requires a v2 response")
 	}
 	if shortFormat {
 		payload, err = decodeProvisionV2(payload)
@@ -1529,7 +1545,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v6.md")
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v7.md")
 	}
 
 	paths := make([]string, 0, 8)
@@ -1931,7 +1947,7 @@ func (p *ProvisionsProcessor) InitChunkBatch(ctx context.Context, recordID int64
 	p.batchRecordID = recordID
 	p.batchChunks = chunks
 	p.batchDocCtx = docCtx
-	p.batchResults = make([]provisionChunkResult, 0, len(chunks))
+	p.batchResults = make([]provisionChunkResult, len(chunks))
 	p.batchResult = provisionExtractionResult{
 		ExtractID: p.Now().Format("20060102-150405"),
 	}
@@ -1944,8 +1960,8 @@ func (p *ProvisionsProcessor) InitChunkBatch(ctx context.Context, recordID int64
 }
 
 // ProcessChunk processes one chunk for the provisions processor: builds the
-// LLM input, calls the LLM, and accumulates the result. Called sequentially
-// by the per-chunk batching coordinator.
+// LLM input, calls the LLM, and stores the result at its source chunk index.
+// The per-chunk batching coordinator may call it concurrently.
 func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
 	if p.batchSkip {
 		return nil
@@ -2006,13 +2022,18 @@ func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) er
 		"ms_used", time.Since(callStart).Milliseconds(),
 	)
 
+	payload, err = p.reviewProvisionPayload(ctx, inputText, provisionChunkTask(p.PromptText, chunk), payload, modelName, chunkIdx, len(p.batchChunks))
+	if err != nil {
+		return err
+	}
+	numInChunk = len(payload["provisions"].([]any))
 	p.batchMu.Lock()
-	p.batchResults = append(p.batchResults, provisionChunkResult{
+	p.batchResults[chunkIdx] = provisionChunkResult{
 		payload:    payload,
 		modelName:  modelName,
 		isFallback: isFallback,
 		numInChunk: numInChunk,
-	})
+	}
 	p.batchMu.Unlock()
 	return nil
 }
@@ -2039,7 +2060,10 @@ func (p *ProvisionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	var llmCallCount, fallbackCount int
 
 	for i, res := range p.batchResults {
-		llmCallCount++
+		if res.payload == nil {
+			continue
+		}
+		llmCallCount += 1 + int(toFloat(res.payload["review_calls"]))
 		if res.isFallback {
 			fallbackCount++
 		}
@@ -2050,7 +2074,13 @@ func (p *ProvisionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			language = strings.TrimSpace(asString(res.payload["language"]))
 		}
 		raw := res.payload["provisions"].([]any)
-		provisions = append(provisions, normalizeProvisionList(raw, chunkLineToPage(p.batchChunks[i]), chunkLineText(p.batchChunks[i]))...)
+		provisions = append(provisions, p.normalizeChunkProvisions(raw, p.batchChunks[i])...)
+	}
+	// A preallocated result slot is not a successful empty model response.
+	// The coordinator also calls finalize after extraction failures.
+	if llmCallCount == 0 {
+		p.Logger.Info("provisions batch: no successful results to finalize", "record_id", p.batchRecordID)
+		return nil
 	}
 
 	if language == "" {
@@ -2061,7 +2091,7 @@ func (p *ProvisionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	p.batchResult = provisionExtractionResult{
 		ExtractID:     p.batchResult.ExtractID,
 		Language:      language,
-		Provisions:    provisions,
+		Provisions:    p.deduplicateProvisions(provisions),
 		ModelName:     firstNonEmptyTrimmed(usedModelName, p.ModelName),
 		LLMCallCount:  llmCallCount,
 		FallbackCount: fallbackCount,

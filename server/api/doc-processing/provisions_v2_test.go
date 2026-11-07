@@ -277,26 +277,31 @@ func TestProvisionsV2DoesNotMutateCapturedResponse(t *testing.T) {
 }
 
 func TestProvisionsV2StructuredRetriesNonconformingResponses(t *testing.T) {
-	for _, first := range []string{
-		`{"provisions":[{"provision":"legacy translated response","source_line_spans":[42]}]}`,
-		strings.Replace(provisionV2Example, `"s":[42]`, `"s":[]`, 1),
-		strings.Replace(provisionV2Example, `"f":1`, `"f":4`, 1),
-	} {
-		var requests atomic.Int32
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			source := provisionV2Example
-			if requests.Add(1) == 1 {
-				source = first
+	for _, prompt := range []string{"prompt-extract-provisions-v6.md", "prompt-extract-provisions-v7.md"} {
+		t.Run(prompt, func(t *testing.T) {
+			for _, first := range []string{
+				`{"provisions":[{"provision":"legacy translated response","source_line_spans":[42]}]}`,
+				strings.Replace(provisionV2Example, `"s":[42]`, `"s":[]`, 1),
+				strings.Replace(provisionV2Example, `"f":1`, `"f":4`, 1),
+			} {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					source := provisionV2Example
+					if requests.Add(1) == 1 {
+						source = first
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": source}}}})
+				}))
+				client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()}
+				p := &ProvisionsProcessor{PromptRef: prompt}
+				got, err := p.extractProvisionPayloadFromText(context.Background(), "input", "instructions", "test", client)
+				srv.Close()
+				if err != nil || got == nil || requests.Load() != 2 {
+					t.Fatalf("requests=%d got=%#v err=%v; compact prompts must retry incompatible output", requests.Load(), got, err)
+				}
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": source}}}})
-		}))
-		client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()}
-		p := &ProvisionsProcessor{PromptRef: "prompt-extract-provisions-v6.md"}
-		got, err := p.extractProvisionPayloadFromText(context.Background(), "input", "instructions", "test", client)
-		srv.Close()
-		if err != nil || got == nil || requests.Load() != 2 {
-			t.Fatalf("requests=%d got=%#v err=%v; v6 must retry incompatible output", requests.Load(), got, err)
-		}
+
+		})
 	}
 }
