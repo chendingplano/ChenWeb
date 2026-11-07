@@ -602,50 +602,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 
 // provisionChunkTask is identical across chunks so its instructions can be cached.
 func provisionChunkTask(base string, _ Chunk) string {
-	schema := map[string]any{
-		"language": "string",
-		"provisions": []map[string]any{{
-			"name":              "string",
-			"name_en":           "string",
-			"type":              "mandatory|recommended|optional",
-			"provision":         "string",
-			"provision_en":      "string",
-			"provision_desc":    "string",
-			"provision_desc_en": "string",
-			"source_line_spans": []string{"12", "16-19"},
-			"context":           "string",
-			"context_en":        "string",
-			"subject":           "string",
-			"subject_en":        "string",
-			"location_type":     "string",
-			"keywords":          []string{"string"},
-			"keywords_en":       []string{"string"},
-			"confidence":        0.0,
-			"is_explicit":       true,
-			"need_verify":       false,
-			"objects": []map[string]any{{
-				"object_name":       "string",
-				"object_name_en":    "string",
-				"object_name_zh":    "string",
-				"object_type":       "equipment|material|system|process|organization|person|place|document|concept|other",
-				"object_role":       "regulated_object|requirement_target|component|parent_system|other",
-				"aliases":           []string{"string"},
-				"acronyms":          []string{"string"},
-				"description":       "string",
-				"evidence_quote":    "string",
-				"source_line_spans": []string{"12", "16-19"},
-				"confidence":        0.0,
-			}},
-			"category_paths":   []any{},
-			"category_path_en": []any{},
-		}},
-	}
-	schemaJSON, _ := json.Marshal(schema)
-	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON)
-	if strings.TrimSpace(base) == "" {
-		return task
-	}
-	return strings.TrimSpace(base) + "\n\n" + task
+	return strings.TrimSpace(base)
 }
 
 func chunkLineToPage(chunk Chunk) map[int]int {
@@ -863,8 +820,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 	if !ok {
 		return nil, fmt.Errorf("(MID_26050547) llm output field 'provisions' must be an array, JSON:%v", payload)
 	}
-	payload["provisions"] = items
-	return payload, nil
+	return expandCompactProvisionPayload(payload, items), nil
 }
 
 func normalizeProvisionPayload(payload map[string]any) map[string]any {
@@ -915,47 +871,7 @@ func looksLikeProvisionRecord(payload map[string]any) bool {
 }
 
 func buildProvisionUserPrompt(block Block) string {
-	schema := map[string]any{
-		"language": "string",
-		"provisions": []map[string]any{{
-			"name":              "string",
-			"name_en":           "string",
-			"type":              "mandatory|recommended|optional",
-			"provision":         "string",
-			"provision_en":      "string",
-			"provision_desc":    "string",
-			"provision_desc_en": "string",
-			"source_line_spans": []string{"12", "16-19"},
-			"context":           "string",
-			"context_en":        "string",
-			"subject":           "string",
-			"subject_en":        "string",
-			"location_type":     "string",
-			"keywords":          []string{"string"},
-			"keywords_en":       []string{"string"},
-			"confidence":        0.0,
-			"is_explicit":       true,
-			"need_verify":       false,
-			"objects": []map[string]any{{
-				"object_name":       "string",
-				"object_name_en":    "string",
-				"object_name_zh":    "string",
-				"object_type":       "equipment|material|system|process|organization|person|place|document|concept|other",
-				"object_role":       "regulated_object|requirement_target|component|parent_system|other",
-				"aliases":           []string{"string"},
-				"acronyms":          []string{"string"},
-				"description":       "string",
-				"evidence_quote":    "string",
-				"source_line_spans": []string{"12", "16-19"},
-				"confidence":        0.0,
-			}},
-			"category_paths":   []any{},
-			"category_path_en": []any{},
-		}},
-	}
-	schemaJSON, _ := json.Marshal(schema)
-	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nBlock index: " + strconv.Itoa(block.Index) +
+	return "Block index: " + strconv.Itoa(block.Index) +
 		"\n\nInput block lines (JSON array):\n" + blockLinesToJSON(block.Lines)
 }
 
@@ -1593,7 +1509,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v3.md")
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v4.md")
 	}
 
 	paths := make([]string, 0, 8)

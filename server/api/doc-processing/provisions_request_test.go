@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -49,5 +50,32 @@ func TestProvisionsNoReasoningPolicyAppliesToBothModels(t *testing.T) {
 	fallback, ok := p.FallbackExtractor.(*llmclients.OpenAIJSONClient)
 	if !ok || primary.ThinkingType != "disabled" || fallback.ThinkingType != "disabled" {
 		t.Fatalf("thinking primary=%q fallback=%#v", primary.ThinkingType, p.FallbackExtractor)
+	}
+}
+
+func TestProvisionsRequestsUseVersionedPromptSchema(t *testing.T) {
+	base := "custom instructions with optional response fields"
+	if got := provisionChunkTask(base, Chunk{}); got != base {
+		t.Fatalf("chunk instructions must come from the prompt file: %q", got)
+	}
+	block := buildProvisionUserPrompt(Block{Index: 7})
+	if !strings.Contains(block, "Block index: 7") || !strings.Contains(block, "Input block lines (JSON array):") {
+		t.Fatalf("block input lost its index or lines: %q", block)
+	}
+	if strings.Contains(block, "schema") || strings.Contains(block, "provision_en") {
+		t.Fatalf("block input must not override the versioned prompt schema: %q", block)
+	}
+}
+
+func TestProvisionsDefaultPromptUsesCompactFormat(t *testing.T) {
+	t.Setenv("EXTRACT_PROVISIONS_PROMPT", "")
+	t.Setenv("PROMPT_FILE_NAME", "")
+	t.Setenv("PROMPT_DIR", t.TempDir())
+	text, ref, _, err := loadProvisionsPromptFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref != "prompt-extract-provisions-v4.md" || !strings.Contains(text, `"output_format": "compact-v1"`) {
+		t.Fatalf("unexpected default ref=%q text=%q", ref, text)
 	}
 }
