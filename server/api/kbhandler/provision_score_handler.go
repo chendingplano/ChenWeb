@@ -22,7 +22,7 @@ import (
 // (metric_score_handler.go), over the gold provisions of the extract-provisions-benchmark skill
 // and the score-extract-provisions scorer. Runs are stored in testbed.provision_score_runs.
 
-const provisionScorePrompt = "prompt-score-extract-provisions-v1.md"
+const provisionScorePrompt = "prompt-score-extract-provisions-v2.md"
 
 var provisionScoreKind = scoreKind{"PROVISION_BENCHMARK_SCORER_PATH", "score-extract-provisions", "extract-provisions-benchmark",
 	"provision-score-runs", provisionScorePrompt, "score_extract_provisions", "MID-20261106-01", "provision"}

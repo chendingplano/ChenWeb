@@ -50,3 +50,11 @@
 
 - [x] 7.1 Devdoc for the provisions benchmark (KnowledgeStore) + pointer in `extract-provisions-spec.md`
 - [x] 7.2 Commit `.agents`, ChenWeb, KnowledgeStore separately with explicit paths; `jj log` check
+
+## 8. Compact scoring input/output (2026-11-07)
+
+- [x] 8.1 Minimal indexed matching projection with source availability/comparability, full source retained; audit metadata and suggestions remain local
+- [x] 8.2 Strict compact decision decoder, legacy replay, exhaustive accounting, merge links, subject overrides and routine diagnostic reconstruction
+- [x] 8.3 Prompt v2, frozen Python projection in UI, bounded compact repair, raw request/response artifacts and expanded API snapshots
+- [x] 8.4 Captured event `llm-6adc0b65` fixture: 57/100 and all scoring measures preserved; Python contract and local HTTP repair/source fallback tests
+- [x] 8.5 Update skill, formal scoring spec, benchmark devdoc and measured implementation record

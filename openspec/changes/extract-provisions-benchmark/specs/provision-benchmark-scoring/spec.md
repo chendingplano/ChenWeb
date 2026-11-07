@@ -5,9 +5,11 @@ The `score-extract-provisions` skill SHALL score a record's `kb.provisions` rows
 run (`testbed.provision_benchmark_runs`) on a scale of 1 to 100.
 
 The work is split in three steps:
-1. `export` writes `input.json`. It holds the gold rows, the predictions, the gold ledger,
-   suggestions and warnings.
-2. The matcher writes `matches.json`: `pairs`, `missed`, `false_positives`, `overrides`.
+1. `export` writes the complete `input.json` audit snapshot (gold, predictions, ledger,
+   suggestions and warnings) and the compact `matching-input.json` model view. `project`
+   SHALL regenerate the model view from a finalized snapshot without querying the database.
+2. The matcher writes compact v2 `matches.json`; the script expands it to
+   `matches-expanded.json`: `pairs`, `missed`, `false_positives`, `overrides`.
 3. `score` computes credit per pair from weighted field checks: `provision_type`, `text`,
    `lines`, `subject`, `location_type`, `is_explicit`. Default weights come from `weights.json`.
    `score` writes `score.json` and `report.md`. The score is `round(100 × soft F1)`, clamped to
@@ -24,6 +26,42 @@ The work is split in three steps:
 #### Scenario: No predictions
 - **WHEN** the record has a gold run but no `kb.provisions` rows
 - **THEN** `export` exits 4 with `NO_PREDICTIONS`
+
+### Requirement: Compact model contract with complete audit evidence
+The model view SHALL contain only version `v=2`, source-comparability `lc`, source-availability
+`sa`, and arrays `g`, `p`, `c`. Gold and prediction rows SHALL be `[source_line_spans, statement,
+subject]`; ledger rows SHALL be `[source_line_spans, text, rule_id, reason]`. A row's local ID
+SHALL be its one-based array position. All rows SHALL be retained, in audit-snapshot order.
+The matching request SHALL retain the complete available source document and output language,
+but SHALL NOT send translations, names, confidence, deterministic field grades, suggestions,
+run metadata or provenance. The complete evidence SHALL remain in the saved audit snapshot.
+
+The response SHALL contain exactly `v=2`, `p`, `m`, `f`, `o`, with all arrays explicit:
+- `p`: `[gold,prediction]`, optionally followed by an exceptional explanation.
+- `m`: `[gold,paired_prediction]` for a merge, or `[gold,0,reason]` for a genuine miss.
+- `f`: `[prediction,cause,target]`, optionally followed by an exceptional explanation.
+  Causes SHALL be `x` (ledger index), `s` (paired gold index), `d` (other prediction index),
+  `n` (not considered by gold), or `i` (misreads source). `n`/`i` SHALL have null targets and
+  nonempty explanations; `n` SHALL address whether gold missed a real provision.
+- `o`: `[paired_gold,boolean,reason]`, subject-only overrides with a nonempty reason.
+
+The decoder SHALL restore full IDs, ledger rules and routine explanations locally, preserving
+exceptional explanations. Unknown keys/versions/causes, noninteger or out-of-range indices,
+wrong target types, duplicate overrides, self/cyclic duplicate references and invalid row
+lengths SHALL fail. Merge targets SHALL be paired and share a line when `lc=true`.
+No missing decision SHALL be inferred. The existing formula and field checks SHALL remain unchanged.
+
+#### Scenario: Captured decisions are compacted
+- **WHEN** compact decisions are expanded against the same full audit snapshot
+- **THEN** their score, aggregate/per-type metrics, per-kind recall and field accuracy equal those of the original decisions
+
+#### Scenario: Changed or unavailable source
+- **WHEN** the source is changed or unreadable
+- **THEN** `lc` is false and line checks are disabled; `sa` distinguishes available changed source from unavailable source
+
+#### Scenario: Old scoring snapshot replay
+- **WHEN** legacy verbose matches are scored without `--require-compact`
+- **THEN** they remain readable; new UI scoring requires the compact contract
 
 ### Requirement: Valid matches only
 `score` SHALL refuse `matches.json` unless all of the following hold:
@@ -49,9 +87,15 @@ The system SHALL expose `/api/v1/kb/provision-scores` to admin/root users: `GET 
 `GET /:id/artifacts/:kind`.
 
 A started run SHALL execute in the background with the shared score runner and the prompt
-`prompt-score-extract-provisions-v1.md`. The runner SHALL freeze the scorer, `weights.json`, the
+`prompt-score-extract-provisions-v2.md`. The runner SHALL freeze the scorer, `weights.json`, the
 gold helper and the rules into the run directory. Each run SHALL be stored in
 `testbed.provision_score_runs` with its input, matches, score and report snapshots.
+The runner SHALL save the exact compact projection, complete request text, raw compact matches
+and expanded matches in its evidence directory. Successful API matches snapshots SHALL retain
+the verbose schema. Invalid responses SHALL NOT be persisted as successful matches or silently
+normalized. Failed compact validation SHALL leave the API matches snapshot null and retain raw
+attempts in the evidence directory. The runner MAY request one complete repair with the compact
+previous decisions and authoritative validation error; a second invalid response SHALL fail.
 
 A record SHALL have at most one running score at a time. Failures SHALL be stored with a stable
 error code: `NO_GOLD`, `NO_PREDICTIONS`, `INVALID_MATCHES`, `LLM_FAILED`, etc.

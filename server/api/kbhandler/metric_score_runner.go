@@ -163,7 +163,7 @@ func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) 
 				line := strings.SplitN(strings.TrimSpace(string(exit.Stderr)), "\n", 2)[0]
 				if line != "" {
 					reason := strings.TrimPrefix(line, "score_io: ")
-					for _, prefix := range []string{"gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "unknown gold provision IDs:", "unknown predicted provision IDs:", "pair ", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
+					for _, prefix := range []string{"compact matches: ", "gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "unknown gold provision IDs:", "unknown predicted provision IDs:", "pair ", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
 						if strings.HasPrefix(reason, prefix) {
 							return metricScoreValidationError{Reason: reason}
 						}
@@ -403,10 +403,16 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	var lines []rawLine
 	source, _ := input["source"].(map[string]any)
 	sourcePath, _ := source["path"].(string)
+	if kind.matchBasis == "provision" {
+		source["available"] = false
+	}
 	if sourcePath != "" {
 		// Keep exactly the canonical source bytes used for the matcher and their digest.
 		raw, readErr := os.ReadFile(sourcePath)
 		if readErr == nil {
+			if kind.matchBasis == "provision" {
+				source["available"] = true
+			}
 			if utf8.RuneCount(raw) > metricReviewMaxInputChars {
 				return e, metricScoreFailure{"INPUT_TOO_LARGE"}
 			}
@@ -438,7 +444,17 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	}
 	// source_text is already in the immutable snapshot; do not duplicate it in the LLM input.
 	matchInput := e.Input
-	if _, ok := input["source_text"]; ok {
+	if kind.matchBasis == "provision" {
+		// The frozen Python scorer owns both the index mapping and the decoder.
+		// Project only after source-comparability and provenance have been finalized.
+		if err = runMetricScoreScriptAt(ctx, frozen, "project", "--dir", dir); err != nil {
+			return e, err
+		}
+		matchInput, err = os.ReadFile(filepath.Join(dir, "matching-input.json"))
+		if err != nil {
+			return e, err
+		}
+	} else if _, ok := input["source_text"]; ok {
 		delete(input, "source_text")
 		matchInput, err = json.Marshal(input)
 		if err != nil {
@@ -448,6 +464,11 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	inputText, err := buildMetricScoreInput(matchInput, lines, req.Lang)
 	if err != nil {
 		return e, err
+	}
+	if kind.matchBasis == "provision" {
+		if err = os.WriteFile(filepath.Join(dir, "matching-request.txt"), []byte(inputText), 0600); err != nil {
+			return e, err
+		}
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		client.ThinkingType = "disabled"
@@ -465,18 +486,28 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 			}
 			return e, metricScoreFailure{"LLM_FAILED"}
 		}
-		dropEmptyPairsAlsoMissed(payload)
-		enforceOneToOnePairs(payload)
-		e.Matches, err = json.MarshalIndent(payload, "", "  ")
+		if kind.matchBasis != "provision" {
+			dropEmptyPairsAlsoMissed(payload)
+			enforceOneToOnePairs(payload)
+		}
+		rawMatches, marshalErr := json.MarshalIndent(payload, "", "  ")
+		err = marshalErr
 		if err != nil {
 			return e, err
 		}
-		if err = os.WriteFile(filepath.Join(dir, "matches.json"), e.Matches, 0600); err != nil {
+		if err = os.WriteFile(filepath.Join(dir, "matches.json"), rawMatches, 0600); err != nil {
 			return e, err
+		}
+		if kind.matchBasis != "provision" {
+			e.Matches = rawMatches
 		}
 		// Validate every attempt with the frozen authoritative scorer. Do not duplicate
 		// its matching rules in Go or invent classifications for invalid model output.
-		if scoreErr := runMetricScoreScriptAt(ctx, frozen, "score", "--dir", dir, "--scorer-model", cfg.ModelName); scoreErr != nil {
+		scoreArgs := []string{"score", "--dir", dir, "--scorer-model", cfg.ModelName}
+		if kind.matchBasis == "provision" {
+			scoreArgs = append(scoreArgs, "--require-compact")
+		}
+		if scoreErr := runMetricScoreScriptAt(ctx, frozen, scoreArgs...); scoreErr != nil {
 			var validation metricScoreValidationError
 			if !errors.As(scoreErr, &validation) {
 				return e, scoreErr
@@ -486,7 +517,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 			if (kind.matchBasis != "metric" && kind.matchBasis != "provision") || attempt == 2 {
 				return e, scoreErr
 			}
-			if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), e.Matches, 0600); err != nil {
+			if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), rawMatches, 0600); err != nil {
 				return e, err
 			}
 			feedback, marshalErr := json.Marshal(map[string]any{"previous_matches": payload, "validation_error": validation.Reason})
@@ -494,7 +525,20 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 				return e, marshalErr
 			}
 			inputText = originalInput + "\nMATCH_REPAIR\n" + string(feedback)
+			if kind.matchBasis == "provision" {
+				if err = os.WriteFile(filepath.Join(dir, "matching-request-attempt-2.txt"), []byte(inputText), 0600); err != nil {
+					return e, err
+				}
+			}
 			continue
+		}
+		if kind.matchBasis == "provision" {
+			// Preserve the existing verbose API/artifact contract; raw compact decisions
+			// remain in matches.json beside the exact model input.
+			e.Matches, err = os.ReadFile(filepath.Join(dir, "matches-expanded.json"))
+			if err != nil {
+				return e, err
+			}
 		}
 		break
 	}
