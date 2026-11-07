@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Info from '@lucide/svelte/icons/info';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { m } from '$lib/paraglide/messages.js';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import type { TableReference } from './pdf-table-geometry';
@@ -20,7 +22,7 @@
 		reportBody
 	}: {
 		run: { id: string | number; title: string; status: string; documentTitle: string; createdAt: string; subtitle?: string };
-		scoreCards: { label: string; value: string; detail?: string }[];
+		scoreCards: { label: string; value: string; detail?: string; help?: string }[];
 		warnings: string[];
 		provenance?: Snippet;
 		evidenceActions?: { id: string; label: string; view(): void; download?(): void }[];
@@ -97,7 +99,7 @@
 				{#if run.documentTitle || run.createdAt}<p>{run.documentTitle}{run.documentTitle && run.createdAt ? ' · ' : ''}{run.createdAt}</p>{/if}
 				{#if run.subtitle}<p>{run.subtitle}</p>{/if}
 			</header>
-			{#if scoreCards.length}<div class="stats">{#each scoreCards as card}<div><span>{card.label}</span><strong>{card.value}</strong>{#if card.detail}<small>{card.detail}</small>{/if}</div>{/each}</div>{/if}
+			{#if scoreCards.length}<div class="stats">{#each scoreCards as card}<div><span class="stat-label">{card.label}{#if card.help}<Tooltip.Provider><Tooltip.Root><Tooltip.Trigger class="stat-info" aria-label={card.help}><Info size={14} aria-hidden="true" /></Tooltip.Trigger><Tooltip.Content class="max-w-72" sideOffset={6}>{card.help}</Tooltip.Content></Tooltip.Root></Tooltip.Provider>{/if}</span><strong>{card.value}</strong>{#if card.detail}<small>{card.detail}</small>{/if}</div>{/each}</div>{/if}
 			{#if warnings.length}<div class="warnings"><h2>{m.msc_warnings()}</h2><ul>{#each warnings as warning}<li>{warning}</li>{/each}</ul></div>{/if}
 			{#if provenance}<div class="provenance">{@render provenance()}</div>{/if}
 			{#if evidenceActions.length}<div class="actions evidence-actions"><h2>{m.msc_evidence()}</h2>{#each evidenceActions as action (action.id)}<div class="evidence-action"><button onclick={action.view}>{action.label}</button>{#if action.download}<button onclick={action.download}>{m.msc_download()}</button>{/if}</div>{/each}</div>{/if}
@@ -125,6 +127,7 @@
 	.panel-resizer { position:relative; width:12px; min-width:12px; margin:0; padding:0; border:0; border-radius:8px; background:transparent; cursor:col-resize; touch-action:none; user-select:none; }
 	.panel-resizer::before { position:absolute; inset:0 4px; border-radius:4px; background:var(--border); content:''; } .panel-resizer:hover::before,.panel-resizer:focus-visible::before,.panel-resizer.resizing::before { background:var(--accent); }
 	.panel-resizer:focus-visible { outline:2px solid var(--accent); outline-offset:1px; } .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin:16px 0; } .stats div { padding:14px; background:var(--surface); border-radius:8px; } .stats span,.stats small { display:block; font-size:12px; color:var(--muted); } .stats strong { display:block; font-size:22px; margin-top:6px; }
+	.stats .stat-label { display:flex; align-items:center; gap:5px; } :global(.stat-info) { display:inline-flex; padding:0; border:0; background:transparent; color:var(--muted); } :global(.stat-info:focus-visible) { outline:2px solid var(--accent); outline-offset:2px; }
 	.warnings { color:#fbbf24; } .light .warnings { color:#a16207; } ul { padding-left:20px; } .actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; } .evidence-actions h2 { flex-basis:100%; } .evidence-action { display:flex; gap:6px; } button { border:1px solid var(--border); border-radius:7px; padding:9px 12px; background:var(--surface); color:var(--text); font-size:13px; cursor:pointer; }
 	@media(max-width:700px) { .split-panels { grid-template-columns:minmax(0,1fr); } .panel-resizer { display:none; } .result-panel,.pdf-panel { height:60vh; min-height:360px; } .benchmark { padding:12px; } }
 </style>

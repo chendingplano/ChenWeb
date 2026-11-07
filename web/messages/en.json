@@ -8662,5 +8662,13 @@
 	"psc_help_lines": "Lines: overlap between extracted and gold source lines; partial credit is possible.",
 	"psc_help_subject": "Subject: whether the extracted subject matches the gold subject.",
 	"psc_help_location": "Location: whether the source location type matches the gold location type.",
-	"psc_help_explicit": "Explicit: whether the extracted explicit or implicit classification matches gold."
+	"psc_help_explicit": "Explicit: whether the extracted explicit or implicit classification matches gold.",
+	"psc_summary_help_score": "The weighted F1 score, calculated from weighted precision and weighted recall, rounded to a whole number and limited to 1–100.",
+	"psc_summary_help_weighted_precision": "Total match credit divided by the number of extracted provisions. Each match earns credit for its field checks.",
+	"psc_summary_help_weighted_recall": "Total match credit divided by the number of gold provisions. Missed provisions contribute zero.",
+	"psc_summary_help_precision": "The number of matched provisions divided by the number of extracted provisions.",
+	"psc_summary_help_recall": "The number of matched provisions divided by the number of gold provisions.",
+	"psc_summary_help_gold": "The number of provisions in the gold benchmark used for this run.",
+	"psc_summary_help_extracted": "The number of extracted provisions evaluated in this run.",
+	"psc_summary_help_matched": "The number of one-to-one matches between gold and extracted provisions."
 }

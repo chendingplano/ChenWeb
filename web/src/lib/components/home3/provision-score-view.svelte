@@ -563,14 +563,14 @@
 		}}
 		scoreCards={detail?.score
 			? [
-					{ label: m.msc_score(), value: String(detail.score.main.score) },
-					{ label: m.msc_soft_precision(), value: pct(detail.score.main.soft_precision) },
-					{ label: m.msc_soft_recall(), value: pct(detail.score.main.soft_recall) },
-					{ label: m.msc_precision(), value: pct(detail.score.main.precision) },
-					{ label: m.msc_recall(), value: pct(detail.score.main.recall) },
-					{ label: m.psc_gold_rows(), value: String(detail.score.main.gold_rows) },
-					{ label: m.psc_predicted_rows(), value: String(detail.score.main.predicted_rows) },
-					{ label: m.msc_matched(), value: String(detail.score.main.matched) }
+					{ label: m.msc_score(), value: String(detail.score.main.score), help: m.psc_summary_help_score() },
+					{ label: m.msc_soft_precision(), value: pct(detail.score.main.soft_precision), help: m.psc_summary_help_weighted_precision() },
+					{ label: m.msc_soft_recall(), value: pct(detail.score.main.soft_recall), help: m.psc_summary_help_weighted_recall() },
+					{ label: m.msc_precision(), value: pct(detail.score.main.precision), help: m.psc_summary_help_precision() },
+					{ label: m.msc_recall(), value: pct(detail.score.main.recall), help: m.psc_summary_help_recall() },
+					{ label: m.psc_gold_rows(), value: String(detail.score.main.gold_rows), help: m.psc_summary_help_gold() },
+					{ label: m.psc_predicted_rows(), value: String(detail.score.main.predicted_rows), help: m.psc_summary_help_extracted() },
+					{ label: m.msc_matched(), value: String(detail.score.main.matched), help: m.psc_summary_help_matched() }
 				]
 			: []}
 		warnings={detail?.input?.warnings ?? []}

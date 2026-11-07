@@ -8662,5 +8662,13 @@
 	"psc_help_lines": "行号：提取的来源行与金标准来源行的重合程度；可以获得部分分数。",
 	"psc_help_subject": "主体：提取的主体是否与金标准主体一致。",
 	"psc_help_location": "位置：来源位置类型是否与金标准的位置类型一致。",
-	"psc_help_explicit": "明确性：提取的显式或隐式分类是否与金标准一致。"
+	"psc_help_explicit": "明确性：提取的显式或隐式分类是否与金标准一致。",
+	"psc_summary_help_score": "加权 F1 分数，由加权精确率和加权召回率计算，四舍五入为整数，并限制在 1–100 之间。",
+	"psc_summary_help_weighted_precision": "匹配得分总和除以提取的条款数。每个匹配根据字段检查结果获得分数。",
+	"psc_summary_help_weighted_recall": "匹配得分总和除以金标准条款数。遗漏的条款得分为零。",
+	"psc_summary_help_precision": "匹配的条款数除以提取的条款数。",
+	"psc_summary_help_recall": "匹配的条款数除以金标准条款数。",
+	"psc_summary_help_gold": "本次运行所用金标准中的条款数量。",
+	"psc_summary_help_extracted": "本次运行中评估的已提取条款数量。",
+	"psc_summary_help_matched": "金标准条款与提取条款之间一对一匹配的数量。"
 }
