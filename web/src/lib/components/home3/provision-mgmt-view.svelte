@@ -435,7 +435,7 @@
 		selectedMetric?.location_type,
 		selectedMetric?.provision,
 		selectedMetric?.source_table_rows ?? [],
-		rawLines
+		rawLines.filter((line) => normalizeMetricSpans(selectedMetric ?? undefined).some((span) => span.line_number === line.line_number))
 	));
 
 	// ---------- Keyword filter + provision name nav ----------
