@@ -43,7 +43,12 @@
 
 	type NavGreatGrandchild = { id: string; label: string };
 	// `href` on a leaf opens that route in a new tab instead of selecting a view.
-	type NavGrandchild = { id: string; label: string; href?: string; children?: NavGreatGrandchild[] };
+	type NavGrandchild = {
+		id: string;
+		label: string;
+		href?: string;
+		children?: NavGreatGrandchild[];
+	};
 	type NavChild = { id: string; label: string; href?: string; children?: NavGrandchild[] };
 	type NavItem = {
 		id: string;
@@ -135,7 +140,13 @@
 			]
 		},
 		{ id: 'chat', label: m.nav_chat(), icon: MessageSquareIcon, group: 'Workspace' },
-		{ id: 'agent-services', label: m.nav_agent_services(), icon: BookMarkedIcon, group: 'Workspace', href: '/home3/agent-services' },
+		{
+			id: 'agent-services',
+			label: m.nav_agent_services(),
+			icon: BookMarkedIcon,
+			group: 'Workspace',
+			href: '/home3/agent-services'
+		},
 		{
 			id: 'agents',
 			label: m.nav_agents(),
@@ -276,7 +287,10 @@
 										id: 'sysadmin-llm-decision-models',
 										label: m.nav_sysadmin_llm_decision_models(),
 										children: [
-											{ id: 'sysadmin-llm-decision-models-playground', label: m.nav_sysadmin_llm_decision_models_playground() }
+											{
+												id: 'sysadmin-llm-decision-models-playground',
+												label: m.nav_sysadmin_llm_decision_models_playground()
+											}
 										]
 									}
 								]
@@ -298,11 +312,20 @@
 					label: m.nav_sysadmin_db(),
 					children: [
 						{ id: 'sysadmin-db-consistency', label: m.nav_sysadmin_db_consistency() },
-						{ id: 'sysadmin-db-clean-artifact-data', label: m.nav_sysadmin_db_clean_artifact_data() },
+						{
+							id: 'sysadmin-db-clean-artifact-data',
+							label: m.nav_sysadmin_db_clean_artifact_data()
+						},
 						{ id: 'sysadmin-db-maint-log', label: m.nav_sysadmin_db_maint_log() },
 						{ id: 'sysadmin-db-resolve-ambiguous', label: m.nav_sysadmin_db_resolve_ambiguous() },
-						{ id: 'sysadmin-db-resolve-metric-range-types', label: m.nav_sysadmin_db_resolve_metric_range_types() },
-						{ id: 'sysadmin-db-resolve-orphaned-labels', label: m.nav_sysadmin_db_resolve_orphaned_labels() }
+						{
+							id: 'sysadmin-db-resolve-metric-range-types',
+							label: m.nav_sysadmin_db_resolve_metric_range_types()
+						},
+						{
+							id: 'sysadmin-db-resolve-orphaned-labels',
+							label: m.nav_sysadmin_db_resolve_orphaned_labels()
+						}
 					]
 				},
 				{
@@ -326,40 +349,67 @@
 										id: 'sysadmin-llm-metrics',
 										label: m.nav_sysadmin_llm_metrics(),
 										children: [
-											{ id: 'sysadmin-llm-review-metrics', label: m.nav_sysadmin_llm_review_metrics() },
+											{
+												id: 'sysadmin-llm-review-metrics',
+												label: m.nav_sysadmin_llm_review_metrics()
+											},
 											{ id: 'sysadmin-llm-metrics-gold', label: m.nav_sysadmin_llm_metrics_gold() },
-											{ id: 'sysadmin-llm-metrics-benchmark', label: m.nav_sysadmin_llm_metrics_benchmark() }
+											{
+												id: 'sysadmin-llm-metrics-benchmark',
+												label: m.nav_sysadmin_llm_metrics_benchmark()
+											}
 										]
 									},
 									{
 										id: 'sysadmin-llm-summaries',
 										label: m.nav_sysadmin_llm_summaries(),
 										children: [
-											{ id: 'sysadmin-llm-summaries-gold', label: m.nav_sysadmin_llm_summaries_gold() },
-											{ id: 'sysadmin-llm-summaries-benchmark', label: m.nav_sysadmin_llm_summaries_benchmark() }
+											{
+												id: 'sysadmin-llm-summaries-gold',
+												label: m.nav_sysadmin_llm_summaries_gold()
+											},
+											{
+												id: 'sysadmin-llm-summaries-benchmark',
+												label: m.nav_sysadmin_llm_summaries_benchmark()
+											}
 										]
 									},
 									{
 										id: 'sysadmin-llm-references',
 										label: m.nav_sysadmin_llm_references(),
 										children: [
-											{ id: 'sysadmin-llm-references-gold', label: m.nav_sysadmin_llm_references_gold() },
-											{ id: 'sysadmin-llm-references-benchmark', label: m.nav_sysadmin_llm_references_benchmark() }
+											{
+												id: 'sysadmin-llm-references-gold',
+												label: m.nav_sysadmin_llm_references_gold()
+											},
+											{
+												id: 'sysadmin-llm-references-benchmark',
+												label: m.nav_sysadmin_llm_references_benchmark()
+											}
 										]
 									},
 									{
 										id: 'sysadmin-llm-provisions',
 										label: m.nav_sysadmin_llm_provisions(),
 										children: [
-											{ id: 'sysadmin-llm-provisions-gold', label: m.nav_sysadmin_llm_provisions_gold() },
-											{ id: 'sysadmin-llm-provisions-benchmark', label: m.nav_sysadmin_llm_provisions_benchmark() }
+											{
+												id: 'sysadmin-llm-provisions-gold',
+												label: m.nav_sysadmin_llm_provisions_gold()
+											},
+											{
+												id: 'sysadmin-llm-provisions-benchmark',
+												label: m.nav_sysadmin_llm_provisions_benchmark()
+											}
 										]
 									},
 									{
 										id: 'sysadmin-hybrid-search-benchmark',
 										label: m.nav_sysadmin_hybrid_search_benchmark(),
 										children: [
-											{ id: 'sysadmin-hybrid-search-benchmark-run', label: m.nav_sysadmin_hybrid_search_benchmark_run() }
+											{
+												id: 'sysadmin-hybrid-search-benchmark-run',
+												label: m.nav_sysadmin_hybrid_search_benchmark_run()
+											}
 										]
 									}
 								]
@@ -371,12 +421,18 @@
 					label: m.nav_sysadmin_resources(),
 					children: [
 						{ id: 'sysadmin-resources-videos', label: m.nav_sysadmin_resources_videos() },
-						{ id: 'sysadmin-resources-product-drawings', label: m.nav_sysadmin_resources_product_drawings() },
+						{
+							id: 'sysadmin-resources-product-drawings',
+							label: m.nav_sysadmin_resources_product_drawings()
+						},
 						{
 							id: 'sysadmin-resources-import-product-names',
 							label: m.nav_sysadmin_resources_import_product_names(),
 							children: [
-								{ id: 'sysadmin-resources-china-mechanical-product-names', label: m.nav_sysadmin_resources_china_mechanical_product_names() }
+								{
+									id: 'sysadmin-resources-china-mechanical-product-names',
+									label: m.nav_sysadmin_resources_china_mechanical_product_names()
+								}
 							]
 						},
 						{
@@ -393,18 +449,35 @@
 				{
 					id: 'sysadmin-keyword-normalization',
 					label: m.nav_sysadmin_keyword_normalization(),
-					children: [{ id: 'sysadmin-keyword-rewrite-rules', label: m.nav_sysadmin_keyword_rewrite_rules() }]
+					children: [
+						{ id: 'sysadmin-keyword-rewrite-rules', label: m.nav_sysadmin_keyword_rewrite_rules() }
+					]
 				},
 				{
 					id: 'sysadmin-doc-process-pipeline',
 					label: m.nav_sysadmin_doc_process_pipeline(),
 					children: [
 						{ id: 'sysadmin-doc-process-dag', label: m.nav_sysadmin_doc_process_dag() },
-						{ id: 'sysadmin-doc-process-processors', label: m.nav_sysadmin_doc_process_processors() },
-						{ id: 'sysadmin-doc-process-semantic-decision-candidates', label: m.nav_sysadmin_doc_process_semantic_decision_candidates() },
-						{ id: 'sysadmin-doc-process-semantic-assertions', label: m.nav_sysadmin_doc_process_semantic_assertions() },
-						{ id: 'sysadmin-doc-process-assertion-evidence', label: m.nav_sysadmin_doc_process_assertion_evidence() },
-						{ id: 'sysadmin-doc-process-semantic-retry-queue', label: m.nav_sysadmin_doc_process_semantic_retry_queue() }
+						{
+							id: 'sysadmin-doc-process-processors',
+							label: m.nav_sysadmin_doc_process_processors()
+						},
+						{
+							id: 'sysadmin-doc-process-semantic-decision-candidates',
+							label: m.nav_sysadmin_doc_process_semantic_decision_candidates()
+						},
+						{
+							id: 'sysadmin-doc-process-semantic-assertions',
+							label: m.nav_sysadmin_doc_process_semantic_assertions()
+						},
+						{
+							id: 'sysadmin-doc-process-assertion-evidence',
+							label: m.nav_sysadmin_doc_process_assertion_evidence()
+						},
+						{
+							id: 'sysadmin-doc-process-semantic-retry-queue',
+							label: m.nav_sysadmin_doc_process_semantic_retry_queue()
+						}
 					]
 				},
 				{
@@ -413,7 +486,12 @@
 					children: [
 						...(pageKey === 'development'
 							? []
-							: [{ id: 'sysadmin-system-code-monitor', label: m.nav_sysadmin_system_code_monitor() }]),
+							: [
+									{
+										id: 'sysadmin-system-code-monitor',
+										label: m.nav_sysadmin_system_code_monitor()
+									}
+								]),
 						{ id: 'sysadmin-system-build-info', label: m.nav_sysadmin_system_build_info() },
 						{ id: 'sysadmin-system-calendar', label: m.nav_sysadmin_system_calendar() },
 						{ id: 'sysadmin-system-peak-hours', label: m.nav_sysadmin_system_peak_hours() },
@@ -481,7 +559,11 @@
 					children: [
 						{ id: 'dev-demos-customers', label: m.nav_dev_demos_customers() },
 						{ id: 'dev-demos-main-page', label: m.nav_dev_demos_main_page(), href: '/home7' },
-						{ id: 'dev-demos-jenny-main-page', label: m.nav_dev_demos_jenny_main_page(), href: '/home8' }
+						{
+							id: 'dev-demos-jenny-main-page',
+							label: m.nav_dev_demos_jenny_main_page(),
+							href: '/home8'
+						}
 					]
 				}
 			]
@@ -495,15 +577,21 @@
 			? resourcesNav
 			: pageKey === 'development'
 				? [
-						...mainNav.map((item) => item.id === 'coding'
-							? {
-								...item,
-								children: [
-									...(item.children ?? []),
-									{ id: 'coding-harnesses', label: m.nav_coding_harnesses(), children: [{ id: 'coding-harness-pi', label: m.nav_coding_harness_pi() }] }
-								]
-							}
-							: item),
+						...mainNav.map((item) =>
+							item.id === 'coding'
+								? {
+										...item,
+										children: [
+											...(item.children ?? []),
+											{
+												id: 'coding-harnesses',
+												label: m.nav_coding_harnesses(),
+												children: [{ id: 'coding-harness-pi', label: m.nav_coding_harness_pi() }]
+											}
+										]
+									}
+								: item
+						),
 						...developmentNav
 					]
 				: mainNav
@@ -627,12 +715,18 @@
 	const displayBottomNav = $derived(buildVisible(bottomNav));
 
 	$effect(() => {
-		const selection = resolveSelection(new URL(window.location.href), [...displayMainNav, ...displayBottomNav]);
+		const selection = resolveSelection(new URL(window.location.href), [
+			...displayMainNav,
+			...displayBottomNav
+		]);
 		if (selection) onRelabel?.(selection);
 	});
 
 	onMount(() => {
-		const selection = resolveSelection(new URL(window.location.href), [...displayMainNav, ...displayBottomNav]);
+		const selection = resolveSelection(new URL(window.location.href), [
+			...displayMainNav,
+			...displayBottomNav
+		]);
 		if (!selection) return;
 		onSelect(selection);
 		accordionOpen[selection.itemId] = true;
@@ -736,7 +830,10 @@
 	}
 
 	function isGrandchildActive(gc: NavGrandchild): boolean {
-		return !!activeMenu && (activeMenu.childId === gc.id || !!gc.children?.some((ggc) => activeMenu.childId === ggc.id));
+		return (
+			!!activeMenu &&
+			(activeMenu.childId === gc.id || !!gc.children?.some((ggc) => activeMenu.childId === ggc.id))
+		);
 	}
 
 	function isSubGroupActive(child: NavChild): boolean {
@@ -749,14 +846,14 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <aside
-	class="relative flex flex-shrink-0 flex-col overflow-hidden"
+	class="relative flex shrink-0 flex-col overflow-hidden"
 	style="width:{effectiveWidth}px; background:{surface2}; border-right:1px solid {borderColor}; transition:width {RAIL_TRANSITION};"
 	onmouseenter={() => onHoverChange(true)}
 	onmouseleave={() => onHoverChange(false)}
 >
 	<!-- Rail mode button at top -->
 	<div
-		class="flex flex-shrink-0 items-center px-2"
+		class="flex shrink-0 items-center px-2"
 		style="height:48px; border-bottom:1px solid {borderColor};"
 	>
 		{#if showLabels}
@@ -772,8 +869,12 @@
 					onmouseleave={(e) => {
 						(e.currentTarget as HTMLElement).style.color = textMuted;
 					}}
-					aria-label={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_shrink_navigation()}
-					title={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_shrink_navigation()}
+					aria-label={autoShrinkExpand
+						? m.nav_rail_disable_auto_shrink_expand()
+						: m.nav_rail_shrink_navigation()}
+					title={autoShrinkExpand
+						? m.nav_rail_disable_auto_shrink_expand()
+						: m.nav_rail_shrink_navigation()}
 				>
 					{#if autoShrinkExpand}
 						<PanelLeftIcon class="h-4 w-4" />
@@ -793,8 +894,12 @@
 				onmouseleave={(e) => {
 					(e.currentTarget as HTMLElement).style.color = textMuted;
 				}}
-				aria-label={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_expand_navigation()}
-				title={autoShrinkExpand ? m.nav_rail_disable_auto_shrink_expand() : m.nav_rail_expand_navigation()}
+				aria-label={autoShrinkExpand
+					? m.nav_rail_disable_auto_shrink_expand()
+					: m.nav_rail_expand_navigation()}
+				title={autoShrinkExpand
+					? m.nav_rail_disable_auto_shrink_expand()
+					: m.nav_rail_expand_navigation()}
 			>
 				<PanelLeftIcon class="h-5 w-5" />
 			</button>
@@ -840,14 +945,14 @@
 					title={!showLabels ? item.label : undefined}
 					aria-label={item.label}
 				>
-					<item.icon class="flex-shrink-0" style="width:20px; height:20px;" />
+					<item.icon class="shrink-0" style="width:20px; height:20px;" />
 					{#if showLabels}
 						<span class="flex-1 truncate text-left" style="font-size:14px; font-weight:500;"
 							>{item.label}</span
 						>
 						{#if item.children}
 							<ChevronDownIcon
-								class="flex-shrink-0 transition-transform duration-200"
+								class="shrink-0 transition-transform duration-200"
 								style="width:14px; height:14px; transform: rotate({accordionOpen[item.id]
 									? '180deg'
 									: '0deg'});"
@@ -885,10 +990,10 @@
 										}
 									}}
 								>
-									<FolderIcon class="h-4 w-4 flex-shrink-0" />
+									<FolderIcon class="h-4 w-4 shrink-0" />
 									<span class="flex-1 truncate text-left">{child.label}</span>
 									<ChevronDownIcon
-										class="flex-shrink-0 transition-transform duration-200"
+										class="shrink-0 transition-transform duration-200"
 										style="width:12px; height:12px; transform: rotate({subAccordionOpen[child.id]
 											? '180deg'
 											: '0deg'});"
@@ -896,43 +1001,60 @@
 								</button>
 								<!-- Grandchildren -->
 								{#if subAccordionOpen[child.id]}
-					<div class="ml-3" style="border-left:2px solid {borderColor};">
-						{#each child.children as gc (gc.id)}
-							{#if gc.children}
-								<button
-									onclick={() => toggleSubAccordion(gc.id)}
-									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
-									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:12px;"
-								>
-									<FolderIcon class="h-4 w-4 flex-shrink-0" />
-									<span class="flex-1 truncate">{gc.label}</span>
-									<ChevronDownIcon class="h-3 w-3" style="transform:rotate({subAccordionOpen[gc.id] ? '180deg' : '0deg'});" />
-								</button>
-								{#if subAccordionOpen[gc.id]}
 									<div class="ml-3" style="border-left:2px solid {borderColor};">
-										{#each gc.children as ggc (ggc.id)}
-											<button
-												onclick={() => selectItem(item, ggc)}
-												class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
-												style="color:{activeMenu?.childId === ggc.id ? accent : textMuted};background:{activeMenu?.childId === ggc.id ? accentTint : 'transparent'};font-size:12px;"
-											>
-												<FileTextIcon class="h-4 w-4 flex-shrink-0" />
-												{ggc.label}
-											</button>
+										{#each child.children as gc (gc.id)}
+											{#if gc.children}
+												<button
+													onclick={() => toggleSubAccordion(gc.id)}
+													class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
+													style="color:{isGrandchildActive(gc)
+														? accent
+														: textMuted};background:{isGrandchildActive(gc)
+														? accentTint
+														: 'transparent'};font-size:12px;"
+												>
+													<FolderIcon class="h-4 w-4 shrink-0" />
+													<span class="flex-1 truncate">{gc.label}</span>
+													<ChevronDownIcon
+														class="h-3 w-3"
+														style="transform:rotate({subAccordionOpen[gc.id] ? '180deg' : '0deg'});"
+													/>
+												</button>
+												{#if subAccordionOpen[gc.id]}
+													<div class="ml-3" style="border-left:2px solid {borderColor};">
+														{#each gc.children as ggc (ggc.id)}
+															<button
+																onclick={() => selectItem(item, ggc)}
+																class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
+																style="color:{activeMenu?.childId === ggc.id
+																	? accent
+																	: textMuted};background:{activeMenu?.childId === ggc.id
+																	? accentTint
+																	: 'transparent'};font-size:12px;"
+															>
+																<FileTextIcon class="h-4 w-4 shrink-0" />
+																{ggc.label}
+															</button>
+														{/each}
+													</div>
+												{/if}
+											{:else}
+												<button
+													onclick={() => selectItem(item, gc)}
+													class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
+													style="color:{isGrandchildActive(gc)
+														? accent
+														: textMuted};background:{isGrandchildActive(gc)
+														? accentTint
+														: 'transparent'};font-size:{child.id === 'sysadmin-llm-metrics'
+														? '11px'
+														: '13px'};"
+												>
+													<FileTextIcon class="h-4 w-4 shrink-0" />
+													{gc.label}
+												</button>
+											{/if}
 										{/each}
-									</div>
-								{/if}
-							{:else}
-								<button
-									onclick={() => selectItem(item, gc)}
-									class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors duration-150"
-									style="color:{isGrandchildActive(gc) ? accent : textMuted};background:{isGrandchildActive(gc) ? accentTint : 'transparent'};font-size:{child.id === 'sysadmin-llm-metrics' ? '11px' : '13px'};"
-								>
-									<FileTextIcon class="h-4 w-4 flex-shrink-0" />
-									{gc.label}
-								</button>
-							{/if}
-						{/each}
 									</div>
 								{/if}
 							{:else}
@@ -960,7 +1082,7 @@
 										}
 									}}
 								>
-									<FileTextIcon class="h-4 w-4 flex-shrink-0" />
+									<FileTextIcon class="h-4 w-4 shrink-0" />
 									{child.label}
 								</button>
 							{/if}
@@ -999,7 +1121,7 @@
 					title={!showLabels ? item.label : undefined}
 					aria-label={item.label}
 				>
-					<item.icon class="flex-shrink-0" style="width:20px; height:20px;" />
+					<item.icon class="shrink-0" style="width:20px; height:20px;" />
 					{#if showLabels}
 						<span class="flex-1 truncate text-left" style="font-size:14px; font-weight:500;"
 							>{item.label}</span
@@ -1011,12 +1133,12 @@
 	</nav>
 
 	<!-- User section at bottom -->
-	<div class="flex-shrink-0 p-2" style="border-top:1px solid {borderColor};">
+	<div class="shrink-0 p-2" style="border-top:1px solid {borderColor};">
 		{#if showLabels}
 			<div class="flex items-center gap-2 rounded-lg p-2" style="background:{hoverBg};">
 				<!-- Avatar -->
 				<div
-					class="flex flex-shrink-0 items-center justify-center rounded-lg text-xs font-semibold"
+					class="flex shrink-0 items-center justify-center rounded-lg text-xs font-semibold"
 					style="width:32px; height:32px; background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
 				>
 					{userInitials}
@@ -1034,7 +1156,7 @@
 						{#snippet child({ props })}
 							<button
 								{...props}
-								class="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-150"
+								class="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-150"
 								style="color:{textMuted};"
 								onmouseenter={(e) => {
 									(e.currentTarget as HTMLElement).style.color = textPrimary;
@@ -1057,9 +1179,7 @@
 							<UserCircle2Icon class="mr-2 h-4 w-4" />
 							{m.nav_user_info()}
 						</DropdownMenu.Item>
-						<DropdownMenu.Item
-							disabled
-						>
+						<DropdownMenu.Item disabled>
 							<CreditCardIcon class="mr-2 h-4 w-4" />
 							{m.nav_account()}
 						</DropdownMenu.Item>
@@ -1099,9 +1219,7 @@
 						<UserCircle2Icon class="mr-2 h-4 w-4" />
 						{m.nav_user_info()}
 					</DropdownMenu.Item>
-					<DropdownMenu.Item
-						disabled
-					>
+					<DropdownMenu.Item disabled>
 						<CreditCardIcon class="mr-2 h-4 w-4" />
 						{m.nav_account()}
 					</DropdownMenu.Item>
