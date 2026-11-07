@@ -2636,6 +2636,7 @@
 	.provision-local-filters .toolbar-select,
 	.provision-local-filters .gold-view-select {
 		box-sizing: border-box;
+		background: var(--filter-control-bg);
 		width: 100%;
 		max-width: none;
 		margin-left: 0;
@@ -2650,7 +2651,7 @@
 		flex: 1;
 		padding: 7px 10px;
 		border: 1px solid var(--ink-line-soft);
-		background: var(--panel-bg-alt);
+		background: var(--filter-control-bg);
 		color: var(--text-secondary);
 		font-family: var(--font-mono);
 		font-size: 11px;
