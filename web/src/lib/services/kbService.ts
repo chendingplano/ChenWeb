@@ -1861,7 +1861,12 @@ export type KbProvisionRecord = {
 	section?: string;
 	provision_kind?: string;
 	evidence?: string;
-	source_table_rows?: Array<{ line: number; rows: string[] }>;
+	source_table_rows?: Array<{
+		line: number;
+		rows?: string[];
+		cells?: string[];
+		row_hash?: Record<string, string>;
+	}>;
 };
 
 // A candidate a gold provision run excluded or merged (testbed.provisions_dropped).

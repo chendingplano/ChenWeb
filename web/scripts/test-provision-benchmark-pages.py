@@ -89,6 +89,24 @@ async def json_route(route, payload, status=200):
     await route.fulfill(status=status, content_type='application/json', body=json.dumps(payload, ensure_ascii=False))
 
 
+def continuation_pdf():
+    """Seven blank pages rendered by PDF.js to exercise actual overlay placement."""
+    objects = ['<< /Type /Catalog /Pages 2 0 R >>',
+               '<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R 9 0 R 11 0 R 13 0 R 15 0 R] /Count 7 >>']
+    for i in range(7):
+        objects += [f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> /Contents {4+i*2} 0 R >>',
+                    '<< /Length 0 >>\nstream\n\nendstream']
+    data, offsets = b'%PDF-1.4\n', [0]
+    for i, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += f'{i} 0 obj\n{obj}\nendobj\n'.encode()
+    xref = len(data)
+    data += f'xref\n0 {len(objects)+1}\n0000000000 65535 f \n'.encode()
+    for offset in offsets[1:]:
+        data += f'{offset:010} 00000 n \n'.encode()
+    return data + f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode()
+
+
 async def check_gold_page(ctx, labels, locale):
     page = await ctx.new_page()
     errors, calls = [], []
@@ -243,6 +261,41 @@ async def check_gold_page(ctx, labels, locale):
     await next_button.click()
     await expect(cards.nth(9)).to_have_class(re.compile(r'\bselected\b'))
     assert abs(await sidebar.locator('.metrics-list').evaluate('el => el.scrollTop') - scroll_top) < 1
+    # Record 40 cites a cell on the continuation page, not the canonical table box on page 6.
+    gold_results[:] = [dict(GOLD[0], id=40, prov_id='416_gprv_40',
+                           location_type='table_cell', provision='利用太阳能辅助堆肥方式处理易腐垃圾,应符合CJJ 52的要求。',
+                           source_line_spans=['121'], source_table_rows=[{
+                               'line': 121, 'rows': ['r2'],
+                               'row_hash': {'r2': 'solar-row'}}])]
+    await page.route('**/api/v1/kb/raw-lines?*', lambda r: json_route(r, {'status': True, 'lines': [{
+        'line_number': 121, 'page_number': 6, 'line_type': 'table',
+        'coords': [80, 721, 890, 843], 'content': '<table>' + (
+            ROOT / 'server/api/documentgeometry/testdata/record416-line.txt'
+        ).read_text().split('<table>', 1)[1].split('</table>', 1)[0] + '</table>'}]}))
+    await page.route('**/api/v1/kb/inputs/416/file', lambda r: r.fulfill(
+        content_type='application/pdf', body=continuation_pdf()))
+    await page.route('**/api/v1/kb/inputs/416/table-geometry', lambda r: json_route(r, {
+        'version': 1, 'algorithm': 'canonical-table-geometry-v5',
+        'coordinate_space': 'page-normalized-1000', 'tables': [{'line': 121, 'rows': [{
+            'id': 'r2', 'hash': 'solar-row', 'boxes': [{'page': 7, 'coords': [100, 170, 920, 270]}],
+            'cells': [{'id': 'r2:c4', 'boxes': [{'page': 7, 'coords': [440, 170, 750, 270]}]}]}]}]}))
+    await page.set_viewport_size({'width': 2400, 'height': 1100})
+    await page.reload()
+    await page.get_by_text(RECORD['title'], exact=False).first.click()
+    await sidebar.locator('.metric-card').first.click()
+    mark = page.locator('.pdf-table-highlight[data-source-table="121#r2:c4"]')
+    await expect(mark).to_have_count(1, timeout=20000)
+    assert await mark.evaluate('el => el.parentElement.id.endsWith("-overlay-7")')
+    await expect(page.locator('.pdf-highlight:not(.pdf-table-highlight)')).to_have_count(0)
+    assert await mark.evaluate('el => Math.abs(parseFloat(el.style.width) / el.parentElement.clientWidth - .31) < .01')
+    await page.wait_for_function('''() => {
+        const mark = document.querySelector('.pdf-table-highlight');
+        const host = document.querySelector('.pdf-canvas-host');
+        if (!mark || !host) return false;
+        const box = mark.getBoundingClientRect(), viewport = host.getBoundingClientRect();
+        return box.top >= viewport.top && box.bottom <= viewport.bottom;
+    }''')
+    await page.screenshot(path=str(SCREENSHOTS / f'gold-cell-{locale}.png'), full_page=True)
     assert not errors, errors
     await page.close()
 

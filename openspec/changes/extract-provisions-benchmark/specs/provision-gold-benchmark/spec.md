@@ -75,3 +75,17 @@ fields.
 #### Scenario: Read-back
 - **WHEN** the 416 run is saved
 - **THEN** reading `testbed.provisions` by its run key returns as many rows as the payload's provisions, with equal fields
+
+### Requirement: Gold provision table highlights
+The Gold Provisions viewer SHALL use saved table row and cell references to locate PDF
+highlights, including continuation pages. A resolved table reference SHALL suppress the
+ordinary canonical line-box highlight. For a legacy `table_cell` provision with only one
+cited row and no cell reference, the viewer SHALL narrow to the column containing the
+provision text only when exactly one source table cell contains that text after Unicode
+and whitespace normalization. Missing or ambiguous text SHALL retain the row reference.
+Stored gold records SHALL remain unchanged.
+
+#### Scenario: Record 40 highlights its continuation-page cell
+- **WHEN** record 416's provision `416_gprv_40` cites line 121, row r2, with `location_type = table_cell`
+- **AND** its provision text occurs uniquely in the technical-requirements cell
+- **THEN** the viewer highlights r2:c4 on PDF page 7 and does not highlight the table box on page 6

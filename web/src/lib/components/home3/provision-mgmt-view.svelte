@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { provisionTableReferences } from './provision-table-references';
 	import { m as i18n } from '$lib/paraglide/messages.js';
 	import { tick } from 'svelte';
 	import { browser } from '$app/environment';
@@ -425,6 +426,12 @@
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
 	});
+	let selectedTableReferences = $derived(provisionTableReferences(
+		selectedMetric?.location_type,
+		selectedMetric?.provision,
+		selectedMetric?.source_table_rows ?? [],
+		rawLines
+	));
 
 	// ---------- Keyword filter + provision name nav ----------
 	let allKeywords = $derived.by(() => {
@@ -927,11 +934,14 @@
 	function renderMetricHighlights(
 		pageNo: number,
 		viewport: PdfPageViewport,
-		overlay: HTMLDivElement
+		overlay: HTMLDivElement,
+		resolvedTableLines: ReadonlySet<number>
 	) {
 		const HIGHLIGHT_EXPAND_TOP_PX = 2;
 		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
-		const lines = selectedLinesByPage.get(pageNo) ?? [];
+		const lines = (selectedLinesByPage.get(pageNo) ?? []).filter(
+			(ln) => !resolvedTableLines.has(ln.line_number)
+		);
 		const rects = lines.flatMap((ln) => {
 			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
 			const vx1 = ln.coords[0] * viewport.width / 1000, vy1 = ln.coords[1] * viewport.height / 1000, vx2 = ln.coords[2] * viewport.width / 1000, vy2 = ln.coords[3] * viewport.height / 1000;
@@ -1871,6 +1881,7 @@
 							bind:numPages={pdfNumPages}
 							highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
 							renderHighlights={renderMetricHighlights}
+							tableReferences={selectedTableReferences}
 							bind:showingLines={showLines}
 							{darkMode}
 							onselect={handleDragSelect}
