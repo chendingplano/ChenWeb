@@ -2657,7 +2657,7 @@
 		font-size: 11px;
 		cursor: pointer;
 	}
-	.provision-sidebar-nav button:disabled { opacity: 0.45; cursor: not-allowed; }
+	.provision-sidebar-nav button:disabled { color: var(--text-muted); cursor: not-allowed; }
 	.provision-sidebar-nav button:not(:disabled):hover { border-color: var(--brass); color: var(--text-primary); }
 	.metric-sidebar {
 		position: relative;
