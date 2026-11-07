@@ -10,6 +10,7 @@ import (
 )
 
 func (p *ProvisionsProcessor) reviewProvisionPayload(ctx context.Context, inputText, promptText string, payload map[string]any, model string, unit, total int) (map[string]any, error) {
+	// Only v7 runs the second pass; v8 carries the audit-only rules in one pass.
 	if filepath.Base(p.PromptRef) != "prompt-extract-provisions-v7.md" || !provisionNeedsReview(inputText, payload) {
 		return payload, nil
 	}
@@ -106,7 +107,7 @@ func provisionReviewUnits(input string) []map[string]any {
 
 func provisionPromptUsesV2(ref string) bool {
 	switch filepath.Base(ref) {
-	case "prompt-extract-provisions-v6.md", "prompt-extract-provisions-v7.md", "prompt-audit-provision-extraction-v1.md":
+	case "prompt-extract-provisions-v6.md", "prompt-extract-provisions-v7.md", "prompt-extract-provisions-v8.md", "prompt-audit-provision-extraction-v1.md":
 		return true
 	default:
 		return false

@@ -135,6 +135,30 @@ func TestProvisionsReviewUsesSourceAndReplacesDraft(t *testing.T) {
 	}
 }
 
+func TestProvisionsV8IsSinglePass(t *testing.T) {
+	var draft map[string]any
+	_ = json.Unmarshal([]byte(`{"v":2,"l":"en","p":[{"n":"checks","t":"m","x":"A shall be clean, and dry.","s":[10],"lt":"s","q":0.9,"f":1}]}`), &draft)
+	extractor := &fakeJSONExtractor{outs: []map[string]any{draft}}
+	p := NewProvisionsProcessor(nil, nil, extractor, nil)
+	p.PromptRef, p.PromptText = "prompt-extract-provisions-v8.md", "instructions"
+	p.ReviewPromptErr, p.ReviewPromptText = nil, "review instructions"
+	source := `[{"flag":"n","line_number":10,"line_type":"list-item","content":"A shall be clean, and dry."}]`
+	payload, model, err := p.extractProvisionPayloadWithFallback(context.Background(), source, p.PromptText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.reviewProvisionPayload(context.Background(), source, p.PromptText, payload, model, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extractor.structuredCalledCount != 1 || extractor.contractNames[0] != "chenweb_provision_extraction_v2" {
+		t.Fatalf("v8 calls=%d contracts=%v, want one v2 call", extractor.structuredCalledCount, extractor.contractNames)
+	}
+	if len(got["provisions"].([]any)) != 1 || got["review_calls"] != nil {
+		t.Fatalf("v8 draft was reviewed: %#v", got)
+	}
+}
+
 func TestProvisionsChunkOwnershipAndDuplicates(t *testing.T) {
 	row := func(text string, spans ...string) any {
 		return map[string]any{"provision": text, "source_line_spans": spans}

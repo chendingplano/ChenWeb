@@ -1545,7 +1545,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v7.md")
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v8.md")
 	}
 
 	paths := make([]string, 0, 8)
