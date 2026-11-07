@@ -419,9 +419,15 @@
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
 	let provisionVisited = $state(false);
+	let metricsVisited = $state(false);
 	$effect(() => {
 		if (activeSection === 'kb-provision-tree' && knowledgeStoreState.activeStore) {
 			provisionVisited = true;
+		}
+	});
+	$effect(() => {
+		if (activeSection === 'kb-metrics' && knowledgeStoreState.activeStore) {
+			metricsVisited = true;
 		}
 	});
 	let metricDetails = $state<Snippet | null>(null);
@@ -444,9 +450,6 @@
 		metricShelfWidth = Math.max(220, Math.min(680, metricShelfDrag.width + metricShelfDrag.x - e.clientX));
 	}
 
-	$effect(() => {
-		if (activeSection !== 'kb-metrics') handleMetricDetailsChange(null);
-	});
 	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 	let searchArtifactType = $derived(
 		parseKbSearchArtifactType(page.url.searchParams.get('scope'))
@@ -887,6 +890,15 @@
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
+			{#if metricsVisited}
+				<div class="h-full" hidden={activeSection !== 'kb-metrics' || !knowledgeStoreState.activeStore}>
+					<MetricMgmtView
+						{darkMode}
+						onFocusModeChange={handleExtractionFocusMode}
+						onMetricDetailsChange={handleMetricDetailsChange}
+					/>
+				</div>
+			{/if}
 			{#if provisionVisited}
 				<div class="h-full" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
 					<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
@@ -945,11 +957,7 @@
 			{:else if activeSection === 'kb-input-details'}
 				<InputsMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metrics'}
-				<MetricMgmtView
-					{darkMode}
-					onFocusModeChange={handleExtractionFocusMode}
-					onMetricDetailsChange={handleMetricDetailsChange}
-				/>
+				<!-- The visited Metrics view remains mounted above. -->
 			{:else if activeSection === 'kb-references'}
 				<ReferencesMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metric-wiki'}
@@ -1068,16 +1076,18 @@
 			{/if}
 		</div>
 	</main>
-	{#if activeSection === 'kb-metrics' && metricDetails && metricShelfOpen}
-		<ContextShelf
-			{darkMode}
-			{metricDetails}
-			activeMenu={null}
-			width={metricShelfWidth}
-			open={metricShelfOpen}
-			onDragStart={startMetricShelfDrag}
-			onClose={() => (metricShelfOpen = false)}
-		/>
+	{#if metricDetails && metricShelfOpen}
+		<div class="h-full shrink-0" hidden={activeSection !== 'kb-metrics' || !knowledgeStoreState.activeStore}>
+			<ContextShelf
+				{darkMode}
+				{metricDetails}
+				activeMenu={null}
+				width={metricShelfWidth}
+				open={metricShelfOpen}
+				onDragStart={startMetricShelfDrag}
+				onClose={() => (metricShelfOpen = false)}
+			/>
+		</div>
 	{/if}
 </div>
 
