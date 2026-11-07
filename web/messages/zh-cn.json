@@ -8649,5 +8649,18 @@
 	"provision_mgmt_order_name_desc": "排序：条款名称降序",
 	"provision_mgmt_prev": "上一条",
 	"provision_mgmt_next": "下一条",
-	"provision_mgmt_no_filter_matches": "没有符合这些筛选条件的条款。"
+	"provision_mgmt_no_filter_matches": "没有符合这些筛选条件的条款。",
+	"psc_help_recall": "该百分比是此类别的匹配得分总和除以金标准条款数；遗漏的条款得分为零。数量表示匹配到的金标准条款数。",
+	"psc_help_accuracy": "该百分比是在可评估此字段的已匹配条款中，该字段检查结果的平均值。",
+	"psc_help_permission": "许可：允许采取某项行动的条款。",
+	"psc_help_instruction": "指令：规定如何执行某项行动的条款。",
+	"psc_help_requirement": "要求：规定必须履行的义务的条款。",
+	"psc_help_recommendation": "建议：建议采取某项行动的条款。",
+	"psc_help_prohibition": "禁止：禁止采取某项行动的条款。",
+	"psc_help_type": "类型：条款是强制性、推荐性还是可选的。",
+	"psc_help_text": "文本：提取的条款文本与金标准文本的相似程度；可以获得部分分数。",
+	"psc_help_lines": "行号：提取的来源行与金标准来源行的重合程度；可以获得部分分数。",
+	"psc_help_subject": "主体：提取的主体是否与金标准主体一致。",
+	"psc_help_location": "位置：来源位置类型是否与金标准的位置类型一致。",
+	"psc_help_explicit": "明确性：提取的显式或隐式分类是否与金标准一致。"
 }

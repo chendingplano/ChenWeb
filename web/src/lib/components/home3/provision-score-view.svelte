@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, type Snippet } from 'svelte';
+	import Info from '@lucide/svelte/icons/info';
+	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { getRawLines, type RawLine } from '$lib/services/kbService';
@@ -77,6 +79,15 @@
 		subject: m.psc_field_subject,
 		location_type: m.psc_field_location_type,
 		is_explicit: m.psc_field_is_explicit
+	};
+	const fieldHelp: Record<string, () => string> = {
+		provision_type: m.psc_help_type, text: m.psc_help_text, lines: m.psc_help_lines,
+		subject: m.psc_help_subject, location_type: m.psc_help_location, is_explicit: m.psc_help_explicit
+	};
+	const kindHelp: Record<string, () => string> = {
+		permission: m.psc_help_permission, instruction: m.psc_help_instruction,
+		requirement: m.psc_help_requirement, recommendation: m.psc_help_recommendation,
+		prohibition: m.psc_help_prohibition
 	};
 	const comparedFields: Record<string, string> = {
 		provision_type: 'provision_type',
@@ -585,6 +596,12 @@
 		</details>
 		{#if evidenceKind}<div class="evidence-view"><div class="section-head"><h3>{evidenceLabels[evidenceKind]()}</h3><button onclick={() => (evidenceKind = '')}>{m.msc_close_evidence()}</button></div><pre>{evidenceText}</pre></div>{/if}
 	{/snippet}
+	{#snippet info(description: string, calculation: string)}
+		<Tooltip.Provider><Tooltip.Root>
+			<Tooltip.Trigger class="stat-info" aria-label={description}><Info size={14} aria-hidden="true" /></Tooltip.Trigger>
+			<Tooltip.Content class="max-w-72" sideOffset={6}>{description} {calculation}</Tooltip.Content>
+		</Tooltip.Root></Tooltip.Provider>
+	{/snippet}
 	{#snippet reportBody(props: ReportBodyProps)}
 		{@const selectSource = props.selectSource}
 		{#if detail}
@@ -608,14 +625,14 @@
 						<h3>{m.psc_recall_by_kind()}</h3>
 						<div class="stats">
 							{#each Object.entries(detail.score.recall_by_kind) as [kind, value]}<div>
-									<span>{kind}</span><strong>{pct(value.soft_recall)}</strong><small>{m.psc_kind_matched({ matched: value.matched, gold: value.gold_rows })}</small>
+									<span class="stat-label">{kind}{#if kindHelp[kind]}{@render info(kindHelp[kind](), m.psc_help_recall())}{/if}</span><strong>{pct(value.soft_recall)}</strong><small>{m.psc_kind_matched({ matched: value.matched, gold: value.gold_rows })}</small>
 								</div>{/each}
 						</div>
 					{/if}
 					<h3>{m.msc_field_accuracy()}</h3>
 					<div class="stats">
 						{#each Object.entries(detail.score.field_accuracy) as [field, accuracy]}<div>
-								<span>{fields[field]?.() ?? field}</span><strong>{pct(accuracy)}</strong>
+								<span class="stat-label">{fields[field]?.() ?? field}{#if fieldHelp[field]}{@render info(fieldHelp[field](), m.psc_help_accuracy())}{/if}</span><strong>{pct(accuracy)}</strong>
 							</div>{/each}
 					</div>
 					<label class="pair-filter">
@@ -935,6 +952,9 @@
 		font-size: 12px;
 		color: var(--muted);
 	}
+	.stats .stat-label { display: flex; align-items: center; gap: 5px; }
+	:global(.stat-info) { display: inline-flex; padding: 0; border: 0; background: transparent; color: var(--muted); }
+	:global(.stat-info:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.stats strong {
 		display: block;
 		font-size: 22px;

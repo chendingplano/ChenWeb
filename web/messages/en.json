@@ -8649,5 +8649,18 @@
 	"provision_mgmt_order_name_desc": "Order by: provision name ↓",
 	"provision_mgmt_prev": "Prev",
 	"provision_mgmt_next": "Next",
-	"provision_mgmt_no_filter_matches": "No provisions match these filters."
+	"provision_mgmt_no_filter_matches": "No provisions match these filters.",
+	"psc_help_recall": "The percentage is total match credit for this kind divided by its gold provisions; missed provisions contribute zero. The count shows matched gold provisions.",
+	"psc_help_accuracy": "The percentage is the average check result across matched provisions where this field can be assessed.",
+	"psc_help_permission": "Permission: a provision allowing an action.",
+	"psc_help_instruction": "Instruction: a provision directing how an action is performed.",
+	"psc_help_requirement": "Requirement: a provision stating an obligation.",
+	"psc_help_recommendation": "Recommendation: a provision advising an action.",
+	"psc_help_prohibition": "Prohibition: a provision forbidding an action.",
+	"psc_help_type": "Type: whether the provision is mandatory, recommended, or optional.",
+	"psc_help_text": "Text: similarity between the extracted and gold provision texts; partial credit is possible.",
+	"psc_help_lines": "Lines: overlap between extracted and gold source lines; partial credit is possible.",
+	"psc_help_subject": "Subject: whether the extracted subject matches the gold subject.",
+	"psc_help_location": "Location: whether the source location type matches the gold location type.",
+	"psc_help_explicit": "Explicit: whether the extracted explicit or implicit classification matches gold."
 }
