@@ -5,13 +5,16 @@
 	let { id, tip, name }: { id: string; tip: string; name: string } = $props();
 	let open = $state(false);
 	let showTip = $state(false);
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') { open = false; showTip = false; }
+	}
 </script>
 
-<span class="help-tip" onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { open = false; showTip = false; } }} onkeydown={(e) => { if (e.key === 'Escape') { open = false; showTip = false; } }}>
-	<button type="button" class="icon" aria-label={m.wpi_string_options()} title={m.wpi_string_options()} aria-haspopup="menu" aria-expanded={open} onclick={() => { open = !open; showTip = false; }}>⋮</button>
+<span class="help-tip" onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { open = false; showTip = false; } }}>
+	<button type="button" class="icon" aria-label={m.wpi_string_options()} title={m.wpi_string_options()} aria-haspopup="menu" aria-expanded={open} onkeydown={handleKeydown} onclick={() => { open = !open; showTip = false; }}>⋮</button>
 	{#if open}
 		<span class="menu" role="menu" aria-label={name}>
-			<button type="button" role="menuitem" aria-describedby={showTip ? id : undefined} onclick={() => (showTip = !showTip)}>{m.wpi_create_element_help_tip()}</button>
+			<button type="button" role="menuitem" aria-describedby={showTip ? id : undefined} onkeydown={handleKeydown} onclick={() => (showTip = !showTip)}>{m.wpi_create_element_help_tip()}</button>
 			{#if showTip}<span {id} role="tooltip" class="tip">{tip}</span>{/if}
 		</span>
 	{/if}
