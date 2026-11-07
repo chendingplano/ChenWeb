@@ -31,6 +31,8 @@
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
+	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import TagIcon from '@lucide/svelte/icons/tag';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
@@ -1479,18 +1481,20 @@
 			: `grid-template-columns: auto ${provListWidth}px minmax(0, 1fr)`}
 	>
 		{#if !recordBrowserFolded}
-			<div class="record-browser-column" class:folded={source === 'testbed' && goldRecordsFolded}>
+			<div class={source === 'testbed' && goldRecordsFolded ? 'record-browser-rail' : 'record-browser-slot'}>
 				{#if source === 'testbed'}
 					<button
 						type="button"
-						class="record-browser-toggle"
+						class="record-fold-toggle"
+						class:rail-toggle={goldRecordsFolded}
 						title={goldRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
 						aria-label={goldRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
 						aria-expanded={!goldRecordsFolded}
 						onclick={() => (goldRecordsFolded = !goldRecordsFolded)}
 					>
-						{#if goldRecordsFolded}<ChevronRightIcon size={16} />{:else}<ChevronLeftIcon size={16} />{/if}
+						{#if goldRecordsFolded}<PanelLeftOpenIcon class="toolbar-icon" />{:else}<PanelLeftCloseIcon class="toolbar-icon" />{/if}
 					</button>
+					{#if goldRecordsFolded}<span>{i18n.provision_mgmt_record()}</span>{/if}
 				{/if}
 				<div class="record-browser-content" hidden={source === 'testbed' && goldRecordsFolded}>
 			<KbInputRecordBrowser
@@ -2418,32 +2422,65 @@
 	}
 
 	/* ---------- METRIC SIDEBAR ---------- */
-	.record-browser-column {
-		display: flex;
-		flex-direction: column;
+	.record-browser-slot {
+		position: relative;
 		min-height: 0;
 		min-width: 0;
-		background: var(--panel-bg);
 	}
-	.record-browser-column.folded { width: 32px; }
-	.record-browser-content { flex: 1; min-height: 0; }
+	.record-browser-content { height: 100%; min-height: 0; }
 	.record-browser-content[hidden] { display: none; }
-	.record-browser-toggle {
-		align-self: flex-end;
-		display: grid;
-		place-items: center;
+	.record-fold-toggle {
+		all: unset;
+		position: absolute;
+		top: 10px;
+		right: 12px;
+		z-index: 6;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		width: 28px;
 		height: 28px;
-		flex-shrink: 0;
-		margin: 2px;
-		padding: 0;
-		border: 1px solid var(--ink-line);
-		border-radius: 5px;
+		border: 1px solid color-mix(in srgb, var(--crimson) 70%, var(--ink-line));
 		background: var(--panel-bg-alt);
 		color: var(--text-secondary);
 		cursor: pointer;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+		transition: border-color 120ms, color 120ms, background 120ms;
 	}
-	.record-browser-toggle:hover { color: var(--brass); }
+	.record-fold-toggle:hover,
+	.record-fold-toggle:focus-visible {
+		border-color: var(--brass);
+		color: var(--brass);
+		background: var(--panel-bg);
+	}
+	.record-browser-rail {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 42px;
+		box-sizing: border-box;
+		border-right: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		color: var(--text-muted);
+		min-width: 0;
+		overflow: hidden;
+	}
+	.record-browser-rail span {
+		position: absolute;
+		bottom: 18px;
+		left: 50%;
+		transform: translateX(-50%) rotate(-90deg);
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+	.rail-toggle {
+		position: static;
+		box-shadow: none;
+	}
 	.provision-filter-disclosure {
 		flex-shrink: 0;
 		margin: 0 16px 14px;

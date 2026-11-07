@@ -129,8 +129,15 @@ async def check_gold_page(ctx, labels, locale):
     await expect(rail).to_have_attribute('style', rail_style)
     await expect(page.locator('.metric-card').first).to_have_class(re.compile(r'\bselected\b'))
     for _ in range(2):
-        await page.get_by_role('button', name=labels['provision_mgmt_fold_records'], exact=True).click(timeout=3000)
+        fold = page.get_by_role('button', name=labels['provision_mgmt_fold_records'], exact=True)
+        browser_box = await root.locator('.browser-shell').bounding_box()
+        button_box = await fold.bounding_box()
+        assert abs(button_box['y'] - browser_box['y'] - 10) < 1, 'fold icon must overlay the record browser'
+        assert abs(browser_box['x'] + browser_box['width'] - button_box['x'] - button_box['width'] - 12) < 1
+        await fold.click(timeout=3000)
         await expect(root.locator('.browser-shell')).to_be_hidden()
+        await expect(root.locator('.record-browser-rail')).to_have_css('width', '42px')
+        await expect(root.locator('.record-browser-rail > span')).to_be_visible()
         await expect(page.locator('.metric-card').first).to_be_visible()
         await expect(rail).to_have_attribute('style', rail_style)
         await page.get_by_role('button', name=labels['provision_mgmt_expand_records'], exact=True).click()
