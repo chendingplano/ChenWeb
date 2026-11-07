@@ -6983,6 +6983,7 @@
 	"msc_select_document": "请选择文档以运行基准评分。",
 	"msc_no_gold": "此文档没有可用的已保存黄金基准。",
 	"msc_history": "基准评分历史",
+	"psc_run_id": "运行 ID",
 	"msc_all_documents": "所有文档",
 	"msc_selected_document": "所选文档",
 	"msc_refresh": "刷新",

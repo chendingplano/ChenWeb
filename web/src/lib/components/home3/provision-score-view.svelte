@@ -521,13 +521,13 @@
 			<table>
 				<thead
 					><tr
-						><th>{m.msc_document()}</th><th>{m.msc_model()}</th><th>{m.msc_created()}</th><th>{m.msc_status()}</th><th
+						><th>{m.psc_run_id()}</th><th>{m.msc_document()}</th><th>{m.msc_model()}</th><th>{m.msc_created()}</th><th>{m.msc_status()}</th><th
 							>{m.msc_score()}</th
 						><th>{m.msc_open()}</th></tr
 					></thead
 				><tbody
 					>{#each runs as run}<tr class:chosen={detail?.id === run.id}
-							><td>{run.title || m.msc_record({ id: run.input_record_id })}<small>{m.msc_record({ id: run.input_record_id })}</small></td
+							><td>{run.id}</td><td>{run.title || m.msc_record({ id: run.input_record_id })}<small>{m.msc_record({ id: run.input_record_id })}</small></td
 							><td>{run.model_name}</td><td>{date(run.created_at)}</td><td
 								><span class:failed={run.status === 'failed'}>{status(run.status)}</span></td
 							><td>{run.score?.score ?? m.msc_na()}</td><td><button onclick={() => open(run.id)}>{m.msc_open()}</button></td></tr

@@ -6983,6 +6983,7 @@
 	"msc_select_document": "Select a document to run a benchmark.",
 	"msc_no_gold": "No saved gold runs are available for this document.",
 	"msc_history": "Benchmark history",
+	"psc_run_id": "Run ID",
 	"msc_all_documents": "All documents",
 	"msc_selected_document": "Selected document",
 	"msc_refresh": "Refresh",
