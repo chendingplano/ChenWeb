@@ -73,6 +73,7 @@
 	let dialogInputLine = $derived(darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(26,20,16,0.12)');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
 	let panelBgAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
+	let filterControlBg = $derived(darkMode ? '#303A4B' : '#FFFFFF');
 	let inkLine = $derived(darkMode ? '#2A3140' : '#D7CFB8');
 	let inkLineSoft = $derived(darkMode ? '#1F2530' : '#E5DEC8');
 	let textPrimary = $derived(darkMode ? '#EDE7D3' : '#1A1410');
@@ -89,7 +90,7 @@
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 	// ---------- State ----------
 	let recordBrowserFolded = $state(false);
-	let goldRecordsFolded = $state(false);
+	let inputRecordsFolded = $state(false);
 	let keywordFilter = $state('');
 	let confidenceFilter = $state('');
 	let provisionNameFilter = $state('');
@@ -1110,12 +1111,6 @@
 		metrics = view === 'dropped' ? droppedRows : goldRows;
 	}
 
-	function enterFocusMode() {
-		if (recordBrowserFolded) return;
-		recordBrowserFolded = true;
-		onFocusModeChange?.(true);
-	}
-
 	function goBack() {
 		if (!recordBrowserFolded) return;
 		recordBrowserFolded = false;
@@ -1214,8 +1209,6 @@
 	async function selectMetric(m: KbProvisionRecord) {
 		selectedMetricId = m.id;
 		highlightSelectionVersion += 1;
-		// Keep the record browser and navigation available while reviewing gold provisions.
-		if (source !== 'testbed') enterFocusMode();
 		const first = normalizeMetricSpans(m)[0];
 		if (!first) return;
 
@@ -1475,6 +1468,7 @@
 	class="metric-mgmt select-text"
 	style="
 		--page-bg:{pageBg};
+		--filter-control-bg:{filterControlBg};
 		--doc-frame-bg:{docFrameBg};
 		--table-head-bg:{tableHeadBg};
 		--dialog-section-bg:{dialogSectionBg};
@@ -1531,22 +1525,20 @@
 			: `grid-template-columns: auto ${provListWidth}px minmax(0, 1fr)`}
 	>
 		{#if !recordBrowserFolded}
-			<div class={source === 'testbed' && goldRecordsFolded ? 'record-browser-rail' : 'record-browser-slot'}>
-				{#if source === 'testbed'}
+			<div class={inputRecordsFolded ? 'record-browser-rail' : 'record-browser-slot'}>
 					<button
 						type="button"
 						class="record-fold-toggle"
-						class:rail-toggle={goldRecordsFolded}
-						title={goldRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
-						aria-label={goldRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
-						aria-expanded={!goldRecordsFolded}
-						onclick={() => (goldRecordsFolded = !goldRecordsFolded)}
+						class:rail-toggle={inputRecordsFolded}
+						title={inputRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
+						aria-label={inputRecordsFolded ? i18n.provision_mgmt_expand_records() : i18n.provision_mgmt_fold_records()}
+						aria-expanded={!inputRecordsFolded}
+						onclick={() => (inputRecordsFolded = !inputRecordsFolded)}
 					>
-						{#if goldRecordsFolded}<PanelLeftOpenIcon class="toolbar-icon" />{:else}<PanelLeftCloseIcon class="toolbar-icon" />{/if}
+						{#if inputRecordsFolded}<PanelLeftOpenIcon class="toolbar-icon" />{:else}<PanelLeftCloseIcon class="toolbar-icon" />{/if}
 					</button>
-					{#if goldRecordsFolded}<span>{i18n.provision_mgmt_record()}</span>{/if}
-				{/if}
-				<div class="record-browser-content" hidden={source === 'testbed' && goldRecordsFolded}>
+					{#if inputRecordsFolded}<span>{i18n.provision_mgmt_record()}</span>{/if}
+				<div class="record-browser-content" hidden={inputRecordsFolded}>
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey={source === 'testbed' ? 'gold-provisions-record-browser' : 'provisions-record-browser'}
@@ -1577,8 +1569,7 @@
 					<div class="left-meta-title">{i18n.provision_mgmt_provisions()}</div>
 					<div class="left-meta-count">{i18n.provision_mgmt_found({ metricsCount: filteredMetrics.length })}</div>
 				</div>
-				{#if source === 'testbed'}
-					<details class="provision-filter-disclosure" open>
+					<details class="provision-filter-disclosure">
 						<summary>{i18n.provision_mgmt_filters()}</summary>
 						<div class="provision-local-filters">
 							<input class="toolbar-kw-input" type="search" placeholder={i18n.provision_mgmt_filter_name()} aria-label={i18n.provision_mgmt_filter_name()} bind:value={provisionNameFilter} />
@@ -1599,6 +1590,7 @@
 								<option value="name_asc">{i18n.provision_mgmt_order_name_asc()}</option>
 								<option value="name_desc">{i18n.provision_mgmt_order_name_desc()}</option>
 							</select>
+							{#if source === 'testbed'}
 							<select
 								class="toolbar-select gold-view-select"
 								aria-label={i18n.provision_mgmt_list_view()}
@@ -1608,13 +1600,13 @@
 								<option value="gold">{i18n.provision_mgmt_list_view_gold()}</option>
 								<option value="dropped">{i18n.provision_mgmt_list_view_dropped()}</option>
 							</select>
+							{/if}
 						</div>
 					</details>
 					<div class="provision-sidebar-nav">
 						<button type="button" onclick={goToPrevMetric} disabled={!prevMetric}>{i18n.provision_mgmt_prev()}</button>
 						<button type="button" onclick={goToNextMetric} disabled={!nextMetric}>{i18n.provision_mgmt_next()}</button>
 					</div>
-				{/if}
 
 				<div class="metrics-list" bind:this={metricsList}>
 					{#if errorMsg}
@@ -2722,7 +2714,7 @@
 		all: unset;
 		cursor: pointer;
 		display: flex;
-		background: var(--panel-bg-alt);
+		background: var(--filter-control-bg);
 		border: 1px solid var(--ink-line-soft);
 		position: relative;
 		transition:
