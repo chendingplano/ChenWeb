@@ -239,14 +239,14 @@ func TestProvisionsCompactResponseLanguageAndLegacyCompatibility(t *testing.T) {
 	} {
 		t.Run(tc.language+"/"+tc.format, func(t *testing.T) {
 			source, _ := json.Marshal(map[string]any{"language": tc.language, "output_format": tc.format,
-				"provisions": []any{map[string]any{"objects": []any{map[string]any{"object_name": "垃圾"}}}}})
+				"provisions": []any{map[string]any{"source_line_spans": []any{"42"}, "objects": []any{map[string]any{"object_name": "垃圾"}}}}})
 			got := extractProvisionTestPayload(t, string(source))
 			p := got["provisions"].([]any)[0].(map[string]any)
 			o := p["objects"].([]any)[0].(map[string]any)
 			if asString(o["object_name_zh"]) != tc.wantZh {
 				t.Errorf("object_name_zh = %#v, want %q", o["object_name_zh"], tc.wantZh)
 			}
-			if tc.format != "compact-v1" && (len(p) != 1 || len(o) != 1) {
+			if tc.format != "compact-v1" && (len(p) != 2 || len(o) != 1) {
 				t.Fatalf("legacy payload was expanded: %#v", got)
 			}
 		})

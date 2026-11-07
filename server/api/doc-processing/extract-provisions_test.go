@@ -756,7 +756,7 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback
 			{
 				"language": "en",
 				"provisions": []any{
-					map[string]any{"provision": "The device shall log all alarms."},
+					map[string]any{"provision": "The device shall log all alarms.", "source_line_spans": []any{"10"}},
 				},
 			},
 		},
@@ -799,7 +799,8 @@ func TestProvisionsProcessor_ExtractProvisionPayloadUsesStructuredContractWhenAv
 		"language": "en",
 		"provisions": []any{
 			map[string]any{
-				"provision": "The device shall log all alarms.",
+				"provision":         "The device shall log all alarms.",
+				"source_line_spans": []any{"10"},
 			},
 		},
 	}}

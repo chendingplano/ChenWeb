@@ -820,6 +820,12 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 	if !ok {
 		return nil, fmt.Errorf("(MID_26050547) llm output field 'provisions' must be an array, JSON:%v", payload)
 	}
+	for i, item := range items {
+		provision, ok := item.(map[string]any)
+		if !ok || len(normalizeProvisionSourceLineSpans(provision["source_line_spans"], nil)) == 0 {
+			return nil, fmt.Errorf("(MID_20261107_521) provision %d has no usable source_line_spans", i+1)
+		}
+	}
 	return expandCompactProvisionPayload(payload, items), nil
 }
 
@@ -1509,7 +1515,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v4.md")
+		promptRef = promptRefFromEnvKeys([]string{"EXTRACT_PROVISIONS_PROMPT", "PROMPT_FILE_NAME"}, "prompt-extract-provisions-v5.md")
 	}
 
 	paths := make([]string, 0, 8)

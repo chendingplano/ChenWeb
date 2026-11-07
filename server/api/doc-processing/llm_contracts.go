@@ -170,8 +170,10 @@ func provisionExtractionContract() llmclients.StructuredOutputContract {
 	return newDocProcessingContract("chenweb_provision_extraction", map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"language":   schemaString(),
-			"provisions": schemaArray(),
+			"language": schemaString(),
+			"provisions": schemaArrayOfObjects(map[string]any{
+				"source_line_spans": map[string]any{"type": "array", "minItems": 1},
+			}, []string{"source_line_spans"}, true),
 		},
 		"required":             []string{"provisions"},
 		"additionalProperties": true,
