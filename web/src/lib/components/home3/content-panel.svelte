@@ -1,5 +1,6 @@
 <script lang="ts">
-import type { Snippet } from 'svelte';
+import { tick, type Snippet } from 'svelte';
+import { captureScroll, restoreScroll, type ScrollSnapshot } from './menu-scroll';
 import type { KbReferenceDetails } from '$lib/services/kbService';
 	import { m } from '$lib/paraglide/messages.js';
 	import BuildInfoView from '$lib/components/home3/build-info-view.svelte';
@@ -198,6 +199,35 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		ontology: m.content_panel_browse_and_manage_ontology_artifacts()
 	};
 
+	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
+	const retainedPages = [
+		{ id: 'sysadmin-jetstream-events', component: JetStreamEventsView },
+		{ id: 'sysadmin-jetstream-subjects', component: JetStreamSubjectsView },
+		{ id: 'sysadmin-alert-logs', component: AlertLogsView },
+		{ id: 'sysadmin-db-maint-log', component: DbMaintLogView },
+		{ id: 'sysadmin-system-build-info', component: BuildInfoView }
+	];
+	let visitedPages = $state<string[]>([]);
+	let contentMain: HTMLElement;
+	let previousPage: string | undefined;
+	const pageScroll = new Map<string, ScrollSnapshot>();
+	$effect.pre(() => {
+		const current = activeMenu?.childId;
+		if (current === previousPage) return;
+		if (previousPage && contentMain) {
+			const previous = contentMain.querySelector<HTMLElement>(`[data-retained-page="${previousPage}"]`);
+			if (previous) pageScroll.set(previousPage, captureScroll(contentMain, previous));
+		}
+		previousPage = current;
+		if (current && retainedPages.some((entry) => entry.id === current) && !visitedPages.includes(current)) {
+			visitedPages = [...visitedPages, current];
+		}
+		if (current && pageScroll.has(current)) {
+			void tick().then(() => {
+				if (previousPage === current && contentMain) restoreScroll(contentMain, pageScroll.get(current)!);
+			});
+		}
+	});
 	let wpiEditorVisited = $state(false);
 	$effect(() => { if (activeMenu?.childId === 'wpi-editor') wpiEditorVisited = true; });
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
@@ -254,6 +284,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 </script>
 
 <main
+	bind:this={contentMain}
 	class="relative flex min-w-0 flex-1 flex-col {activeMenu?.childId === 'sysadmin-llm-chat-sessions'
 		? 'overflow-hidden'
 		: 'overflow-y-auto'}"
@@ -316,7 +347,16 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 
 	<!-- Main content area -->
 	<div class="min-w-0 flex-1 {showFooter ? '' : 'min-h-0'}">
-		{#if activeMenu?.childId === 'dev-demos-customers'}
+		{#each retainedPages as retained (retained.id)}
+			{#if visitedPages.includes(retained.id)}
+				<div class:h-full={retained.id === 'sysadmin-alert-logs'} data-retained-page={retained.id} hidden={activeMenu?.childId !== retained.id} inert={activeMenu?.childId !== retained.id}>
+					<retained.component {darkMode} />
+				</div>
+			{/if}
+		{/each}
+		{#if retainedPages.some((entry) => entry.id === activeMenu?.childId)}
+			<!-- Retained page is rendered above. -->
+		{:else if activeMenu?.childId === 'dev-demos-customers'}
 			<iframe
 				src="/wpi/customers-demo"
 				title={m.nav_dev_demos_customers()}
@@ -375,18 +415,15 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<CdmEditorShell {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-logs'}
 			<JetStreamLogsView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-jetstream-events'}
-			<JetStreamEventsView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-jetstream-subjects'}
-			<JetStreamSubjectsView {darkMode} />
+
+
 		{:else if activeMenu?.childId === 'sysadmin-doc-proc-logs'}
 			<DocProcLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-usage-logs'}
 			<LLMUsageLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-review-logs'}
 			<DocReviewLogsView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-alert-logs'}
-			<AlertLogsView {darkMode} />
+
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-embedding'}
@@ -419,8 +456,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<DbConsistencyView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-clean-artifact-data'}
 			<CleanArtifactDataView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-db-maint-log'}
-			<DbMaintLogView {darkMode} />
+
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-ambiguous'}
 			<ResolveAmbiguousObjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-metric-range-types'}
@@ -489,8 +525,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<CodeMonitorView {darkMode} />
 		{:else if activeMenu?.childId === 'dev-modules'}
 			<ReusableModulesView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-system-build-info'}
-			<BuildInfoView {darkMode} />
+
 		{:else if activeMenu?.childId === 'sysadmin-system-peak-hours'}
 			<PeakHoursView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-system-releases'}
