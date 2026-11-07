@@ -99,6 +99,7 @@
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbProvisionRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
+	let metricsList: HTMLDivElement | undefined = $state();
 	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
@@ -1113,11 +1114,29 @@
 	}
 
 	function goToPrevMetric() {
-		if (prevMetric) void selectMetric(prevMetric);
+		if (prevMetric) void navigateMetric(prevMetric);
 	}
 
 	function goToNextMetric() {
-		if (nextMetric) void selectMetric(nextMetric);
+		if (nextMetric) void navigateMetric(nextMetric);
+	}
+
+	async function navigateMetric(metric: KbProvisionRecord) {
+		void selectMetric(metric);
+		await tick();
+		const card = metricsList?.querySelector<HTMLElement>('.metric-card.selected');
+		if (!metricsList || !card) return;
+		const viewport = metricsList.getBoundingClientRect();
+		const top = viewport.top + metricsList.clientTop;
+		const bottom = top + metricsList.clientHeight;
+		const bounds = card.getBoundingClientRect();
+		if (bounds.top < top || bounds.bottom > bottom) {
+			// Scroll only the provisions list, keeping the surrounding page in place.
+			metricsList.scrollTo({
+				top: metricsList.scrollTop + bounds.top + bounds.height / 2 - (top + bottom) / 2,
+				behavior: 'smooth'
+			});
+		}
 	}
 
 	function handleMetricNameDropdown(e: Event) {
@@ -1587,7 +1606,7 @@
 					</div>
 				{/if}
 
-				<div class="metrics-list">
+				<div class="metrics-list" bind:this={metricsList}>
 					{#if errorMsg}
 						<div class="error">{errorMsg}</div>
 					{:else if !loading && metrics.length === 0}

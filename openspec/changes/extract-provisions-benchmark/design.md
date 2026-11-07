@@ -172,6 +172,9 @@ first gold set. `weights.json` keeps the weights adjustable.
 - **Gold Provisions** is `ProvisionMgmtView` with `source="testbed"`. A `GoldRunFilter('provisions')`
   drives the record browser, and a Gold/Dropped switch selects the list. Extract, save, edit,
   delete and raw-line editing are hidden in testbed mode.
+  Prev/Next keeps a fully visible destination card in place. If any part of the destination
+  falls outside the list viewport, the list scrolls smoothly to center it (clamped at the
+  scroll limits), without scrolling the surrounding page.
 - **Benchmark** is a new `provision-score-view.svelte`, a pared-down copy of
   `metric-score-view.svelte` on `BenchmarkReportViewer`:
   - pick a document (with-gold filter), a model and a gold run, then run;

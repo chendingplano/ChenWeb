@@ -92,13 +92,14 @@ async def json_route(route, payload, status=200):
 async def check_gold_page(ctx, labels, locale):
     page = await ctx.new_page()
     errors, calls = [], []
+    gold_results = GOLD.copy()
     page.on('pageerror', lambda e: errors.append(str(e)))
 
     async def provisions(route):
         q = parse_qs(urlparse(route.request.url).query)
         calls.append(q)
         assert q.get('source') == ['testbed'] and q.get('run_id') == [RUN['run_id']], q
-        await json_route(route, {'status': True, 'results': GOLD, 'total': len(GOLD), 'dropped': DROPPED})
+        await json_route(route, {'status': True, 'results': gold_results, 'total': len(gold_results), 'dropped': DROPPED})
 
     await page.route('**/api/v1/kb/provisions/gold-options', lambda r: json_route(r, {
         'status': True, 'skill_versions': ['1.0.0'],
@@ -197,6 +198,51 @@ async def check_gold_page(ctx, labels, locale):
         await page.locator('.pvw-lines-host').wait_for(state='detached')
         await page.get_by_role('button', name=labels['provision_mgmt_show_lines'], exact=True).wait_for()
     await page.screenshot(path=str(SCREENSHOTS / f'gold-{locale}.png'), full_page=True)
+    # A long list must keep Prev/Next selections visible without scrolling the page.
+    gold_results[:] = [dict(GOLD[0], id=i + 1, prov_id=f'416_gprv_{i + 1}',
+                           prov_name=f'Provision {i + 1:02}') for i in range(20)]
+    await page.reload()
+    await page.get_by_text(RECORD['title'], exact=False).first.click()
+    cards = sidebar.locator('.metric-card')
+    await expect(cards).to_have_count(20)
+    await cards.nth(8).click()
+    for direction, index, button in [('below', 9, next_button), ('above', 8, prev)]:
+        # Leave half the destination card beyond the visible edge.
+        await sidebar.locator('.metrics-list').evaluate('''(list, args) => {
+            const card = list.querySelectorAll('.metric-card')[args.index];
+            const box = card.getBoundingClientRect();
+            const viewport = list.getBoundingClientRect();
+            const edge = args.direction === 'below' ? viewport.bottom : viewport.top;
+            list.scrollTop += box.top + box.height / 2 - edge;
+        }''', {'direction': direction, 'index': index})
+        page_scroll = await page.evaluate('window.scrollY')
+        await button.click()
+        await expect(cards.nth(index)).to_have_class(re.compile(r'\bselected\b'))
+        await page.wait_for_function('''() => {
+            const list = document.querySelector('.metrics-list');
+            const card = list.querySelector('.metric-card.selected');
+            const viewport = list.getBoundingClientRect();
+            const box = card.getBoundingClientRect();
+            return Math.abs(box.top + box.height / 2 -
+                (viewport.top + list.clientTop + list.clientHeight / 2)) < 2;
+        }''', timeout=3000)
+        assert await page.evaluate('window.scrollY') == page_scroll
+    # A fully visible destination should not disturb the current scroll position.
+    await sidebar.locator('summary').click()
+    await sidebar.locator('.metrics-list').evaluate('''list => {
+        const card = list.querySelector('.metric-card.selected').getBoundingClientRect();
+        const viewport = list.getBoundingClientRect();
+        list.scrollTop += card.top - viewport.top - 10;
+    }''')
+    assert await cards.nth(9).evaluate('''card => {
+        const list = card.parentElement.getBoundingClientRect();
+        const box = card.getBoundingClientRect();
+        return box.top >= list.top && box.bottom <= list.bottom;
+    }'''), 'the no-scroll destination must be fully visible'
+    scroll_top = await sidebar.locator('.metrics-list').evaluate('el => el.scrollTop')
+    await next_button.click()
+    await expect(cards.nth(9)).to_have_class(re.compile(r'\bselected\b'))
+    assert abs(await sidebar.locator('.metrics-list').evaluate('el => el.scrollTop') - scroll_top) < 1
     assert not errors, errors
     await page.close()
 
