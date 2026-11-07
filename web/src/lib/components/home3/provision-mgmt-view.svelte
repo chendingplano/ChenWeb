@@ -1415,6 +1415,27 @@
 	}
 </script>
 
+{#snippet provisionInfoCard(provision: KbProvisionRecord)}
+	<div class="provision-floating-card" class:light={!darkMode}>
+		<div class="provision-floating-kicker">
+			<span>#{provision.id}</span>
+			{#if provision.confidence != null}
+				<span class="provision-floating-confidence">{confidencePct(provision.confidence)}</span>
+			{/if}
+			{#if provision.prov_id}<span class="provision-floating-id">{provision.prov_id}</span>{/if}
+		</div>
+		<div class="provision-floating-name">{metricNameOf(provision)}</div>
+		{#if provision.prov_desc || provision.provision}
+			<div class="provision-floating-desc">{provision.prov_desc || provision.provision}</div>
+		{/if}
+		<div class="provision-floating-meta">
+			{#if provision.provision_type}<span>{provision.provision_type}</span>{/if}
+			{#if provision.location_type}<span>{provision.location_type}</span>{/if}
+			<span>{i18n.provision_mgmt_span({ count: spanCount(provision), plural: spanCount(provision) === 1 ? '' : 's' })}</span>
+		</div>
+	</div>
+{/snippet}
+
 <svelte:window
 	onkeydown={(e) => {
 		if (e.key === 'Escape' && recordBrowserFolded) goBack();
@@ -1885,6 +1906,9 @@
 										<ListIcon class="pvw-tb-icon" />
 									{/if}
 								</button>
+							{/snippet}
+							{#snippet floatingOverlay()}
+								{#if selectedMetric}{@render provisionInfoCard(selectedMetric)}{/if}
 							{/snippet}
 							{#snippet linesView()}
 								<div class="lines-panel">
@@ -2680,8 +2704,8 @@
 		background: var(--panel-bg);
 	}
 	.metric-card.selected {
-		border-color: var(--crimson);
-		background: var(--panel-bg);
+		border-color: #3b82f6;
+		background: #3b82f6;
 	}
 	.card-rule {
 		width: 4px;
@@ -2693,7 +2717,7 @@
 		background: var(--brass);
 	}
 	.metric-card.selected .card-rule {
-		background: var(--crimson);
+		background: #1d4ed8;
 	}
 	.card-body {
 		padding: 12px 14px 12px 12px;
@@ -2735,8 +2759,21 @@
 		font-weight: 500;
 		color: var(--text-primary);
 	}
-	.metric-card.selected .card-name {
-		color: var(--crimson);
+	.metric-card.selected .card-name,
+	.metric-card.selected .card-index,
+	.metric-card.selected .card-prov-id,
+	.metric-card.selected .card-conf,
+	.metric-card.selected .card-desc,
+	.metric-card.selected .card-foot {
+		color: #fff;
+	}
+	.metric-card.selected .card-prov-id {
+		opacity: 1;
+		border-color: rgba(255, 255, 255, 0.45);
+	}
+	.metric-card.selected .chip {
+		color: #fff;
+		border-color: rgba(255, 255, 255, 0.45);
 	}
 	.card-desc {
 		font-size: 12px;
@@ -2791,6 +2828,64 @@
 		background: var(--page-bg);
 		overflow: hidden;
 	}
+	.provision-floating-card {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 12px 14px;
+		border-radius: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		background:
+			linear-gradient(180deg, rgba(20, 27, 39, 0.96), rgba(10, 14, 22, 0.94));
+		box-shadow:
+			0 18px 40px rgba(2, 6, 23, 0.42),
+			inset 0 1px 0 rgba(255, 255, 255, 0.06);
+		color: var(--text-primary);
+		backdrop-filter: blur(10px);
+	}
+	.provision-floating-card.light {
+		border-color: var(--ink-line);
+		background: var(--panel-bg);
+		box-shadow: 0 18px 40px rgba(26, 20, 16, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+		color: var(--text-primary);
+	}
+	.provision-floating-kicker,
+	.provision-floating-meta {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+	}
+	.provision-floating-kicker span,
+	.provision-floating-meta span {
+		padding: 3px 7px;
+		border-radius: 999px;
+		background: rgba(148, 163, 184, 0.12);
+		border: 1px solid rgba(148, 163, 184, 0.18);
+	}
+	.provision-floating-confidence {
+		color: var(--teal);
+	}
+	.provision-floating-name {
+		font-family: var(--font-serif);
+		font-size: 19px;
+		line-height: 1.2;
+		color: var(--text-primary);
+	}
+	.provision-floating-card.light .provision-floating-name { color: var(--text-primary); }
+	.provision-floating-desc {
+		font-size: 12px;
+		line-height: 1.5;
+		color: var(--text-secondary);
+		max-width: 42ch;
+	}
+	.provision-floating-id { text-transform: none; }
+
 	/* ---- PDF toolbar buttons (rendered via snippet in PdfViewWindow's pvw-toolbar-pill) ---- */
 	.pvw-tool-btn {
 		display: inline-flex;

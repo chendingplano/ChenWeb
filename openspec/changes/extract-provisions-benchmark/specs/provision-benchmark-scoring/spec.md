@@ -71,7 +71,11 @@ entries.
 **Gold Provisions** (`sysadmin-llm-provisions-gold`) SHALL:
 - list documents that have gold provision runs, filtered by gold rules version and model;
 - show one run's gold provisions and dropped candidates, read-only, next to the source PDF with
-  the selected provision's lines highlighted.
+  the selected provision's lines highlighted;
+- highlight the selected list record in the same blue background and white text as Gold Metrics;
+- show a floating info box beside the selected provision's PDF highlight, using the Gold Metrics
+  card style and displaying the record ID, confidence (when present), provision ID, name,
+  description/source text, provision type, location type and source span count.
 
 **Benchmark** (`sysadmin-llm-provisions-benchmark`) SHALL:
 - start a score for a chosen document, scoring model and gold run;
@@ -90,6 +94,12 @@ text selection.
 #### Scenario: Gold Provisions is read-only
 - **WHEN** an admin opens Gold Provisions and selects a gold run of record 416
 - **THEN** the gold provisions are listed and no extract, edit, save or delete control is shown
+
+#### Scenario: Selected gold provision info box
+- **WHEN** an admin selects a gold provision with source line coordinates in the PDF view
+- **THEN** its list card uses the Gold Metrics selection colors and a floating info box shows
+  that provision's summary next to its highlighted source lines
+- **AND** selecting another provision updates both the highlighted list card and the info box
 
 #### Scenario: Highlight from the report
 - **WHEN** a user selects a missed gold provision in an opened report
