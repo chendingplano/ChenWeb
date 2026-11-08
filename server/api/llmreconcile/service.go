@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
 )
@@ -247,7 +248,10 @@ func (c *DeepSeekBalanceClient) FetchBalance(ctx context.Context, baseURL string
 	}
 	client := sharedllm.NewDeepSeekBalanceClient(c.HTTPClient)
 	client.ModelName = config.AppConfig.ModelBalanceQueries["deepseek"]
-	result, err := client.Fetch(ctx, baseURL, apiKey, &sharedllm.RequestCapture{UserID: userID})
+	result, err := client.Fetch(ctx, baseURL, apiKey, &sharedllm.RequestCapture{
+		UserID: userID,
+		RunID:  llmrun.Next(ctx),
+	})
 	if err != nil {
 		return BalanceFetchResult{}, err
 	}
