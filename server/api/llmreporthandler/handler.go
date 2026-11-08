@@ -480,12 +480,14 @@ func ListUsageEventsAdmin(c echo.Context) error {
 	page := intParamDefault(c.QueryParam("page"), 1)
 	pageSize := intParamDefault(c.QueryParam("page_size"), 50)
 	filters := UsageEventAdminFilters{
-		Model:      c.QueryParam("model"),
-		Prompt:     c.QueryParam("prompt"),
-		CallReason: c.QueryParam("call_reason"),
-		CallLoc:    c.QueryParam("call_loc"),
-		MetaKey:    c.QueryParam("meta_key"),
-		MetaValue:  c.QueryParam("meta_value"),
+		Model:                    c.QueryParam("model"),
+		Prompt:                   c.QueryParam("prompt"),
+		CallReason:               c.QueryParam("call_reason"),
+		CallLoc:                  c.QueryParam("call_loc"),
+		MetaKey:                  c.QueryParam("meta_key"),
+		MetaValue:                c.QueryParam("meta_value"),
+		ExcludeProviderBalance:   c.QueryParam("exclude_provider_balance") == "true",
+		ExcludeEmbeddingNoPrompt: c.QueryParam("exclude_embedding_no_prompt") == "true",
 	}
 	if v, ok := int64Param(c.QueryParam("run_id")); ok {
 		filters.RunID = &v

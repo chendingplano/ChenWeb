@@ -47,6 +47,7 @@
 		selectedReferences = null,
 		metricDetails = null,
 		provisionDetails = null,
+		productDetails = null,
 		summaryDetails = null,
 		referenceDetails = null,
 		width       = 280,
@@ -58,6 +59,7 @@
 		activeMenu:  ActiveSelection | null;
 		metricDetails?: Snippet | null;
 		provisionDetails?: Snippet | null;
+		productDetails?: Snippet | null;
 		summaryDetails?: Snippet | null;
 		referenceDetails?: KbReferenceDetails | null;
 		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
@@ -298,16 +300,19 @@
 	class="flex-shrink-0 flex flex-col overflow-y-auto relative select-text"
 	style="width:{width}px; background:{surface}; border-left:1px solid {borderColor}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
-	<!-- Resize handle (left edge) -->
+	<!-- Resize handle (left edge). Kept inside the aside: overflow-y:auto clips anything left of x=0. -->
 	<div
-		class="absolute left-0 top-0 bottom-0 cursor-col-resize"
-		style="width:4px; z-index:10; background:transparent;"
+		class="absolute top-0 bottom-0 cursor-col-resize"
+		style="left:0; width:10px; z-index:10; background:transparent;"
+		title={msg.dashboard_drag_to_resize_shelf()}
 		onmousedown={onDragStart}
 		onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '40'; }}
 		onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-	></div>
+	>
+		<span aria-hidden="true" style="position:absolute; left:50%; top:50%; width:8px; height:52px; transform:translate(-50%,-50%); border-radius:999px; background:radial-gradient(circle, {textMuted} 22%, transparent 24%) center 6px / 6px 12px repeat-y, {surface2}; border:1px solid {borderColor}; box-shadow:0 0 0 2px rgba(0,0,0,0.14);"></span>
+	</div>
 
-	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null || provisionDetails != null || summaryDetails != null}>
+	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null || provisionDetails != null || productDetails != null || summaryDetails != null}>
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
 			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
@@ -315,6 +320,7 @@
 				{:else if selectedReferences}{msg.rsc_reference_details()}
 				{:else if summaryDetails}{msg.sgv_summary_detail()}
 				{:else if provisionDetails}{msg.context_shelf_provision_details()}
+				{:else if productDetails}{msg.context_shelf_product_details()}
 				{:else if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
 				{:else if findingShelf.active}{msg.context_shelf_finding()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
@@ -374,6 +380,8 @@
 			{@render summaryDetails?.()}
 		{:else if provisionDetails}
 			{@render provisionDetails?.()}
+		{:else if productDetails}
+			{@render productDetails?.()}
 		{:else if metricDetails}
 			{@render metricDetails?.()}
 		{:else if compare}

@@ -59,6 +59,8 @@
 		heroTitle = msg.kb_extraction_extracted_items(),
 		heroDescription = msg.kb_extraction_inspect_the_items_an_llm(),
 		onFocusModeChange,
+		onItemDetailsChange,
+		focusPdfWidth = $bindable(480),
 
 		groups,
 		loadItems,
@@ -101,6 +103,9 @@
 		heroDescription?: string;
 		/** Notifies the host so it can fold/restore the surrounding Menu while an item is shown on the canvas. */
 		onFocusModeChange?: (focused: boolean) => void;
+		onItemDetailsChange?: (item: any | null) => void;
+		/** Focus-mode PDF card width in px. Bindable so the host can resize it alongside its own panel. */
+		focusPdfWidth?: number;
 
 		groups: GroupDef[];
 		/** record is the selected browser entry; a gold benchmark entry carries its run in gold_metric_runs. */
@@ -177,7 +182,7 @@
 	let focusedItemId = $state<number | null>(null);
 	let listWidth = $state(LIST_DEFAULT);
 	let resizing = $state(false);
-	let focusPdfWidth = $state(FOCUS_PDF_DEFAULT);
+	let persistedFocusPdfWidth: number | null = null;
 	let focusResizing = $state(false);
 	let showDiscriminators = $state(false);
 	let typeFilter = $state('__all__');
@@ -327,10 +332,20 @@
 		const saved = Number(localStorage.getItem(focusPdfWidthKey));
 		if (Number.isFinite(saved) && saved > 0) {
 			focusPdfWidth = clampFocusPdfWidth(saved);
-			return;
+		} else {
+			// First-load default: keep the canvas at roughly 2/3 and the PDF at 1/3.
+			focusPdfWidth = clampFocusPdfWidth(Math.round(window.innerWidth / 3));
 		}
-		// First-load default: keep the canvas at roughly 2/3 and the PDF at 1/3.
-		focusPdfWidth = clampFocusPdfWidth(Math.round(window.innerWidth / 3));
+		// Loaded value is the baseline: the persist effect below must not write it back.
+		persistedFocusPdfWidth = focusPdfWidth;
+	});
+
+	// Persists every width change, including ones a host pushes through the bindable prop.
+	$effect(() => {
+		const width = focusPdfWidth;
+		if (!browser || persistedFocusPdfWidth === null || width === persistedFocusPdfWidth) return;
+		persistedFocusPdfWidth = width;
+		localStorage.setItem(focusPdfWidthKey, String(width));
 	});
 
 	function persistListWidth(next: number) {
@@ -340,7 +355,6 @@
 
 	function persistFocusPdfWidth(next: number) {
 		focusPdfWidth = clampFocusPdfWidth(next);
-		if (browser) localStorage.setItem(focusPdfWidthKey, String(focusPdfWidth));
 	}
 
 	async function handleRecordSelect(record: KbInputRecord) {
@@ -422,6 +436,10 @@
 		rawLines = [];
 		onFocusModeChange?.(false);
 	}
+
+	$effect(() => {
+		onItemDetailsChange?.(focusedItem);
+	});
 
 	onDestroy(() => {
 		if (focusedItemId != null) onFocusModeChange?.(false);
@@ -944,6 +962,7 @@
 							<div class="legend-hint">{msg.kb_extraction_hover_an_attribute_node_to()}</div>
 						</aside>
 
+						{#if !onItemDetailsChange}
 						<aside
 							bind:this={sceneMetaCardEl}
 							class="map-meta-card"
@@ -1027,6 +1046,7 @@
 								onkeydown={onSceneMetaResizerKeydown}
 							></button>
 						</aside>
+						{/if}
 
 						{#if selectedInfo}
 							{@const si = selectedInfo}

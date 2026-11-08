@@ -61,6 +61,8 @@
 	let filterOutTokMax  = $state('');
 	let filterMetaKey    = $state('');
 	let filterMetaValue  = $state('');
+	let excludeProviderBalance = $state(true);
+	let excludeEmbeddingNoPrompt = $state(true);
 
 	function applyFilters() {
 		page = 1;
@@ -81,6 +83,8 @@
 		filterOutTokMax = '';
 		filterMetaKey = '';
 		filterMetaValue = '';
+		excludeProviderBalance = true;
+		excludeEmbeddingNoPrompt = true;
 		page = 1;
 		load();
 	}
@@ -127,6 +131,8 @@
 				params.set('meta_key', filterMetaKey);
 				params.set('meta_value', filterMetaValue);
 			}
+			if (excludeProviderBalance) params.set('exclude_provider_balance', 'true');
+			if (excludeEmbeddingNoPrompt) params.set('exclude_embedding_no_prompt', 'true');
 			const res = await fetch(`/api/v1/llm/usage-events-admin?${params}`, { credentials: 'same-origin' });
 			const data = await res.json();
 			if (!res.ok) throw new Error(data.message ?? m.llm_usage_logs_failed_to_load());
@@ -469,6 +475,14 @@
 				<span style="font-size:11px; color:{textMuted};">{m.llm_usage_logs_metadata_value()}</span>
 				<input type="text" bind:value={filterMetaValue} placeholder={m.llm_usage_logs_contains()}
 					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex items-center gap-2 self-end pb-2 text-sm" style="color:{textSecondary};">
+				<input type="checkbox" bind:checked={excludeProviderBalance} />
+				{m.llm_usage_logs_exclude_provider_balance()}
+			</label>
+			<label class="flex items-center gap-2 self-end pb-2 text-sm" style="color:{textSecondary};">
+				<input type="checkbox" bind:checked={excludeEmbeddingNoPrompt} />
+				{m.llm_usage_logs_exclude_embedding_no_prompt()}
 			</label>
 		</div>
 		<div class="flex items-center gap-2 mt-4">

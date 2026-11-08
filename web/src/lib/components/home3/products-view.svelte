@@ -31,6 +31,8 @@
 		heroTitle = m.products_products_provenance(),
 		heroDescription = m.products_browse_product_records_extracted_from(),
 		onFocusModeChange,
+		onProductDetailsChange,
+		focusPdfWidth = $bindable(480),
 		source = 'kb'
 	}: {
 		darkMode?: boolean;
@@ -40,6 +42,8 @@
 		heroTitle?: string;
 		heroDescription?: string;
 		onFocusModeChange?: (focused: boolean) => void;
+		onProductDetailsChange?: (product: KbProductRecord | null) => void;
+		focusPdfWidth?: number;
 		/** 'testbed': read-only Gold Products over one extract-products-benchmark run. */
 		source?: 'kb' | 'testbed';
 	} = $props();
@@ -197,6 +201,8 @@
 	recordBrowserControls={source === 'testbed' ? (goldControls as Snippet) : undefined}
 	mapRecord={source === 'testbed' ? mapGoldRecord : undefined}
 	reloadToken={productView}
+	onItemDetailsChange={onProductDetailsChange}
+	bind:focusPdfWidth
 	groups={PRODUCT_GROUPS}
 	loadItems={loadItems}
 	attrRaw={productAttrRaw}

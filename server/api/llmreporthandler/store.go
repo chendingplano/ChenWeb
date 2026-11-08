@@ -540,19 +540,21 @@ type UsageEventAdmin struct {
 // UsageEventAdminFilters holds optional server-side filters for ListUsageEventsAdmin.
 // Zero values mean "no filter" for that field.
 type UsageEventAdminFilters struct {
-	Model       string
-	Prompt      string
-	CallReason  string
-	CallLoc     string
-	RunID       *int64
-	StartedFrom *time.Time
-	StartedTo   *time.Time
-	InTokMin    *int64
-	InTokMax    *int64
-	OutTokMin   *int64
-	OutTokMax   *int64
-	MetaKey     string
-	MetaValue   string
+	Model                    string
+	Prompt                   string
+	CallReason               string
+	CallLoc                  string
+	RunID                    *int64
+	StartedFrom              *time.Time
+	StartedTo                *time.Time
+	InTokMin                 *int64
+	InTokMax                 *int64
+	OutTokMin                *int64
+	OutTokMax                *int64
+	MetaKey                  string
+	MetaValue                string
+	ExcludeProviderBalance   bool
+	ExcludeEmbeddingNoPrompt bool
 }
 
 // buildUsageEventAdminWhere translates non-empty filters into a SQL WHERE clause
@@ -605,6 +607,12 @@ func buildUsageEventAdminWhere(f UsageEventAdminFilters) (string, []any) {
 		args = append(args, f.MetaValue)
 		valueArg := len(args)
 		clauses = append(clauses, fmt.Sprintf("evt.metadata_json ->> $%d ILIKE '%%' || $%d || '%%'", keyArg, valueArg))
+	}
+	if f.ExcludeProviderBalance {
+		clauses = append(clauses, "evt.call_reason <> 'provider_balance'")
+	}
+	if f.ExcludeEmbeddingNoPrompt {
+		clauses = append(clauses, "evt.prompt_name <> 'embedding_no_prompt'")
 	}
 
 	if len(clauses) == 0 {
