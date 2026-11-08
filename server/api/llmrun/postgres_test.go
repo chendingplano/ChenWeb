@@ -47,10 +47,10 @@ func TestPostgresExecutionMigrationAndRedelivery(t *testing.T) {
 		}
 	}
 	exec(`DROP SCHEMA IF EXISTS kb CASCADE; DROP SCHEMA IF EXISTS shared CASCADE; DROP TABLE IF EXISTS public.llm_usage_event;
- CREATE SCHEMA kb; CREATE SCHEMA IF NOT EXISTS testbed; DROP TABLE IF EXISTS testbed.generated_question_runs;
+ CREATE SCHEMA kb; CREATE SCHEMA IF NOT EXISTS testbed; DROP TABLE IF EXISTS testbed.generated_question_runs; DROP TABLE IF EXISTS testbed.provision_score_runs;
  CREATE TABLE testbed.generated_question_runs(id bigint PRIMARY KEY);
  CREATE TABLE kb.metric_score_runs(id bigint PRIMARY KEY); CREATE TABLE kb.reference_score_runs(id bigint PRIMARY KEY);
- CREATE TABLE kb.provision_score_runs(id bigint PRIMARY KEY); CREATE TABLE kb.summary_score_runs(id bigint PRIMARY KEY);
+ CREATE TABLE testbed.provision_score_runs(id bigint PRIMARY KEY); CREATE TABLE kb.summary_score_runs(id bigint PRIMARY KEY);
  CREATE TABLE kb.doc_process_runs(id bigint PRIMARY KEY); CREATE TABLE kb.doc_review_runs(id bigint PRIMARY KEY);
  CREATE TABLE public.llm_usage_event(run_id bigint); INSERT INTO public.llm_usage_event VALUES (NULL),(5),(9400)`)
 	sharedMigration, err := os.ReadFile("../../../../shared/go/api/goose/shared_migrations/20261108000001_id_manager.sql")

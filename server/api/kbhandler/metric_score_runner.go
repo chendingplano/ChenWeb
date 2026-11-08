@@ -344,7 +344,7 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 
 func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, kind scoreKind, id int64, req metricScoreRequest, userID string) (e metricScoreEvidence, err error) {
 	e.Model = req.Model
-	table := map[string]string{"metric-score-runs": "kb.metric_score_runs", "reference-score-runs": "kb.reference_score_runs", "provision-score-runs": "kb.provision_score_runs", "product-score-runs": "testbed.product_score_runs"}[kind.runsDir]
+	table := map[string]string{"metric-score-runs": "kb.metric_score_runs", "reference-score-runs": "kb.reference_score_runs", "provision-score-runs": "testbed.provision_score_runs", "product-score-runs": "testbed.product_score_runs"}[kind.runsDir]
 	executionID, err := taskLLMExecution(ctx, db, table, id)
 	if err != nil {
 		return e, err
