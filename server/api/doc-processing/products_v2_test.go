@@ -581,3 +581,38 @@ func TestProductsMergedV2PromptExampleDecodes(t *testing.T) {
 		t.Fatalf("prompt example decoded to %#v", rows)
 	}
 }
+
+func TestProductsV2GroundsAShiftedCitationOnTheNamingLine(t *testing.T) {
+	lines := productSourceLinesFromChunk([]MarkedLine{
+		{Mark: "r", Line: Line{LineNo: 40, LineType: "heading", Content: "B.1 Germination test"}},
+		{Mark: "r", Line: Line{LineNo: 41, LineType: "paragraph", Content: "Shake the sample on a reciprocating shaker for 1 h."}},
+		{Mark: "r", Line: Line{LineNo: 42, LineType: "paragraph", Content: "Hazardous waste"}},
+		{Mark: "r", Line: Line{LineNo: 43, LineType: "paragraph", Content: "Household waste that harms health or the environment."}},
+	})
+	rows := decodeProductV2Test(t, `{"v":2,"p":[`+
+		`{"n":"reciprocating shaker","t":"eq","r":"use","d":"s","s":[40],"o":"m","q":0.9},`+
+		`{"n":"hazardous waste","t":"pc","r":"risk","d":"s","s":[43],"o":"d","q":0.9},`+
+		`{"n":"shaker","t":"eq","r":"use","d":"s","s":[41],"o":"m","q":0.9},`+
+		`{"n":"collection vehicles","t":"eq","r":"req","d":"s","s":[43],"o":"m","q":0.9}]}`, lines)
+	cases := []struct {
+		spans []string
+		quote string
+	}{
+		// Cited one line early: the naming line is added, the citation kept.
+		{[]string{"40", "41"}, "B.1 Germination test\nShake the sample on a reciprocating shaker for 1 h."},
+		// A definition line under its term gains the term's line.
+		{[]string{"43", "42"}, "Hazardous waste\nHousehold waste that harms health or the environment."},
+		// Already grounded: unchanged.
+		{[]string{"41"}, "Shake the sample on a reciprocating shaker for 1 h."},
+		// Named nowhere nearby (an expanded conjunct, say): unchanged.
+		{[]string{"43"}, "Household waste that harms health or the environment."},
+	}
+	for i, c := range cases {
+		if got := toStringSlice(rows[i]["evidence_lines"]); !reflect.DeepEqual(got, c.spans) {
+			t.Errorf("row %d evidence_lines=%v, want %v", i, got, c.spans)
+		}
+		if rows[i]["evidence_quote"] != c.quote {
+			t.Errorf("row %d evidence_quote=%q, want %q", i, rows[i]["evidence_quote"], c.quote)
+		}
+	}
+}

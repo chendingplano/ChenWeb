@@ -216,7 +216,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	translateModelCfg.ThinkingType = normalizeThinkingType(envString("TRANSLATE_PRODUCTS_THINKING", "disabled"))
 	mergedPromptText, mergedPromptRef, mergedPromptPath, mergedPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MERGED_PROMPT"},
-		"prompt-extract-products-merged-v2.md",
+		"prompt-extract-products-merged-v3.md",
 	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
@@ -777,7 +777,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			p.persistProductsStatus(ctx, rec, p.batchStart, mergedErr)
 			return mergedErr
 		}
-		products = p.batchMergedRows
+		products = settleMergedChunkRows(p.batchMergedRows, p.batchBlocks)
 		usedRelationModel = firstNonEmptyTrimmed(p.batchMergedModel, p.MergedModelName)
 		p.Logger.Info("+++++ EXTRACT_PRODUCTS_MERGED_PASS is set; skipping Pass 2 (rows came from the merged pass)",
 			"rows", len(products),
@@ -943,7 +943,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			}
 			return productExtractionResult{}, mergedErr
 		}
-		products = mergedRows
+		products = settleMergedChunkRows(mergedRows, blocks)
 		usedRelationModel = mergedModel
 		usedMentionModel = mergedModel
 		llmCallCount = len(blocks)
@@ -1179,6 +1179,10 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 	}
 	raw, _ := payload["products"].([]any)
 	rows := normalizeProductList(raw)
+	for _, row := range rows {
+		row[productRowChunkKey] = block.Index
+		row[productRowOverlapOnlyKey] = !mentionHasNormalEvidence(block, toStringSlice(row["evidence_lines"]), "")
+	}
 	didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MergedModelName) && strings.TrimSpace(modelName) != ""
 	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 	outputTokens := outputTokenCount(p.Extractor)
@@ -1190,6 +1194,184 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 		"output_tokens", outputTokens,
 		"ms_used", time.Since(callStart).Milliseconds())
 	return rows, modelName, didFallback, nil
+}
+
+// Bookkeeping keys a merged-pass row carries until settleMergedChunkRows
+// removes them: the chunk that produced it, and whether all its evidence
+// lines are that chunk's overlap lines.
+const (
+	productRowChunkKey       = "_chunk_seq"
+	productRowOverlapOnlyKey = "_overlap_only"
+)
+
+// settleMergedChunkRows prepares merged-pass rows for Deterministic Step B.
+// Rows are put in chunk order, because chunks finish in any order and Step B
+// keeps the first row of a duplicate group. A row that cites only its chunk's
+// overlap lines is dropped when the chunk holding those lines as normal lines
+// produced a row for the same product: that chunk saw the lines with their
+// full context, so its rows decide the product's relations there. An
+// overlap-only row for a product the owning chunk missed is kept.
+//
+// Finally, rows with the same product and relation type are merged across the
+// whole document (mergeProductRelationRows). Each merged call sees one chunk,
+// so a product discussed in several chunks comes back once per chunk; the
+// two-pass pipeline gets one row per (product, relation) from Step A instead.
+func settleMergedChunkRows(rows []map[string]any, blocks []Block) []map[string]any {
+	owner := map[int]int{}
+	for _, b := range blocks {
+		for _, l := range b.Lines {
+			if l.Flag == "n" {
+				owner[l.LineNumber] = b.Index
+			}
+		}
+	}
+	productKeys := func(row map[string]any) []string {
+		var keys []string
+		for _, name := range []string{asString(row["canonical_name"]), asString(row["product_name"])} {
+			if key := normalizedProductCandidateKey(name, ""); key != "" {
+				keys = append(keys, key)
+			}
+		}
+		return keys
+	}
+	chunkOf := func(row map[string]any) int {
+		seq, _ := row[productRowChunkKey].(int)
+		return seq
+	}
+	normalProducts := map[int]map[string]bool{}
+	for _, row := range rows {
+		if toBool(row[productRowOverlapOnlyKey]) {
+			continue
+		}
+		seq := chunkOf(row)
+		if normalProducts[seq] == nil {
+			normalProducts[seq] = map[string]bool{}
+		}
+		for _, key := range productKeys(row) {
+			normalProducts[seq][key] = true
+		}
+	}
+	ownerHasProduct := func(row map[string]any) bool {
+		keys := productKeys(row)
+		for _, span := range toStringSlice(row["evidence_lines"]) {
+			start, end, ok := parseCompactLineSpan(span)
+			if !ok {
+				continue
+			}
+			for line := start; line <= end; line++ {
+				seq, owned := owner[line]
+				if !owned {
+					continue
+				}
+				for _, key := range keys {
+					if normalProducts[seq][key] {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if toBool(row[productRowOverlapOnlyKey]) && ownerHasProduct(row) {
+			continue
+		}
+		out = append(out, row)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return chunkOf(out[i]) < chunkOf(out[j])
+	})
+	for _, row := range out {
+		delete(row, productRowChunkKey)
+		delete(row, productRowOverlapOnlyKey)
+	}
+	return mergeProductRelationRows(out)
+}
+
+// productObligationRank orders obligation levels from weakest to strongest,
+// so a merged row keeps the strongest of its statements.
+var productObligationRank = map[string]int{
+	"descriptive": 1, "permitted": 2, "recommended": 3, "conditional": 4, "mandatory": 5, "prohibited": 6,
+}
+
+// mergeProductRelationRows folds rows with the same product (Step B's
+// canonical-name key) and relation type into the first such row: evidence
+// lines, conditions, exceptions, parameters and related products are united,
+// distinct requirement texts are joined with " … ", the strongest obligation
+// level and the highest confidence are kept, and the first non-empty
+// responsible actor wins.
+func mergeProductRelationRows(rows []map[string]any) []map[string]any {
+	key := func(row map[string]any) string {
+		return normalizedProductCandidateKey(asString(row["canonical_name"]), asString(row["product_name"])) + "|" +
+			strings.ToLower(strings.TrimSpace(asString(row["relation_type"])))
+	}
+	joinText := func(a, b, sep string) string {
+		a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+		switch {
+		case b == "" || strings.Contains(a, b):
+			return a
+		case a == "" || strings.Contains(b, a):
+			return b
+		}
+		return a + sep + b
+	}
+	unionStrings := func(a, b any) []string {
+		out := toStringSlice(a)
+		for _, s := range toStringSlice(b) {
+			out = appendUniqueString(out, s)
+		}
+		return out
+	}
+	unionItems := func(a, b any) []any {
+		out, _ := normalizeProductItems(a)
+		seen := map[string]bool{}
+		for _, item := range out {
+			body, _ := json.Marshal(item)
+			seen[string(body)] = true
+		}
+		more, _ := normalizeProductItems(b)
+		for _, item := range more {
+			body, _ := json.Marshal(item)
+			if !seen[string(body)] {
+				seen[string(body)] = true
+				out = append(out, item)
+			}
+		}
+		if out == nil {
+			out = []any{}
+		}
+		return out
+	}
+	first := map[string]map[string]any{}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		k := key(row)
+		target, ok := first[k]
+		if !ok {
+			first[k] = row
+			out = append(out, row)
+			continue
+		}
+		target["evidence_lines"] = unionStrings(target["evidence_lines"], row["evidence_lines"])
+		target["evidence_quote"] = joinText(asString(target["evidence_quote"]), asString(row["evidence_quote"]), "\n")
+		target["requirement_text"] = joinText(asString(target["requirement_text"]), asString(row["requirement_text"]), " … ")
+		target["conditions"] = unionStrings(target["conditions"], row["conditions"])
+		target["exceptions"] = unionStrings(target["exceptions"], row["exceptions"])
+		target["parameters"] = unionItems(target["parameters"], row["parameters"])
+		target["related_products"] = unionItems(target["related_products"], row["related_products"])
+		if productObligationRank[asString(row["obligation_level"])] > productObligationRank[asString(target["obligation_level"])] {
+			target["obligation_level"] = row["obligation_level"]
+		}
+		if strings.TrimSpace(asString(target["responsible_actor"])) == "" {
+			target["responsible_actor"] = row["responsible_actor"]
+		}
+		if toFloat(row["confidence"]) > toFloat(target["confidence"]) {
+			target["confidence"] = row["confidence"]
+			target["confidence_reason"] = row["confidence_reason"]
+		}
+	}
+	return out
 }
 
 // runMergedPassOverBlocks fans the merged pass out across every block, the
@@ -1627,8 +1809,8 @@ func buildMergedProductsTaskPrompt(blockIndex int) string {
 		"\n\nBlock index: " + strconv.Itoa(blockIndex)
 }
 
-// buildCompactMergedProductsTaskPrompt is the task suffix for
-// prompt-extract-products-merged-v2.md. That prompt owns the compact response
+// buildCompactMergedProductsTaskPrompt is the task suffix for the compact
+// merged prompts (merged-v2 and merged-v3). The prompt owns the compact response
 // format, so unlike buildMergedProductsTaskPrompt this repeats no schema that
 // could contradict it.
 func buildCompactMergedProductsTaskPrompt(blockIndex int) string {
@@ -2392,6 +2574,11 @@ func categoryPathsFromCatalog(res productNameResolution) []CategoryPathEntry {
 func (p *ProductsProcessor) buildProductOutputRows(products []map[string]any, now time.Time, numBlocks int, modelName string) []map[string]any {
 	out := make([]map[string]any, 0, len(products))
 	timeText := now.Format(defaultDocMetaStatusTime)
+	// The prompt that wrote the relation rows: Pass 2's, or the merged pass's.
+	promptRef := p.PromptRef
+	if p.MergedPass {
+		promptRef = p.MergedPromptRef
+	}
 	for _, product := range products {
 		out = append(out, map[string]any{
 			"product_name":         strings.TrimSpace(asString(product["product_name"])),
@@ -2420,7 +2607,7 @@ func (p *ProductsProcessor) buildProductOutputRows(products []map[string]any, no
 			"product_name_id":      product["product_name_id"],
 			"status":               "active",
 			"model_name":           strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
-			"prompt_name":          strings.TrimSpace(p.PromptRef),
+			"prompt_name":          strings.TrimSpace(promptRef),
 			"num_blocks":           numBlocks,
 			"create_time":          timeText,
 			"modify_time":          timeText,

@@ -56,8 +56,14 @@ func productSourceLinesFromChunk(lines []MarkedLine) productSourceLines {
 	return out
 }
 
+// productMergedPromptUsesV2 reports whether the merged prompt asks for the
+// compact v2 response. v3 keeps the v2 wire format and changes only the rules.
 func productMergedPromptUsesV2(ref string) bool {
-	return filepath.Base(ref) == "prompt-extract-products-merged-v2.md"
+	switch filepath.Base(ref) {
+	case "prompt-extract-products-merged-v2.md", "prompt-extract-products-merged-v3.md":
+		return true
+	}
+	return false
 }
 
 // The same schema governs provider retries and decoding plain JSON clients.
@@ -127,6 +133,7 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		if err != nil {
 			return nil, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err)
 		}
+		spans, quote = groundProductV2Spans(name, spans, quote, lines)
 		params := make([]any, 0)
 		for _, param := range objectItemsFromValue(raw["p"]) {
 			params = append(params, map[string]any{
@@ -241,6 +248,66 @@ func resolveProductV2Spans(items []any, lines productSourceLines) ([]string, str
 		}
 	}
 	return spans, strings.Join(parts, "\n"), nil
+}
+
+// groundProductV2Spans adds the line just before or after a cited line when
+// none of the cited text contains the product's name but that neighbour does.
+// With reasoning off, deepseek-flash sometimes cites a whole chunk's rows one
+// line off (record 416: every test-method row cited the heading above its
+// step). The cited spans are kept, so a row that rightly cites a line without
+// the name, such as a definition under its term, only gains the term's line.
+// Names the source never writes out whole (expanded conjuncts) match no line
+// and are left alone; table-row spans are not widened.
+func groundProductV2Spans(name string, spans []string, quote string, lines productSourceLines) ([]string, string) {
+	key := productV2NameKey(name)
+	if key == "" || strings.Contains(productV2NameKey(quote), key) {
+		return spans, quote
+	}
+	cited := map[string]bool{}
+	for _, span := range spans {
+		cited[span] = true
+	}
+	widened := stringsToAny(spans)
+	added := false
+	for _, span := range spans {
+		m := productV2Span.FindStringSubmatch(span)
+		if m == nil || m[3] != "" {
+			continue
+		}
+		start, _ := strconv.Atoi(m[1])
+		end := start
+		if m[2] != "" {
+			end, _ = strconv.Atoi(m[2])
+		}
+		for _, n := range []int{start - 1, end + 1} {
+			text, ok := lines[n]
+			if ok && !cited[strconv.Itoa(n)] && strings.Contains(productV2NameKey(text), key) {
+				cited[strconv.Itoa(n)] = true
+				widened = append(widened, strconv.Itoa(n))
+				added = true
+			}
+		}
+	}
+	if !added {
+		return spans, quote
+	}
+	if out, text, err := resolveProductV2Spans(widened, lines); err == nil {
+		return out, text
+	}
+	return spans, quote
+}
+
+// productV2NameKey compares names and cited text without case or whitespace.
+func productV2NameKey(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), ""))
+}
+
+func stringsToAny(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 type productV2LineRow struct {
