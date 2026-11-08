@@ -403,6 +403,20 @@
 										]
 									},
 									{
+										id: 'sysadmin-llm-products',
+										label: m.nav_sysadmin_llm_products(),
+										children: [
+											{
+												id: 'sysadmin-llm-products-gold',
+												label: m.nav_sysadmin_llm_products_gold()
+											},
+											{
+												id: 'sysadmin-llm-products-benchmark',
+												label: m.nav_sysadmin_llm_products_benchmark()
+											}
+										]
+									},
+									{
 										id: 'sysadmin-hybrid-search-benchmark',
 										label: m.nav_sysadmin_hybrid_search_benchmark(),
 										children: [

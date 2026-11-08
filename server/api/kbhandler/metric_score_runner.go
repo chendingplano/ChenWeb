@@ -163,7 +163,7 @@ func runMetricScoreScriptAt(ctx context.Context, script string, args ...string) 
 				line := strings.SplitN(strings.TrimSpace(string(exit.Stderr)), "\n", 2)[0]
 				if line != "" {
 					reason := strings.TrimPrefix(line, "score_io: ")
-					for _, prefix := range []string{"compact matches: ", "gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "unknown gold provision IDs:", "unknown predicted provision IDs:", "pair ", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
+					for _, prefix := range []string{"compact matches: ", "gold rows ", "predicted rows ", "unknown gold metric IDs:", "unknown predicted metric IDs:", "unknown gold provision IDs:", "unknown predicted provision IDs:", "unknown gold product IDs:", "unknown predicted product IDs:", "pair ", "false positive ", "override ", `override "correct"`, "Review refers to ", "Reviewer required", "Limitations must be ", "Review every aligned prediction ", "Judge every included gold unit ", "Credit must be ", "Unit reason required", "Prediction spans required", "Positive coverage requires ", "Claims must be ", "Overlapping claims", "Invalid claim status", "Claim reason required", "Evidence list required", "Supported claims require ", "Claim evidence outside ", "Unreviewed prediction text", "Invalid span offsets", "Span quote mismatch", "Invalid/duplicate prediction ID", "Invalid prediction chunk sequence", "Invalid gold chunks", "Prediction text required", "Chunk diagnostics required"} {
 						if strings.HasPrefix(reason, prefix) {
 							return metricScoreValidationError{Reason: reason}
 						}
@@ -323,17 +323,20 @@ func freezeScoreTools(root, script, scoreSkill, goldSkill string) (string, map[s
 	return filepath.Join(root, "skills", scoreSkill, "scripts", "score_io.py"), hashes, nil
 }
 
-// scoreKind names what differs between the metric, reference and provision benchmarks; the scoring flow
-// (export, LLM matching, score) is shared.
+// scoreKind names what differs between the metric, reference, provision and product benchmarks; the
+// scoring flow (export, LLM matching, score) is shared.
 type scoreKind struct {
 	scriptEnv, scoreSkill, goldSkill string
 	runsDir, prompt                  string
 	callReason, callLoc              string
 	matchBasis                       string // what matching falls back to when the source is unreadable
+	// compact: the scorer owns a compact v2 matching contract (project, strict decoder, expanded
+	// matches), as the provision and product scorers do.
+	compact bool
 }
 
 var metricScoreKind = scoreKind{"METRIC_BENCHMARK_SCORER_PATH", "score-extract-metrics", "extract-metrics-benchmark",
-	"metric-score-runs", metricScorePrompt, "score_extract_metrics", "MID-20261007-04", "metric"}
+	"metric-score-runs", metricScorePrompt, "score_extract_metrics", "MID-20261007-04", "metric", false}
 
 func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, id int64, req metricScoreRequest, userID string) (metricScoreEvidence, error) {
 	return executeScore(ctx, db, logger, metricScoreKind, id, req, userID)
@@ -341,7 +344,7 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 
 func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, kind scoreKind, id int64, req metricScoreRequest, userID string) (e metricScoreEvidence, err error) {
 	e.Model = req.Model
-	table := map[string]string{"metric-score-runs": "kb.metric_score_runs", "reference-score-runs": "kb.reference_score_runs", "provision-score-runs": "kb.provision_score_runs"}[kind.runsDir]
+	table := map[string]string{"metric-score-runs": "kb.metric_score_runs", "reference-score-runs": "kb.reference_score_runs", "provision-score-runs": "kb.provision_score_runs", "product-score-runs": "testbed.product_score_runs"}[kind.runsDir]
 	executionID, err := taskLLMExecution(ctx, db, table, id)
 	if err != nil {
 		return e, err
@@ -408,14 +411,14 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	var lines []rawLine
 	source, _ := input["source"].(map[string]any)
 	sourcePath, _ := source["path"].(string)
-	if kind.matchBasis == "provision" {
+	if kind.compact {
 		source["available"] = false
 	}
 	if sourcePath != "" {
 		// Keep exactly the canonical source bytes used for the matcher and their digest.
 		raw, readErr := os.ReadFile(sourcePath)
 		if readErr == nil {
-			if kind.matchBasis == "provision" {
+			if kind.compact {
 				source["available"] = true
 			}
 			if utf8.RuneCount(raw) > metricReviewMaxInputChars {
@@ -449,7 +452,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	}
 	// source_text is already in the immutable snapshot; do not duplicate it in the LLM input.
 	matchInput := e.Input
-	if kind.matchBasis == "provision" {
+	if kind.compact {
 		// The frozen Python scorer owns both the index mapping and the decoder.
 		// Project only after source-comparability and provenance have been finalized.
 		if err = runMetricScoreScriptAt(ctx, frozen, "project", "--dir", dir); err != nil {
@@ -470,15 +473,15 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 	if err != nil {
 		return e, err
 	}
-	if kind.matchBasis == "provision" {
+	if kind.compact {
 		if err = os.WriteFile(filepath.Join(dir, "matching-request.txt"), []byte(inputText), 0600); err != nil {
 			return e, err
 		}
 	}
-	// Compact provision matching keeps the profile's reasoning: without it deepseek-flash loses
-	// the exhaustive index accounting and emits [i,i] progressions (run 3, 2026-11-07: 0/3 valid
-	// responses without reasoning, 4/4 with it).
-	if kind.matchBasis != "provision" && strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
+	// Compact matching keeps the profile's reasoning: without it deepseek-flash loses the
+	// exhaustive index accounting and emits [i,i] progressions (provision run 3, 2026-11-07: 0/3
+	// valid responses without reasoning, 4/4 with it).
+	if !kind.compact && strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		client.ThinkingType = "disabled"
 	}
 	originalInput := inputText
@@ -494,7 +497,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 			}
 			return e, metricScoreFailure{"LLM_FAILED"}
 		}
-		if kind.matchBasis != "provision" {
+		if !kind.compact {
 			dropEmptyPairsAlsoMissed(payload)
 			enforceOneToOnePairs(payload)
 		}
@@ -506,13 +509,13 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 		if err = os.WriteFile(filepath.Join(dir, "matches.json"), rawMatches, 0600); err != nil {
 			return e, err
 		}
-		if kind.matchBasis != "provision" {
+		if !kind.compact {
 			e.Matches = rawMatches
 		}
 		// Validate every attempt with the frozen authoritative scorer. Do not duplicate
 		// its matching rules in Go or invent classifications for invalid model output.
 		scoreArgs := []string{"score", "--dir", dir, "--scorer-model", cfg.ModelName}
-		if kind.matchBasis == "provision" {
+		if kind.compact {
 			scoreArgs = append(scoreArgs, "--require-compact")
 		}
 		if scoreErr := runMetricScoreScriptAt(ctx, frozen, scoreArgs...); scoreErr != nil {
@@ -522,7 +525,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 			}
 			logger.Warn("benchmark matching validation failed", "run_id", id, "attempt", attempt, "validation_reason", validation.Reason)
 			// Reference matching retains its existing scoring flow.
-			if (kind.matchBasis != "metric" && kind.matchBasis != "provision") || attempt == 2 {
+			if (kind.matchBasis != "metric" && !kind.compact) || attempt == 2 {
 				return e, scoreErr
 			}
 			if err = os.WriteFile(filepath.Join(dir, "matches-attempt-1.json"), rawMatches, 0600); err != nil {
@@ -533,14 +536,14 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 				return e, marshalErr
 			}
 			inputText = originalInput + "\nMATCH_REPAIR\n" + string(feedback)
-			if kind.matchBasis == "provision" {
+			if kind.compact {
 				if err = os.WriteFile(filepath.Join(dir, "matching-request-attempt-2.txt"), []byte(inputText), 0600); err != nil {
 					return e, err
 				}
 			}
 			continue
 		}
-		if kind.matchBasis == "provision" {
+		if kind.compact {
 			// Preserve the existing verbose API/artifact contract; raw compact decisions
 			// remain in matches.json beside the exact model input.
 			e.Matches, err = os.ReadFile(filepath.Join(dir, "matches-expanded.json"))

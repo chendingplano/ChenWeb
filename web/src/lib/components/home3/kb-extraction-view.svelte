@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { m as msg } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, type ComponentProps, type Snippet } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -26,6 +26,7 @@
 	import Share2Icon from '@lucide/svelte/icons/share-2';
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
+	import { kbInputRecordKey } from './metric-benchmark-record';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import {
@@ -35,6 +36,7 @@
 	import {
 		getRawLines,
 		type KbInputRecord,
+		type ListKbInputsParams,
 		type RawLine
 	} from '$lib/services/kbService';
 
@@ -83,7 +85,13 @@
 		emptyTableName = '',
 		emptySubtitle = msg.kb_extraction_run_the_extraction_processor_to(),
 		browserSubtitle = msg.kb_extraction_search_filter_and_select_a(),
-		canvasMapLabel = msg.kb_extraction_attribute_map()
+		canvasMapLabel = msg.kb_extraction_attribute_map(),
+
+		recordListParams,
+		recordListPausedMessage = '',
+		recordBrowserControls,
+		mapRecord,
+		reloadToken = ''
 	}: {
 		darkMode?: boolean;
 		browserInstanceKey?: string;
@@ -95,7 +103,8 @@
 		onFocusModeChange?: (focused: boolean) => void;
 
 		groups: GroupDef[];
-		loadItems: (recordId: number) => Promise<{ results: any[]; file_name?: string }>;
+		/** record is the selected browser entry; a gold benchmark entry carries its run in gold_metric_runs. */
+		loadItems: (recordId: number, record: KbInputRecord) => Promise<{ results: any[]; file_name?: string }>;
 		getItemId: (item: any) => number;
 		getItemType: (item: any) => string;
 		getItemTitle: (item: any) => string;
@@ -120,6 +129,14 @@
 		emptySubtitle?: string;
 		browserSubtitle?: string;
 		canvasMapLabel?: string;
+
+		// Optional record-browser hooks for gold benchmark hosts (e.g. Gold Products); off by default.
+		recordListParams?: Partial<ListKbInputsParams>;
+		recordListPausedMessage?: string;
+		recordBrowserControls?: Snippet;
+		mapRecord?: ComponentProps<typeof KbInputRecordBrowser>['mapRecord'];
+		/** Changing it reloads the selected record's items (e.g. a Gold/Dropped switch). */
+		reloadToken?: string;
 	} = $props();
 
 	// Letterpress palette — kept in lockstep with metric-mgmt-view so this view
@@ -151,6 +168,8 @@
 	const focusPdfWidthKey = $derived(`${storagePrefix}:focus-pdf-width:${browserInstanceKey}`);
 
 	let selectedRecordId = $state<number | null>(null);
+	// One record can be several browser entries (one per gold run); the key tells them apart.
+	let selectedRecordKey = $state<string | null>(null);
 	let recordCache = $state<Record<number, KbInputRecord>>({});
 	let items = $state<any[]>([]);
 	let loading = $state(false);
@@ -326,15 +345,30 @@
 
 	async function handleRecordSelect(record: KbInputRecord) {
 		recordCache = { ...recordCache, [record.id]: record };
-		if (selectedRecordId === record.id && items.length) return;
+		const key = kbInputRecordKey(record);
+		if (selectedRecordKey === key && items.length) return;
 		selectedRecordId = record.id;
+		selectedRecordKey = key;
+		await reloadItems(record);
+	}
+
+	let lastReloadToken = reloadToken;
+	$effect(() => {
+		const token = reloadToken;
+		if (token === lastReloadToken) return;
+		lastReloadToken = token;
+		const record = selectedRecordId != null ? recordCache[selectedRecordId] : null;
+		if (record) void reloadItems(record);
+	});
+
+	async function reloadItems(record: KbInputRecord) {
 		closeFocus();
 		typeFilter = '__all__';
 		loading = true;
 		loadError = '';
 		items = [];
 		try {
-			const response = await loadItems(record.id);
+			const response = await loadItems(record.id, record);
 			items = response.results ?? [];
 		} catch (error) {
 			items = [];
@@ -1148,6 +1182,11 @@
 				emptySubtitle={msg.kb_extraction_use_search_or_retrieve_to()}
 				{scopeToActiveStore}
 				{selectedRecordId}
+				{selectedRecordKey}
+				listParams={recordListParams}
+				listPausedMessage={recordListPausedMessage}
+				{...mapRecord ? { mapRecord } : {}}
+				extraControls={recordBrowserControls}
 				onSelect={handleRecordSelect}
 			/>
 

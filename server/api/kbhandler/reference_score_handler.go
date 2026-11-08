@@ -25,7 +25,7 @@ import (
 const referenceScorePrompt = "prompt-score-extract-references-v1.md"
 
 var referenceScoreKind = scoreKind{"REFERENCE_BENCHMARK_SCORER_PATH", "score-extract-references", "extract-references-benchmark",
-	"reference-score-runs", referenceScorePrompt, "score_extract_references", "MID-20261014-01", "reference"}
+	"reference-score-runs", referenceScorePrompt, "score_extract_references", "MID-20261014-01", "reference", false}
 
 func ListReferenceScoreGoldRuns(c echo.Context) error {
 	recordID, err := strconv.ParseInt(c.QueryParam("record_id"), 10, 64)

@@ -25,7 +25,7 @@ import (
 const provisionScorePrompt = "prompt-score-extract-provisions-v2.md"
 
 var provisionScoreKind = scoreKind{"PROVISION_BENCHMARK_SCORER_PATH", "score-extract-provisions", "extract-provisions-benchmark",
-	"provision-score-runs", provisionScorePrompt, "score_extract_provisions", "MID-20261106-01", "provision"}
+	"provision-score-runs", provisionScorePrompt, "score_extract_provisions", "MID-20261106-01", "provision", true}
 
 func ListProvisionScoreGoldRuns(c echo.Context) error {
 	recordID, err := strconv.ParseInt(c.QueryParam("record_id"), 10, 64)

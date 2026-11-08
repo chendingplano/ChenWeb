@@ -43,6 +43,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import ReferenceScoreView from '$lib/components/home3/reference-score-view.svelte';
 	import ProvisionScoreView from '$lib/components/home3/provision-score-view.svelte';
 	import ProvisionMgmtView from '$lib/components/home3/provision-mgmt-view.svelte';
+	import ProductScoreView from '$lib/components/home3/product-score-view.svelte';
+	import ProductsView from '$lib/components/home3/products-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
@@ -272,6 +274,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			activeMenu?.childId !== 'sysadmin-llm-references-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-provisions-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-provisions-benchmark' &&
+			activeMenu?.childId !== 'sysadmin-llm-products-gold' &&
+			activeMenu?.childId !== 'sysadmin-llm-products-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-chat-sessions' &&
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
@@ -450,6 +454,10 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<ProvisionMgmtView {darkMode} {onFocusModeChange} source="testbed" />
 		{:else if activeMenu?.childId === 'sysadmin-llm-provisions-benchmark'}
 			<ProvisionScoreView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-products-gold'}
+			<ProductsView {darkMode} {onFocusModeChange} source="testbed" />
+		{:else if activeMenu?.childId === 'sysadmin-llm-products-benchmark'}
+			<ProductScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
 			<MetricReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}

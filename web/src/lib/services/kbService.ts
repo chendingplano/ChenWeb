@@ -423,8 +423,8 @@ export type GoldMetricOptionsResponse = {
 };
 
 // Which gold benchmark set a gold view reads: testbed.metrics or the
-// testbed reference, summary or provision tables.
-export type GoldKind = 'metrics' | 'references' | 'summaries' | 'provisions';
+// testbed reference, summary, provision or product tables.
+export type GoldKind = 'metrics' | 'references' | 'summaries' | 'provisions' | 'products';
 
 // Skill versions and models present in a gold set, for the gold views' filters.
 export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptionsResponse> {
@@ -436,7 +436,9 @@ export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptions
 				? 'Failed to list gold reference options'
 				: kind === 'provisions'
 					? 'Failed to list gold provision options'
-					: 'Failed to list gold summary options'
+					: kind === 'products'
+						? 'Failed to list gold product options'
+						: 'Failed to list gold summary options'
 	);
 }
 
@@ -1170,6 +1172,22 @@ export type KbProductRecord = {
 	prompt_name: string;
 	create_time: string;
 	modify_time: string;
+	// Gold-only fields (source=testbed).
+	product_key?: string;
+	section?: string;
+	rule_id?: string;
+};
+
+// A candidate a gold product run excluded or merged (testbed.products_dropped).
+export type KbDroppedProduct = {
+	id: number;
+	candidate_id: string;
+	decision: string;
+	drop_reason: string;
+	reason?: string;
+	text?: string;
+	source_line_spans: string[];
+	product_keys: string[];
 };
 
 export type ListKbProductsResponse = {
@@ -1178,14 +1196,20 @@ export type ListKbProductsResponse = {
 	file_name?: string;
 	results: KbProductRecord[];
 	total: number;
+	dropped?: KbDroppedProduct[];
 };
 
-export async function listKbProducts(inputRecordId: number): Promise<ListKbProductsResponse> {
-	const result = await fetchOrThrow<ListKbProductsResponse>(
-		`${BASE}/products?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
-		'Failed to retrieve products'
-	);
-	return result;
+// Without goldRun: production product relations (kb.products). With goldRun: that
+// benchmark run's gold product relations plus its dropped candidates.
+export async function listKbProducts(inputRecordId: number, goldRun?: GoldRun): Promise<ListKbProductsResponse> {
+	const query = new URLSearchParams({ input_record_id: String(inputRecordId) });
+	if (goldRun) {
+		query.set('source', 'testbed');
+		query.set('skill_version', goldRun.skill_version);
+		query.set('model_name', goldRun.model_name);
+		query.set('run_id', goldRun.run_id);
+	}
+	return fetchOrThrow<ListKbProductsResponse>(`${BASE}/products?${query}`, 'Failed to retrieve products');
 }
 
 // ---------- kb.stores ----------

@@ -834,6 +834,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/references", kbhandler.ListReferences)
 	apiGroup.GET("/kb/references/gold-options", kbhandler.ListGoldReferenceOptions)
 	apiGroup.GET("/kb/provisions/gold-options", kbhandler.ListGoldProvisionOptions)
+	apiGroup.GET("/kb/products/gold-options", kbhandler.ListGoldProductOptions)
 	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)
 	apiGroup.GET("/kb/metrics/gold-options", kbhandler.ListGoldMetricOptions)
 	apiGroup.GET("/kb/metrics/ontology-analysis", kbhandler.GetMetricOntologyAnalysis)
@@ -867,6 +868,14 @@ func RegisterRoutes(e *echo.Echo) error {
 	provisionScores.POST("", kbhandler.StartProvisionScore)
 	provisionScores.GET("/:id", kbhandler.GetProvisionScore)
 	provisionScores.GET("/:id/artifacts/:kind", kbhandler.DownloadProvisionScoreArtifact)
+
+	productScores := apiGroup.Group("/kb/product-scores", kbhandler.MetricScoreAdmin)
+	productScores.GET("/models", kbhandler.ListMetricScoreModels)
+	productScores.GET("/gold-runs", kbhandler.ListProductScoreGoldRuns)
+	productScores.GET("", kbhandler.ListProductScores)
+	productScores.POST("", kbhandler.StartProductScore)
+	productScores.GET("/:id", kbhandler.GetProductScore)
+	productScores.GET("/:id/artifacts/:kind", kbhandler.DownloadProductScoreArtifact)
 
 	summaryScores := apiGroup.Group("/kb/summary-scores", kbhandler.MetricScoreAdmin)
 	summaryScores.GET("/models", kbhandler.ListMetricScoreModels)

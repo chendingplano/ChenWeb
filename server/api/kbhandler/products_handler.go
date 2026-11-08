@@ -42,6 +42,10 @@ type productRecord struct {
 	PromptName        string          `json:"prompt_name"`
 	CreateTime        string          `json:"create_time"`
 	ModifyTime        string          `json:"modify_time"`
+	// Gold-only fields (source=testbed); production rows leave them empty.
+	ProductKey string `json:"product_key,omitempty"`
+	Section    string `json:"section,omitempty"`
+	RuleID     string `json:"rule_id,omitempty"`
 }
 
 type listProductsResponse struct {
@@ -50,11 +54,14 @@ type listProductsResponse struct {
 	FileName string          `json:"file_name,omitempty"`
 	Results  []productRecord `json:"results"`
 	Total    int             `json:"total"`
+	// Dropped holds a gold run's excluded/duplicate candidates (source=testbed only).
+	Dropped []droppedProduct `json:"dropped,omitempty"`
 }
 
 // ListProducts handles GET /api/v1/kb/products?input_record_id=N.
 // It returns every product relation extracted for the record from kb.products,
-// ordered by primary key (extraction order).
+// ordered by primary key (extraction order). With source=testbed it returns the
+// gold product relations of one benchmark run instead.
 func ListProducts(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PR_001")
 	defer rc.Close()
@@ -84,6 +91,9 @@ func ListProducts(c echo.Context) error {
 		if qerr := db.QueryRow(q, inputID).Scan(&fn); qerr == nil && fn.Valid {
 			fileName = strings.TrimSpace(fn.String)
 		}
+	}
+	if strings.TrimSpace(c.QueryParam("source")) == "testbed" {
+		return listGoldProducts(c, logger, inputID, fileName)
 	}
 
 	const q = `
