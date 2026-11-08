@@ -100,10 +100,10 @@
 		if (activeMenu?.childId !== 'sysadmin-llm-references-benchmark') selectedReferences = null;
 		if (activeMenu?.childId !== 'sysadmin-llm-references-gold') referenceDetails = null;
 	});
-	// Product Review and Review Metrics use the shelf's space for their own panes — hide it while
+	// Product Review, Review Metrics and Gold Products (Product Viewer) use the shelf's space for their own panes — hide it while
 	// it's the active content, without touching the stored shelfOpen toggle so
 	// other pages keep whatever open/closed state the user last left them in.
-	let shelfVisible = $derived(shelfOpen && activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics');
+	let shelfVisible = $derived(shelfOpen && activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics' && activeMenu?.childId !== 'sysadmin-llm-products-gold');
 	let docReviewKey = $state(0);
 	let settingsHydrated = $state(false);
 	let railExpandedBeforeFocus = false;
