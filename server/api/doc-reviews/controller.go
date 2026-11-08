@@ -12,6 +12,7 @@ import (
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/docactivity"
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -155,10 +156,10 @@ func (c *DocReviewController) createRun(ctx context.Context, requestID, recordID
 	var runID int64
 	err = c.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_runs
-			(request_id, input_record_id, run_number, aspects, model_overrides, notes, status, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+			(request_id, input_record_id, run_number, aspects, model_overrides, notes, status, created_by, llm_run_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
 		RETURNING id`,
-		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy),
+		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy), llmrun.Next(ctx),
 	).Scan(&runID)
 	return runID, err
 }
@@ -179,6 +180,12 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	}
 	if req.Status != "accepted" {
 		return fmt.Errorf("request %d is in status %q, expected 'accepted'", requestID, req.Status)
+	}
+
+	// The run row carries the decision made at creation, including zero.
+	var executionID sql.NullInt64
+	if err := c.DB.QueryRowContext(ctx, `SELECT llm_run_id FROM kb.doc_review_runs WHERE id = $1`, runID).Scan(&executionID); err != nil {
+		return fmt.Errorf("load review LLM execution ID for run %d: %w", runID, err)
 	}
 
 	// Transition run -> running (atomic: only one worker wins).
@@ -217,6 +224,8 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 
 	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
 	processor.RunID = runID
+
+	processor.LLMRunID = executionID.Int64
 	processor.ReviewDepth = req.ReviewDepth
 	processor.RequestedAspects = append([]string(nil), req.Aspects...)
 	processor.ReviewLogsStore = reviewLogsStore

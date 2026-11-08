@@ -27,7 +27,7 @@ func llmRecordIDFromContext(ctx context.Context) int64 {
 type llmRunIDKey struct{}
 
 func withLLMRunID(ctx context.Context, runID int64) context.Context {
-	if runID <= 0 {
+	if runID < 0 {
 		return ctx
 	}
 	return context.WithValue(ctx, llmRunIDKey{}, runID)

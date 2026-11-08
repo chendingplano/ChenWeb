@@ -306,6 +306,7 @@ func TestQuestionGeneratorWorkerPersistsSourceFailure(t *testing.T) {
 	loadQuestionGenerationLines = func(context.Context, *sql.DB, int64) ([]docprocessing.Line, error) {
 		return nil, fmt.Errorf("file missing")
 	}
+	expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture-model").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "cannot read this record's canonical line file").WillReturnResult(sqlmock.NewResult(0, 1))
 	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics"}`)
@@ -386,6 +387,7 @@ func TestQuestionGeneratorWorkerModelToSavedQuestions(t *testing.T) {
 			if err := req.normalize(); err != nil {
 				t.Fatal(err)
 			}
+			expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 			mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture-model").WillReturnResult(sqlmock.NewResult(0, 1))
 			if modelFails {
 				mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "question generation model request failed or timed out").WillReturnResult(sqlmock.NewResult(0, 1))

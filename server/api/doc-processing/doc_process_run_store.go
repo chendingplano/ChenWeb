@@ -11,6 +11,7 @@ import (
 // one row per handleEvent invocation (one pipeline execution for one record).
 // See ADR 2026071201.
 type DocProcessRunRecord struct {
+	LLMRunID   int64 // shared llm_run_id sequence; zero is a durable allocation failure
 	RecordID   int64
 	EventID    string // empty -> NULL (not every invocation traces back to a kb.events row)
 	Mode       string // "auto" | "dev"
@@ -61,8 +62,8 @@ func (s SQLStore) CreateDocProcessRun(ctx context.Context, rec DocProcessRunReco
 	}
 
 	const stmt = `
-INSERT INTO kb.doc_process_runs (record_id, event_id, mode, run_number, processors, parameters)
-VALUES ($1, $2, $3, (SELECT COALESCE(MAX(run_number), 0) + 1 FROM kb.doc_process_runs WHERE record_id = $1), $4::jsonb, $5::jsonb)
+INSERT INTO kb.doc_process_runs (record_id, event_id, mode, run_number, processors, parameters, llm_run_id)
+VALUES ($1, $2, $3, (SELECT COALESCE(MAX(run_number), 0) + 1 FROM kb.doc_process_runs WHERE record_id = $1), $4::jsonb, $5::jsonb, $6)
 RETURNING id`
 
 	var id int64
@@ -72,6 +73,7 @@ RETURNING id`
 		rec.Mode,
 		string(processorsJSON),
 		string(parametersJSON),
+		rec.LLMRunID,
 	).Scan(&id)
 	if err != nil {
 		return 0, err

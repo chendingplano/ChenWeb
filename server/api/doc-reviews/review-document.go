@@ -446,7 +446,8 @@ type ReviewProcessor struct {
 
 	// RunID must be set by the caller (DocReviewController) before PostProcessIndex
 	// is invoked. Findings and progress updates are scoped to this run.
-	RunID int64
+	RunID    int64
+	LLMRunID int64 // shared execution correlation, separate from findings run ID
 
 	// ReviewDepth selects the request's depth-indexed output limits.
 	ReviewDepth int
@@ -1276,7 +1277,7 @@ func (p *ReviewProcessor) HandleEvent(ctx context.Context, payload []byte) error
 // their findings, and persists them to kb.doc_review_findings.
 func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
 	ctx = withLLMRecordID(ctx, recordID)
-	ctx = withLLMRunID(ctx, p.RunID)
+	ctx = withLLMRunID(ctx, p.LLMRunID)
 	start := p.Now()
 	p.Logger.Info("document review start", "record_id", recordID)
 

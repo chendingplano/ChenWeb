@@ -753,7 +753,7 @@ func TestPeakWaitingFilterIncludesAdmissionAndUnclosedCallHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{"i.pipeline_state = 'running'", "waiting for off-peak hours", "waiting for peak hours", "llm_hold", "llm_resume", "llm_hold_cancelled", "hold_id", "doc_process_runs"} {
+	for _, part := range []string{"i.pipeline_state = 'running'", "waiting for off-peak hours", "waiting for peak hours", "llm_hold", "llm_resume", "llm_hold_cancelled", "hold_id", "doc_process_runs", "SELECT r.llm_run_id FROM"} {
 		if !strings.Contains(where, part) {
 			t.Errorf("peak waiting filter missing %q: %s", part, where)
 		}

@@ -422,6 +422,7 @@ else:
 		t.Fatal(err)
 	}
 	defer db.Close()
+	expectTaskLLMExecution(mock, "kb.metric_score_runs", 93)
 	mock.ExpectQuery(`SELECT current_database\(\),current_user`).WillReturnRows(sqlmock.NewRows([]string{"db", "user"}).AddRow("fixture-db", "fixture-user"))
 	logger := loggerutil.CreateDefaultLogger("20261007-672")
 	defer logger.Close()

@@ -106,7 +106,7 @@ func TestMetricQuestionInputUsesSelectedContextsAndRunID(t *testing.T) {
 	calls := 0
 	client := questionExtractorFunc(func(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 		calls++
-		if in.RunID != 42 || in.RecordID != 416 {
+		if in.RunID != 90042 || in.RecordID != 416 {
 			t.Errorf("missing usage correlation: run=%d record=%d", in.RunID, in.RecordID)
 		}
 		if !strings.HasPrefix(in.InputText, `{"document_metadata":`) {
@@ -163,7 +163,7 @@ func TestMetricQuestionInputUsesSelectedContextsAndRunID(t *testing.T) {
 	}
 	logger := loggerutil.CreateDefaultLogger("20261024-267")
 	defer logger.Close()
-	questions, err := generateMetricQuestionDocument(context.Background(), db, 42, req, ApiTypes.LLMModelDef{ModelName: "fixture"}, client, questionGenerationPrompt, "test fixture", "user", nil, logger)
+	questions, err := generateMetricQuestionDocument(docprocessing.WithLLMRunID(context.Background(), 90042), db, 42, req, ApiTypes.LLMModelDef{ModelName: "fixture"}, client, questionGenerationPrompt, "test fixture", "user", nil, logger)
 	if err != nil || len(questions) != 3 || calls != 1 {
 		t.Fatalf("questions=%d calls=%d error=%v", len(questions), calls, err)
 	}

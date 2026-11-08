@@ -168,6 +168,11 @@ func randomQuestionDocumentIDs(ctx context.Context, db *sql.DB) ([]int64, error)
 }
 
 func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req questionGenerationRequest, modelRef, userID string, logger ApiTypes.JimoLogger) error {
+	executionID, err := taskLLMExecution(ctx, db, "testbed.generated_question_runs", runID)
+	if err != nil {
+		return err
+	}
+	ctx = docprocessing.WithLLMRunID(ctx, executionID)
 	cfg, client, err := newQuestionGenerationClient(modelRef, logger)
 	if err != nil {
 		logger.Error("configure question model failed", "run_id", runID, "error", err)
@@ -414,7 +419,7 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 		if utf8.RuneCount(input) > questionGenerationMaxInputChars {
 			return accepted, fmt.Errorf("document and metric context too large after formatting")
 		}
-		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: runID, RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
+		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: docprocessing.LLMRunIDFromContext(ctx), RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
 		if err != nil {
 			logger.Error("metric question model call failed", "run_id", runID, "record_id", req.InputRecordID, "error", err)
 			return accepted, errors.Join(lastValidationErr, fmt.Errorf("question generation model request failed or timed out"))

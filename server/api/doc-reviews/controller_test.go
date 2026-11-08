@@ -81,6 +81,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			end_time TIMESTAMPTZ,
 			error_message TEXT
 		)`,
+		`ALTER TABLE kb.doc_review_runs ADD COLUMN IF NOT EXISTS llm_run_id BIGINT`,
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_findings (
 			id BIGSERIAL PRIMARY KEY,
 			input_record_id BIGINT NOT NULL DEFAULT 0,
@@ -351,7 +352,7 @@ func TestController_AcceptRequest_InsertsNormalizedAndExplicitReviewDepth(t *tes
 				WithArgs(int64(11)).
 				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 			mock.ExpectQuery(`(?s)INSERT INTO kb\.doc_review_runs.*RETURNING id`).
-				WithArgs(int64(11), int64(42), 1, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user").
+				WithArgs(int64(11), int64(42), 1, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user", int64(0)).
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(21)))
 			mock.ExpectExec(`(?s)INSERT INTO kb\.doc_review_status`).
 				WithArgs(int64(11), int64(42), int64(21), "grammar_spelling", "P1").
@@ -1194,5 +1195,35 @@ func TestController_GetRequestWithFindings_UsesRunStatusForHistoricalRun(t *test
 	}
 	if len(rwf.Findings) != 1 {
 		t.Fatalf("Findings has %d entries, want 1", len(rwf.Findings))
+	}
+}
+
+func TestController_RunReviewBindingFailureLeavesRunUnclaimed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)SELECT r\.id, r\.input_record_id, r\.review_depth.*FROM kb\.doc_review_requests`).
+		WithArgs(int64(11)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "input_record_id", "review_depth", "tier", "aspects", "reference_docs", "notes", "model_overrides",
+			"requester_name", "requester_id", "report_template", "doc_template", "status", "create_time",
+			"run_id", "run_status", "start_time", "end_time", "error_message",
+		}).AddRow(
+			int64(11), int64(42), 3, "custom", `["grammar_spelling"]`, `[]`, "", `{}`,
+			"test-user", int64(0), "", "", "accepted", "2026-07-10 12:00:00+00",
+			nil, "", "", "", "",
+		))
+
+	mock.ExpectQuery(`SELECT llm_run_id FROM kb.doc_review_runs`).WithArgs(int64(21)).WillReturnError(fmt.Errorf("binding unavailable"))
+	err = (&DocReviewController{DB: db}).RunReview(context.Background(), 11, 21)
+	if err == nil || !strings.Contains(err.Error(), "binding unavailable") {
+		t.Fatalf("run continued after binding failure: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("SQL expectations: %v", err)
 	}
 }

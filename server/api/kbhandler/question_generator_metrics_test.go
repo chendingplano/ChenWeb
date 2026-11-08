@@ -173,6 +173,7 @@ func TestQuestionGeneratorBatchSkipsAndHitsExactTargets(t *testing.T) {
 			return map[string]any{"questions": questions}, nil
 		}), nil
 	}
+	expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
 	for i, n := range []int{6, 3} {
 		mock.ExpectBegin()
@@ -219,6 +220,7 @@ func TestQuestionGeneratorBatchStopsWithoutMetrics(t *testing.T) {
 			return nil, nil
 		}), nil
 	}
+	expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE testbed.generated_question_runs").WithArgs(int64(12), "no eligible document could generate the remaining questions: document has no metrics").WillReturnResult(sqlmock.NewResult(0, 1))
 	req := questionRequest(t, `{"purpose":"search_metrics"}`)
@@ -316,6 +318,7 @@ func TestQuestionGeneratorBatchRetriesDuplicateOutput(t *testing.T) {
 					return map[string]any{"questions": questions}, nil
 				}), nil
 			}
+			expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 			mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectBegin()
 			for range 3 {

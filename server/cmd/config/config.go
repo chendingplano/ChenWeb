@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	sharedgoose "github.com/chendingplano/shared/go/api/goose"
@@ -1034,5 +1035,9 @@ func RunMigrations(ctx context.Context, logger ApiTypes.JimoLogger) error {
 	if err := sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedDBHandle); err != nil {
 		return fmt.Errorf("shared migrations failed: %w", err)
 	}
+	if err := llmrun.Provision(ctx, ApiTypes.SharedDBHandle); err != nil {
+		return err
+	}
+
 	return nil
 }

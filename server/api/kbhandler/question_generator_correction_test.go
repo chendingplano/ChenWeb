@@ -66,7 +66,7 @@ func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 			var rejected map[string]any
 			client := questionExtractorFunc(func(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 				calls++
-				if in.RunID != 6 || in.RecordID != 416 {
+				if in.RunID != 90006 || in.RecordID != 416 {
 					t.Fatal("lost usage correlation")
 				}
 				var input struct {
@@ -130,7 +130,7 @@ func TestMetricQuestionCorrectsMisalignedCitations(t *testing.T) {
 			}
 			logger := loggerutil.CreateDefaultLogger("20261024-619")
 			defer logger.Close()
-			qs, err := generateMetricQuestionDocument(context.Background(), db, 6, req, ApiTypes.LLMModelDef{ModelName: "fixture"}, client, questionGenerationPrompt, "fixture prompt", "admin", nil, logger)
+			qs, err := generateMetricQuestionDocument(docprocessing.WithLLMRunID(context.Background(), 90006), db, 6, req, ApiTypes.LLMModelDef{ModelName: "fixture"}, client, questionGenerationPrompt, "fixture prompt", "admin", nil, logger)
 			if mode == "corrected" {
 				if err != nil || len(qs) != 3 || calls != 2 {
 					t.Fatalf("questions=%d calls=%d error=%v", len(qs), calls, err)

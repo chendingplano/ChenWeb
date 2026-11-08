@@ -9,17 +9,35 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	sharedllm "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
+
+type scoreUsageSink func(context.Context, sharedllm.UsageCaptureRecord) (string, error)
+
+func (sink scoreUsageSink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord) (string, error) {
+	return sink(ctx, record)
+}
 
 // Real projection, decoder, frozen scorer and HTTP client; only DB export and provider are fixtures.
 func TestProvisionCompactRunner(t *testing.T) {
 	for _, mode := range []string{"complete", "repair", "invalid_twice", "missing_source", "changed_source"} {
 		t.Run(mode, func(t *testing.T) {
+			previousSink := sharedllm.DefaultUsageCaptureSink
+			var usageCalls atomic.Int32
+			sharedllm.DefaultUsageCaptureSink = scoreUsageSink(func(_ context.Context, record sharedllm.UsageCaptureRecord) (string, error) {
+				usageCalls.Add(1)
+				if record.RunID != 90093 {
+					t.Errorf("usage run ID=%d, want 90093", record.RunID)
+				}
+				return "", nil
+			})
+			t.Cleanup(func() { sharedllm.DefaultUsageCaptureSink = previousSink })
 			root, err := filepath.Abs("../../..")
 			if err != nil {
 				t.Fatal(err)
@@ -146,10 +164,14 @@ else:
 				t.Fatal(err)
 			}
 			defer db.Close()
+			expectTaskLLMExecution(mock, "kb.provision_score_runs", 93)
 			mock.ExpectQuery(`SELECT current_database\(\),current_user`).WillReturnRows(sqlmock.NewRows([]string{"db", "user"}).AddRow("fixture-db", "fixture-user"))
 			logger := loggerutil.CreateDefaultLogger("20261107-319")
 			defer logger.Close()
 			evidence, err := executeScore(context.Background(), db, logger, provisionScoreKind, 93, metricScoreRequest{RecordID: 416, Model: "fixture", Lang: "zh-cn"}, "fixture-user")
+			if int(usageCalls.Load()) != calls {
+				t.Fatalf("usage calls=%d, provider calls=%d", usageCalls.Load(), calls)
+			}
 			if mode == "invalid_twice" {
 				if metricScoreErrorCode(err) != "INVALID_MATCHES" || calls != 2 || len(evidence.Score) != 0 || len(evidence.Matches) != 0 {
 					t.Fatalf("invalid response not bounded/rejected: calls=%d err=%v", calls, err)

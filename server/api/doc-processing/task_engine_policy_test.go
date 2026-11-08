@@ -393,7 +393,7 @@ func pauseLLMTask(t *testing.T, sw *scriptedWindow, sinkErr error) (context.Cont
 	t.Cleanup(srv.Close)
 	sink := &lifecycleSink{err: sinkErr}
 	s := &ControlService{TaskPolicy: taskEnginePolicy{CrossPeak: CrossPeakPauseLLM, Window: sw.window(), Events: sink}}
-	ctx := withRunID(withLLMUserID(context.Background(), "u1"), 9)
+	ctx := withLLMRunID(withRunID(withLLMUserID(context.Background(), "u1"), 9), 9009)
 	ctx = s.applyCrossPeakRule(ctx, nil, 7, PeakModeAutoOffPeak)
 	client := &sharedllm.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "k", ModelName: "deepseek-test", HTTPClient: srv.Client()}
 	return ctx, client, &hits, sink
@@ -430,7 +430,7 @@ func TestPauseLLM_HoldsRealRequestAndRecordsPairedEvents(t *testing.T) {
 		t.Fatalf("rows = %+v, want llm_hold then llm_resume", rows)
 	}
 	for _, r := range rows {
-		if r.UserID != "u1" || r.RecordID != 7 || r.RunID != 9 || r.ModelName != "deepseek-test" ||
+		if r.UserID != "u1" || r.RecordID != 7 || r.RunID != 9009 || r.ModelName != "deepseek-test" ||
 			r.PromptName != "p" || r.CallLoc != "LOC_T" || r.TotalTokens != 0 ||
 			r.Metadata["peak_mode"] != PeakModeAutoOffPeak || r.Metadata["cross_peak_mode"] != CrossPeakPauseLLM {
 			t.Fatalf("row attribution = %+v", r)

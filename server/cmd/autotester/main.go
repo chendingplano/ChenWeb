@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/autotester"
@@ -210,11 +211,13 @@ func runAutoTestMigrations(ctx context.Context, logger ApiTypes.JimoLogger) erro
 	if err != nil {
 		return fmt.Errorf("failed to run project migrator (MID_060221143036): %w", err)
 	}
-
 	logger.Info("Running shared migrations")
 	err = goose.RunSharedMigrations(ctx, logger, autotester_db)
 	if err != nil {
 		return fmt.Errorf("failed to run shared migrator (MID_060221143037): %w", err)
+	}
+	if err := llmrun.Provision(ctx, autotester_db); err != nil {
+		return err
 	}
 
 	logger.Info("Running autotester migrations")

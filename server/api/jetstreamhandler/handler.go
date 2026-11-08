@@ -13,6 +13,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -784,7 +785,14 @@ func PublishEvent(c echo.Context) error {
 		})
 	}
 
-	ack, err := js.Publish(req.Subject, []byte(normalizedPayload))
+	publishPayload := []byte(normalizedPayload)
+	if isDocProcessingTriggerSubject(req.Subject) {
+		publishPayload, err = llmrun.Stamp(publishPayload)
+		if err != nil {
+			return err
+		}
+	}
+	ack, err := js.Publish(req.Subject, publishPayload)
 	if err != nil {
 		logger.Error("failed to publish event", "subject", req.Subject, "error", err)
 		return c.JSON(http.StatusBadGateway, map[string]any{

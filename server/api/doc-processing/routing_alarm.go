@@ -53,7 +53,7 @@ const (
 // resolution/enforcement. Message is the human-readable text persisted
 // verbatim into alarms_errors.message; it must stay content-safe (ids,
 // checksums, processor/pipeline names only -- never document content).
-// RunID correlates the alarm to kb.doc_process_runs.id for per-run dedup
+// RunID correlates the alarm to the allocated LLM execution ID for per-run dedup
 // (spec 2026080102 section 11). RecordID is the fallback correlator for
 // alarms raised before a run row exists (e.g. a block-mode conflict that
 // fails processing before dispatch, per IsDecisionRelevantPlanConflict) --

@@ -181,7 +181,7 @@ func (g *peakRequestGate) attribute(ctx context.Context, usage sharedllm.UsageCa
 		usage.UserID = llmUserIDFromContext(ctx)
 	}
 	if usage.RunID == 0 {
-		usage.RunID, _ = runIDFromContext(ctx)
+		usage.RunID = llmRunIDFromContext(ctx)
 	}
 	if usage.RecordID == 0 {
 		usage.RecordID = g.recordID

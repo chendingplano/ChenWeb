@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/nats-io/nats.go"
@@ -216,7 +217,11 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 	cb := func(msg *nats.Msg) {
 		inFlight.Add(1)
 		defer inFlight.Done()
-		if err := handler(ctx, msg.Data); err != nil {
+		payload := msg.Data
+		if metadata, err := msg.Metadata(); err == nil {
+			payload = llmrun.QueuePayload(payload, metadata.Stream, metadata.Sequence.Stream)
+		}
+		if err := handler(ctx, payload); err != nil {
 			s.logger.Error("(MID_26041120) converter message failed", "subject", msg.Subject, "error", err)
 			if shouldAckOnHandlerError(err) {
 				_ = msg.Ack()

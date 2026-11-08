@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/deepdoc/server/api/ontology/policyaudit"
 	"github.com/chendingplano/deepdoc/server/api/ontology/semrules"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -255,6 +256,9 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 			continue
 		}
 		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops, cmd.UserID)
+		if err == nil {
+			eventPayload, err = llmrun.Inherit(payload, eventPayload)
+		}
 		if err != nil {
 			mu.Lock()
 			if firstErr == nil {
@@ -649,6 +653,13 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		return err
 	}
+	// Resolve before routing, which may itself make LLM calls. Queued commands
+	// carry a stable identity, including a distinct suffix per batch document.
+	executionID, err := llmrun.Resolve(ctx, ApiTypes.ProjectDBHandle, llmrun.Key(payload, evt.RecordID))
+	if err != nil {
+		return err
+	}
+	ctx = withLLMRunID(ctx, executionID)
 	// Tag ctx with the event's user_id as early as possible so every LLM
 	// call made anywhere in this run (routing/facets/resolver, not just the
 	// processors below) stamps llm_usage_event.user_id -- mirrors withRunID,
@@ -964,6 +975,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			}
 		}
 		id, createErr := s.RunStore.CreateDocProcessRun(ctx, DocProcessRunRecord{
+			LLMRunID:   llmRunIDFromContext(ctx),
 			RecordID:   evt.RecordID,
 			EventID:    eventIDFromContext(ctx),
 			Mode:       mode,
@@ -1001,7 +1013,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		scopedAlarms := make([]RoutingAlarm, len(routingResult.Alarms))
 		copy(scopedAlarms, routingResult.Alarms)
 		for i := range scopedAlarms {
-			scopedAlarms[i].RunID = runID
+			scopedAlarms[i].RunID = llmRunIDFromContext(ctx)
 			scopedAlarms[i].RecordID = evt.RecordID
 		}
 		s.raiseRoutingAlarms(ctx, scopedAlarms)
@@ -1889,14 +1901,9 @@ type runIDCtxKey struct{}
 // point so every Log* call site stamps run_id without a signature change.
 // See ADR 2026071201.
 //
-// Also tags ctx via withLLMRunID (llm_capture_input.go) with the same id,
-// so every processor's LLM calls made through newLLMJSONInput stamp
-// llm_usage_event.run_id too -- otherwise doc-processing runs (unlike
-// doc-review runs, which tag it separately in review-document.go) would
-// always capture LLM usage with run_id left NULL.
+// LLM usage uses its separately allocated execution ID.
 func withRunID(ctx context.Context, id int64) context.Context {
-	ctx = context.WithValue(ctx, runIDCtxKey{}, id)
-	return withLLMRunID(ctx, id)
+	return context.WithValue(ctx, runIDCtxKey{}, id)
 }
 
 func runIDFromContext(ctx context.Context) (int64, bool) {

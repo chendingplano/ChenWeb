@@ -15,6 +15,7 @@ import (
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/documentgeometry"
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
@@ -599,6 +600,10 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64
 	payload, err := json.Marshal(ev)
 	if err != nil {
 		return fmt.Errorf("(MID_26041112) encode line-file-generated event: %w", err)
+	}
+	payload, err = llmrun.Stamp(payload)
+	if err != nil {
+		return fmt.Errorf("stamp processing execution: %w", err)
 	}
 	if err := s.Publisher.Publish(ctx, subject, payload); err != nil {
 		return fmt.Errorf("(MID_26041113) publish event subject=%s: %w", subject, err)

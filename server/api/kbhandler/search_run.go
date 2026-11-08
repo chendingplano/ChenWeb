@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/chendingplano/deepdoc/server/api/llmrun"
 )
 
 // searchCall identifies one search in public.llm_usage_event: its query embedding and keyword
-// calls carry the search's run ID (from kb.search_run_id_seq) and user. It travels in the context
+// calls carry the search's run ID (from shared.id_mgr llm_run_id) and user. It travels in the context
 // so computeQueryEmbedding and searchQueryKeywords keep their signatures.
 type searchCall struct {
 	runID  int64
@@ -34,8 +34,6 @@ func searchCallFrom(ctx context.Context) searchCall {
 // correlation, so it is logged and the search goes on with run ID 0.
 func newSearchCall(ctx context.Context, db *sql.DB, userID string) searchCall {
 	call := searchCall{userID: userID}
-	if err := db.QueryRowContext(ctx, `SELECT nextval('kb.search_run_id_seq')`).Scan(&call.runID); err != nil {
-		loggerutil.CreateDefaultLogger("20261024-746").Warn("allocate search run id failed", "error", err)
-	}
+	call.runID = llmrun.Next(ctx)
 	return call
 }

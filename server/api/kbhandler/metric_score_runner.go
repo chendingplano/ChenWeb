@@ -341,6 +341,11 @@ func executeMetricScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLog
 
 func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, kind scoreKind, id int64, req metricScoreRequest, userID string) (e metricScoreEvidence, err error) {
 	e.Model = req.Model
+	table := map[string]string{"metric-score-runs": "kb.metric_score_runs", "reference-score-runs": "kb.reference_score_runs", "provision-score-runs": "kb.provision_score_runs"}[kind.runsDir]
+	executionID, err := taskLLMExecution(ctx, db, table, id)
+	if err != nil {
+		return e, err
+	}
 	script, err := scoreSkillScriptPath(kind.scriptEnv, kind.scoreSkill)
 	if err != nil {
 		return e, err
@@ -481,7 +486,7 @@ func executeScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, k
 		logger.Info("calling LLM for benchmark matching", "scorer", kind.scoreSkill, "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "input_bytes", len(inputText), "attempt", attempt)
 		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 			UserID: userID, PromptName: kind.prompt, PromptText: string(prompt), ModelName: cfg.ModelName,
-			InputText: inputText, RecordID: req.RecordID, RunID: id, CallReason: kind.callReason, CallLoc: kind.callLoc,
+			InputText: inputText, RecordID: req.RecordID, RunID: executionID, CallReason: kind.callReason, CallLoc: kind.callLoc,
 		})
 		if err != nil {
 			if ctx.Err() != nil {

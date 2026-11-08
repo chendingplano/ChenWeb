@@ -23,15 +23,13 @@ func TestRunIDFromContext_NotSet(t *testing.T) {
 	}
 }
 
-// withRunID is the single choke point where handleEvent tags ctx with the
-// kb.doc_process_runs.id for a pipeline invocation (control.go:862). Every
-// processor's LLM calls read the run id back out via llmRunIDFromContext
-// (llm_capture_input.go) to populate llm_usage_event.run_id, so withRunID
-// must also satisfy that reader or every LLM call made during a plain
-// doc-processing run (e.g. extract_metrics) silently gets run_id=NULL.
-func TestWithRunID_AlsoTagsLLMRunID(t *testing.T) {
-	ctx := withRunID(context.Background(), 87)
-	if got := llmRunIDFromContext(ctx); got != 87 {
-		t.Fatalf("llmRunIDFromContext() = %d, want 87", got)
+func TestTableRunIDDoesNotReplaceLLMExecution(t *testing.T) {
+	ctx := withRunID(withLLMRunID(context.Background(), 1099), 87)
+	if got := llmRunIDFromContext(ctx); got != 1099 {
+		t.Fatalf("LLM run = %d, want 1099", got)
+	}
+	ctx = withLLMRunID(ctx, 0)
+	if got := llmRunIDFromContext(ctx); got != 0 {
+		t.Fatalf("failed execution retained old ID %d", got)
 	}
 }

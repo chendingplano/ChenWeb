@@ -30,12 +30,12 @@ func WithLLMRecordID(ctx context.Context, recordID int64) context.Context {
 	return withLLMRecordID(ctx, recordID)
 }
 
-// WithLLMRunID tags the context with the review run ID for LLM capture metadata.
+// WithLLMRunID tags the context with the allocated LLM execution ID for LLM capture metadata.
 func WithLLMRunID(ctx context.Context, runID int64) context.Context {
 	return withLLMRunID(ctx, runID)
 }
 
-// LLMRunIDFromContext returns the review run ID tagged via WithLLMRunID, or 0 if unset.
+// LLMRunIDFromContext returns the allocated LLM execution ID tagged via WithLLMRunID, or 0 if unset.
 func LLMRunIDFromContext(ctx context.Context) int64 {
 	return llmRunIDFromContext(ctx)
 }

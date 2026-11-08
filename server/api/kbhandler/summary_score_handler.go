@@ -324,6 +324,10 @@ func runSummaryScore(db *sql.DB, id int64, req summaryScoreRequest, userID strin
 
 func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, id int64, req summaryScoreRequest, userID string) (e summaryScoreEvidence, err error) {
 	e.Model = req.Model
+	executionID, err := taskLLMExecution(ctx, db, "kb.summary_score_runs", id)
+	if err != nil {
+		return e, err
+	}
 	script, err := scoreSkillScriptPath("SUMMARY_BENCHMARK_SCORER_PATH", "score-extract-summaries")
 	if err != nil {
 		return e, err
@@ -395,7 +399,7 @@ func executeSummaryScore(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 	originalInput := inputText
 	for attempt := 1; attempt <= 2; attempt++ {
 		logger.Info("calling LLM for summary judgments", "run_id", id, "record_id", req.RecordID, "model", cfg.ModelName, "attempt", attempt)
-		payload, callErr := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, PromptName: summaryScorePrompt, PromptText: string(prompt), ModelName: cfg.ModelName, InputText: inputText, RecordID: req.RecordID, RunID: id, CallReason: "score_extract_summaries", CallLoc: "MID-20261021-01"})
+		payload, callErr := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, PromptName: summaryScorePrompt, PromptText: string(prompt), ModelName: cfg.ModelName, InputText: inputText, RecordID: req.RecordID, RunID: executionID, CallReason: "score_extract_summaries", CallLoc: "MID-20261021-01"})
 		if callErr != nil {
 			if ctx.Err() != nil {
 				return e, ctx.Err()

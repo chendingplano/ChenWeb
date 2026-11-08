@@ -119,6 +119,7 @@ func TestQuestionGenerationPersistsValidQuestionsWhenDocumentFails(t *testing.T)
 			return partialQuestionPayload(), nil
 		}), nil
 	}
+	expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectBegin()
 	for range 2 {
@@ -204,6 +205,7 @@ func TestQuestionGenerationCorrectionSavesOnlyNewQuestions(t *testing.T) {
 			return payload, nil
 		}), nil
 	}
+	expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectBegin()
 	for range 2 {
@@ -256,6 +258,7 @@ func TestQuestionGenerationBatchPreservesPartialAndLaterDocuments(t *testing.T) 
 			return payload, nil
 		}), nil
 	}
+	expectTaskLLMExecution(mock, "testbed.generated_question_runs", 12)
 	mock.ExpectExec("UPDATE testbed.generated_question_runs SET model_name").WithArgs(int64(12), "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
 	for _, counts := range []questionCounts{{1, 1, 0}, {1, 1, 1}} {
 		mock.ExpectBegin()
