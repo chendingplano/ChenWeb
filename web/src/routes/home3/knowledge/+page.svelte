@@ -36,7 +36,7 @@
 	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
 	import SceneBlocksView from '$lib/components/home3/scene-blocks-view.svelte';
-	import ProductsView from '$lib/components/home3/products-view.svelte';
+	import ProductViewer from '$lib/components/shared-ui/product-viewer/product-viewer.svelte';
 	import CategoryReviewView from '$lib/components/home3/category-review-view.svelte';
 	import InventoryItemsView from '$lib/components/home3/inventory-items-view.svelte';
 	import ObjectManagerView from '$lib/components/home3/object-manager-view.svelte';
@@ -437,28 +437,6 @@
 		provisionShelfOpen = details != null;
 	}
 	let metricDetails = $state<Snippet | null>(null);
-	let productDetails = $state<any | null>(null);
-	let productShelfOpen = $state(false);
-	// Product shelf and the focus-mode PDF card share one edge: dragging moves the shelf and the PDF
-	// by equal and opposite amounts, so the map in between keeps its width.
-	let productShelfWidth = $state(480);
-	let productPdfWidth = $state(480);
-	let productShelfDrag: { x: number; shelf: number; pdf: number } | null = null;
-	function startProductShelfDrag(e: MouseEvent) {
-		productShelfDrag = { x: e.clientX, shelf: productShelfWidth, pdf: productPdfWidth };
-	}
-	function resizeProductShelf(e: MouseEvent) {
-		if (!productShelfDrag) return;
-		const { x, shelf, pdf } = productShelfDrag;
-		const nextShelf = Math.max(220, Math.min(680, shelf + x - e.clientX));
-		const nextPdf = Math.max(320, Math.min(1460, pdf - (nextShelf - shelf)));
-		productPdfWidth = nextPdf;
-		productShelfWidth = shelf + (pdf - nextPdf);
-	}
-	function handleProductDetailsChange(product: any | null) {
-		productDetails = product;
-		productShelfOpen = product != null;
-	}
 	let metricShelfOpen = $state(false);
 	let metricShelfWidth = $state(480);
 	let metricShelfDrag: { x: number; width: number } | null = null;
@@ -632,34 +610,6 @@
 	}
 </script>
 
-{#snippet productDetailsContent()}
-	{#if productDetails}
-		<div class="rounded-xl p-4" style="background:{darkMode ? '#252A3A' : '#ECEEF2'}; border:1px solid {borderColor};">
-			<h2 class="break-words text-sm font-semibold" style="color:{textPrimary};">{productDetails.product_name || productDetails.product_rel_id || m.products_product()}</h2>
-			<dl class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-				<dt style="color:{textMuted};">{m.products_product_type()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.product_type || '—'}</dd>
-				<dt style="color:{textMuted};">{m.kb_extraction_confidence()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{Math.round((Number(productDetails.confidence) || 0) * 100)}%</dd>
-				<dt style="color:{textMuted};">{m.kb_extraction_object_id()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.product_rel_id || '—'}</dd>
-				<dt style="color:{textMuted};">{m.kb_extraction_lines()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{#each productDetails.evidence_lines ?? [] as line, i}{i ? ', ' : ''}{typeof line === 'object' ? line.line_number ?? line.line : line}{/each}{#if !productDetails.evidence_lines?.length}—{/if}</dd>
-				{#if productDetails.create_time}<dt style="color:{textMuted};">{m.kb_extraction_create_time()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{new Date(productDetails.create_time).toLocaleString()}</dd>{/if}
-				{#if productDetails.relation_summary}<dt style="color:{textMuted};">{m.products_relation_summary()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{productDetails.relation_summary}</dd>{/if}
-				{#if productDetails.relation_summary_en}<dt style="color:{textMuted};">{m.products_relation_summary_english()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{productDetails.relation_summary_en}</dd>{/if}
-				<dt style="color:{textMuted};">{m.products_canonical_name()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.canonical_name || '—'}</dd>
-				{#if productDetails.canonical_name_en}<dt style="color:{textMuted};">{m.products_canonical_name_english()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.canonical_name_en}</dd>{/if}
-				<dt style="color:{textMuted};">{m.products_requirement_text()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{productDetails.requirement_text || '—'}</dd>
-				{#if productDetails.requirement_text_en}<dt style="color:{textMuted};">{m.products_requirement_text_english()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{productDetails.requirement_text_en}</dd>{/if}
-				<dt style="color:{textMuted};">{m.products_evidence_quote()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{productDetails.evidence_quote || '—'}</dd>
-				{#if productDetails.obligation_level}<dt style="color:{textMuted};">{m.products_obligation_level()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.obligation_level}</dd>{/if}
-				<dt style="color:{textMuted};">{m.products_confidence_reason()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.confidence_reason || '—'}</dd>
-				{#if productDetails.conditions?.length}<dt style="color:{textMuted};">{m.products_conditions()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.conditions.join(', ')}</dd>{/if}
-				{#if productDetails.parameters?.length}<dt style="color:{textMuted};">{m.products_parameters()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.parameters.join(', ')}</dd>{/if}
-				{#if productDetails.responsible_actor}<dt style="color:{textMuted};">{m.products_responsible_actor()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.responsible_actor}</dd>{/if}
-				{#if productDetails.exceptions?.length}<dt style="color:{textMuted};">{m.products_exceptions()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{productDetails.exceptions.join(', ')}</dd>{/if}
-			</dl>
-		</div>
-	{/if}
-{/snippet}
-
 {#snippet menuChild(child: KbMenuChild)}
 	<button
 		type="button"
@@ -700,8 +650,8 @@
 {/snippet}
 
 <svelte:window
-	onmousemove={(e) => { resizeMetricShelf(e); resizeProductShelf(e); }}
-	onmouseup={() => { metricShelfDrag = null; productShelfDrag = null; }}
+	onmousemove={resizeMetricShelf}
+	onmouseup={() => (metricShelfDrag = null)}
 />
 
 <div class="kb-page flex overflow-hidden select-text" style="background:{pageBg}; color:{textPrimary};">
@@ -934,17 +884,17 @@
 	{/if}
 
 	<main class="flex min-w-0 flex-1 flex-col overflow-hidden" style="background:{contentBg};">
-		{#if (activeSection === 'kb-metrics' && metricDetails) || (activeSection === 'kb-provision-tree' && provisionDetails) || (activeSection === 'kb-products' && productDetails)}
+		{#if (activeSection === 'kb-metrics' && metricDetails) || (activeSection === 'kb-provision-tree' && provisionDetails)}
 			<div class="flex flex-shrink-0 justify-end p-2" style="border-bottom:1px solid {borderColor};">
 				<button
 					type="button"
 					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs"
 					style="background:{accentTint}; color:{accent};"
-					onclick={() => activeSection === 'kb-metrics' ? (metricShelfOpen = !metricShelfOpen) : activeSection === 'kb-provision-tree' ? (provisionShelfOpen = !provisionShelfOpen) : (productShelfOpen = !productShelfOpen)}
-					aria-label={(activeSection === 'kb-metrics' ? metricShelfOpen : activeSection === 'kb-provision-tree' ? provisionShelfOpen : productShelfOpen) ? m.content_panel_close_context_panel() : m.content_panel_open_context_panel()}
+					onclick={() => activeSection === 'kb-metrics' ? (metricShelfOpen = !metricShelfOpen) : activeSection === 'kb-provision-tree' ? (provisionShelfOpen = !provisionShelfOpen) : undefined}
+					aria-label={(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen) ? m.content_panel_close_context_panel() : m.content_panel_open_context_panel()}
 				>
 					<PanelRightIcon class="h-3.5 w-3.5" />
-					{(activeSection === 'kb-metrics' ? metricShelfOpen : activeSection === 'kb-provision-tree' ? provisionShelfOpen : productShelfOpen) ? m.content_panel_close_panel() : m.content_panel_open_panel()}
+					{(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen) ? m.content_panel_close_panel() : m.content_panel_open_panel()}
 				</button>
 			</div>
 		{/if}
@@ -1060,12 +1010,10 @@
 					onFocusModeChange={handleExtractionFocusMode}
 				/>
 			{:else if activeSection === 'kb-products'}
-				<ProductsView
+				<ProductViewer
 					{darkMode}
 					browserInstanceKey="products"
 					onFocusModeChange={handleExtractionFocusMode}
-					onProductDetailsChange={handleProductDetailsChange}
-					bind:focusPdfWidth={productPdfWidth}
 				/>
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
@@ -1153,11 +1101,6 @@
 	{#if provisionDetails && provisionShelfOpen}
 		<div class="h-full shrink-0" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
 			<ContextShelf {darkMode} {provisionDetails} activeMenu={null} width={metricShelfWidth} open={provisionShelfOpen} onDragStart={startMetricShelfDrag} onClose={() => (provisionShelfOpen = false)} />
-		</div>
-	{/if}
-	{#if productDetails && productShelfOpen}
-		<div class="h-full shrink-0 [&>aside]:h-full" hidden={activeSection !== 'kb-products'}>
-			<ContextShelf {darkMode} productDetails={productDetailsContent} activeMenu={null} width={productShelfWidth} open={productShelfOpen} onDragStart={startProductShelfDrag} onClose={() => (productShelfOpen = false)} />
 		</div>
 	{/if}
 </div>

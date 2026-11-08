@@ -44,7 +44,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import ProvisionScoreView from '$lib/components/home3/provision-score-view.svelte';
 	import ProvisionMgmtView from '$lib/components/home3/provision-mgmt-view.svelte';
 	import ProductScoreView from '$lib/components/home3/product-score-view.svelte';
-	import ProductsView from '$lib/components/home3/products-view.svelte';
+	import ProductViewer from '$lib/components/shared-ui/product-viewer/product-viewer.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
@@ -455,7 +455,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'sysadmin-llm-provisions-benchmark'}
 			<ProvisionScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-products-gold'}
-			<ProductsView {darkMode} {onFocusModeChange} source="testbed" />
+			<ProductViewer {darkMode} {onFocusModeChange} source="testbed" browserInstanceKey="gold-products" />
 		{:else if activeMenu?.childId === 'sysadmin-llm-products-benchmark'}
 			<ProductScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
