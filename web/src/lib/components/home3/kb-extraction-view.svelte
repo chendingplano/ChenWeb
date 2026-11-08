@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { m as msg } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
-	import { onDestroy, type ComponentProps, type Snippet } from 'svelte';
+	import { onDestroy, untrack, type ComponentProps, type Snippet } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -337,7 +337,8 @@
 			focusPdfWidth = clampFocusPdfWidth(Math.round(window.innerWidth / 3));
 		}
 		// Loaded value is the baseline: the persist effect below must not write it back.
-		persistedFocusPdfWidth = focusPdfWidth;
+		// untrack: reading the bindable width here would re-run this effect on every drag and reset it.
+		persistedFocusPdfWidth = untrack(() => focusPdfWidth);
 	});
 
 	// Persists every width change, including ones a host pushes through the bindable prop.

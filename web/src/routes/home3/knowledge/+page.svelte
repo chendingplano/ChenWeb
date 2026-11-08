@@ -1156,7 +1156,7 @@
 		</div>
 	{/if}
 	{#if productDetails && productShelfOpen}
-		<div class="h-full shrink-0" hidden={activeSection !== 'kb-products'}>
+		<div class="h-full shrink-0 [&>aside]:h-full" hidden={activeSection !== 'kb-products'}>
 			<ContextShelf {darkMode} productDetails={productDetailsContent} activeMenu={null} width={productShelfWidth} open={productShelfOpen} onDragStart={startProductShelfDrag} onClose={() => (productShelfOpen = false)} />
 		</div>
 	{/if}
