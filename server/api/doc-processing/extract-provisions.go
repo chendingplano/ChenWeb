@@ -54,6 +54,7 @@ type ProvisionsProcessor struct {
 	ExtractProvisionsMaxTasks     int
 	ExtractProvisionsInput        string // "chunks" (default) or "blocks"
 	ObjectStore                   ArtifactObjectsStore
+	ObjectTypes                   ObjectTypeRegistry
 	ObjectReconciler              ObjectReconciler
 	AmbiguousObjectLLMResolver    AmbiguousObjectLLMResolver
 	ResolveAmbiguousMinConfidence float64
@@ -162,6 +163,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		logger.Warn("configure ambiguous object LLM resolver failed", "err", err)
 	}
 	if ApiTypes.ProjectDBHandle != nil {
+		p.ObjectTypes = ObjectTypeSQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv()}
 	}
@@ -376,6 +378,12 @@ func (p *ProvisionsProcessor) logLLMCall(
 		"provisions_before": provisionsSoFar,
 		"percent":           fmt.Sprintf("%d%%", percent),
 	}
+	for key, value := range provisionDiagnosticMetadata(ctx) {
+		extraInfo[key] = value
+	}
+	if failures := provisionStructuredFailures(callErr); len(failures) > 0 {
+		extraInfo["structured_output_failures"] = failures
+	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
 	callReason := p.Name()
@@ -532,6 +540,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 		// Keep canonical chunk serialization; the stable task is the cacheable prefix.
 		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+		jobCtx = withProvisionChunkDiagnostics(jobCtx, recordID, idx, len(chunks), chunk)
 		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, inputText, provisionChunkTask(p.PromptText, chunk))
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
 		numInChunk := 0
@@ -672,6 +681,11 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 		)
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), idx)
 		// Block mode keeps its self-contained prompt (blocks are not shared across processors).
+		diagnosticChunk := Chunk{}
+		for _, line := range block.Lines {
+			diagnosticChunk.Lines = append(diagnosticChunk.Lines, MarkedLine{Line: Line{LineNo: line.LineNumber}})
+		}
+		jobCtx = withProvisionChunkDiagnostics(jobCtx, record_id, idx, len(blocks), diagnosticChunk)
 		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, buildProvisionUserPrompt(block), p.PromptText)
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
 		numInBlock := 0
@@ -748,7 +762,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, inputText, promptText string) (map[string]any, string, error) {
 	payload, err := p.extractProvisionPayloadFromText(ctx, inputText, promptText, p.ModelName, p.Extractor)
 	if err == nil {
-		return payload, strings.TrimSpace(p.ModelName), nil
+		return payload, strings.TrimSpace(p.ModelName), p.registerProvisionObjectTypes(ctx, payload["provisions"].([]any), p.ModelName)
 	}
 
 	var payloadVal any = "nil"
@@ -796,14 +810,15 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 				"provisions": []any{},
 			}, fallbackModelName, nil
 		}
-		return nil, fallbackModelName, fmt.Errorf("(MID_26050545) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
+		return nil, fallbackModelName, fmt.Errorf("(MID_26050545) primary extraction failed: %w; fallback extraction failed: %w", err, fallbackErr)
 	}
-	return payload, fallbackModelName, nil
+	return payload, fallbackModelName, p.registerProvisionObjectTypes(ctx, payload["provisions"].([]any), fallbackModelName)
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText, promptText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
 	in := newLLMJSONInput(ctx, p.PromptRef, promptText, modelName, inputText, "extract_provisions", "MID-CWB-EXTRACT-PROVISIONS")
 	in.DocumentFirst = false
+	in.Metadata = provisionDiagnosticMetadata(ctx)
 	var (
 		payload map[string]any
 		err     error
@@ -833,9 +848,11 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 		return nil, errors.New("(MID_20261107_763) compact provision prompt requires a v2 response")
 	}
 	if shortFormat {
-		payload, err = decodeProvisionV2(payload)
+		wire := payload
+		payload, err = decodeProvisionV2(wire)
 		if err != nil {
-			return nil, err
+			raw, _ := json.Marshal(wire)
+			return nil, &llmclients.StructuredOutputError{Kind: llmclients.ErrStructuredOutputSchemaValidation, Err: err, Raw: string(raw)}
 		}
 	}
 	payload = normalizeProvisionPayload(payload)
@@ -1988,6 +2005,7 @@ func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) er
 	)
 
 	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	ctx = withProvisionChunkDiagnostics(ctx, recordID, chunkIdx, len(p.batchChunks), chunk)
 	payload, modelName, err := p.extractProvisionPayloadWithFallback(ctx, inputText, provisionChunkTask(p.PromptText, chunk))
 
 	isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""

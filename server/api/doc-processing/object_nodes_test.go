@@ -66,11 +66,12 @@ func TestFindCandidatesExcludesRejectedAndMergedNodes(t *testing.T) {
 		"canonical_name_zh", "primary_language", "object_type", "aliases", "acronyms",
 		"normalized_names", "description", "search_document", "reconcile_status", "ext_info",
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("reconcile_status NOT IN ('rejected', 'merged')")).
+	mock.ExpectQuery(regexp.QuoteMeta("reconcile_status NOT IN ('rejected', 'merged')") + `(?s).*ORDER BY CASE WHEN object_type = \$3 AND EXISTS.*status = 'approved'`).
 		WillReturnRows(sqlmock.NewRows(cols).AddRow(
 			int64(1), "obj_1", "", "pump", "", "", "", "equipment",
 			[]byte("[]"), []byte("[]"), []byte(`["pump"]`), "", "", "active", []byte("{}"),
 		))
+	mock.ExpectQuery("SELECT name FROM kb.object_types").WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("equipment"))
 
 	candidates, err := store.FindCandidates(context.Background(), ArtifactObject{
 		ObjectName:      "pump",

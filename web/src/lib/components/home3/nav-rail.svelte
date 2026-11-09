@@ -318,6 +318,7 @@
 						},
 						{ id: 'sysadmin-db-maint-log', label: m.nav_sysadmin_db_maint_log() },
 						{ id: 'sysadmin-db-resolve-ambiguous', label: m.nav_sysadmin_db_resolve_ambiguous() },
+						{ id: 'sysadmin-db-object-types', label: m.nav_sysadmin_db_object_types() },
 						{
 							id: 'sysadmin-db-resolve-metric-range-types',
 							label: m.nav_sysadmin_db_resolve_metric_range_types()

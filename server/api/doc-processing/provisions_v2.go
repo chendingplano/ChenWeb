@@ -36,7 +36,7 @@ func provisionV2Schema() map[string]any {
 		}},
 	}
 	objects := schemaArrayOfObjects(map[string]any{
-		"n": text, "t": provisionV2Enum(provisionV2ObjectTypes), "r": provisionV2Enum(provisionV2ObjectRoles),
+		"n": text, "t": map[string]any{"type": "string", "pattern": `\S`}, "r": provisionV2Enum(provisionV2ObjectRoles),
 		"s": spans, "q": score, "a": schemaStringArray(), "y": schemaStringArray(), "d": schemaString(),
 	}, []string{"n", "t", "r", "s", "q"}, false)
 	provisions := schemaArrayOfObjects(map[string]any{
@@ -120,8 +120,15 @@ func decodeProvisionV2(payload map[string]any) (map[string]any, error) {
 			if err != nil {
 				return nil, fmt.Errorf("provision %d object source_line_spans: %w", i+1, err)
 			}
+			rawType := asString(object["t"])
+			objectType := normalizeObjectToken(rawType)
+			// These codes are backwards-compatible wire aliases only. The
+			// database registry owns acceptance and approval of type names.
+			if canonical, ok := provisionV2ObjectTypes[objectType]; ok {
+				objectType = canonical
+			}
 			decoded := map[string]any{
-				"object_name": object["n"], "object_type": provisionV2ObjectTypes[asString(object["t"])],
+				"object_name": object["n"], "object_type": objectType, "object_type_raw": rawType,
 				"object_role": provisionV2ObjectRoles[asString(object["r"])], "source_line_spans": objectSpans, "confidence": object["q"],
 				"description": asString(object["d"]), "aliases": append([]string{}, toStringSlice(object["a"])...),
 				"acronyms": append([]string{}, toStringSlice(object["y"])...),

@@ -75,10 +75,10 @@ type ObjectNode struct {
 	// IRIs; primary_class_term_id is a DERIVED projection maintained by
 	// classification assertions and project_semantics in P3 -- it is never
 	// authored directly.
-	OntologicalLevel     string
-	IdentityScope        string
-	ExternalIdentifiers  []byte // JSONB
-	PrimaryClassTermID   string
+	OntologicalLevel    string
+	IdentityScope       string
+	ExternalIdentifiers []byte // JSONB
+	PrimaryClassTermID  string
 }
 
 type ObjectNodeCandidate struct {
@@ -253,7 +253,7 @@ func normalizeArtifactObject(recordID int64, artifactType, artifactID string, ra
 		Confidence:          toFloat(raw["confidence"]),
 		ReconcileStatus:     ObjectReconcilePending,
 		ReconcileConfidence: 0,
-		ExtInfo:             map[string]any{"source": artifactType},
+		ExtInfo:             map[string]any{"source": artifactType, "object_type_raw": firstNonEmptyTrimmed(asString(raw["object_type_raw"]), asString(raw["object_type"]))},
 	}
 	if obj.ObjectName == "" {
 		obj.ObjectName = firstNonEmptyTrimmed(obj.ObjectNameZh, obj.ObjectNameEn)

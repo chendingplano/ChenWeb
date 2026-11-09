@@ -907,6 +907,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/search/backfill-embeddings", kbhandler.BackfillSearchEmbeddings)
 	apiGroup.POST("/kb/ontology/class-contracts/backfill-search", kbhandler.BackfillClassContractSearch)
 	apiGroup.POST("/kb/objects/resolve-ambiguous", kbhandler.ResolveAmbiguousObjects)
+	apiGroup.GET("/kb/object-types", kbhandler.ListObjectTypes)
+	apiGroup.POST("/kb/object-types/:id/approve", kbhandler.ApproveObjectType)
 	apiGroup.POST("/kb/entities/resolve-objects", kbhandler.ResolveEntityObjects)
 	apiGroup.GET("/kb/schedule-job-types", kbhandler.ListScheduleJobTypes)
 	apiGroup.POST("/kb/schedules", kbhandler.CreateSchedule)

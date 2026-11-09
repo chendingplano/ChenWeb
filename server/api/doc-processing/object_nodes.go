@@ -48,7 +48,9 @@ SELECT id,
 FROM kb.object_nodes
 WHERE reconcile_status NOT IN ('rejected', 'merged')
   AND (normalized_names ?| $1 OR canonical_name = $2 OR canonical_name_en = $2 OR canonical_name_zh = $2)
-ORDER BY CASE WHEN object_type = $3 THEN 0 ELSE 1 END, id
+ORDER BY CASE WHEN object_type = $3 AND EXISTS (
+    SELECT 1 FROM kb.object_types WHERE name = $3 AND status = 'approved'
+) THEN 0 ELSE 1 END, id
 LIMIT $4`, pq.Array(names), obj.ObjectName, obj.ObjectType, maxCandidates)
 	if err != nil {
 		return nil, err
@@ -59,12 +61,25 @@ LIMIT $4`, pq.Array(names), obj.ObjectName, obj.ObjectType, maxCandidates)
 	if err != nil {
 		return nil, err
 	}
+	// Release the result before querying the registry, including on pools with
+	// a single connection. Approval changes take effect without a worker restart.
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	types := []string{normalizeObjectToken(obj.ObjectType)}
+	for _, node := range nodes {
+		types = append(types, normalizeObjectToken(node.ObjectType))
+	}
+	approved, err := (ObjectTypeSQLStore{DB: s.DB}).approvedNames(ctx, types)
+	if err != nil {
+		return nil, fmt.Errorf("load approved object types: %w", err)
+	}
 
 	out := make([]ObjectNodeCandidate, 0, len(nodes))
 	for _, node := range nodes {
 		score := 0.85
 		method := "lexical_name"
-		if objectTypesCompatible(obj.ObjectType, node.ObjectType) && objectNameBundlesOverlap(obj.NormalizedNames, node.NormalizedNames) {
+		if approvedObjectTypesCompatible(obj.ObjectType, node.ObjectType, approved) && objectNameBundlesOverlap(obj.NormalizedNames, node.NormalizedNames) {
 			score = 1
 			method = "exact_name"
 		}
@@ -150,20 +165,28 @@ func (s ObjectNodeSQLStore) CreateNode(ctx context.Context, obj ArtifactObject) 
 	if s.DB == nil {
 		return ObjectNode{}, fmt.Errorf("db is nil")
 	}
+	sourceRecordID := obj.SourceRecordID
+	if sourceRecordID <= 0 {
+		sourceRecordID = obj.InputRecordID
+	}
 	node := ObjectNode{
-		ObjectID:          buildObjectID(obj.InputRecordID, firstNonEmptyTrimmed(obj.ObjectName, obj.ObjectNameEn, obj.ObjectNameZh), 1),
-		CanonicalName:     firstNonEmptyTrimmed(obj.ObjectName, obj.ObjectNameEn, obj.ObjectNameZh),
-		CanonicalNameEn:   obj.ObjectNameEn,
-		CanonicalNameZh:   obj.ObjectNameZh,
-		PrimaryLanguage:   obj.Language,
-		ObjectType:        firstNonEmptyTrimmed(obj.ObjectType, "other"),
-		Aliases:           obj.Aliases,
-		Acronyms:          obj.Acronyms,
-		NormalizedNames:   obj.NormalizedNames,
-		Description:       obj.Description,
-		SearchDocument:    buildObjectNodeSearchDocument(obj),
-		ReconcileStatus:   "active",
-		ExtInfo:           map[string]any{"source": "object_reconciliation"},
+		ObjectID:        buildObjectID(obj.InputRecordID, firstNonEmptyTrimmed(obj.ObjectName, obj.ObjectNameEn, obj.ObjectNameZh), 1),
+		CanonicalName:   firstNonEmptyTrimmed(obj.ObjectName, obj.ObjectNameEn, obj.ObjectNameZh),
+		CanonicalNameEn: obj.ObjectNameEn,
+		CanonicalNameZh: obj.ObjectNameZh,
+		PrimaryLanguage: obj.Language,
+		ObjectType:      firstNonEmptyTrimmed(obj.ObjectType, "other"),
+		Aliases:         obj.Aliases,
+		Acronyms:        obj.Acronyms,
+		NormalizedNames: obj.NormalizedNames,
+		Description:     obj.Description,
+		SearchDocument:  buildObjectNodeSearchDocument(obj),
+		ReconcileStatus: "active",
+		ExtInfo: map[string]any{
+			"source": "object_reconciliation", "object_type_raw": firstNonEmptyTrimmed(asString(obj.ExtInfo["object_type_raw"]), obj.ObjectType),
+			"source_record_id": sourceRecordID, "source_run_id": llmRunIDFromContext(ctx),
+			"source_processor": obj.ArtifactType, "source_line_spans": orEmptySlice(obj.SourceLineSpans),
+		},
 		CanonicalObjectID: "",
 	}
 	aliases, _ := json.Marshal(orEmptySlice(node.Aliases))

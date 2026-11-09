@@ -152,6 +152,7 @@ func encodeProvisionV2Replay(full map[string]any) (map[string]any, []any) {
 				}
 			}
 			o["t"] = reverseProvisionV2Enum(provisionV2ObjectTypes, asString(object["object_type"]))
+			object["object_type_raw"] = o["t"] // preserve original wire spelling for diagnostics
 			o["r"] = reverseProvisionV2Enum(provisionV2ObjectRoles, asString(object["object_role"]))
 			o["s"] = numericProvisionV2ReplaySpans(object["source_line_spans"])
 			omitEmptyProvisionV2ReplayFields(o)

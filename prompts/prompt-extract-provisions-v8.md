@@ -168,6 +168,11 @@ null, long attribute names, translated attributes, or unlisted attributes.
   `tc` table cell; `hc` heading context; `mx` mixed.
 - Object `t`: `eq` equipment; `mat` material; `sys` system; `proc` process;
   `org` organization; `per` person; `loc` place; `doc` document; `con` concept; `oth` other.
+  These are existing broad types, not a closed vocabulary. If an object needs a
+  genuinely different broad type, return its concise descriptive name in `t`
+  (prefer an English name, such as `waste_stream`), rather than inventing a short
+  code. New types are retained as proposals for human review. Use an existing
+  type for synonyms or narrower instances of that type.
 - Object `r`: `reg` regulated object; `tgt` requirement target; `part` component;
   `par` parent system; `oth` other. Prefer a specific supported role over `oth`.
 

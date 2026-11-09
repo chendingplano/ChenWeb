@@ -49,6 +49,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import CleanArtifactDataView from '$lib/components/home3/clean-artifact-data-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import ResolveAmbiguousObjectsView from '$lib/components/home3/resolve-ambiguous-objects-view.svelte';
+	import ObjectTypesView from '$lib/components/home3/object-types-view.svelte';
 	import ResolveMetricRangeTypesView from '$lib/components/home3/resolve-metric-range-types-view.svelte';
 	import ResolveOrphanedLabelsView from '$lib/components/home3/resolve-orphaned-labels-view.svelte';
 	import SchedulesView from '$lib/components/home3/schedules-view.svelte';
@@ -262,6 +263,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			activeMenu?.childId !== 'dev-demos-customers' &&
 			activeMenu?.childId !== 'sysadmin-question-generator' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
+			activeMenu?.childId !== 'sysadmin-db-object-types' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-metric-range-types' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-orphaned-labels' &&
 			activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
@@ -467,6 +469,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-ambiguous'}
 			<ResolveAmbiguousObjectsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-db-object-types'}
+			<ObjectTypesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-metric-range-types'}
 			<ResolveMetricRangeTypesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-orphaned-labels'}
