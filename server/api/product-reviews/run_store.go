@@ -409,10 +409,12 @@ func (s RunStore) LoadScopedDocs(ctx context.Context, runID int64) ([]ScopedDoc,
 }
 
 func (s RunStore) LoadResults(ctx context.Context, runID int64, f ResultFilters) ([]Result, error) {
+	// Display fields come from kb.metrics at read time: the saved rows carry only
+	// ids, scores and paths, so a run saved before these fields existed still shows them.
 	q := `
-		SELECT artifact_type, artifact_id, COALESCE(source_row_id,0), input_record_id,
-		       node_id, tier, score, COALESCE(paths,'[]'::jsonb), inclusion_reason,
-		       COALESCE(source_line_spans,'[]'::jsonb)
+		SELECT artifact_type, artifact_id, COALESCE(source_row_id,0) AS source_row_id, input_record_id,
+		       node_id, tier, score, COALESCE(paths,'[]'::jsonb) AS paths, inclusion_reason,
+		       COALESCE(source_line_spans,'[]'::jsonb) AS source_line_spans
 		FROM kb.product_review_results WHERE run_id = $1`
 	args := []any{runID}
 	add := func(cond string, val any) {
@@ -437,7 +439,15 @@ func (s RunStore) LoadResults(ctx context.Context, runID int64, f ResultFilters)
 	for _, ex := range f.ExcludeTiers {
 		add("tier <> ", ex)
 	}
-	q += ` ORDER BY score DESC, artifact_type, artifact_id`
+	q = `
+		SELECT r.artifact_type, r.artifact_id, r.source_row_id, r.input_record_id,
+		       r.node_id, r.tier, r.score, r.paths, r.inclusion_reason, r.source_line_spans,
+		       COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, ''),
+		       COALESCE(m.metric_subject, ''), COALESCE(m.metric_subject_en, ''),
+		       COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''), COALESCE(m.metric_unit_en, '')
+		FROM (` + q + `) r
+		LEFT JOIN kb.metrics m ON m.id = r.source_row_id AND m.ref_mention_id IS NULL
+		ORDER BY r.score DESC, r.artifact_type, r.artifact_id`
 
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -453,7 +463,8 @@ func (s RunStore) LoadResults(ctx context.Context, runID int64, f ResultFilters)
 			spansRaw []byte
 		)
 		if err := rows.Scan(&r.ArtifactType, &r.ArtifactID, &r.SourceRowID, &r.InputRecordID,
-			&nodeID, &r.Tier, &r.Score, &pathsRaw, &r.InclusionReason, &spansRaw); err != nil {
+			&nodeID, &r.Tier, &r.Score, &pathsRaw, &r.InclusionReason, &spansRaw,
+			&r.MetricName, &r.MetricNameEn, &r.Subject, &r.SubjectEn, &r.Value, &r.Unit, &r.UnitEn); err != nil {
 			return nil, err
 		}
 		if nodeID.Valid {

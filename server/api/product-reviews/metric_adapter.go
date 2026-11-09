@@ -23,7 +23,13 @@ const metricSelect = `
 	       COALESCE(NULLIF(sa.primary_label, ''), m.metric_name, ''),
 	       COALESCE(m.metric_subject, ''),
 	       COALESCE(m.subject_concept_id, ''),
-	       COALESCE(sa.source_line_spans, '[]'::jsonb)
+	       COALESCE(sa.source_line_spans, '[]'::jsonb),
+	       COALESCE(m.metric_name, ''),
+	       COALESCE(m.metric_name_en, ''),
+	       COALESCE(m.metric_subject_en, ''),
+	       COALESCE(m.metric_value, ''),
+	       COALESCE(m.metric_unit, ''),
+	       COALESCE(m.metric_unit_en, '')
 	FROM kb.search_artifacts_metric sa
 	JOIN kb.metrics m ON m.id = sa.source_row_id AND m.ref_mention_id IS NULL`
 
@@ -36,7 +42,8 @@ func scanArtifacts(rows *sql.Rows, artifactType string) ([]Artifact, error) {
 			spansRaw []byte
 		)
 		if err := rows.Scan(&a.ArtifactID, &a.SourceRowID, &a.InputRecordID,
-			&a.PrimaryLabel, &a.SubjectText, &a.SubjectConcept, &spansRaw); err != nil {
+			&a.PrimaryLabel, &a.SubjectText, &a.SubjectConcept, &spansRaw,
+			&a.MetricName, &a.MetricNameEn, &a.SubjectEn, &a.Value, &a.Unit, &a.UnitEn); err != nil {
 			return nil, err
 		}
 		a.ArtifactType = artifactType

@@ -56,6 +56,13 @@ type Result struct {
 	InclusionReason string          `json:"inclusion_reason"`
 	LineSpans       json.RawMessage `json:"source_line_spans"`
 	PrimaryLabel    string          `json:"primary_label"`
+	MetricName      string          `json:"metric_name"`
+	MetricNameEn    string          `json:"metric_name_en"`
+	Subject         string          `json:"subject"`
+	SubjectEn       string          `json:"subject_en"`
+	Value           string          `json:"value"`
+	Unit            string          `json:"unit"`
+	UnitEn          string          `json:"unit_en"`
 }
 
 // pathHit is one (artifact, path) contribution before union.
@@ -268,6 +275,13 @@ func assembleResults(nodes []ScopeNode, scoped []ScopedDoc, hits []pathHit, budg
 			Paths:         sortedKeys(a.paths),
 			LineSpans:     a.art.LineSpans,
 			PrimaryLabel:  a.art.PrimaryLabel,
+			MetricName:    a.art.MetricName,
+			MetricNameEn:  a.art.MetricNameEn,
+			Subject:       a.art.SubjectText,
+			SubjectEn:     a.art.SubjectEn,
+			Value:         a.art.Value,
+			Unit:          a.art.Unit,
+			UnitEn:        a.art.UnitEn,
 		}
 		if tier != TierDocumentScope && nodeID != 0 {
 			nid := nodeID

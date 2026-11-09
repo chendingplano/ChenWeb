@@ -147,6 +147,13 @@ export type ResultRow = {
 	inclusion_reason: string;
 	source_line_spans: unknown;
 	primary_label: string;
+	metric_name: string;
+	metric_name_en: string;
+	subject: string;
+	subject_en: string;
+	value: string;
+	unit: string;
+	unit_en: string;
 };
 
 export type ObjectName = {

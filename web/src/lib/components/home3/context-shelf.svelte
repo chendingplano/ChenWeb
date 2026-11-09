@@ -2,20 +2,20 @@
 	import { m as msg } from '$lib/paraglide/messages.js';
 	import type { KbReferenceDetails } from '$lib/services/kbService';
 	import { untrack, type Snippet } from 'svelte';
-	import BotIcon         from '@lucide/svelte/icons/bot';
-	import ZapIcon         from '@lucide/svelte/icons/zap';
-	import ActivityIcon    from '@lucide/svelte/icons/activity';
-	import CpuIcon         from '@lucide/svelte/icons/cpu';
-	import DatabaseIcon    from '@lucide/svelte/icons/database';
-	import ClockIcon       from '@lucide/svelte/icons/clock';
-	import TrendingUpIcon  from '@lucide/svelte/icons/trending-up';
+	import BotIcon from '@lucide/svelte/icons/bot';
+	import ZapIcon from '@lucide/svelte/icons/zap';
+	import ActivityIcon from '@lucide/svelte/icons/activity';
+	import CpuIcon from '@lucide/svelte/icons/cpu';
+	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
-	import RefreshCwIcon   from '@lucide/svelte/icons/refresh-cw';
-	import CheckIcon       from '@lucide/svelte/icons/check';
-	import PlusIcon        from '@lucide/svelte/icons/plus';
-	import XIcon           from '@lucide/svelte/icons/x';
-	import WrenchIcon      from '@lucide/svelte/icons/wrench';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import XIcon from '@lucide/svelte/icons/x';
+	import WrenchIcon from '@lucide/svelte/icons/wrench';
 	import FindingDetailsPanel from '$lib/components/home3/finding-details-panel.svelte';
 	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
 	import {
@@ -41,8 +41,8 @@
 	};
 
 	let {
-		darkMode    = true,
-		activeMenu  = null,
+		darkMode = true,
+		activeMenu = null,
 		selectedMetrics = null,
 		selectedReferences = null,
 		metricDetails = null,
@@ -50,53 +50,60 @@
 		productDetails = null,
 		summaryDetails = null,
 		referenceDetails = null,
-		width       = 280,
-		open        = true,
+		width = 280,
+		open = true,
 		onDragStart,
 		onClose
 	}: {
-		darkMode:    boolean;
-		activeMenu:  ActiveSelection | null;
+		darkMode: boolean;
+		activeMenu: ActiveSelection | null;
 		metricDetails?: Snippet | null;
 		provisionDetails?: Snippet | null;
 		productDetails?: Snippet | null;
 		summaryDetails?: Snippet | null;
 		referenceDetails?: KbReferenceDetails | null;
-		selectedMetrics?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
-		selectedReferences?: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null;
-		width:       number;
-		open:        boolean;
+		selectedMetrics?: {
+			production: Record<string, unknown> | null;
+			gold: Record<string, unknown> | null;
+		} | null;
+		selectedReferences?: {
+			production: Record<string, unknown> | null;
+			gold: Record<string, unknown> | null;
+		} | null;
+		width: number;
+		open: boolean;
 		onDragStart: (e: MouseEvent) => void;
-		onClose:     () => void;
+		onClose: () => void;
 	} = $props();
 
 	// --- Layout constants ---
 	const radiusCard = '12px'; // cards, panels
 
 	// --- Design tokens ---
-	let surface       = $derived(darkMode ? '#1F2333'  : '#FFFFFF');  // shelf background
-	let surface2      = $derived(darkMode ? '#252A3A'  : '#ECEEF2');  // card surface inside shelf
-	let borderColor   = $derived(darkMode ? '#2D3348'  : '#E4E6EB');  // border
-	let accent        = $derived(darkMode ? '#818CF8'  : '#6366F1');  // primary accent
-	let textPrimary   = $derived(darkMode ? '#E2E8F0' : '#111827');
-	let textMuted     = $derived(darkMode ? '#64748B' : '#9CA3AF');
+	let surface = $derived(darkMode ? '#1F2333' : '#FFFFFF'); // shelf background
+	let surface2 = $derived(darkMode ? '#252A3A' : '#ECEEF2'); // card surface inside shelf
+	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB'); // border
+	let accent = $derived(darkMode ? '#818CF8' : '#6366F1'); // primary accent
+	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
+	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
 	// Suppress unused props/consts (declared for API completeness / design-token reference)
-	void radiusCard; void open;
+	void radiusCard;
+	void open;
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 
 	// --- Value Range Type Map (rendered while resolve-metric-range-types-view.svelte
 	// is mounted; see resolve-metric-range-types-shelf-store) ---
 	let mapBucketDraft = $state<Record<string, string>>({});
-	let mapApplying    = $state<Record<string, boolean>>({});
+	let mapApplying = $state<Record<string, boolean>>({});
 	let mapApplyResult = $state<Record<string, string>>({});
-	let mapApplyError  = $state<Record<string, string>>({});
+	let mapApplyError = $state<Record<string, string>>({});
 
 	// Per-entry state for the separate "Apply to metrics" action (approved tab only).
-	let metricsApplying    = $state<Record<string, boolean>>({});
+	let metricsApplying = $state<Record<string, boolean>>({});
 	let metricsApplyResult = $state<Record<string, string>>({});
-	let metricsApplyError  = $state<Record<string, string>>({});
+	let metricsApplyError = $state<Record<string, string>>({});
 
 	// The map is split across two tabs rather than one sorted list: triage and
 	// bulk-apply are different jobs, and mixing them buried the handful of
@@ -109,18 +116,18 @@
 	let mapNotice = $state('');
 
 	let newEntryRawValue = $state('');
-	let newEntryBucket   = $state('');
-	let addingEntry      = $state(false);
-	let addEntryError    = $state('');
-	let addEntryResult   = $state('');
+	let newEntryBucket = $state('');
+	let addingEntry = $state(false);
+	let addEntryError = $state('');
+	let addEntryResult = $state('');
 
 	// Sort/search apply on top of the pending/approved split, shared across both
 	// tabs so switching tabs doesn't reset what the operator was looking for.
-	let mapSortKey     = $state<MapEntrySortKey | null>(null);
-	let mapSearchRaw   = $state('');
+	let mapSortKey = $state<MapEntrySortKey | null>(null);
+	let mapSearchRaw = $state('');
 	let mapSearchMapped = $state('');
 
-	let splitMapEntries  = $derived(splitMapEntriesByStatus(rangeTypeMapShelf.entries));
+	let splitMapEntries = $derived(splitMapEntriesByStatus(rangeTypeMapShelf.entries));
 	let visibleMapEntries = $derived(
 		sortMapEntriesBy(
 			filterMapEntries(
@@ -147,7 +154,10 @@
 	async function applyMapEntry(rawValue: string) {
 		const bucket = (mapBucketDraft[rawValue] ?? '').trim();
 		if (!bucket) {
-			mapApplyError = { ...mapApplyError, [rawValue]: msg.context_shelf_enter_a_canonical_bucket_first() };
+			mapApplyError = {
+				...mapApplyError,
+				[rawValue]: msg.context_shelf_enter_a_canonical_bucket_first()
+			};
 			return;
 		}
 		mapApplying = { ...mapApplying, [rawValue]: true };
@@ -156,7 +166,10 @@
 		mapNotice = '';
 		try {
 			const res = await applyRangeTypeMapEntry(rawValue, bucket);
-			const summary = msg.context_shelf_approved_row_corrected({ corrected_count: res.corrected_count, plural: res.corrected_count === 1 ? '' : 's' });
+			const summary = msg.context_shelf_approved_row_corrected({
+				corrected_count: res.corrected_count,
+				plural: res.corrected_count === 1 ? '' : 's'
+			});
 			mapApplyResult = { ...mapApplyResult, [rawValue]: summary };
 			mapNotice = `${rawValue} → ${bucket}. ${summary}`;
 		} catch (e) {
@@ -177,7 +190,10 @@
 			const res = await applyRangeTypeMapEntryToMetrics(rawValue);
 			metricsApplyResult = {
 				...metricsApplyResult,
-				[rawValue]: msg.context_shelf_metric_row_updated({ applied_count: res.applied_count, plural: res.applied_count === 1 ? '' : 's' })
+				[rawValue]: msg.context_shelf_metric_row_updated({
+					applied_count: res.applied_count,
+					plural: res.applied_count === 1 ? '' : 's'
+				})
 			};
 		} catch (e) {
 			metricsApplyError = {
@@ -213,14 +229,14 @@
 
 	// Model status data
 	const models = [
-		{ name: 'Claude Sonnet 4.6', status: 'online',   latency: '124ms', usage: 78 },
-		{ name: 'GPT-4o',            status: 'online',   latency: '198ms', usage: 41 },
-		{ name: 'Gemini Pro',        status: 'degraded', latency: '450ms', usage: 12 }
+		{ name: 'Claude Sonnet 4.6', status: 'online', latency: '124ms', usage: 78 },
+		{ name: 'GPT-4o', status: 'online', latency: '198ms', usage: 41 },
+		{ name: 'Gemini Pro', status: 'degraded', latency: '450ms', usage: 12 }
 	];
 
 	const systemMetrics = [
-		{ label: 'CPU',       value: 23, unit: '%', color: '#34D399' },
-		{ label: msg.context_shelf_memory(),    value: 61, unit: '%', color: '#818CF8' },
+		{ label: 'CPU', value: 23, unit: '%', color: '#34D399' },
+		{ label: msg.context_shelf_memory(), value: 61, unit: '%', color: '#818CF8' },
 		{ label: msg.context_shelf_api_quota(), value: 34, unit: '%', color: '#FBBF24' }
 	];
 
@@ -281,15 +297,27 @@
 	// One comparison grid serves metrics and references: two columns, rows that differ highlighted.
 	let compare = $derived(
 		selectedReferences
-			? { pair: selectedReferences, fields: referenceDetailFields, idKey: 'ref_id', nameKeys: ['cited_raw', 'ref_id'],
-				labels: [msg.rsc_extracted_reference(), msg.rsc_gold_reference()] }
+			? {
+					pair: selectedReferences,
+					fields: referenceDetailFields,
+					idKey: 'ref_id',
+					nameKeys: ['cited_raw', 'ref_id'],
+					labels: [msg.rsc_extracted_reference(), msg.rsc_gold_reference()]
+				}
 			: selectedMetrics
-				? { pair: selectedMetrics, fields: metricDetailFields, idKey: 'metric_id', nameKeys: ['metric_name', 'name', 'metric_id'],
-					labels: [msg.context_shelf_production_metric(), msg.context_shelf_gold_metric()] }
+				? {
+						pair: selectedMetrics,
+						fields: metricDetailFields,
+						idKey: 'metric_id',
+						nameKeys: ['metric_name', 'name', 'metric_id'],
+						labels: [msg.context_shelf_production_metric(), msg.context_shelf_gold_metric()]
+					}
 				: null
 	);
 	function metricFieldValue(metric: Record<string, unknown>, keys: readonly string[]): string {
-		const value = keys.map((key) => metric[key]).find((candidate) => candidate != null && candidate !== '');
+		const value = keys
+			.map((key) => metric[key])
+			.find((candidate) => candidate != null && candidate !== '');
 		if (value == null) return '—';
 		return typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value));
 	}
@@ -297,7 +325,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <aside
-	class="flex-shrink-0 flex flex-col overflow-y-auto relative select-text"
+	class="relative flex shrink-0 flex-col overflow-y-auto select-text"
 	style="width:{width}px; background:{surface}; border-left:1px solid {borderColor}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
 	<!-- Resize handle (left edge). Kept inside the aside: overflow-y:auto clips anything left of x=0. -->
@@ -306,16 +334,33 @@
 		style="left:0; width:10px; z-index:10; background:transparent;"
 		title={msg.dashboard_drag_to_resize_shelf()}
 		onmousedown={onDragStart}
-		onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '40'; }}
-		onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+		onmouseenter={(e) => {
+			(e.currentTarget as HTMLElement).style.background = accent + '40';
+		}}
+		onmouseleave={(e) => {
+			(e.currentTarget as HTMLElement).style.background = 'transparent';
+		}}
 	>
-		<span aria-hidden="true" style="position:absolute; left:50%; top:50%; width:8px; height:52px; transform:translate(-50%,-50%); border-radius:999px; background:radial-gradient(circle, {textMuted} 22%, transparent 24%) center 6px / 6px 12px repeat-y, {surface2}; border:1px solid {borderColor}; box-shadow:0 0 0 2px rgba(0,0,0,0.14);"></span>
+		<span
+			aria-hidden="true"
+			style="position:absolute; left:50%; top:50%; width:8px; height:52px; transform:translate(-50%,-50%); border-radius:999px; background:radial-gradient(circle, {textMuted} 22%, transparent 24%) center 6px / 6px 12px repeat-y, {surface2}; border:1px solid {borderColor}; box-shadow:0 0 0 2px rgba(0,0,0,0.14);"
+		></span>
 	</div>
 
-	<div class="p-4 space-y-4" style="padding-left:12px;" class:metric-details-shelf={metricDetails != null || provisionDetails != null || productDetails != null || summaryDetails != null}>
+	<div
+		class="space-y-4 p-4"
+		style="padding-left:12px;"
+		class:metric-details-shelf={metricDetails != null ||
+			provisionDetails != null ||
+			productDetails != null ||
+			summaryDetails != null}
+	>
 		<!-- Header -->
 		<div class="flex items-center justify-between pt-1 pl-1">
-			<span class="text-xs font-semibold uppercase tracking-widest" style="color:{textMuted}; font-family:{fontMono};">
+			<span
+				class="text-xs font-semibold tracking-widest uppercase"
+				style="color:{textMuted}; font-family:{fontMono};"
+			>
 				{#if referenceDetails}{msg.rsc_reference_details()}
 				{:else if selectedReferences}{msg.rsc_reference_details()}
 				{:else if summaryDetails}{msg.sgv_summary_detail()}
@@ -336,44 +381,99 @@
 			</span>
 			<button
 				onclick={onClose}
-				class="flex items-center justify-center w-6 h-6 rounded-md cursor-pointer transition-colors duration-150"
+				class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md transition-colors duration-150"
 				style="color:{textMuted};"
-				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; (e.currentTarget as HTMLElement).style.background = borderColor; }}
-				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+				onmouseenter={(e) => {
+					(e.currentTarget as HTMLElement).style.color = textPrimary;
+					(e.currentTarget as HTMLElement).style.background = borderColor;
+				}}
+				onmouseleave={(e) => {
+					(e.currentTarget as HTMLElement).style.color = textMuted;
+					(e.currentTarget as HTMLElement).style.background = 'transparent';
+				}}
 				aria-label={msg.context_shelf_close_context_panel()}
 			>
-				<XIcon class="w-3.5 h-3.5" />
+				<XIcon class="h-3.5 w-3.5" />
 			</button>
 		</div>
 
 		{#if referenceDetails?.kind === 'dropped'}
 			{@const item = referenceDetails.item}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="text-[9px] font-semibold uppercase tracking-widest" style="color:{accent};">{msg.references_mgmt_dropped_details()}</div>
-				<h2 class="mt-2 break-words text-sm font-semibold" style="color:{textPrimary};">{item.cited_raw || msg.references_mgmt_untitled_reference()}</h2>
+				<div class="text-[9px] font-semibold tracking-widest uppercase" style="color:{accent};">
+					{msg.references_mgmt_dropped_details()}
+				</div>
+				<h2 class="wrap-break-words mt-2 text-sm font-semibold" style="color:{textPrimary};">
+					{item.cited_raw || msg.references_mgmt_untitled_reference()}
+				</h2>
 				<dl class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-					<dt style="color:{textMuted};">{msg.references_mgmt_decision()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.decision}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_rule()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.drop_reason}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_reason()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.reason || '—'}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_merged_into()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.ref_ids.join(', ') || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_decision()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">{item.decision}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_rule()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">{item.drop_reason}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_reason()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">{item.reason || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_merged_into()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.ref_ids.join(', ') || '—'}
+					</dd>
 				</dl>
 			</div>
 		{:else if referenceDetails?.kind === 'reference'}
 			{@const item = referenceDetails.item}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="text-[9px] font-semibold uppercase tracking-widest" style="color:{accent};">{msg.references_mgmt_selected_reference()}</div>
-				<h2 class="mt-2 break-words text-sm font-semibold" style="color:{textPrimary};">{item.target_title || item.cited_raw || item.resource_title || msg.references_mgmt_untitled_reference()}</h2>
+				<div class="text-[9px] font-semibold tracking-widest uppercase" style="color:{accent};">
+					{msg.references_mgmt_selected_reference()}
+				</div>
+				<h2 class="wrap-break-words mt-2 text-sm font-semibold" style="color:{textPrimary};">
+					{item.target_title ||
+						item.cited_raw ||
+						item.resource_title ||
+						msg.references_mgmt_untitled_reference()}
+				</h2>
 				<dl class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-					<dt style="color:{textMuted};">{msg.references_mgmt_type()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.target_type} / {item.target_subtype}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_content()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.target_content}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_normativity()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.normativity}{item.list_kind ? ` · ${item.list_kind}` : ''}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_ref_form()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.ref_form || '—'}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_mechanism()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.mechanism || '—'}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_in_requirement()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.in_requirement === undefined ? '—' : item.in_requirement ? msg.references_mgmt_yes() : msg.references_mgmt_no()}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_internal()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.internal === undefined ? '—' : item.internal ? msg.references_mgmt_yes() : msg.references_mgmt_no()}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_confidence()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.confidence ?? '—'}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_identifiers()}</dt><dd class="m-0 break-words" style="color:{textPrimary};">{item.identifiers.join(', ') || '—'}</dd>
-					<dt style="color:{textMuted};">{msg.references_mgmt_source_excerpt()}</dt><dd class="m-0 break-words whitespace-pre-wrap" style="color:{textPrimary};">{item.evidence || item.cited_raw || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_type()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.target_type} / {item.target_subtype}
+					</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_content()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">{item.target_content}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_normativity()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.normativity}{item.list_kind ? ` · ${item.list_kind}` : ''}
+					</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_ref_form()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">{item.ref_form || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_mechanism()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">{item.mechanism || '—'}</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_in_requirement()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.in_requirement === undefined
+							? '—'
+							: item.in_requirement
+								? msg.references_mgmt_yes()
+								: msg.references_mgmt_no()}
+					</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_internal()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.internal === undefined
+							? '—'
+							: item.internal
+								? msg.references_mgmt_yes()
+								: msg.references_mgmt_no()}
+					</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_confidence()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.confidence ?? '—'}
+					</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_identifiers()}</dt>
+					<dd class="wrap-break-words m-0" style="color:{textPrimary};">
+						{item.identifiers.join(', ') || '—'}
+					</dd>
+					<dt style="color:{textMuted};">{msg.references_mgmt_source_excerpt()}</dt>
+					<dd class="wrap-break-words m-0 whitespace-pre-wrap" style="color:{textPrimary};">
+						{item.evidence || item.cited_raw || '—'}
+					</dd>
 				</dl>
 			</div>
 		{:else if summaryDetails}
@@ -387,33 +487,53 @@
 		{:else if compare}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
 				<div class="grid grid-cols-2 gap-x-3">
-					{#each [
-						{ label: compare.labels[0], metric: compare.pair.production },
-						{ label: compare.labels[1], metric: compare.pair.gold }
-					] as column (column.label)}
+					{#each [{ label: compare.labels[0], metric: compare.pair.production }, { label: compare.labels[1], metric: compare.pair.gold }] as column (column.label)}
 						<div class="min-w-0 border-b pb-2" style="border-color:{borderColor};">
 							<h3 class="text-xs font-semibold" style="color:{accent};">{column.label}</h3>
-							<div class="mt-1 break-words text-xs font-semibold" style="color:{textPrimary};">
-								{column.metric ? String(compare.nameKeys.map((key) => column.metric?.[key]).find((v) => v != null && v !== '') ?? '—') : '—'}
+							<div class="wrap-break-words mt-1 text-xs font-semibold" style="color:{textPrimary};">
+								{column.metric
+									? String(
+											compare.nameKeys
+												.map((key) => column.metric?.[key])
+												.find((v) => v != null && v !== '') ?? '—'
+										)
+									: '—'}
 							</div>
 						</div>
 					{/each}
 					{#each compare.fields as [keys, label]}
-						{@const productionValue = compare.pair.production ? metricFieldValue(compare.pair.production, keys) : '—'}
+						{@const productionValue = compare.pair.production
+							? metricFieldValue(compare.pair.production, keys)
+							: '—'}
 						{@const goldValue = compare.pair.gold ? metricFieldValue(compare.pair.gold, keys) : '—'}
 						{@const differs = keys[0] !== compare.idKey && productionValue !== goldValue}
 						<div
 							class="col-span-2 grid grid-cols-2 gap-x-3 rounded-md px-2 py-1.5"
-							style="background:{differs ? 'rgba(251,191,36,0.12)' : 'transparent'}; border-bottom:1px solid {differs ? 'rgba(251,191,36,0.35)' : borderColor};"
+							style="background:{differs
+								? 'rgba(251,191,36,0.12)'
+								: 'transparent'}; border-bottom:1px solid {differs
+								? 'rgba(251,191,36,0.35)'
+								: borderColor};"
 						>
-							<div class="col-span-2 text-[9px] font-semibold uppercase" style="color:{textMuted};">{label()}</div>
-							<div class="min-w-0 break-words text-xs whitespace-pre-wrap" style="color:{textPrimary};">{productionValue}</div>
-							<div class="min-w-0 break-words text-xs whitespace-pre-wrap" style="color:{textPrimary};">{goldValue}</div>
+							<div class="col-span-2 text-[9px] font-semibold uppercase" style="color:{textMuted};">
+								{label()}
+							</div>
+							<div
+								class="wrap-break-words min-w-0 text-xs whitespace-pre-wrap"
+								style="color:{textPrimary};"
+							>
+								{productionValue}
+							</div>
+							<div
+								class="wrap-break-words min-w-0 text-xs whitespace-pre-wrap"
+								style="color:{textPrimary};"
+							>
+								{goldValue}
+							</div>
 						</div>
 					{/each}
 				</div>
 			</div>
-
 		{:else if findingShelf.active}
 			<div class="finding-shelf-body">
 				<FindingDetailsPanel
@@ -425,14 +545,13 @@
 					onCloseMatchedUnits={findingShelf.onCloseMatchedUnits ?? undefined}
 				/>
 			</div>
-
 		{:else if rangeTypeMapShelf.active}
 			<div class="flex items-center justify-between gap-2">
-				<div class="flex items-center gap-0.5 rounded-md p-0.5 min-w-0" style="background:{surface2};">
-					{#each [
-						{ id: 'pending'  as const, label: msg.context_shelf_needs_triage(), count: splitMapEntries.pending.length },
-						{ id: 'approved' as const, label: msg.context_shelf_approved(),     count: splitMapEntries.approved.length }
-					] as tab (tab.id)}
+				<div
+					class="flex min-w-0 items-center gap-0.5 rounded-md p-0.5"
+					style="background:{surface2};"
+				>
+					{#each [{ id: 'pending' as const, label: msg.context_shelf_needs_triage(), count: splitMapEntries.pending.length }, { id: 'approved' as const, label: msg.context_shelf_approved(), count: splitMapEntries.approved.length }] as tab (tab.id)}
 						<button
 							onclick={() => (mapTab = tab.id)}
 							class="cursor-pointer whitespace-nowrap"
@@ -448,10 +567,10 @@
 					onclick={loadRangeTypeMapEntries}
 					disabled={rangeTypeMapShelf.loading}
 					title={msg.context_shelf_refresh()}
-					class="flex items-center justify-center w-6 h-6 rounded-md cursor-pointer flex-shrink-0"
+					class="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md"
 					style="color:{textMuted}; background:transparent; border:none;"
 				>
-					<RefreshCwIcon class="w-3.5 h-3.5 {rangeTypeMapShelf.loading ? 'animate-spin' : ''}" />
+					<RefreshCwIcon class="h-3.5 w-3.5 {rangeTypeMapShelf.loading ? 'animate-spin' : ''}" />
 				</button>
 			</div>
 
@@ -460,7 +579,10 @@
 			{/if}
 
 			{#if mapNotice}
-				<div class="text-[11px] rounded-md px-2 py-1.5" style="background:rgba(52,211,153,0.10); color:#34D399;">
+				<div
+					class="rounded-md px-2 py-1.5 text-[11px]"
+					style="background:rgba(52,211,153,0.10); color:#34D399;"
+				>
 					{mapNotice}
 				</div>
 			{/if}
@@ -472,13 +594,17 @@
 			</datalist>
 
 			<div class="rounded-lg p-2.5" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="text-[11px] font-semibold mb-1.5" style="color:{textMuted};">{msg.context_shelf_add_new_entry()}</div>
+				<div class="mb-1.5 text-[11px] font-semibold" style="color:{textMuted};">
+					{msg.context_shelf_add_new_entry()}
+				</div>
 				<div class="flex flex-col gap-1.5">
 					<input
 						type="text"
 						placeholder={msg.context_shelf_raw_value()}
 						bind:value={newEntryRawValue}
-						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+						style="background:{darkMode
+							? '#141824'
+							: '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 							border-radius:5px; padding:5px 8px; font-size:12px;"
 					/>
 					<input
@@ -486,17 +612,19 @@
 						list="rmrt-shelf-canonical-bucket-options"
 						placeholder={msg.context_shelf_canonical_bucket()}
 						bind:value={newEntryBucket}
-						style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+						style="background:{darkMode
+							? '#141824'
+							: '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 							border-radius:5px; padding:5px 8px; font-size:12px;"
 					/>
 					<button
 						onclick={addNewMapEntry}
 						disabled={addingEntry}
-						class="flex items-center justify-center gap-1.5 cursor-pointer"
+						class="flex cursor-pointer items-center justify-center gap-1.5"
 						style="padding:6px 10px; border-radius:6px; border:none; background:{accent}; color:white;
 							font-size:12px; font-weight:500; opacity:{addingEntry ? 0.6 : 1};"
 					>
-						<PlusIcon class="w-3.5 h-3.5" />
+						<PlusIcon class="h-3.5 w-3.5" />
 						{addingEntry ? msg.context_shelf_adding() : msg.context_shelf_add()}
 					</button>
 					{#if addEntryError}
@@ -508,11 +636,10 @@
 			</div>
 
 			<div class="flex items-center gap-1.5">
-				<span class="text-[10px] font-semibold uppercase flex-shrink-0" style="color:{textMuted};">{msg.context_shelf_sort()}</span>
-				{#each [
-					{ id: 'raw_value' as const, label: msg.context_shelf_sort_by_raw_values() },
-					{ id: 'canonical_bucket' as const, label: msg.context_shelf_sort_by_mapped_values() }
-				] as opt (opt.id)}
+				<span class="shrink-0 text-[10px] font-semibold uppercase" style="color:{textMuted};"
+					>{msg.context_shelf_sort()}</span
+				>
+				{#each [{ id: 'raw_value' as const, label: msg.context_shelf_sort_by_raw_values() }, { id: 'canonical_bucket' as const, label: msg.context_shelf_sort_by_mapped_values() }] as opt (opt.id)}
 					<button
 						onclick={() => (mapSortKey = mapSortKey === opt.id ? null : opt.id)}
 						class="cursor-pointer whitespace-nowrap"
@@ -531,14 +658,18 @@
 					type="text"
 					placeholder={msg.context_shelf_search_raw_values()}
 					bind:value={mapSearchRaw}
-					style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+					style="background:{darkMode
+						? '#141824'
+						: '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 						border-radius:5px; padding:5px 8px; font-size:12px;"
 				/>
 				<input
 					type="text"
 					placeholder={msg.context_shelf_search_mapped_values()}
 					bind:value={mapSearchMapped}
-					style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+					style="background:{darkMode
+						? '#141824'
+						: '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 						border-radius:5px; padding:5px 8px; font-size:12px;"
 				/>
 			</div>
@@ -546,18 +677,29 @@
 			<div class="space-y-2">
 				{#if visibleMapEntries.length === 0 && !rangeTypeMapShelf.loading}
 					<div class="text-xs" style="color:{textMuted};">
-						{mapTab === 'pending' ? msg.context_shelf_no_entries_need_triage() : msg.context_shelf_no_approved_entries_yet()}
+						{mapTab === 'pending'
+							? msg.context_shelf_no_entries_need_triage()
+							: msg.context_shelf_no_approved_entries_yet()}
 					</div>
 				{/if}
 				{#each visibleMapEntries as entry (entry.raw_value)}
 					{@const invalid = isInvalidMapEntry(entry)}
 					<div
 						class="rounded-lg p-2.5"
-						style="background:{surface2}; border:1px solid {invalid ? (darkMode ? 'rgba(251,191,36,0.35)' : 'rgba(217,119,6,0.3)') : borderColor};"
+						style="background:{surface2}; border:1px solid {invalid
+							? darkMode
+								? 'rgba(251,191,36,0.35)'
+								: 'rgba(217,119,6,0.3)'
+							: borderColor};"
 					>
-						<div class="flex items-start justify-between gap-2 mb-1.5">
-							<span class="text-xs font-medium break-all" style="color:{textPrimary};">{entry.raw_value}</span>
-							<span class="text-[10px] font-semibold uppercase flex-shrink-0" style="color:{invalid ? '#FBBF24' : '#34D399'};">
+						<div class="mb-1.5 flex items-start justify-between gap-2">
+							<span class="text-xs font-medium break-all" style="color:{textPrimary};"
+								>{entry.raw_value}</span
+							>
+							<span
+								class="shrink-0 text-[10px] font-semibold uppercase"
+								style="color:{invalid ? '#FBBF24' : '#34D399'};"
+							>
 								{entry.status}
 							</span>
 						</div>
@@ -567,62 +709,80 @@
 								list="rmrt-shelf-canonical-bucket-options"
 								bind:value={mapBucketDraft[entry.raw_value]}
 								placeholder={msg.context_shelf_bucket()}
-								class="flex-1 min-w-0"
-								style="background:{darkMode ? '#141824' : '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
+								class="min-w-0 flex-1"
+								style="background:{darkMode
+									? '#141824'
+									: '#FFFFFF'}; border:1px solid {borderColor}; color:{textPrimary};
 									border-radius:5px; padding:4px 6px; font-size:11px;"
 							/>
 							<button
 								onclick={() => applyMapEntry(entry.raw_value)}
 								disabled={mapApplying[entry.raw_value]}
 								title={msg.context_shelf_save_this_bucket_and_approve()}
-								class="flex items-center justify-center flex-shrink-0 cursor-pointer"
+								class="flex shrink-0 cursor-pointer items-center justify-center"
 								style="width:24px; height:24px; border-radius:5px; border:none; background:{accent}; color:white;
 									opacity:{mapApplying[entry.raw_value] ? 0.6 : 1};"
 							>
-								<CheckIcon class="w-3 h-3" />
+								<CheckIcon class="h-3 w-3" />
 							</button>
 						</div>
 						{#if mapApplyError[entry.raw_value]}
-							<div class="text-[11px] mt-1" style="color:#F87171;">{mapApplyError[entry.raw_value]}</div>
+							<div class="mt-1 text-[11px]" style="color:#F87171;">
+								{mapApplyError[entry.raw_value]}
+							</div>
 						{:else if mapApplyResult[entry.raw_value]}
-							<div class="text-[11px] mt-1" style="color:#34D399;">{mapApplyResult[entry.raw_value]}</div>
+							<div class="mt-1 text-[11px]" style="color:#34D399;">
+								{mapApplyResult[entry.raw_value]}
+							</div>
 						{/if}
 						{#if !invalid}
 							<button
 								onclick={() => applyEntryToMetrics(entry.raw_value)}
 								disabled={metricsApplying[entry.raw_value]}
-								title={msg.context_shelf_rewrite_value_range_type_to({ canonical_bucket: entry.canonical_bucket ?? '' })}
-								class="w-full flex items-center justify-center gap-1.5 cursor-pointer mt-1.5"
+								title={msg.context_shelf_rewrite_value_range_type_to({
+									canonical_bucket: entry.canonical_bucket ?? ''
+								})}
+								class="mt-1.5 flex w-full cursor-pointer items-center justify-center gap-1.5"
 								style="padding:4px 8px; border-radius:5px; border:1px solid {accent}; background:transparent;
 									color:{accent}; font-size:11px; font-weight:500;
 									opacity:{metricsApplying[entry.raw_value] ? 0.6 : 1};"
 							>
-								<WrenchIcon class="w-3 h-3" />
-								{metricsApplying[entry.raw_value] ? msg.context_shelf_applying() : msg.context_shelf_apply()}
+								<WrenchIcon class="h-3 w-3" />
+								{metricsApplying[entry.raw_value]
+									? msg.context_shelf_applying()
+									: msg.context_shelf_apply()}
 							</button>
 							{#if metricsApplyError[entry.raw_value]}
-								<div class="text-[11px] mt-1" style="color:#F87171;">{metricsApplyError[entry.raw_value]}</div>
+								<div class="mt-1 text-[11px]" style="color:#F87171;">
+									{metricsApplyError[entry.raw_value]}
+								</div>
 							{:else if metricsApplyResult[entry.raw_value]}
-								<div class="text-[11px] mt-1" style="color:#34D399;">{metricsApplyResult[entry.raw_value]}</div>
+								<div class="mt-1 text-[11px]" style="color:#34D399;">
+									{metricsApplyResult[entry.raw_value]}
+								</div>
 							{/if}
 						{/if}
 					</div>
 				{/each}
 			</div>
-
 		{:else if sectionId === 'dashboard' || !activeMenu}
 			<!-- System Health card -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-3">
-					<CpuIcon class="w-4 h-4" style="color:{accent};" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_system_health()}</span>
+				<div class="mb-3 flex items-center gap-2">
+					<CpuIcon class="h-4 w-4" style="color:{accent};" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_system_health()}</span
+					>
 				</div>
 				<div class="space-y-3">
 					{#each systemMetrics as m}
 						<div>
-							<div class="flex justify-between mb-1">
+							<div class="mb-1 flex justify-between">
 								<span class="text-xs" style="color:{textMuted};">{m.label}</span>
-								<span class="text-xs font-medium" style="color:{textPrimary}; font-family:{fontMono};">{m.value}{m.unit}</span>
+								<span
+									class="text-xs font-medium"
+									style="color:{textPrimary}; font-family:{fontMono};">{m.value}{m.unit}</span
+								>
 							</div>
 							<div class="h-1.5 rounded-full" style="background:{borderColor};">
 								<div
@@ -637,20 +797,28 @@
 
 			<!-- AI Models card -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-3">
-					<DatabaseIcon class="w-4 h-4" style="color:{accent};" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_ai_models()}</span>
+				<div class="mb-3 flex items-center gap-2">
+					<DatabaseIcon class="h-4 w-4" style="color:{accent};" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_ai_models()}</span
+					>
 				</div>
 				<div class="space-y-3">
 					{#each models as m}
 						<div class="flex items-center gap-3">
 							<div
-								class="w-2 h-2 rounded-full flex-shrink-0"
-								style="background:{modelStatusColor(m.status)}; box-shadow:0 0 6px {modelStatusColor(m.status)}80;"
+								class="h-2 w-2 shrink-0 rounded-full"
+								style="background:{modelStatusColor(
+									m.status
+								)}; box-shadow:0 0 6px {modelStatusColor(m.status)}80;"
 							></div>
-							<div class="flex-1 min-w-0">
-								<div class="text-xs font-medium truncate" style="color:{textPrimary};">{m.name}</div>
-								<div class="text-xs" style="color:{textMuted}; font-family:{fontMono};">{m.latency}</div>
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-xs font-medium" style="color:{textPrimary};">
+									{m.name}
+								</div>
+								<div class="text-xs" style="color:{textMuted}; font-family:{fontMono};">
+									{m.latency}
+								</div>
 							</div>
 							<div class="text-xs" style="color:{textMuted};">{m.usage}%</div>
 						</div>
@@ -660,80 +828,88 @@
 
 			<!-- Upcoming card -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-3">
-					<ClockIcon class="w-4 h-4" style="color:#06b6d4;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_upcoming()}</span>
+				<div class="mb-3 flex items-center gap-2">
+					<ClockIcon class="h-4 w-4" style="color:#06b6d4;" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_upcoming()}</span
+					>
 				</div>
 				<div class="space-y-1">
-					{#each [
-						{ time: '10:00', label: msg.context_shelf_team_standup() },
-						{ time: '14:00', label: 'Code review PR #142' },
-						{ time: '16:30', label: msg.context_shelf_daily_briefing_digest() }
-					] as event}
+					{#each [{ time: '10:00', label: msg.context_shelf_team_standup() }, { time: '14:00', label: 'Code review PR #142' }, { time: '16:30', label: msg.context_shelf_daily_briefing_digest() }] as event}
 						<div class="flex items-center gap-3 py-1.5">
-							<span class="text-xs w-10 flex-shrink-0" style="color:{textMuted}; font-family:{fontMono};">{event.time}</span>
-							<div class="w-1 h-1 rounded-full flex-shrink-0" style="background:{accent};"></div>
-							<span class="text-xs truncate" style="color:{textPrimary};">{event.label}</span>
+							<span class="w-10 shrink-0 text-xs" style="color:{textMuted}; font-family:{fontMono};"
+								>{event.time}</span
+							>
+							<div class="h-1 w-1 shrink-0 rounded-full" style="background:{accent};"></div>
+							<span class="truncate text-xs" style="color:{textPrimary};">{event.label}</span>
 						</div>
 					{/each}
 				</div>
 			</div>
-
 		{:else if sectionId === 'agents'}
 			<!-- Agent stats 2x2 grid -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-4">
-					<BotIcon class="w-4 h-4" style="color:{accent};" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_agent_overview()}</span>
+				<div class="mb-4 flex items-center gap-2">
+					<BotIcon class="h-4 w-4" style="color:{accent};" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_agent_overview()}</span
+					>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
-					{#each [
-						{ label: msg.context_shelf_total(),        value: '4',   color: accent },
-						{ label: msg.context_shelf_active(),       value: '2',   color: '#34D399' },
-						{ label: msg.context_shelf_tasks_today(),  value: '37',  color: '#FBBF24' },
-						{ label: msg.context_shelf_success_rate(), value: '98%', color: '#06b6d4' }
-					] as stat}
-						<div class="rounded-lg p-3 text-center" style="background:{darkMode ? '#1F2333' : '#FFFFFF'}; border:1px solid {borderColor};">
-							<div class="text-lg font-bold" style="color:{stat.color}; font-family:{fontMono};">{stat.value}</div>
-							<div class="text-xs mt-0.5" style="color:{textMuted};">{stat.label}</div>
+					{#each [{ label: msg.context_shelf_total(), value: '4', color: accent }, { label: msg.context_shelf_active(), value: '2', color: '#34D399' }, { label: msg.context_shelf_tasks_today(), value: '37', color: '#FBBF24' }, { label: msg.context_shelf_success_rate(), value: '98%', color: '#06b6d4' }] as stat}
+						<div
+							class="rounded-lg p-3 text-center"
+							style="background:{darkMode ? '#1F2333' : '#FFFFFF'}; border:1px solid {borderColor};"
+						>
+							<div class="text-lg font-bold" style="color:{stat.color}; font-family:{fontMono};">
+								{stat.value}
+							</div>
+							<div class="mt-0.5 text-xs" style="color:{textMuted};">{stat.label}</div>
 						</div>
 					{/each}
 				</div>
 			</div>
 			<!-- Suggested agents -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-3">
-					<TrendingUpIcon class="w-4 h-4" style="color:#FBBF24;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_suggested_agents()}</span>
+				<div class="mb-3 flex items-center gap-2">
+					<TrendingUpIcon class="h-4 w-4" style="color:#FBBF24;" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_suggested_agents()}</span
+					>
 				</div>
 				{#each [msg.context_shelf_dataanalystbot(), 'EmailCopilot', msg.context_shelf_meetingscribe()] as name}
 					<div class="flex items-center gap-3 py-2" style="border-bottom:1px solid {borderColor};">
-						<div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:{accent}20;">
-							<BotIcon class="w-3.5 h-3.5" style="color:{accent};" />
+						<div
+							class="flex h-7 w-7 items-center justify-center rounded-lg"
+							style="background:{accent}20;"
+						>
+							<BotIcon class="h-3.5 w-3.5" style="color:{accent};" />
 						</div>
-						<span class="text-sm flex-1" style="color:{textPrimary};">{name}</span>
-						<button class="text-xs px-2 py-0.5 rounded-md cursor-pointer" style="background:{accent}15; color:{accent}; border:none;">{msg.context_shelf_add()}</button>
+						<span class="flex-1 text-sm" style="color:{textPrimary};">{name}</span>
+						<button
+							class="cursor-pointer rounded-md px-2 py-0.5 text-xs"
+							style="background:{accent}15; color:{accent}; border:none;"
+							>{msg.context_shelf_add()}</button
+						>
 					</div>
 				{/each}
 			</div>
-
 		{:else if sectionId === 'skills'}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-4">
-					<ZapIcon class="w-4 h-4" style="color:#FBBF24;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_usage_this_month()}</span>
+				<div class="mb-4 flex items-center gap-2">
+					<ZapIcon class="h-4 w-4" style="color:#FBBF24;" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_usage_this_month()}</span
+					>
 				</div>
 				<div class="space-y-3">
-					{#each [
-						{ name: msg.context_shelf_summarizer(),      pct: 85 },
-						{ name: msg.context_shelf_code_formatter(),  pct: 64 },
-						{ name: msg.context_shelf_pdf_extractor(),   pct: 45 },
-						{ name: msg.context_shelf_web_scraper(),     pct: 28 }
-					] as s}
+					{#each [{ name: msg.context_shelf_summarizer(), pct: 85 }, { name: msg.context_shelf_code_formatter(), pct: 64 }, { name: msg.context_shelf_pdf_extractor(), pct: 45 }, { name: msg.context_shelf_web_scraper(), pct: 28 }] as s}
 						<div>
-							<div class="flex justify-between mb-1">
+							<div class="mb-1 flex justify-between">
 								<span class="text-xs" style="color:{textPrimary};">{s.name}</span>
-								<span class="text-xs" style="color:{textMuted}; font-family:{fontMono};">{s.pct}%</span>
+								<span class="text-xs" style="color:{textMuted}; font-family:{fontMono};"
+									>{s.pct}%</span
+								>
 							</div>
 							<div class="h-1.5 rounded-full" style="background:{borderColor};">
 								<div class="h-full rounded-full" style="width:{s.pct}%; background:{accent};"></div>
@@ -742,49 +918,48 @@
 					{/each}
 				</div>
 			</div>
-
 		{:else if sectionId === 'coding'}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-3">
-					<ActivityIcon class="w-4 h-4" style="color:#FBBF24;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_code_stats()}</span>
+				<div class="mb-3 flex items-center gap-2">
+					<ActivityIcon class="h-4 w-4" style="color:#FBBF24;" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_code_stats()}</span
+					>
 				</div>
-				{#each [
-					{ label: msg.context_shelf_reviews_completed(), value: '14', icon: CircleCheckIcon, color: '#34D399' },
-					{ label: msg.context_shelf_issues_flagged(),    value: '38', icon: AlertCircleIcon, color: '#FBBF24' },
-					{ label: msg.context_shelf_lines_generated(),   value: '2.4k', icon: ZapIcon,        color: accent }
-				] as s}
-					<div class="flex items-center gap-3 py-2.5" style="border-bottom:1px solid {borderColor};">
-						<s.icon class="w-4 h-4" style="color:{s.color};" />
-						<span class="text-sm flex-1" style="color:{textPrimary};">{s.label}</span>
-						<span class="text-sm font-bold" style="color:{s.color}; font-family:{fontMono};">{s.value}</span>
+				{#each [{ label: msg.context_shelf_reviews_completed(), value: '14', icon: CircleCheckIcon, color: '#34D399' }, { label: msg.context_shelf_issues_flagged(), value: '38', icon: AlertCircleIcon, color: '#FBBF24' }, { label: msg.context_shelf_lines_generated(), value: '2.4k', icon: ZapIcon, color: accent }] as s}
+					<div
+						class="flex items-center gap-3 py-2.5"
+						style="border-bottom:1px solid {borderColor};"
+					>
+						<s.icon class="h-4 w-4" style="color:{s.color};" />
+						<span class="flex-1 text-sm" style="color:{textPrimary};">{s.label}</span>
+						<span class="text-sm font-bold" style="color:{s.color}; font-family:{fontMono};"
+							>{s.value}</span
+						>
 					</div>
 				{/each}
 			</div>
-
 		{:else if sectionId === 'knowledge'}
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="flex items-center gap-2 mb-3">
-					<DatabaseIcon class="w-4 h-4" style="color:#06b6d4;" />
-					<span class="text-sm font-semibold" style="color:{textPrimary};">{msg.context_shelf_kb_stats()}</span>
+				<div class="mb-3 flex items-center gap-2">
+					<DatabaseIcon class="h-4 w-4" style="color:#06b6d4;" />
+					<span class="text-sm font-semibold" style="color:{textPrimary};"
+						>{msg.context_shelf_kb_stats()}</span
+					>
 				</div>
-				{#each [
-					{ label: msg.context_shelf_total_documents(), value: '234' },
-					{ label: msg.context_shelf_indexed_chunks(),  value: '8.7k' },
-					{ label: msg.context_shelf_searches_today(),  value: '42' },
-					{ label: msg.context_shelf_avg_relevance(),   value: '94%' }
-				] as s}
+				{#each [{ label: msg.context_shelf_total_documents(), value: '234' }, { label: msg.context_shelf_indexed_chunks(), value: '8.7k' }, { label: msg.context_shelf_searches_today(), value: '42' }, { label: msg.context_shelf_avg_relevance(), value: '94%' }] as s}
 					<div class="flex justify-between py-2" style="border-bottom:1px solid {borderColor};">
 						<span class="text-sm" style="color:{textMuted};">{s.label}</span>
-						<span class="text-sm font-semibold" style="color:{textPrimary}; font-family:{fontMono};">{s.value}</span>
+						<span class="text-sm font-semibold" style="color:{textPrimary}; font-family:{fontMono};"
+							>{s.value}</span
+						>
 					</div>
 				{/each}
 			</div>
-
 		{:else}
 			<!-- Generic context -->
 			<div class="rounded-xl p-4" style="background:{surface2}; border:1px solid {borderColor};">
-				<div class="text-sm font-semibold mb-2" style="color:{textPrimary};">
+				<div class="mb-2 text-sm font-semibold" style="color:{textPrimary};">
 					{activeMenu?.itemTitle ?? msg.context_shelf_information()}
 				</div>
 				<p class="text-sm" style="color:{textMuted};">

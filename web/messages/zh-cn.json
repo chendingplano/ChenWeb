@@ -101,6 +101,8 @@
 	"pmr_clear": "清除",
 	"pmr_all_tiers": "全部层级",
 	"pmr_all_documents": "全部文档",
+	"pmr_prev": "上一个",
+	"pmr_next": "下一个",
 	"pmr_filter_text": "按文本筛选…",
 	"pmr_no_results": "没有指标匹配当前筛选条件。",
 	"pmr_see_gaps": "查看 {n} 个覆盖缺口",

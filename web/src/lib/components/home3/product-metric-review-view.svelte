@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { m } from '$lib/paraglide/messages.js';
+	import { getLocale } from '$lib/paraglide/runtime';
 	import {
 		AlertTriangle,
 		ChevronDown,
@@ -69,6 +70,7 @@
 		type AttrDef
 	} from './metric-detail-groups';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import MetricInfoCard from './metric-info-card.svelte';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
 	// `embedded`/`onBack`: rendered inside content-panel.svelte's app shell —
@@ -430,8 +432,28 @@
 	let detailPdfNumPages = $state(0);
 	let detailHighlightVersion = $state(0);
 
+	// Full kb.metrics row of the selected result, for the Metric Info card floating
+	// over the PDF. One listKbMetrics call per document, cached by document id.
+	let infoMetric = $state<KbMetricRecord | null>(null);
+	const metricsByDoc = new Map<number, Promise<KbMetricRecord[]>>();
+	function loadInfoMetric(r: ResultRow) {
+		infoMetric = null;
+		let p = metricsByDoc.get(r.input_record_id);
+		if (!p) {
+			p = listKbMetrics(r.input_record_id).then((res) => res.results ?? []);
+			p.catch(() => metricsByDoc.delete(r.input_record_id));
+			metricsByDoc.set(r.input_record_id, p);
+		}
+		p.then((list) => {
+			if (selectedResult?.artifact_id !== r.artifact_id) return; // superseded
+			infoMetric = list.find((x) => x.metric_id === r.artifact_id) ?? null;
+		}).catch(() => {});
+	}
+
+	// Must not depend on the page: the viewer re-renders every page when fileUrl
+	// changes, and Prev/Next within one document should only scroll.
 	let detailFileUrl = $derived(
-		detailInput ? `/api/v1/kb/inputs/${detailInput.id}/file#page=${detailDocPage}&zoom=page-width` : ''
+		detailInput ? `/api/v1/kb/inputs/${detailInput.id}/file#zoom=page-width` : ''
 	);
 	let detailIsPdf = $derived((detailInput?.type ?? '').toLowerCase() === 'pdf');
 
@@ -505,6 +527,7 @@
 	async function selectResult(r: ResultRow) {
 		selectedResult = r;
 		detailHighlightVersion += 1;
+		loadInfoMetric(r);
 		detailError = '';
 		if (metricDetailId !== r.artifact_id) {
 			metricDetailId = r.artifact_id;
@@ -772,6 +795,28 @@
 		return { ordered, scope };
 	});
 
+	// Records in the order they are displayed, for Prev / Next.
+	const visibleRows = $derived([
+		...groups.ordered.flatMap(([, rows]) => rows),
+		...(showDocumentScope ? groups.scope : [])
+	]);
+	const selectedIdx = $derived(
+		visibleRows.findIndex((r) => r.artifact_id === selectedResult?.artifact_id)
+	);
+
+	function stepResult(dir: 1 | -1) {
+		const n = visibleRows.length;
+		if (n === 0) return;
+		const i = selectedIdx < 0 ? (dir === 1 ? 0 : n - 1) : selectedIdx + dir;
+		if (i < 0 || i >= n) return;
+		selectResult(visibleRows[i]);
+		requestAnimationFrame(() =>
+			document
+				.querySelector('.rcard.sel')
+				?.scrollIntoView({ block: 'nearest' })
+		);
+	}
+
 	const gaps = $derived.by(() => {
 		const rep = run?.report_json as
 			| { gaps?: { node_id: number; label: string; kind: string; grounding: string }[] }
@@ -926,6 +971,10 @@
 
 	function fmtScore(s: number): string {
 		return s.toFixed(3);
+	}
+	// Card text follows the page locale; the English column falls back to the Chinese one.
+	function localized(zh: string, en: string): string {
+		return (getLocale() === 'zh-cn' ? zh : en || zh) || '';
 	}
 	function spansText(spans: unknown): string {
 		if (Array.isArray(spans))
@@ -1185,15 +1234,29 @@
 								<option value="direct">{m.product_metric_review_direct()}</option>
 								<option value="document_first">{m.product_metric_review_document_first()}</option>
 							</select>
+						</div>
+						<div class="filters">
 							<select bind:value={docFilter}>
-								<option value={null}>{m.pmr_all_documents()}</option>
-								{#each scopedDocs as d (d.input_record_id)}
-									<option value={d.input_record_id}
-										>#{d.input_record_id}{d.doc_kind ? ` · ${d.doc_kind}` : ''}</option
-									>
-								{/each}
-							</select>
+									<option value={null}>{m.pmr_all_documents()}</option>
+									{#each scopedDocs as d (d.input_record_id)}
+										<option value={d.input_record_id}
+											>#{d.input_record_id}{d.doc_kind ? ` · ${d.doc_kind}` : ''}</option
+										>
+									{/each}
+								</select>
 							<input type="search" placeholder={m.pmr_filter_text()} bind:value={textFilter} />
+						</div>
+						<div class="filters">
+							<div class="doc-nav">
+									<button type="button" disabled={visibleRows.length === 0 || selectedIdx === 0}
+									onclick={() => stepResult(-1)}
+										>{m.pmr_prev()}</button
+									>
+									<button type="button" disabled={visibleRows.length === 0 || selectedIdx === visibleRows.length - 1}
+									onclick={() => stepResult(1)}
+										>{m.pmr_next()}</button
+									>
+								</div>
 						</div>
 
 						{#if filtered.length === 0}
@@ -1216,9 +1279,11 @@
 										<span class="g-label">{nodeLabel.get(nodeId) ?? `#${nodeId}`}</span>
 										<span class="g-count">{rows.length}</span>
 									</button>
-									{#each rows as r (r.artifact_id)}
-										{@render resultRow(r)}
-									{/each}
+									<div class="rcard-list">
+										{#each rows as r (r.artifact_id)}
+											{@render resultCard(r)}
+										{/each}
+									</div>
 								</div>
 							{/each}
 
@@ -1235,9 +1300,11 @@
 										<span class="g-count">{groups.scope.length}</span>
 									</button>
 									{#if showDocumentScope}
-										{#each groups.scope as r (r.artifact_id)}
-											{@render resultRow(r)}
-										{/each}
+										<div class="rcard-list">
+											{#each groups.scope as r (r.artifact_id)}
+												{@render resultCard(r)}
+											{/each}
+										</div>
 									{/if}
 								</div>
 							{/if}
@@ -1279,7 +1346,11 @@
 									enableSelectionDialog={false}
 									showSidebar={false}
 									{darkMode}
-								/>
+								>
+									{#snippet floatingOverlay()}
+										{#if infoMetric}<MetricInfoCard metric={infoMetric} light={!darkMode} />{/if}
+									{/snippet}
+								</PdfViewWindow>
 							{:else}
 								<div class="note">{m.pmr_detail_pdf_unavailable()}</div>
 							{/if}
@@ -1597,17 +1668,32 @@
 	</div>
 {/snippet}
 
-{#snippet resultRow(r: ResultRow)}
+{#snippet kv(label: string, value: string)}
+	<span class="rc-kv"><span class="rc-k">{label}</span><span class="rc-v">{value || '—'}</span></span>
+{/snippet}
+
+{#snippet resultCard(r: ResultRow)}
 	<button
-		class="rrow"
+		class="rcard"
 		class:sel={selectedResult?.artifact_id === r.artifact_id}
 		onclick={() => selectResult(r)}
 	>
-		<span class="r-tier t-{r.tier}">{r.tier}</span>
-		<span class="r-label">{r.primary_label || r.artifact_id}</span>
-		<span class="r-doc">#{r.input_record_id}</span>
-		<span class="r-paths">{r.paths.join('·')}</span>
-		<span class="r-score mono">{fmtScore(r.score)}</span>
+		<span class="rc-row">
+			{@render kv(m.pmr_field_artifact(), r.artifact_id)}
+			{@render kv(m.pmr_field_document(), `#${r.input_record_id}`)}
+			{@render kv(m.pmr_field_score(), fmtScore(r.score))}
+		</span>
+		<span class="rc-row">
+			{@render kv(
+				m.pmr_field_metric_name(),
+				localized(r.metric_name, r.metric_name_en) || r.primary_label || r.artifact_id
+			)}
+		</span>
+		<span class="rc-row">
+			{@render kv(m.pmr_field_subject(), localized(r.subject, r.subject_en))}
+			{@render kv(m.pmr_field_value(), r.value)}
+			{@render kv(m.pmr_field_unit(), localized(r.unit, r.unit_en))}
+		</span>
 	</button>
 {/snippet}
 
@@ -2441,9 +2527,32 @@
 		background: var(--bg);
 		font-size: 11px;
 	}
+	.filters select,
 	.filters input {
-		flex: 1;
-		min-width: 120px;
+		flex: 1 1 0;
+		min-width: 0;
+		box-sizing: border-box;
+	}
+	.doc-nav {
+		display: flex;
+		gap: 8px;
+		flex: 1 1 100%;
+	}
+	.doc-nav button {
+		flex: 1 1 0;
+		min-width: 0;
+		padding: 4px 8px;
+		border: 1px solid var(--border);
+		background: var(--bg);
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.doc-nav button:hover:not(:disabled) {
+		background: color-mix(in oklch, var(--bronze) 12%, transparent);
+	}
+	.doc-nav button:disabled {
+		opacity: 0.4;
+		cursor: default;
 	}
 
 	.result-group {
@@ -2479,68 +2588,81 @@
 			monospace;
 		color: var(--subtle);
 	}
-	.rrow {
-		width: 100%;
+
+	.rcard-list {
 		display: grid;
-		grid-template-columns: 78px 1fr 56px minmax(0, 90px) 58px;
 		gap: 8px;
-		align-items: center;
 		padding: 8px;
-		border: 0;
-		border-bottom: 1px solid var(--border);
-		background: transparent;
+	}
+	/* Scoped under .pmr-shell so these beat `.pmr-shell button { color: inherit }`. */
+	.pmr-shell .rcard {
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding: 10px;
+		border: 1px solid #172554;
+		border-radius: 6px;
+		background: #172554;
+		color: #eff6ff;
 		cursor: pointer;
 		text-align: left;
 		font-size: 11px;
 	}
-	.rrow:hover {
-		background: color-mix(in oklch, var(--bronze) 5%, transparent);
+	.pmr-shell .rcard:hover {
+		border-color: #1e40af;
 	}
-	.rrow.sel {
-		background: color-mix(in oklch, var(--bronze) 12%, transparent);
+	.pmr-shell .rcard.sel {
+		background: #2563eb;
+		color: #ffffff;
+		border-color: #1d4ed8;
+		box-shadow: inset 3px 0 0 #1e3a8a;
 	}
-	.r-tier {
-		padding: 2px 5px;
-		border: 1px solid currentColor;
-		border-radius: 2px;
-		font:
-			500 8.5px 'DM Mono',
-			monospace;
-		text-align: center;
+	.pmr-shell:not(.dark) .rcard {
+		background: #2563eb;
+		border-color: #2563eb;
+		color: #ffffff;
 	}
-	.t-direct {
-		color: var(--bronze);
+	.pmr-shell:not(.dark) .rcard:hover {
+		border-color: #1d4ed8;
 	}
-	.t-part {
-		color: var(--blue);
+	.pmr-shell:not(.dark) .rcard.sel {
+		background: #bfdbfe;
+		color: #0b1f3a;
+		border-color: #60a5fa;
+		box-shadow: inset 3px 0 0 #1d4ed8;
 	}
-	.t-aspect {
-		color: var(--green);
+	.rc-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 14px;
+		min-width: 0;
 	}
-	.t-document_scope {
-		color: var(--subtle);
+	.rc-kv {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 5px;
+		min-width: 0;
+		overflow-wrap: anywhere;
 	}
-	.r-label {
+	.rc-k {
+		font-size: 10px;
+	}
+	.rc-v {
 		font-weight: 600;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
-	.r-doc,
-	.r-paths {
-		color: var(--subtle);
-		font:
-			500 10px 'DM Mono',
-			monospace;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+	.pmr-shell .rcard .rc-k {
+		color: #7fa6d9;
 	}
-	.r-score {
-		text-align: right;
-		color: var(--subtle);
+	.pmr-shell .rcard.sel .rc-k {
+		color: #dbeafe;
 	}
-
+	.pmr-shell:not(.dark) .rcard .rc-k {
+		color: #dbeafe;
+	}
+	.pmr-shell:not(.dark) .rcard.sel .rc-k {
+		color: #1e3a8a;
+	}
 	.empty-state {
 		padding: 40px 0;
 		text-align: center;

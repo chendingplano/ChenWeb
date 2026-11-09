@@ -101,6 +101,8 @@
 	"pmr_clear": "Clear",
 	"pmr_all_tiers": "All tiers",
 	"pmr_all_documents": "All documents",
+	"pmr_prev": "Prev",
+	"pmr_next": "Next",
 	"pmr_filter_text": "Filter by text…",
 	"pmr_no_results": "No metrics matched the current filters.",
 	"pmr_see_gaps": "See {n} coverage gap(s)",

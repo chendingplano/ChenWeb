@@ -42,7 +42,11 @@
 	import ObjectManagerView from '$lib/components/home3/object-manager-view.svelte';
 	import SemanticProjectionsView from '$lib/components/home3/semantic-projections-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
-	import { getDefaultKnowledgeStore, getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
+	import {
+		getDefaultKnowledgeStore,
+		getProvisionCategory,
+		listProvisionGraph
+	} from '$lib/services/kbService';
 	import { getPageConfig, type PageConfig } from '$lib/services/pageConfigService';
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
@@ -453,13 +457,14 @@
 
 	function resizeMetricShelf(e: MouseEvent) {
 		if (!metricShelfDrag) return;
-		metricShelfWidth = Math.max(220, Math.min(680, metricShelfDrag.width + metricShelfDrag.x - e.clientX));
+		metricShelfWidth = Math.max(
+			220,
+			Math.min(680, metricShelfDrag.width + metricShelfDrag.x - e.clientX)
+		);
 	}
 
 	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
-	let searchArtifactType = $derived(
-		parseKbSearchArtifactType(page.url.searchParams.get('scope'))
-	);
+	let searchArtifactType = $derived(parseKbSearchArtifactType(page.url.searchParams.get('scope')));
 	let metricWikiId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
 	let metricOntologyExplorerId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
 	let artifactWikiType = $derived(page.url.searchParams.get('artifact_type')?.trim() ?? '');
@@ -649,12 +654,12 @@
 	{/if}
 {/snippet}
 
-<svelte:window
-	onmousemove={resizeMetricShelf}
-	onmouseup={() => (metricShelfDrag = null)}
-/>
+<svelte:window onmousemove={resizeMetricShelf} onmouseup={() => (metricShelfDrag = null)} />
 
-<div class="kb-page flex overflow-hidden select-text" style="background:{pageBg}; color:{textPrimary};">
+<div
+	class="kb-page flex overflow-hidden select-text"
+	style="background:{pageBg}; color:{textPrimary};"
+>
 	<aside
 		class="kb-menu flex flex-col overflow-hidden"
 		class:menu-collapsed={menuCollapsed}
@@ -668,12 +673,14 @@
 	>
 		<!-- Header: matches nav-rail style -->
 		<div
-			class="flex flex-shrink-0 items-center px-2"
+			class="flex shrink-0 items-center px-2"
 			style="height:48px; border-bottom:1px solid {borderColor};"
 		>
 			{#if !menuCollapsed}
 				<div class="flex w-full items-center justify-between px-1">
-					<span style="font-size:13px; font-weight:600; color:{accent};">{m.home3_knowledge_knowledge()}</span>
+					<span style="font-size:13px; font-weight:600; color:{accent};"
+						>{m.home3_knowledge_knowledge()}</span
+					>
 					<button
 						type="button"
 						onclick={() => (menuCollapsed = true)}
@@ -716,7 +723,7 @@
 			     doesn't match any menu item. These entries are otherwise silently
 			     ignored, so surface them here instead of only to the console, since
 			     this page is the config's own audience. -->
-			<div class="flex-shrink-0 px-2 pt-2">
+			<div class="shrink-0 px-2 pt-2">
 				<div
 					class="rounded-lg px-3 py-2"
 					style="background:{darkMode
@@ -729,7 +736,9 @@
 						{m.home3_knowledge_unrecognized_menu_config_id_s()}
 					</div>
 					<div style="font-size:11px; margin-top:2px; color:{textSecondary};">
-						{m.home3_knowledge_page_config_home3_knowledge({ unknownMenuConfigIds: unknownMenuConfigIds.join(', ') })}
+						{m.home3_knowledge_page_config_home3_knowledge({
+							unknownMenuConfigIds: unknownMenuConfigIds.join(', ')
+						})}
 					</div>
 				</div>
 			</div>
@@ -749,7 +758,7 @@
 								type="button"
 								onclick={() => selectSection(item.id)}
 								data-entry-key={item.id}
-									class="flex w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+								class="flex w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
 								style="
 									padding:9px 0;
 									border:none;
@@ -773,7 +782,7 @@
 										: textSecondary;
 								}}
 							>
-								<item.icon class="h-5 w-5 flex-shrink-0" />
+								<item.icon class="h-5 w-5 shrink-0" />
 							</button>
 						{:else}
 							<!-- Expanded: full collapsible parent -->
@@ -781,15 +790,13 @@
 								class="rounded-lg"
 								style="
 									background:{cardBg};
-									border:1px solid {item.children?.some((child) => isChildActive(child.id))
-									? accent
-									: borderColor};
+									border:1px solid {item.children?.some((child) => isChildActive(child.id)) ? accent : borderColor};
 								"
 							>
 								<button
 									type="button"
 									onclick={() => toggleParentOpen(item)}
-										data-entry-key={item.id}
+									data-entry-key={item.id}
 									class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
 									style="
 										color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
@@ -799,7 +806,7 @@
 										: 'transparent'};
 									"
 								>
-									<item.icon class="h-5 w-5 flex-shrink-0" />
+									<item.icon class="h-5 w-5 shrink-0" />
 									<span class="min-w-0 flex-1">
 										<span class="block truncate" style="font-size:14px; font-weight:600;"
 											>{item.label}</span
@@ -827,16 +834,14 @@
 							type="button"
 							onclick={() => selectSection(item.id)}
 							data-entry-key={item.id}
-								class="flex w-full cursor-pointer items-center rounded-lg text-left transition-colors duration-150"
+							class="flex w-full cursor-pointer items-center rounded-lg text-left transition-colors duration-150"
 							style="
 								gap:{menuCollapsed ? '0' : '12px'};
 								padding:{menuCollapsed ? '9px 0' : '8px 10px'};
 								justify-content:{menuCollapsed ? 'center' : 'flex-start'};
 								background:{activeSection === item.id ? accentTint : menuCollapsed ? 'transparent' : cardBg};
 								color:{activeSection === item.id ? accent : textSecondary};
-								border:{menuCollapsed
-								? 'none'
-								: '1px solid ' + (activeSection === item.id ? accent : borderColor)};
+								border:{menuCollapsed ? 'none' : '1px solid ' + (activeSection === item.id ? accent : borderColor)};
 								border-left:{!menuCollapsed && activeSection === item.id
 								? '2px solid ' + accent
 								: !menuCollapsed
@@ -856,7 +861,7 @@
 								el.style.color = activeSection === item.id ? accent : textSecondary;
 							}}
 						>
-							<item.icon class="h-5 w-5 flex-shrink-0" />
+							<item.icon class="h-5 w-5 shrink-0" />
 							{#if !menuCollapsed}
 								<span class="min-w-0 flex-1">
 									<span class="block truncate" style="font-size:14px; font-weight:600;"
@@ -885,22 +890,34 @@
 
 	<main class="flex min-w-0 flex-1 flex-col overflow-hidden" style="background:{contentBg};">
 		{#if (activeSection === 'kb-metrics' && metricDetails) || (activeSection === 'kb-provision-tree' && provisionDetails)}
-			<div class="flex flex-shrink-0 justify-end p-2" style="border-bottom:1px solid {borderColor};">
+			<div class="flex shrink-0 justify-end p-2" style="border-bottom:1px solid {borderColor};">
 				<button
 					type="button"
 					class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs"
 					style="background:{accentTint}; color:{accent};"
-					onclick={() => activeSection === 'kb-metrics' ? (metricShelfOpen = !metricShelfOpen) : activeSection === 'kb-provision-tree' ? (provisionShelfOpen = !provisionShelfOpen) : undefined}
-					aria-label={(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen) ? m.content_panel_close_context_panel() : m.content_panel_open_context_panel()}
+					onclick={() =>
+						activeSection === 'kb-metrics'
+							? (metricShelfOpen = !metricShelfOpen)
+							: activeSection === 'kb-provision-tree'
+								? (provisionShelfOpen = !provisionShelfOpen)
+								: undefined}
+					aria-label={(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen)
+						? m.content_panel_close_context_panel()
+						: m.content_panel_open_context_panel()}
 				>
 					<PanelRightIcon class="h-3.5 w-3.5" />
-					{(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen) ? m.content_panel_close_panel() : m.content_panel_open_panel()}
+					{(activeSection === 'kb-metrics' ? metricShelfOpen : provisionShelfOpen)
+						? m.content_panel_close_panel()
+						: m.content_panel_open_panel()}
 				</button>
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
 			{#if metricsVisited}
-				<div class="h-full" hidden={activeSection !== 'kb-metrics' || !knowledgeStoreState.activeStore}>
+				<div
+					class="h-full"
+					hidden={activeSection !== 'kb-metrics' || !knowledgeStoreState.activeStore}
+				>
 					<MetricMgmtView
 						{darkMode}
 						onFocusModeChange={handleExtractionFocusMode}
@@ -909,8 +926,16 @@
 				</div>
 			{/if}
 			{#if provisionVisited}
-				<div class="h-full" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
-					<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} onProvisionDetailsChange={handleProvisionDetailsChange} onProvisionDetailsClose={() => (provisionShelfOpen = false)} />
+				<div
+					class="h-full"
+					hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}
+				>
+					<ProvisionMgmtView
+						{darkMode}
+						onFocusModeChange={handleExtractionFocusMode}
+						onProvisionDetailsChange={handleProvisionDetailsChange}
+						onProvisionDetailsClose={() => (provisionShelfOpen = false)}
+					/>
 				</div>
 			{/if}
 			{#if needsActiveStore && !knowledgeStoreState.activeStore && resolvingDefaultStore}
@@ -935,9 +960,9 @@
 						<p
 							style="font-size:13px; color:{textSecondary}; line-height:1.6; margin-bottom:1.5rem;"
 						>
-							{m.home3_knowledge_this_section_operates_on_the()} <strong
-								style="color:{textPrimary};">{m.home3_knowledge_knowledge_stores()}</strong
-							> {m.home3_knowledge_and_click_a_card_to()}
+							{m.home3_knowledge_this_section_operates_on_the()}
+							<strong style="color:{textPrimary};">{m.home3_knowledge_knowledge_stores()}</strong>
+							{m.home3_knowledge_and_click_a_card_to()}
 						</p>
 						<button
 							type="button"
@@ -998,7 +1023,8 @@
 					/>
 				{:else}
 					<div class="flex h-full items-center justify-center p-8" style="color:{textSecondary};">
-						{m.home3_knowledge_artifact_wiki_for()} <code>{artifactWikiType || 'unknown'}</code> {m.home3_knowledge_is_not_wired_yet()}
+						{m.home3_knowledge_artifact_wiki_for()} <code>{artifactWikiType || 'unknown'}</code>
+						{m.home3_knowledge_is_not_wired_yet()}
 					</div>
 				{/if}
 			{:else if activeSection === 'kb-doc-structure'}
@@ -1086,7 +1112,10 @@
 		</div>
 	</main>
 	{#if metricDetails && metricShelfOpen}
-		<div class="h-full shrink-0" hidden={activeSection !== 'kb-metrics' || !knowledgeStoreState.activeStore}>
+		<div
+			class="h-full shrink-0"
+			hidden={activeSection !== 'kb-metrics' || !knowledgeStoreState.activeStore}
+		>
 			<ContextShelf
 				{darkMode}
 				{metricDetails}
@@ -1099,8 +1128,19 @@
 		</div>
 	{/if}
 	{#if provisionDetails && provisionShelfOpen}
-		<div class="h-full shrink-0" hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}>
-			<ContextShelf {darkMode} {provisionDetails} activeMenu={null} width={metricShelfWidth} open={provisionShelfOpen} onDragStart={startMetricShelfDrag} onClose={() => (provisionShelfOpen = false)} />
+		<div
+			class="h-full shrink-0"
+			hidden={activeSection !== 'kb-provision-tree' || !knowledgeStoreState.activeStore}
+		>
+			<ContextShelf
+				{darkMode}
+				{provisionDetails}
+				activeMenu={null}
+				width={metricShelfWidth}
+				open={provisionShelfOpen}
+				onDragStart={startMetricShelfDrag}
+				onClose={() => (provisionShelfOpen = false)}
+			/>
 		</div>
 	{/if}
 </div>

@@ -20,6 +20,14 @@ type Artifact struct {
 	SubjectText    string          // the artifact's subject, for normalized-name matching
 	SubjectConcept string          // subject concept id (may be empty)
 	LineSpans      json.RawMessage // source_line_spans, for citation
+	// Display fields for the review list card. Names and units come in both
+	// languages; the UI picks one by locale.
+	MetricName   string
+	MetricNameEn string
+	SubjectEn    string
+	Value        string
+	Unit         string
+	UnitEn       string
 }
 
 // ArtifactAdapter is the per-type indirection that keeps `metric` from being

@@ -21,7 +21,7 @@
 	import { kbInputRecordKey, metricBenchmarkSelection } from './metric-benchmark-record';
 	import { GoldRunFilter, goldRunBadges } from './gold-run-filter.svelte';
 	import GoldRunFilters from './gold-run-filters.svelte';
-	import { clipTableCell, splitTableContextRows } from './metric-table-context';
+	import MetricInfoCard from './metric-info-card.svelte';
 	import {
 		normalizeMetricSpans,
 		confidencePct,
@@ -1219,53 +1219,7 @@
 	}}
 />
 
-{#snippet metricInfoCard(metric: KbMetricRecord)}
-	<div class="metric-floating-card" class:light={!darkMode}>
-		<div class="metric-floating-kicker">
-			<span class="metric-floating-id">#{metric.id}</span>
-			{#if metric.confidence != null}
-				<span class="metric-floating-confidence">{Math.round(Number(metric.confidence) * 100)}%</span>
-			{/if}
-			{#if metric.metric_id}
-				<span class="metric-floating-metric-id">{metric.metric_id}</span>
-			{/if}
-		</div>
-		<div class="metric-floating-name">
-			{metric.metric_name || metric.metric_subject || i18n.metric_mgmt_metric({ id: metric.id })}
-		</div>
-		{#if metric.metric_desc}<div class="metric-floating-desc">{metric.metric_desc}</div>{/if}
-		{#each metric.table_context ?? [] as win (win.line)}
-			{@const parts = splitTableContextRows(win)}
-			<div class="metric-floating-table-wrap">
-				{#if win.caption}<div class="metric-floating-table-caption">{win.caption}</div>{/if}
-				<table class="metric-floating-table">
-					<thead>
-						{#each parts.head as row (row.id)}
-							<tr>{#each row.cells as cell, ci (ci)}<th>{cell}</th>{/each}</tr>
-						{/each}
-					</thead>
-					<tbody>
-						{#each parts.body as row (row.id)}
-							<tr class:matched={row.matched}>
-								{#if row.full_width}
-									<td colspan={win.columns.length} title={row.cells[0]}>{clipTableCell(row.cells[0])}</td>
-								{:else}
-									{#each row.cells as cell, ci (ci)}<td title={cell}>{clipTableCell(cell)}</td>{/each}
-								{/if}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/each}
-		<div class="metric-floating-meta">
-			{#if metric.metric_value}<span>{metric.metric_value}</span>{/if}
-			{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
-			{#if metric.location_type}<span>{metric.location_type}</span>{/if}
-			<span>{i18n.metric_mgmt_span_2({ metric: spanCount(metric), plural: spanCount(metric) === 1 ? '' : 's' })}</span>
-		</div>
-	</div>
-{/snippet}
+
 
 {#snippet metricDetails()}
 	<div class="metric-shelf-details select-text" style="--page-bg:{pageBg}; --panel-bg:{panelBg}; --panel-bg-alt:{panelBgAlt}; --ink-line:{inkLine}; --ink-line-soft:{inkLineSoft}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --brass:{brass}; --crimson:{crimson}; --font-serif:{fontSerif}; --font-mono:{fontMono}; --font-sans:{fontSans};">
@@ -1784,11 +1738,11 @@
 								</button>
 							{/snippet}
 							{#snippet floatingOverlay()}
-								{#if selectedMetric}{@render metricInfoCard(selectedMetric)}{/if}
+								{#if selectedMetric}<MetricInfoCard metric={selectedMetric} light={!darkMode} />{/if}
 							{/snippet}
 							{#snippet floatingOverlays(pageNo: number)}
 								{#each metricCardsByPage.get(pageNo) ?? [] as metric (metric.id)}
-									{@render metricInfoCard(metric)}
+									<MetricInfoCard {metric} light={!darkMode} />
 								{/each}
 							{/snippet}
 							{#snippet linesView()}
@@ -2942,9 +2896,6 @@
 		text-transform: none;
 		letter-spacing: 0.02em;
 	}
-	.metric-floating-metric-id {
-		text-transform: none;
-	}
 	.card-conf {
 		font-family: var(--font-mono);
 		font-size: 11px;
@@ -3568,97 +3519,6 @@
 		background: rgba(22, 163, 74, 0.16);
 		border-left: 4px solid rgba(22, 163, 74, 0.85);
 	}
-	.metric-floating-card {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		padding: 12px 14px;
-		border-radius: 14px;
-		border: 1px solid rgba(148, 163, 184, 0.28);
-		background:
-			linear-gradient(180deg, rgba(20, 27, 39, 0.96), rgba(10, 14, 22, 0.94));
-		box-shadow:
-			0 18px 40px rgba(2, 6, 23, 0.42),
-			inset 0 1px 0 rgba(255, 255, 255, 0.06);
-		color: var(--text-primary);
-		backdrop-filter: blur(10px);
-	}
-	.metric-floating-card.light {
-		border-color: var(--ink-line);
-		background: var(--panel-bg);
-		box-shadow: 0 18px 40px rgba(26, 20, 16, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-		color: var(--text-primary);
-	}
-	.metric-floating-kicker,
-	.metric-floating-meta {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 8px;
-		font-family: var(--font-mono);
-		font-size: 11px;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--text-secondary);
-	}
-	.metric-floating-id,
-	.metric-floating-confidence,
-	.metric-floating-metric-id,
-	.metric-floating-meta span {
-		padding: 3px 7px;
-		border-radius: 999px;
-		background: rgba(148, 163, 184, 0.12);
-		border: 1px solid rgba(148, 163, 184, 0.18);
-	}
-	.metric-floating-confidence {
-		color: var(--mint);
-	}
-	.metric-floating-name {
-		font-family: var(--font-serif);
-		font-size: 19px;
-		line-height: 1.2;
-		color: var(--paper);
-	}
-	.metric-floating-card.light .metric-floating-name { color: var(--text-primary); }
-	.metric-floating-desc {
-		font-size: 12px;
-		line-height: 1.5;
-		color: var(--text-secondary);
-		max-width: 42ch;
-	}
-	.metric-floating-table-wrap {
-		max-width: min(640px, 70vw);
-		max-height: 260px;
-		overflow: auto;
-	}
-	.metric-floating-table-caption {
-		font-size: 11px;
-		color: var(--text-secondary);
-		margin-bottom: 4px;
-	}
-	.metric-floating-table {
-		border-collapse: collapse;
-		font-size: 11px;
-		line-height: 1.4;
-		color: var(--text-secondary);
-	}
-	.metric-floating-table th,
-	.metric-floating-table td {
-		border: 1px solid rgba(148, 163, 184, 0.2);
-		padding: 3px 6px;
-		text-align: left;
-		vertical-align: top;
-	}
-	.metric-floating-table th {
-		color: var(--text-primary);
-		font-weight: 600;
-		white-space: nowrap;
-	}
-	.metric-floating-table tr.matched td {
-		color: var(--paper);
-		background: rgba(22, 163, 74, 0.16);
-	}
-	.metric-floating-card.light .metric-floating-table tr.matched td { color: var(--text-primary); }
 	.doc-foot-hint {
 		font-size: 12px;
 		line-height: 1.5;
