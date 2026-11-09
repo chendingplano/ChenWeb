@@ -16,8 +16,8 @@ The `parser-result-converter` service consumes JetStream messages for parsed PDF
   - `status` contains parsed success (`operation=parsed`, `proc_status=success`)
 - Uses converter by `parser_name`:
   - empty / `opendata`: converts JSON to `.txt`
-  - `paddleocr`: currently returns not-implemented
-  - `mineru`: currently returns not-implemented
+  - `paddleocr`: converts `<pdf-stem>_paddleocr.json` into `<pdf-stem>_paddleocr.txt` (same Line File format as MinerU)
+  - `mineru`: converts `<pdf-stem>_mineru.json` into `<pdf-stem>_mineru.txt`
   - `docline`: currently returns not-implemented
 - Extracts missing or stale physical PDF table geometry and builds a canonical row/cell geometry companion before publishing the line-file event, including manual convert-only runs. Current physical companions are reused.
 - Appends a `converted` status entry to `kb.inputs.status` with success/failed

@@ -331,7 +331,7 @@ func convertOneParserFile(inputPath, parserName string) (string, error) {
 	case "mineru":
 		return ConvertMineruFile(inputPath)
 	case "paddleocr":
-		return "", fmt.Errorf("(MID_26042601) parser_name=%q: %w", parserName, ErrParserNotImplemented)
+		return ConvertPaddleOCRFile(inputPath)
 	case "docline":
 		return "", fmt.Errorf("(MID_26042603) parser_name=%q: %w", parserName, ErrParserNotImplemented)
 	default:
