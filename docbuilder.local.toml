@@ -1,0 +1,14 @@
+# Document Builder sources: each directory of Markdown/PDF files published as a categorised
+# document tree at GET /api/v1/docbuilder/<key>/tree. `dir` is absolute or relative to this file.
+# Categories are assigned once by `docbuilder-classify -source <key>` and saved in
+# <dir>/.docbuilder/manifest.json.
+
+[[source]]
+key   = "user-manuals"
+title = "User Manuals"
+dir   = "../KnowledgeStore/doc-repo/user-manuals"
+
+[[source]]
+key   = "devdocs"
+title = "Documents"
+dir   = "../KnowledgeStore/doc-repo/devdocs"

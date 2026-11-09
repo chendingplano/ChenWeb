@@ -8791,5 +8791,12 @@
 	"otypes_approved_by": "批准人",
 	"otypes_not_recorded": "未记录",
 	"otypes_select_title": "选择要审核的类型",
-	"otypes_select_help": "批准前，请检查其原始值和来源。"
+	"otypes_select_help": "批准前，请检查其原始值和来源。",
+	"docbuilder_tree_label": "文档分类",
+	"docbuilder_loading": "加载中…",
+	"docbuilder_select_document": "请从目录树中选择一个文档。",
+	"docbuilder_drag_to_resize": "拖动以调整大小",
+	"docbuilder_load_failed": "无法加载“{label}”",
+	"docbuilder_tree_failed": "无法加载文档列表。",
+	"docbuilder_pending": "有 {count} 个文档尚未分类。"
 }

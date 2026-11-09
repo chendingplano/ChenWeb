@@ -8791,5 +8791,12 @@
 	"otypes_approved_by": "Approved by",
 	"otypes_not_recorded": "Not recorded",
 	"otypes_select_title": "Select a type to review",
-	"otypes_select_help": "Inspect its original value and source before approving it."
+	"otypes_select_help": "Inspect its original value and source before approving it.",
+	"docbuilder_tree_label": "Document categories",
+	"docbuilder_loading": "Loading…",
+	"docbuilder_select_document": "Select a document from the tree.",
+	"docbuilder_drag_to_resize": "Drag to resize",
+	"docbuilder_load_failed": "Failed to load \"{label}\"",
+	"docbuilder_tree_failed": "Failed to load the document list.",
+	"docbuilder_pending": "{count} documents are not categorised yet."
 }

@@ -42,6 +42,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docbenchmarkadminhandler"
+	"github.com/chendingplano/deepdoc/server/api/docbuilder"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
@@ -326,6 +327,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
 	apiGroup.GET("/reusable-modules", reusablemodules.Handler(ApiTypes.ProjectDBHandle))
+	docBuilderConfig := os.Getenv("DOCBUILDER_CONFIG")
+	if docBuilderConfig == "" {
+		docBuilderConfig = "docbuilder.local.toml"
+	}
+	docBuilderSources, err := docbuilder.LoadSources(docBuilderConfig)
+	if err != nil {
+		return fmt.Errorf("load document builder sources: %w", err)
+	}
+	docbuilder.Register(apiGroup, docBuilderSources)
 	monitorLoc, err := time.LoadLocation(appconfig.GetLLMConfig().WorkspaceTimezone)
 	if err != nil {
 		return fmt.Errorf("load code monitor timezone: %w", err)
