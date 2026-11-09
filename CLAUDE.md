@@ -110,9 +110,9 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   `section`. These also preserve the selected view across ordinary reloads.
 
 # 4. Reusable modules and IDs
-* Before building a component, backend package or script that another feature may already
-  provide, search the module catalogue with the `find-reusable-module` skill. The full rule and
-  the list of capabilities are in the workspace `CLAUDE.md`, section "Reusable modules".
+* Before writing a new component, backend package, script or helper, search for one that already
+  does the job with the `find-reusable-module` skill; it searches the module catalogue and then
+  the code. The full rule is in the workspace `CLAUDE.md`, section "Reusable modules".
 * IDs that are not the inserted row's own primary key (run, batch, job or correlation IDs)
   come from `shared/go/api/idmanager`; `llmrun.Provision` shows how an application provisions
   its sequence. `server/api/llmrun/id_allocation_guard_test.go` fails on a new
