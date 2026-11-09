@@ -11,6 +11,8 @@
 		FileText,
 		FolderTree,
 		Layers,
+		PanelLeftClose,
+		PanelLeftOpen,
 		Pencil,
 		Plus,
 		RefreshCw,
@@ -127,14 +129,31 @@
 	// and the scope-tree / results / metric-details panes, sizes persisted per
 	// browser (spec: product-review-results-layout; pattern mirrors
 	// metric-ontology-explorer/panel-shell.svelte's splitter) ─────────────────
-	type ReviewLayout = { drawingH: number; scopeW: number; detailW: number };
+	// detailW = whole right-hand pane (PDF + metric details); attrsW = the metric-details
+	// panel inside it, to the right of the PDF.
+	type ReviewLayout = {
+		drawingH: number;
+		scopeW: number;
+		detailW: number;
+		attrsW: number;
+		scopeCollapsed?: boolean;
+	};
 	const LAYOUT_KEY = 'pmr-review-layout';
-	const LAYOUT_DEFAULTS: ReviewLayout = { drawingH: 320, scopeW: 320, detailW: 420 };
+	const LAYOUT_DEFAULTS: ReviewLayout = {
+		drawingH: 320,
+		scopeW: 320,
+		detailW: 760,
+		attrsW: 320,
+		scopeCollapsed: false
+	};
 	const SCOPE_MIN = 240,
 		SCOPE_MAX = 480;
-	const DETAIL_MIN = 320,
-		DETAIL_MAX = 900;
-	const MAIN_MIN = -40;
+	const SCOPE_RAIL = 40; // width of the scope tree when collapsed (toggle button only)
+	const ATTRS_MIN = 240; // metric-details panel minimum width
+	const PDF_MIN = 240; // PDF viewer minimum width inside the right-hand pane
+	const DETAIL_MIN = ATTRS_MIN + PDF_MIN + 9; // right-hand pane minimum (9 = one SPLITTER)
+	const MAIN_MIN = 240; // Entry list minimum width in px; the Entry list fills the remaining space
+	const SPLITTER = 9; // width of one v-splitter handle
 	const DRAWING_MIN = 140,
 		DRAWING_MAX = 940;
 
@@ -147,7 +166,10 @@
 				return {
 					drawingH: typeof p.drawingH === 'number' ? p.drawingH : LAYOUT_DEFAULTS.drawingH,
 					scopeW: typeof p.scopeW === 'number' ? p.scopeW : LAYOUT_DEFAULTS.scopeW,
-					detailW: typeof p.detailW === 'number' ? p.detailW : LAYOUT_DEFAULTS.detailW
+					detailW:
+						typeof p.detailW === 'number' ? Math.max(DETAIL_MIN, p.detailW) : LAYOUT_DEFAULTS.detailW,
+					attrsW: typeof p.attrsW === 'number' ? p.attrsW : LAYOUT_DEFAULTS.attrsW,
+					scopeCollapsed: p.scopeCollapsed === true
 				};
 			}
 		} catch {
@@ -158,6 +180,14 @@
 
 	let layout = $state<ReviewLayout>(loadLayout());
 	let layoutEl: HTMLDivElement | null = $state(null);
+
+	// Effective scope-tree width: the dragged width, or the narrow rail when collapsed.
+	const scopeWidth = $derived(layout.scopeCollapsed ? SCOPE_RAIL : layout.scopeW);
+
+	function toggleScopeCollapsed() {
+		layout.scopeCollapsed = !layout.scopeCollapsed;
+		persistLayout();
+	}
 
 	function persistLayout() {
 		if (!browser) return;
@@ -170,7 +200,7 @@
 
 	const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-	type ResizeKey = 'drawingH' | 'scopeW' | 'detailW';
+	type ResizeKey = 'drawingH' | 'scopeW' | 'detailW' | 'attrsW';
 	let drag: { key: ResizeKey; startX: number; startY: number; startVal: number } | null = null;
 
 	function startResize(e: PointerEvent, key: ResizeKey) {
@@ -182,15 +212,17 @@
 		if (!drag || !layoutEl) return;
 		const W = layoutEl.clientWidth;
 		if (drag.key === 'scopeW') {
-			const maxScope = Math.max(SCOPE_MIN, W - layout.detailW - MAIN_MIN - 12);
+			const maxScope = Math.max(SCOPE_MIN, W - layout.detailW - MAIN_MIN - 2 * SPLITTER);
 			layout.scopeW = clamp(drag.startVal + (e.clientX - drag.startX), SCOPE_MIN, Math.min(SCOPE_MAX, maxScope));
 		} else if (drag.key === 'detailW') {
-			const maxDetail = Math.max(DETAIL_MIN, W - layout.scopeW - MAIN_MIN - 12);
-			layout.detailW = clamp(
-				drag.startVal - (e.clientX - drag.startX),
-				DETAIL_MIN,
-				Math.min(DETAIL_MAX, maxDetail)
-			);
+			const maxDetail = Math.max(DETAIL_MIN, W - scopeWidth - MAIN_MIN - 2 * SPLITTER);
+			layout.detailW = clamp(drag.startVal - (e.clientX - drag.startX), DETAIL_MIN, maxDetail);
+			// keep the PDF at least PDF_MIN wide when the whole right-hand pane narrows
+			layout.attrsW = Math.min(layout.attrsW, layout.detailW - PDF_MIN - SPLITTER);
+		} else if (drag.key === 'attrsW') {
+			// the splitter sits between the PDF (left) and the details panel (right)
+			const maxAttrs = layout.detailW - PDF_MIN - SPLITTER;
+			layout.attrsW = clamp(drag.startVal - (e.clientX - drag.startX), ATTRS_MIN, maxAttrs);
 		} else {
 			layout.drawingH = clamp(drag.startVal + (e.clientY - drag.startY), DRAWING_MIN, DRAWING_MAX);
 		}
@@ -1079,21 +1111,50 @@
 				bind:this={layoutEl}
 			>
 				<!-- scope tree -->
-				<aside class="scope-pane" style={tab === 'results' ? `width:${layout.scopeW}px` : ''}>
+				<aside
+					class="scope-pane"
+					class:collapsed={tab === 'results' && layout.scopeCollapsed}
+					style={tab === 'results' ? `width:${scopeWidth}px` : ''}
+				>
 					<div class="pane-head">
-						<FolderTree size={13} /><span>{m.pmr_scope_tree()}</span>
-						{#if selectedNodeId != null}
-							<button class="linky" onclick={() => (selectedNodeId = null)}>{m.pmr_clear()}</button>
+						{#if tab === 'results' && layout.scopeCollapsed}
+							<button
+								class="linky icon-btn"
+								onclick={toggleScopeCollapsed}
+								title={m.pmr_expand_scope_tree()}
+								aria-label={m.pmr_expand_scope_tree()}
+								aria-expanded="false"
+							>
+								<PanelLeftOpen size={14} />
+							</button>
+						{:else}
+							<FolderTree size={13} /><span>{m.pmr_scope_tree()}</span>
+							{#if selectedNodeId != null}
+								<button class="linky" onclick={() => (selectedNodeId = null)}>{m.pmr_clear()}</button>
+							{/if}
+							{#if tab === 'results'}
+								<button
+									class="linky icon-btn"
+									onclick={toggleScopeCollapsed}
+									title={m.pmr_collapse_scope_tree()}
+									aria-label={m.pmr_collapse_scope_tree()}
+									aria-expanded="true"
+								>
+									<PanelLeftClose size={14} />
+								</button>
+							{/if}
 						{/if}
 					</div>
-					<div class="tree">
-						{#each tree as root (root.id)}
-							{@render treeNode(root, 0)}
-						{/each}
-					</div>
+					{#if !(tab === 'results' && layout.scopeCollapsed)}
+						<div class="tree">
+							{#each tree as root (root.id)}
+								{@render treeNode(root, 0)}
+							{/each}
+						</div>
+					{/if}
 				</aside>
 
-				{#if tab === 'results'}
+				{#if tab === 'results' && !layout.scopeCollapsed}
 					<div
 						class="v-splitter"
 						role="separator"
@@ -1108,9 +1169,7 @@
 				<!-- main -->
 				<section
 					class="main-pane"
-					style={tab === 'results'
-						? `width:calc(100% - ${layout.scopeW + layout.detailW + 412}px)`
-						: ''}
+					style={tab === 'results' ? `min-width:${MAIN_MIN}px` : ''}
 				>
 					{#if tab === 'results'}
 						<div class="filters">
@@ -1201,7 +1260,40 @@
 
 					<!-- metric details -->
 					<aside class="detail-pane" style="width:{layout.detailW}px">
-						<div class="detail-attrs">
+						<div class="detail-pdf">
+							{#if !selectedResult}
+								<!-- nothing to show until a result is selected -->
+							{:else if detailLoading}
+								<div class="note">{m.pmr_loading()}</div>
+							{:else if detailError}
+								<div class="note error">{detailError}</div>
+							{:else if detailIsPdf && detailInput}
+								<PdfViewWindow
+									inputId={detailInput.id}
+									fileUrl={detailFileUrl}
+									bind:page={detailDocPage}
+									bind:zoom={detailPdfZoom}
+									bind:numPages={detailPdfNumPages}
+									highlightVersion={`${selectedResult.artifact_id}:${detailHighlightVersion}`}
+									renderHighlights={renderResultHighlights}
+									enableSelectionDialog={false}
+									showSidebar={false}
+									{darkMode}
+								/>
+							{:else}
+								<div class="note">{m.pmr_detail_pdf_unavailable()}</div>
+							{/if}
+						</div>
+						<div
+							class="v-splitter"
+							role="separator"
+							aria-orientation="vertical"
+							onpointerdown={(e) => startResize(e, 'attrsW')}
+							onpointermove={moveResize}
+							onpointerup={endResize}
+							onpointercancel={endResize}
+						></div>
+						<div class="detail-attrs" style="width:{layout.attrsW}px">
 							<div class="pane-head">
 								<FileText size={13} /><span>{m.pmr_detail_heading()}</span>
 							</div>
@@ -1273,30 +1365,6 @@
 								>
 									{m.pmr_full_details_button()}
 								</button>
-							{/if}
-						</div>
-						<div class="detail-pdf">
-							{#if !selectedResult}
-								<!-- nothing to show until a result is selected -->
-							{:else if detailLoading}
-								<div class="note">{m.pmr_loading()}</div>
-							{:else if detailError}
-								<div class="note error">{detailError}</div>
-							{:else if detailIsPdf && detailInput}
-								<PdfViewWindow
-									inputId={detailInput.id}
-									fileUrl={detailFileUrl}
-									bind:page={detailDocPage}
-									bind:zoom={detailPdfZoom}
-									bind:numPages={detailPdfNumPages}
-									highlightVersion={`${selectedResult.artifact_id}:${detailHighlightVersion}`}
-									renderHighlights={renderResultHighlights}
-									enableSelectionDialog={false}
-									showSidebar={false}
-									{darkMode}
-								/>
-							{:else}
-								<div class="note">{m.pmr_detail_pdf_unavailable()}</div>
 							{/if}
 						</div>
 					</aside>
@@ -1970,11 +2038,11 @@
 		flex: 0 0 auto;
 	}
 	.layout.resizable .main-pane {
-		flex: 0 0 auto;
+		flex: 1 1 0;
 		min-width: 0;
 	}
 	.layout.resizable .detail-pane {
-		flex: 1 1 auto;
+		flex: 0 0 auto;
 	}
 	.v-splitter {
 		flex: 0 0 auto;
@@ -2128,14 +2196,31 @@
 		max-height: calc(100vh - 40px);
 		overflow: auto;
 	}
+	.scope-pane.collapsed {
+		overflow: hidden;
+		padding: 10px 8px;
+	}
+	.scope-pane.collapsed .pane-head {
+		justify-content: center;
+		margin-bottom: 0;
+		padding-bottom: 0;
+		border-bottom: 0;
+	}
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 2px;
+		color: var(--bronze);
+	}
 
 	/* metric-details pane */
 	.detail-pane {
 		position: sticky;
 		top: 14px;
 		display: flex;
-		flex-direction: column;
-		gap: 16px;
+		flex-direction: row;
+		align-items: stretch;
 		max-height: calc(100vh - 40px);
 	}
 	.detail-attrs {
@@ -2143,8 +2228,8 @@
 		background: var(--surface);
 		box-shadow: var(--shadow);
 		padding: 14px;
-		flex-shrink: 0;
-		max-height: 46vh;
+		flex: 0 0 auto;
+		min-height: 0;
 		overflow: auto;
 	}
 	.detail-title {
@@ -2159,7 +2244,8 @@
 		text-align: center;
 	}
 	.detail-pdf {
-		flex: 1 1 auto;
+		flex: 1 1 0;
+		min-width: 0;
 		min-height: 320px;
 		border: 1px solid var(--border);
 		background: var(--surface);
@@ -2699,7 +2785,11 @@
 			position: static;
 			max-height: 340px;
 		}
+		.detail-pane {
+			flex-direction: column;
+		}
 		.detail-attrs {
+			width: auto !important;
 			max-height: none;
 		}
 		.v-splitter,

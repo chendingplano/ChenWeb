@@ -96,6 +96,8 @@
 	"pmr_drawing_discard": "放弃",
 	"pmr_drawing_regenerate": "重新生成",
 	"pmr_scope_tree": "范围树",
+	"pmr_collapse_scope_tree": "收起范围树",
+	"pmr_expand_scope_tree": "展开范围树",
 	"pmr_clear": "清除",
 	"pmr_all_tiers": "全部层级",
 	"pmr_all_documents": "全部文档",
