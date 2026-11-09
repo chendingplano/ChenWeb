@@ -14,6 +14,10 @@ run = "go build -buildvcs=false -o ./.cache/server.exe ./server/cmd/deepdoc/."
 [tasks.build-doc-service]
 run = "go build -buildvcs=false -o ./.cache/doc-service.exe ./server/cmd/doc-service/."
 
+[tasks.build-docs]
+description = "Document Builder: categorize new Markdown/PDF files of a source with an LLM (once per file). Usage: mise build-docs <source> [--dry-run] [--force] [--model <profile>]"
+run = "go run ./server/cmd/docbuilder-classify -source"
+
 [tasks.build-autotester]
 run = "go build -buildvcs=false -o ./.cache/autotester.exe ./server/cmd/autotester/."
 
