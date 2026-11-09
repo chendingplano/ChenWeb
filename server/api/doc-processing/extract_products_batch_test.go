@@ -14,6 +14,24 @@ func TestProductsProcessorImplementsChunkBatch(t *testing.T) {
 	var _ ChunkBatchProcessor = (*ProductsProcessor)(nil)
 }
 
+func TestMergedProductsUsesStablePromptPrefix(t *testing.T) {
+	extractor := &stubLLMJSONExtractor{results: []stubLLMJSONResult{
+		{payload: map[string]any{"products": []any{}}},
+		{payload: map[string]any{"products": []any{}}},
+	}}
+	p := &ProductsProcessor{Extractor: extractor}
+	for _, input := range []string{"first chunk", "second chunk"} {
+		if _, err := p.extractProductPayload(context.Background(), "extract products merged", input, "stable instructions", "prompt", "model", structureModelConfig{}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, in := range extractor.inputs {
+		if in.DocumentFirst || in.PromptText != "stable instructions" {
+			t.Fatalf("merged product request must use the stable prompt first: %+v", in)
+		}
+	}
+}
+
 // TestProductsProcessor_BatchProcessChunkAccumulatesAndSaves verifies that
 // InitChunkBatch + ProcessChunk (via the per-chunk batching coordinator) +
 // FinalizeChunkBatch produces the same saved rows HandleEvent would, and --

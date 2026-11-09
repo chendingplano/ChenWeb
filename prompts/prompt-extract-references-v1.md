@@ -11,9 +11,12 @@ Return strict JSON only.
 
 ## Input
 
-The input is a JSON array of lines. Each line has `line_number`, `line_type` (heading, text,
-table, list-item, …) and `content`. Use `line_number` values for `source_line_spans`. A context
-line before the array may give the document title.
+The input is a JSON object with `doc_context` (the document title and identifier) and `lines`
+(the lines in this chunk), or a bare array of lines when no document context is available.
+Each line has `flag`, `line_number`, `page_number`,
+`line_type` (heading, text, table, list-item, …) and `content`. Use `line_number` values for
+`source_line_spans`; ignore `flag` and `page_number` when identifying references. `doc_context`
+is context only and is not itself a source line.
 
 Tables are rendered as numbered logical rows, for example `116#h0: Name | Standard`
 and `116#r1: Fan | ISO 9001`. Inspect every row, including header rows that cite a resource.

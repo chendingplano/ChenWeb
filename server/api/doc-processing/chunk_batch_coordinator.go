@@ -304,8 +304,17 @@ func (s *ControlService) scheduleChunkBatch(
 	}
 
 	// Phase 1a: seed the first chunk only to prime the prompt-level cache.
+	seedDone := make(chan struct{})
 	wg.Add(1)
-	go func() { defer wg.Done(); runOne(seed, 0) }()
+	go func() { defer wg.Done(); defer close(seedDone); runOne(seed, 0) }()
+	if p, ok := seed.(interface{ WarmPromptBeforeRemainingChunks() bool }); ok && p.WarmPromptBeforeRemainingChunks() && len(chunks) > 1 {
+		select {
+		case <-seedDone:
+		case <-ctx.Done():
+			wg.Wait()
+			return ErrPipelineStopped
+		}
+	}
 
 	// Phase 1b: wait for the prompt prefix to be cached. Skipped when there
 	// are no subsequent LLM calls (single chunk, single processor).
@@ -338,6 +347,33 @@ func (s *ControlService) scheduleChunkBatch(
 		}
 	}
 
+	// Warm task-first prompts that cannot reuse the seed processor's chunk prefix.
+	// Wait for the first calls to finish and their prefixes to persist before fan-out.
+	warmed := make(map[int]bool)
+	var warmWG sync.WaitGroup
+	if len(chunks) > 1 {
+		for pi := 1; pi < len(ordered); pi++ {
+			p, ok := ordered[pi].(interface{ WarmPromptBeforeRemainingChunks() bool })
+			if !ok || !p.WarmPromptBeforeRemainingChunks() {
+				continue
+			}
+			warmed[pi] = true
+			warmWG.Add(1)
+			go func(bp ChunkBatchProcessor) { defer warmWG.Done(); runOne(bp, 0) }(ordered[pi])
+		}
+	}
+	if len(warmed) > 0 {
+		warmWG.Wait()
+		if stagger := llmCallStagger(); stagger > 0 {
+			select {
+			case <-time.After(stagger):
+			case <-ctx.Done():
+				wg.Wait()
+				return ErrPipelineStopped
+			}
+		}
+	}
+
 	// Phase 3: remaining (processor x chunk) concurrently, bounded.
 	// Chunk-major spawn order (chunks outer, processors inner) ensures
 	// goroutines from different processors interleave. A processor-major
@@ -348,6 +384,9 @@ func (s *ControlService) scheduleChunkBatch(
 		sem := make(chan struct{}, maxDocProcessorTasks(10))
 		for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
 			for pi := 1; pi < len(ordered); pi++ {
+				if chunkIdx == 0 && warmed[pi] {
+					continue
+				}
 				wg.Add(1)
 				go func(bp ChunkBatchProcessor, idx int) {
 					defer wg.Done()

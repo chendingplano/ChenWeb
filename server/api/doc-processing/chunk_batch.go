@@ -25,6 +25,7 @@ import (
 //	Phase 1c: for each chunk index 1..N-1:
 //	    go processor[0].ProcessChunk(ctx, chunkIdx)  — concurrent, prompt cache warm
 //	Phase 2: wait LLM_CALL_STAGGER                   — let chunk+prompt prefixes persist
+//	Warm the first chunk of processors with task-first prompts, then wait for cache persistence.
 //	Phase 3: for each chunk, for each processor[1..M]:
 //	    go P.ProcessChunk(ctx, chunkIdx)              — concurrent, benefit from cache
 //	for each processor P:
@@ -42,8 +43,7 @@ type ChunkBatchProcessor interface {
 	// ProcessChunk processes a single chunk index: builds the LLM input,
 	// makes the LLM call (which benefits from the cache populated by previous
 	// processors in this batch), and accumulates the result internally.
-	// Called sequentially by the coordinator, one processor at a time, with
-	// LLM_CALL_STAGGER between the end of one call and the start of the next.
+	// The coordinator may call different chunks concurrently.
 	ProcessChunk(ctx context.Context, chunkIdx int) error
 
 	// FinalizeChunkBatch runs after all chunks have been processed. It saves

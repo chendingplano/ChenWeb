@@ -69,6 +69,8 @@ func NewReferencesProcessor(inputStore DocMetadataStore, db *sql.DB, e LLMJSONEx
 
 func (p *ReferencesProcessor) Name() string { return "extract_references" }
 
+func (p *ReferencesProcessor) WarmPromptBeforeRemainingChunks() bool { return true }
+
 func (p *ReferencesProcessor) HandleEvent(context.Context, []byte) error {
 	return fmt.Errorf("%s requires chunk batching", p.Name())
 }
@@ -92,8 +94,13 @@ func (p *ReferencesProcessor) ProcessChunk(ctx context.Context, idx int) error {
 		return fmt.Errorf("%s chunk index out of range", p.Name())
 	}
 	start := time.Now()
-	raw, err := p.Extractor.ExtractJSON(ctx, newLLMJSONInput(ctx, p.Name(), p.PromptText, p.ModelName,
-		canonicalChunkInputText(p.batchChunks[idx].Lines, p.batchDocCtx), p.Name(), "MID_26101121"))
+	in := newLLMJSONInput(ctx, p.Name(), p.PromptText, p.ModelName,
+		canonicalChunkInputText(p.batchChunks[idx].Lines, p.batchDocCtx), p.Name(), "MID_26101121")
+	// The extraction instructions are large and identical across chunks, while each
+	// chunk's document input changes. Keep the prompt first so its stable prefix can
+	// be reused by the provider's prompt cache.
+	in.DocumentFirst = false
+	raw, err := p.Extractor.ExtractJSON(ctx, in)
 	if err != nil {
 		p.Logger.Warn("extract references chunk failed", "record_id", p.batchRecordID, "chunk", idx,
 			"ms_used", time.Since(start).Milliseconds(), "error", err)

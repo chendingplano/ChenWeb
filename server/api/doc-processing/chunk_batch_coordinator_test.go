@@ -96,7 +96,10 @@ type recordingProc struct {
 	maxConc    int32
 }
 
-func (r *recordingProc) Name() string                                                 { return r.name }
+func (r *recordingProc) Name() string { return r.name }
+func (r *recordingProc) WarmPromptBeforeRemainingChunks() bool {
+	return r.name == "extract_references" || r.name == "extract_products"
+}
 func (r *recordingProc) InitChunkBatch(context.Context, int64, []Chunk, string) error { return nil }
 func (r *recordingProc) FinalizeChunkBatch(context.Context) error                     { return nil }
 func (r *recordingProc) ProcessChunk(ctx context.Context, idx int) error {
@@ -132,6 +135,25 @@ func TestSeedPhaseRunsChunksConcurrently(t *testing.T) {
 	if len(seed.starts) != 4 || len(remainder.starts) != 4 {
 		t.Fatalf("each processor should run all 4 chunks; seed=%d remainder=%d",
 			len(seed.starts), len(remainder.starts))
+	}
+}
+
+func TestChunkBatchWarmsReferenceAndProductPrompts(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "1")
+	seed := &recordingProc{name: "extract_provisions"}
+	refs := &recordingProc{name: "extract_references"}
+	products := &recordingProc{name: "extract_products"}
+	s := &ControlService{}
+	if err := s.scheduleChunkBatch(context.Background(), []ChunkBatchProcessor{seed, refs, products}, make([]Chunk, 3), 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []*recordingProc{refs, products} {
+		if len(p.starts) != 3 {
+			t.Fatalf("%s: got %d calls, want 3", p.name, len(p.starts))
+		}
+		if elapsed := p.starts[1].Sub(p.starts[0]); elapsed < 900*time.Millisecond {
+			t.Errorf("%s: remaining chunks started after %s, before the prompt warm-up", p.name, elapsed)
+		}
 	}
 }
 

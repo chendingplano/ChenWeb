@@ -391,6 +391,8 @@ func (p *ProductsProcessor) applyProductsReasoning() {
 
 func (p *ProductsProcessor) Name() string { return "extract_products" }
 
+func (p *ProductsProcessor) WarmPromptBeforeRemainingChunks() bool { return p.MergedPass }
+
 func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
@@ -1651,6 +1653,9 @@ func (p *ProductsProcessor) extractProductPayload(
 		callReason = "extract_products"
 	}
 	in := newLLMJSONInput(ctx, promptRef, promptText, modelName, inputText, callReason, "MID-CWB-EXTRACT-PRODUCTS")
+	if callReason == "extract products merged" {
+		in.DocumentFirst = false
+	}
 	var (
 		payload map[string]any
 		err     error
