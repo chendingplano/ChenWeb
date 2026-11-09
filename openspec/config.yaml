@@ -1,0 +1,25 @@
+schema: spec-driven
+
+# Per-artifact rules, added to the schema's own instructions when an artifact is created.
+rules:
+  proposal:
+    - >-
+      Before writing Impact, search the reusable module catalogue with the find-reusable-module
+      skill for every kind of functionality the change needs. In Impact, list the catalogued
+      modules the change reuses or extends (module ID and name), or state what was searched
+      and that nothing fit.
+    - >-
+      Any ID that is not the inserted row's own primary key (run, batch, job or correlation
+      IDs; IDs shared across tables) comes from the shared ID manager (shared/go/api/idmanager).
+      Name the sequence: global, or one the change provisions. Never a new CREATE SEQUENCE,
+      MAX(id)+1, an in-memory counter, or another table's primary key.
+  design:
+    - >-
+      Include a "Reused modules" section: each catalogued module used or extended, how, and
+      for any new component, package or script that a catalogued module nearly covers, why
+      that module was not extended instead.
+  tasks:
+    - >-
+      If the change builds code meant for reuse, add a task to register it with the
+      create-reusable-module skill. If it changes a catalogued module, add a task to update
+      that module's kb.reusable_modules row and doc together and run the catalogue check.

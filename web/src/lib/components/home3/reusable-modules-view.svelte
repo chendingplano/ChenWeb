@@ -151,12 +151,16 @@
 				<dt>{m.modules_status()}</dt><dd>{statusLabel(selected.status)}</dd>
 				<dt>{m.modules_language()}</dt><dd>{selected.prog_language}</dd>
 				<dt>{m.modules_version_label()}</dt><dd>{selected.version}</dd>
+				<dt>{m.modules_capability()}</dt><dd>{selected.capability_label || selected.capability || m.modules_not_set()}</dd>
+				<dt>{m.modules_use_when()}</dt><dd>{selected.use_when || m.modules_not_set()}</dd>
 				<dt>{m.modules_documentation()}</dt><dd>{selected.doc_path || m.modules_not_set()}</dd>
 				<dt>{m.modules_created()}</dt><dd>{formatDate(selected.created_at)} · {selected.created_by}</dd>
 				<dt>{m.modules_updated()}</dt><dd>{formatDate(selected.updated_at)} · {selected.updated_by}</dd>
 			</dl>
 			<h3>{m.modules_files()}</h3>
 			{#if selected.files.length}<ul>{#each selected.files as file}<li><code>{file}</code></li>{/each}</ul>{:else}<p>{m.modules_no_files()}</p>{/if}
+			<h3>{m.modules_devdocs()}</h3>
+			{#if selected.devdoc_paths.length}<ul>{#each selected.devdoc_paths as path}<li><code>{path}</code></li>{/each}</ul>{:else}<p>{m.modules_no_devdocs()}</p>{/if}
 			<h3>{m.modules_configuration()}</h3><pre>{JSON.stringify(selected.config_json, null, 2)}</pre>
 			</div>
 		{/if}

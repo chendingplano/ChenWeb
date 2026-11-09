@@ -109,6 +109,15 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   Dashboard menus store stable IDs in `view`/`child` query parameters; Knowledge Base uses
   `section`. These also preserve the selected view across ordinary reloads.
 
+# 4. Reusable modules and IDs
+* Before building a component, backend package or script that another feature may already
+  provide, search the module catalogue with the `find-reusable-module` skill. The full rule and
+  the list of capabilities are in the workspace `CLAUDE.md`, section "Reusable modules".
+* IDs that are not the inserted row's own primary key (run, batch, job or correlation IDs)
+  come from `shared/go/api/idmanager`; `llmrun.Provision` shows how an application provisions
+  its sequence. `server/api/llmrun/id_allocation_guard_test.go` fails on a new
+  `CREATE SEQUENCE`, `nextval(` or `MAX(x)+1` unless the file is allowlisted with a reason.
+
 # Balance Query Usage Attribution
 
 `[model-balance-queries]` in `config.toml` / `config.local.toml` maps provider IDs

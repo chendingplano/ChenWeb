@@ -19,12 +19,12 @@ func TestList(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			rows := sqlmock.NewRows([]string{"id", "module_id", "module_name", "module_type", "prog_language", "description", "files", "version", "config_json", "status", "doc_path", "created_by", "updated_by", "created_at", "updated_at"})
+			rows := sqlmock.NewRows([]string{"id", "module_id", "module_name", "module_type", "prog_language", "description", "files", "version", "config_json", "status", "doc_path", "capability", "capability_label", "use_when", "devdoc_paths", "created_by", "updated_by", "created_at", "updated_at"})
 			now := time.Now().UTC()
 			if scenario != "empty" {
-				rows.AddRow(1, "20261025-01", "Metric Visualizer", "frontend", "svelte", "Shows metrics", `["ChenWeb/web/metric.svelte"]`, "1.0.0", `{"compact":true}`, "active", "KnowledgeStore/doc-repo/modules/module-metric.md", "cding", "cding", now, now)
+				rows.AddRow(1, "20261025-01", "Metric Visualizer", "frontend", "svelte", "Shows metrics", `["ChenWeb/web/metric.svelte"]`, "1.0.0", `{"compact":true}`, "active", "KnowledgeStore/doc-repo/modules/module-metric.md", "record-viewers", "Record viewers", "show one metric", `["KnowledgeStore/doc-repo/devdocs/202610/2026102501-devdoc-x.md"]`, "cding", "cding", now, now)
 			}
-			expectation := mock.ExpectQuery(`SELECT .+ FROM kb\.reusable_modules ORDER BY module_name, module_id`)
+			expectation := mock.ExpectQuery(`SELECT .+ FROM kb\.reusable_modules r LEFT JOIN kb\.reusable_module_capabilities c .+ ORDER BY r\.module_name, r\.module_id`)
 			if scenario == "database error" {
 				expectation.WillReturnError(errors.New("private database details"))
 			} else {
@@ -67,6 +67,12 @@ func TestList(t *testing.T) {
 					}
 					if string(response.Modules[0].Files) != `["ChenWeb/web/metric.svelte"]` {
 						t.Fatal("files must remain structured JSON")
+					}
+					if string(response.Modules[0].DevdocPaths) != `["KnowledgeStore/doc-repo/devdocs/202610/2026102501-devdoc-x.md"]` {
+						t.Fatal("devdoc paths must remain structured JSON")
+					}
+					if response.Modules[0].Capability != "record-viewers" || response.Modules[0].CapabilityLabel != "Record viewers" || response.Modules[0].UseWhen != "show one metric" {
+						t.Fatalf("index fields not returned: %+v", response.Modules[0])
 					}
 				}
 			}

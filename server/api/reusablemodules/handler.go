@@ -23,10 +23,15 @@ type Module struct {
 	ConfigJSON   json.RawMessage `json:"config_json"`
 	Status       string          `json:"status"`
 	DocPath      string          `json:"doc_path"`
-	CreatedBy    string          `json:"created_by"`
-	UpdatedBy    string          `json:"updated_by"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	// Index fields used by the find-reusable-module skill; capability is "" until classified.
+	Capability      string          `json:"capability"`
+	CapabilityLabel string          `json:"capability_label"`
+	UseWhen         string          `json:"use_when"`
+	DevdocPaths     json.RawMessage `json:"devdoc_paths"`
+	CreatedBy       string          `json:"created_by"`
+	UpdatedBy       string          `json:"updated_by"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // Handler is registered inside the authenticated /api/v1 group and uses its
@@ -38,7 +43,7 @@ func Handler(db *sql.DB) echo.HandlerFunc {
 			logger.Error("List reusable modules failed", "error", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Unable to load modules"})
 		}
-		rows, err := db.QueryContext(c.Request().Context(), `SELECT id, module_id, module_name, module_type, prog_language, description, files, version, config_json, status, doc_path, created_by, updated_by, created_at, updated_at FROM kb.reusable_modules ORDER BY module_name, module_id`)
+		rows, err := db.QueryContext(c.Request().Context(), `SELECT r.id, r.module_id, r.module_name, r.module_type, r.prog_language, r.description, r.files, r.version, r.config_json, r.status, r.doc_path, COALESCE(r.capability, ''), COALESCE(c.label, ''), r.use_when, r.devdoc_paths, r.created_by, r.updated_by, r.created_at, r.updated_at FROM kb.reusable_modules r LEFT JOIN kb.reusable_module_capabilities c ON c.capability = r.capability ORDER BY r.module_name, r.module_id`)
 		if err != nil {
 			return fail(err)
 		}
@@ -46,11 +51,11 @@ func Handler(db *sql.DB) echo.HandlerFunc {
 		modules := make([]Module, 0)
 		for rows.Next() {
 			var module Module
-			var files, config []byte
-			if err := rows.Scan(&module.ID, &module.ModuleID, &module.ModuleName, &module.ModuleType, &module.ProgLanguage, &module.Description, &files, &module.Version, &config, &module.Status, &module.DocPath, &module.CreatedBy, &module.UpdatedBy, &module.CreatedAt, &module.UpdatedAt); err != nil {
+			var files, config, devdocs []byte
+			if err := rows.Scan(&module.ID, &module.ModuleID, &module.ModuleName, &module.ModuleType, &module.ProgLanguage, &module.Description, &files, &module.Version, &config, &module.Status, &module.DocPath, &module.Capability, &module.CapabilityLabel, &module.UseWhen, &devdocs, &module.CreatedBy, &module.UpdatedBy, &module.CreatedAt, &module.UpdatedAt); err != nil {
 				return fail(err)
 			}
-			module.Files, module.ConfigJSON = files, config
+			module.Files, module.ConfigJSON, module.DevdocPaths = files, config, devdocs
 			modules = append(modules, module)
 		}
 		if err := rows.Err(); err != nil {

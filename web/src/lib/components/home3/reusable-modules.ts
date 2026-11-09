@@ -10,6 +10,10 @@ export type ReusableModule = {
 	config_json: Record<string, unknown>;
 	status: 'active' | 'under-dev' | 'retired';
 	doc_path: string;
+	capability: string;
+	capability_label: string;
+	use_when: string;
+	devdoc_paths: string[];
 	created_by: string;
 	updated_by: string;
 	created_at: string;
@@ -22,6 +26,7 @@ export function filterModules(modules: ReusableModule[], query: string): Reusabl
 	return modules.filter((module) => [
 		module.module_id, module.module_name, module.description, module.module_type,
 		module.prog_language, module.status, module.version, module.doc_path,
-		...module.files, JSON.stringify(module.config_json)
+		module.capability, module.capability_label, module.use_when,
+		...module.files, ...module.devdoc_paths, JSON.stringify(module.config_json)
 	].join('\n').toLocaleLowerCase().includes(term));
 }
