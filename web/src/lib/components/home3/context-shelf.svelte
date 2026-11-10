@@ -325,7 +325,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <aside
-	class="relative flex shrink-0 flex-col overflow-y-auto select-text"
+	class="relative flex h-full min-h-0 shrink-0 flex-col overflow-y-auto select-text"
 	style="width:{width}px; background:{surface}; border-left:1px solid {borderColor}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
 	<!-- Resize handle (left edge). Kept inside the aside: overflow-y:auto clips anything left of x=0. -->
