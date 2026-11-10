@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
+	import NameValueVisualizer from '$lib/components/shared-ui/name-value/name-value-visualizer.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
@@ -247,6 +248,7 @@
 								</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}">
 									<div class="flex gap-1">
+										<button onclick={() => (expandedId = expandedId === row.id ? null : row.id)} aria-expanded={expandedId === row.id} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_view()}</button>
 										<button onclick={() => toggleComments(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_comment({ count: row.comment_count })}</button>
 										{#if row.status !== 'resolved'}
 											<button onclick={() => startResolve(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{accent};color:white">{m.alert_logs_resolve()}</button>
@@ -282,9 +284,14 @@
 											</div>
 										{/if}
 										{#if expandedId === row.id}
-											<pre style="font-size:12px;color:{textSecondary};white-space:pre-wrap;word-break:break-word;margin-top:8px">{row.message}
-{row.req_id}{row.call_flow}
-{row.attrs}</pre>
+											<div style="font-size:12px;color:{textSecondary};margin-top:8px">
+												<NameValueVisualizer ariaLabel={m.alert_logs_details()} fields={[
+													{ key: 'message', label: m.alert_logs_message(), values: [row.message] },
+													{ key: 'req_id', label: m.alert_logs_request_id(), values: [row.req_id] },
+													{ key: 'call_flow', label: m.alert_logs_call_flow(), values: [row.call_flow] },
+													{ key: 'attrs', label: m.alert_logs_attributes(), values: [row.attrs] }
+												]} />
+											</div>
 										{/if}
 									</td>
 								</tr>
