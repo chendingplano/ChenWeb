@@ -276,6 +276,7 @@
 			resolvingId = null;
 			checkedIds = checkedIds.filter((id) => id !== row.id);
 			if (commentsId === row.id) commentsId = null;
+			window.dispatchEvent(new Event('alert-logs-changed'));
 			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
@@ -300,6 +301,7 @@
 			if (resolvingId !== null && checkedIds.includes(resolvingId)) resolvingId = null;
 			checkedIds = [];
 			bulkDialog.close();
+			window.dispatchEvent(new Event('alert-logs-changed'));
 			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { bulkError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 		finally { bulkSaving = false; }

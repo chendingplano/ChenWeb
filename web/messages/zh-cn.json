@@ -1290,6 +1290,8 @@
 	"nodepalette_no_nodes_yet": "暂无节点",
 	"siteheader_switch_language": "切换语言",
 	"siteheader_toggle_dark_mode": "切换深色模式",
+	"siteheader_open_errors": "警报日志中有未解决的错误",
+	"siteheader_no_open_errors": "警报日志中没有未解决的错误",
 	"siteheader_close_menu": "关闭菜单",
 	"siteheader_open_menu": "打开菜单",
 	"blocklist_block_id": "块 ID",

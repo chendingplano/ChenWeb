@@ -2,7 +2,7 @@
 	import type { SiteConfig } from '$lib/services/siteConfigService';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { locales, getLocale, setLocale } from '$lib/paraglide/runtime';
-	import { Sun, Moon, Languages, ChevronDown, Menu, X } from '@lucide/svelte';
+	import { Sun, Moon, Languages, ChevronDown, Menu, X, Bell } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { slide } from 'svelte/transition';
 	import { goto } from '$app/navigation';
@@ -29,6 +29,40 @@
 	]);
 
 	let mobileOpen = $state(false);
+	let hasOpenErrors = $state(false);
+
+	$effect(() => {
+		if (!$appAuthStore.isLoggedIn) {
+			hasOpenErrors = false;
+			return;
+		}
+		const controller = new AbortController();
+		let requestVersion = 0;
+		async function refreshErrors() {
+			const version = ++requestVersion;
+			try {
+				const params = new URLSearchParams({ page_size: '1' });
+				params.append('filter', 'level|eq|ERROR');
+				params.append('filter', 'status|eq|open');
+				const response = await fetch(`/api/v1/system-admin/alert-logs?${params}`, {
+					credentials: 'same-origin', signal: controller.signal
+				});
+				if (!response.ok) return;
+				const data = await response.json();
+				if (!controller.signal.aborted && version === requestVersion && data.status && typeof data.total === 'number') hasOpenErrors = data.total > 0;
+			} catch { /* Keep the last known state when the request fails. */ }
+		}
+		void refreshErrors();
+		const timer = window.setInterval(refreshErrors, 30000);
+		window.addEventListener('alert-logs-changed', refreshErrors);
+		window.addEventListener('focus', refreshErrors);
+		return () => {
+			controller.abort();
+			window.clearInterval(timer);
+			window.removeEventListener('alert-logs-changed', refreshErrors);
+			window.removeEventListener('focus', refreshErrors);
+		};
+	});
 
 	async function handleNavClick(event: MouseEvent, item: (typeof nav)[number]) {
 		if (item.requiresAuth && !appAuthStore.getIsLoggedIn()) {
@@ -116,6 +150,10 @@
 				{/if}
 			</button>
 			{#if $appAuthStore.isLoggedIn}
+				<span class="relative inline-flex p-2 text-[#17181c]/45 dark:text-white/45" role="status" aria-label={hasOpenErrors ? m.siteheader_open_errors() : m.siteheader_no_open_errors()} title={hasOpenErrors ? m.siteheader_open_errors() : m.siteheader_no_open_errors()}>
+					<Bell class="h-4 w-4" aria-hidden="true" />
+					{#if hasOpenErrors}<span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" aria-hidden="true"></span>{/if}
+				</span>
 				<button
 					type="button"
 					onclick={handleLogout}

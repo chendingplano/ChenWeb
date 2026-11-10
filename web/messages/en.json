@@ -1290,6 +1290,8 @@
 	"nodepalette_no_nodes_yet": "No nodes yet",
 	"siteheader_switch_language": "Switch language",
 	"siteheader_toggle_dark_mode": "Toggle dark mode",
+	"siteheader_open_errors": "Open errors in the alert log",
+	"siteheader_no_open_errors": "No open errors in the alert log",
 	"siteheader_close_menu": "Close menu",
 	"siteheader_open_menu": "Open menu",
 	"blocklist_block_id": "block id",
