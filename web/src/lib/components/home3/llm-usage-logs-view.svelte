@@ -149,8 +149,18 @@
 
 	function prevPage() { if (page > 1) { page--; load(); } }
 	function nextPage() { if (page < totalPages) { page++; load(); } }
+	function changePageSize(value: number) {
+		pageSize = value;
+		try { sessionStorage.setItem('llmUsageLogsPageSize', String(value)); } catch { /* storage unavailable */ }
+		page = 1;
+		load();
+	}
 
 	onMount(() => {
+		try {
+			const saved = Number(sessionStorage.getItem('llmUsageLogsPageSize'));
+			if ([20, 50, 100, 200].includes(saved)) pageSize = saved;
+		} catch { /* storage unavailable */ }
 		load();
 		const onSelChange = () => {
 			const sel = window.getSelection();
@@ -520,6 +530,13 @@
 				{#if total > 0} {m.llm_usage_logs_page_of({ page, totalPages })}{/if}
 			</span>
 			<div class="flex items-center gap-2">
+				<label class="flex items-center gap-2" style="color:{textSecondary}; font-size:12px;">
+					{m.alert_logs_page_size()}
+					<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading}
+						style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor}; border-radius:4px; padding:4px;">
+						{#each [20, 50, 100, 200] as size}<option value={size}>{size}</option>{/each}
+					</select>
+				</label>
 				<button
 					onclick={load}
 					disabled={loading}
