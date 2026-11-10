@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import NameValueVisualizer from '$lib/components/shared-ui/name-value/name-value-visualizer.svelte';
@@ -176,10 +176,53 @@
 	}
 	function opSym(op: Op) { return ops.find((o) => o.op === op)?.sym ?? '='; }
 	function shorten(text: string) { return text.length > 40 ? `${text.slice(0, 39)}…` : text; }
-	function openDetails(row: AlertRow) { detailRow = row; detailDialog.showModal(); }
-	async function openComments(row: AlertRow) {
+	let drag: { dialog: HTMLDialogElement; pointer: number; x: number; y: number } | null = null;
+	function positionDialog(dialog: HTMLDialogElement, anchor: DOMRect) {
+		const gap = 8;
+		const rect = dialog.getBoundingClientRect();
+		const left = Math.max(gap, Math.min(anchor.right - rect.width, window.innerWidth - rect.width - gap));
+		const below = anchor.bottom + gap;
+		const top = below + rect.height <= window.innerHeight - gap ? below : Math.max(gap, anchor.top - rect.height - gap);
+		dialog.style.left = `${left}px`;
+		dialog.style.top = `${top}px`;
+	}
+	async function showDialog(dialog: HTMLDialogElement, anchor: DOMRect) {
+		dialog.showModal();
+		await tick();
+		positionDialog(dialog, anchor);
+	}
+	function startDialogDrag(event: PointerEvent, dialog: HTMLDialogElement) {
+		if (event.button !== 0) return;
+		const rect = dialog.getBoundingClientRect();
+		drag = { dialog, pointer: event.pointerId, x: event.clientX - rect.left, y: event.clientY - rect.top };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		event.preventDefault();
+	}
+	function moveDialog(dialog: HTMLDialogElement, left: number, top: number) {
+		dialog.style.left = `${Math.max(0, Math.min(left, window.innerWidth - dialog.offsetWidth))}px`;
+		dialog.style.top = `${Math.max(0, Math.min(top, window.innerHeight - dialog.offsetHeight))}px`;
+	}
+	function dragDialog(event: PointerEvent) {
+		if (drag?.pointer === event.pointerId) moveDialog(drag.dialog, event.clientX - drag.x, event.clientY - drag.y);
+	}
+	function moveDialogByKey(event: KeyboardEvent, dialog: HTMLDialogElement) {
+		const delta = event.shiftKey ? 20 : 5;
+		const dx = event.key === 'ArrowLeft' ? -delta : event.key === 'ArrowRight' ? delta : 0;
+		const dy = event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0;
+		if (!dx && !dy) return;
+		const rect = dialog.getBoundingClientRect();
+		moveDialog(dialog, rect.left + dx, rect.top + dy);
+		event.preventDefault();
+	}
+	function openDetails(row: AlertRow, event: MouseEvent) {
+		const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		detailRow = row;
+		void showDialog(detailDialog, anchor);
+	}
+	async function openComments(row: AlertRow, event: MouseEvent) {
+		const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		commentRow = row; commentsId = row.id; commentDraft = ''; commentError = ''; comments = [];
-		commentsDialog.showModal();
+		void showDialog(commentsDialog, anchor);
 		await loadComments(row.id);
 	}
 	async function loadComments(id: number) {
@@ -339,7 +382,7 @@
 								<td onclick={() => (selected = { id: row.id, col: 'created_at' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textMuted};white-space:nowrap;font-size:12px;{selected?.id === row.id && selected.col === 'created_at' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{formatTime(row.created_at)}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'level' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{levelColor(row.level)};font-weight:600;{selected?.id === row.id && selected.col === 'level' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.level}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'message' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};max-width:420px;{selected?.id === row.id && selected.col === 'message' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">
-									<button onclick={() => openDetails(row)} class="text-left cursor-pointer" title={m.alert_logs_details()} style="color:{textPrimary};background:none;border:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:block">{row.message}</button>
+									<button onclick={(event) => openDetails(row, event)} class="text-left cursor-pointer" title={m.alert_logs_details()} style="color:{textPrimary};background:none;border:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:block">{row.message}</button>
 								</td>
 								<td onclick={() => (selected = { id: row.id, col: 'loc' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary};font-family:monospace;font-size:12px;{selected?.id === row.id && selected.col === 'loc' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.loc || '—'}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'status' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{row.status === 'resolved' ? success : textSecondary};{selected?.id === row.id && selected.col === 'status' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.status === 'resolved' ? m.alert_logs_status_resolved() : m.alert_logs_status_open()}{#if row.status === 'resolved' && row.resolver}<div style="font-size:12px;color:{textSecondary}">{m.alert_logs_resolver({ resolver: displayUser(row.resolver) })}</div>{/if}</td>
@@ -351,8 +394,8 @@
 								</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}">
 									<div class="flex gap-1">
-										<button onclick={() => openDetails(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_view()}</button>
-										<button onclick={() => openComments(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_comment({ count: row.comment_count })}</button>
+										<button onclick={(event) => openDetails(row, event)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_view()}</button>
+										<button onclick={(event) => openComments(row, event)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_comment({ count: row.comment_count })}</button>
 										{#if row.status !== 'resolved'}
 											<button onclick={() => startResolve(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{accent};color:white">{m.alert_logs_resolve()}</button>
 										{/if}
@@ -381,8 +424,8 @@
 	</div>
 </div>
 
-<dialog bind:this={detailDialog} aria-labelledby="alert-detail-title" onclose={() => (detailRow = null)} style="width:min(48rem, 90vw);max-height:85vh;overflow:auto;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
-{#if detailRow}<h2 id="alert-detail-title" style="font-size:16px;font-weight:600">{m.alert_logs_details()} · {detailRow.id}</h2>
+<dialog bind:this={detailDialog} aria-labelledby="alert-detail-title" onclose={() => (detailRow = null)} style="position:fixed;inset:auto;left:0;top:0;margin:0;width:min(48rem, 90vw);min-width:min(20rem, 90vw);min-height:10rem;max-width:90vw;max-height:85vh;overflow:auto;resize:both;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
+{#if detailRow}<div class="flex items-center gap-2"><button type="button" aria-label={m.alert_logs_move_dialog()} title={m.alert_logs_move_dialog()} onpointerdown={(event) => startDialogDrag(event, detailDialog)} onpointermove={dragDialog} onpointerup={() => (drag = null)} onpointercancel={() => (drag = null)} onkeydown={(event) => moveDialogByKey(event, detailDialog)} style="cursor:move;touch-action:none;color:{textSecondary};padding:4px">⋮⋮</button><h2 id="alert-detail-title" style="font-size:16px;font-weight:600">{m.alert_logs_details()} · {detailRow.id}</h2></div>
 	{#if detailRow.status === 'resolved'}
 	<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: displayUser(detailRow.resolver) || '—', time: formatTime(detailRow.resolve_time) })}</div>
 	<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{detailRow.resolution}</div>
@@ -398,8 +441,8 @@
 	</div>
 <div class="flex justify-end mt-4"><button onclick={() => detailDialog.close()} class="rounded px-3 py-1.5 text-sm" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_close()}</button></div>{/if}
 </dialog>
-<dialog bind:this={commentsDialog} aria-labelledby="alert-comments-title" onclose={() => { commentsId = null; commentRow = null; }} style="width:min(48rem, 90vw);max-height:85vh;overflow:auto;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
-{#if commentRow}<h2 id="alert-comments-title" style="font-size:16px;font-weight:600">{m.alert_logs_comment({ count: commentRow.comment_count })} · {commentRow.id}</h2>
+<dialog bind:this={commentsDialog} aria-labelledby="alert-comments-title" onclose={() => { commentsId = null; commentRow = null; }} style="position:fixed;inset:auto;left:0;top:0;margin:0;width:min(48rem, 90vw);min-width:min(20rem, 90vw);min-height:10rem;max-width:90vw;max-height:85vh;overflow:auto;resize:both;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
+{#if commentRow}<div class="flex items-center gap-2"><button type="button" aria-label={m.alert_logs_move_dialog()} title={m.alert_logs_move_dialog()} onpointerdown={(event) => startDialogDrag(event, commentsDialog)} onpointermove={dragDialog} onpointerup={() => (drag = null)} onpointercancel={() => (drag = null)} onkeydown={(event) => moveDialogByKey(event, commentsDialog)} style="cursor:move;touch-action:none;color:{textSecondary};padding:4px">⋮⋮</button><h2 id="alert-comments-title" style="font-size:16px;font-weight:600">{m.alert_logs_comment({ count: commentRow.comment_count })} · {commentRow.id}</h2></div>
 <div class="space-y-2" style="margin-top:8px">
 	{#each comments as cm (cm.id)}
 	<div style="font-size:13px;color:{textSecondary}"><span style="color:{textMuted};font-size:12px">{displayUser(cm.author)} · {formatTime(cm.created_at)}</span><div style="white-space:pre-wrap">{cm.body}</div></div>
