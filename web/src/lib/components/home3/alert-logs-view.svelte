@@ -161,6 +161,8 @@
 				body: JSON.stringify({ resolution: resolutionDraft.trim() })
 			});
 			resolvingId = null;
+			if (expandedId === row.id) expandedId = null;
+			if (commentsId === row.id) commentsId = null;
 			await load();
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
@@ -256,10 +258,10 @@
 									</div>
 								</td>
 							</tr>
-							{#if expandedId === row.id || resolvingId === row.id || commentsId === row.id || row.status === 'resolved'}
+							{#if expandedId === row.id || resolvingId === row.id || commentsId === row.id}
 								<tr>
 									<td colspan="7" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
-										{#if row.status === 'resolved'}
+										{#if row.status === 'resolved' && expandedId === row.id}
 											<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: row.resolver ?? '—', time: formatTime(row.resolve_time) })}</div>
 											<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{row.resolution}</div>
 										{/if}
