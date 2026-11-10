@@ -8838,5 +8838,8 @@
 	"docgroups_select_group": "请选择一个分组。",
 	"docgroups_counts": "{documents} 个文档，{uncategorized} 个未分类",
 	"docgroups_failed": "请求失败。",
-	"nav_sysadmin_doc_groups": "文档分组"
+	"nav_sysadmin_doc_groups": "文档分组",
+	"kb_import_resize_column": "调整{label}列宽",
+	"docbuilder_empty": "此分组没有文档。如果应该有，请联系管理员检查其成员。",
+	"docgroups_not_found": "磁盘上不存在"
 }

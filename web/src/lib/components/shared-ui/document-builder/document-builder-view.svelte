@@ -208,6 +208,8 @@
 			<p class="p-6" style="color:{textMuted};">{m.docbuilder_loading()}</p>
 		{:else if error}
 			<p class="p-6" style="color:#EF4444;">{error}</p>
+		{:else if tree.length === 0}
+			<p class="p-6" style="color:{textMuted};">{m.docbuilder_empty()}</p>
 		{:else if !selected}
 			<p class="p-6" style="color:{textMuted};">{m.docbuilder_select_document()}</p>
 		{:else if selected.kind === 'pdf' && selected.doc_id}

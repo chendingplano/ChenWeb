@@ -278,6 +278,13 @@ func (a *API) adminList(c echo.Context) error {
 		if err != nil {
 			return a.fail(c, err)
 		}
+		for i := range members {
+			members[i].Exists = a.Store.memberReachable(members[i])
+			if members[i].Type == "file" {
+				_, err := os.Stat(a.Store.abs(members[i].Path))
+				members[i].Exists = err == nil
+			}
+		}
 		ag := adminGroup{Group: g, Members: members, Documents: len(entries)}
 		if ag.Members == nil {
 			ag.Members = []Member{}

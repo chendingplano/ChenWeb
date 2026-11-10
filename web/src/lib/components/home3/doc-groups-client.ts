@@ -1,5 +1,10 @@
 // Client for the document group administration API (server/api/docbuilder).
-export type DocGroupMember = { member_id: number; member_type: 'dir' | 'file'; path: string };
+export type DocGroupMember = {
+	member_id: number;
+	member_type: 'dir' | 'file';
+	path: string;
+	exists: boolean;
+};
 export type DocGroup = {
 	group_id: number;
 	group_key: string;

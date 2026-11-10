@@ -340,3 +340,39 @@ func TestMenuOrderAndRoles(t *testing.T) {
 		t.Fatalf("swapped positions must swap the menu order: %s", got)
 	}
 }
+
+func TestWrongRootDoesNotHideDocumentsAndFilesComeBack(t *testing.T) {
+	e := newEnv(t)
+	e.write("itest/r/a.md", "# A")
+	e.write("itest/r/b.md", "# B")
+	g := e.group("root", dir("itest/r"))
+	before := e.docs(g)
+	if len(before) != 2 {
+		t.Fatalf("want 2 documents, got %v", before)
+	}
+	// Point the store at a root where the member directory does not exist (wrong DOCUMENT_ROOT_DIR):
+	// nothing is known about the files, so none may be marked missing.
+	realRoot := e.s.Root
+	e.s.Root = t.TempDir()
+	if err := e.s.SyncGroup(e.ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.s.Root = realRoot
+	if after := e.docs(g); len(after) != 2 {
+		t.Fatalf("an unreachable member must not hide its documents: %v", after)
+	}
+	// A file that is really gone is hidden, and comes back with the same ID when it returns.
+	idA := before["itest/r/a.md"].DocID
+	if err := os.Rename(filepath.Join(e.root, "itest/r/a.md"), filepath.Join(e.root, "a.md.away")); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.docs(g); len(got) != 1 {
+		t.Fatalf("a deleted file must disappear: %v", got)
+	}
+	if err := os.Rename(filepath.Join(e.root, "a.md.away"), filepath.Join(e.root, "itest/r/a.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.docs(g)["itest/r/a.md"]; got.DocID != idA {
+		t.Fatalf("a returning file keeps its document ID: %+v", got)
+	}
+}

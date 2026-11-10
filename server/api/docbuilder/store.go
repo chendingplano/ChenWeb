@@ -41,9 +41,10 @@ type Store struct {
 
 // Member is one member of a group: a directory (recursive) or a file, relative to the root.
 type Member struct {
-	ID   int64  `json:"member_id"`
-	Type string `json:"member_type"` // "dir" or "file"
-	Path string `json:"path"`
+	ID     int64  `json:"member_id"`
+	Type   string `json:"member_type"` // "dir" or "file"
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"` // set when listing for administration: is the path on disk?
 }
 
 type fileRow struct {
@@ -419,9 +420,12 @@ func (s *Store) SyncGroup(ctx context.Context, groupID int64) error {
 		if _, ok := onDisk[p]; ok {
 			continue
 		}
+		// A file is only "gone" if the member that should hold it is itself reachable. When the
+		// member's directory is absent (wrong DOCUMENT_ROOT_DIR, unmounted disk) nothing is known
+		// about its files, so they keep their state instead of being marked missing.
 		inScope := false
 		for _, m := range members {
-			if memberCovers(m, p) {
+			if memberCovers(m, p) && s.memberReachable(m) {
 				inScope = true
 			}
 		}
@@ -442,6 +446,16 @@ func (s *Store) SyncGroup(ctx context.Context, groupID int64) error {
 		return err
 	}
 	return s.importLegacy(ctx, groupID, members)
+}
+
+// memberReachable reports whether the directory a member points at (or holds) exists on disk.
+func (s *Store) memberReachable(m Member) bool {
+	base := m.Path
+	if m.Type == "file" {
+		base = path.Dir(m.Path)
+	}
+	fi, err := os.Stat(s.abs(base))
+	return err == nil && fi.IsDir()
 }
 
 func (s *Store) registerNew(ctx context.Context, rel string, fi found, onDisk map[string]found, touched map[int64]bool) error {

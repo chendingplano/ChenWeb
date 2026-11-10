@@ -8838,5 +8838,8 @@
 	"docgroups_select_group": "Select a group.",
 	"docgroups_counts": "{documents} documents, {uncategorized} uncategorized",
 	"docgroups_failed": "The request failed.",
-	"nav_sysadmin_doc_groups": "Document Groups"
+	"nav_sysadmin_doc_groups": "Document Groups",
+	"kb_import_resize_column": "Resize {label} column",
+	"docbuilder_empty": "This group has no documents. If you expected some, ask an administrator to check its members.",
+	"docgroups_not_found": "not found on disk"
 }

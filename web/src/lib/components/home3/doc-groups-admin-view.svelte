@@ -316,6 +316,9 @@
 									{mem.member_type === 'dir' ? m.docgroups_dir() : m.docgroups_file()}
 								</span>
 								<span class="flex-1 truncate">{mem.path}</span>
+								{#if !mem.exists}<span style="color:#EF4444; font-size:12px;"
+										>{m.docgroups_not_found()}</span
+									>{/if}
 								<button
 									style="color:#EF4444;"
 									disabled={busy}
