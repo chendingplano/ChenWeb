@@ -10,36 +10,23 @@ import (
 // follows (for example "-en.md"), so the two languages of one document are kept apart.
 var versionRe = regexp.MustCompile(`^(.*?)[-_]v(\d+(?:\.\d+)*)((?:[-_.].*)?)$`)
 
-// LatestVersions keeps, for every document that exists in several versions
-// (name-v1.0-en.md, name-v1.1-en.md, ...), only the highest version. Versions are compared
-// number by number, so 1.10 is newer than 1.9. Documents without a version are kept as they are,
-// and so is each language of a document (the part after the version is part of the identity).
-func LatestVersions(entries []Entry) []Entry {
-	best := map[string]int{} // identity → index of the newest entry so far
-	keys := make([]string, len(entries))
-	for i, e := range entries {
-		m := versionRe.FindStringSubmatch(e.Path)
-		if m == nil {
-			continue
-		}
-		keys[i] = m[1] + "\x00" + m[3]
-		if j, ok := best[keys[i]]; !ok || newer(m[2], versionOf(entries[j].Path)) {
-			best[keys[i]] = i
-		}
+// ParsePath splits a relative path into the logical key shared by all versions of one document and
+// the version ("" when the name has none). name-v1.0-en.md and name-v1.1-en.md share a key;
+// name-v1.0-zh.md has another.
+func ParsePath(p string) (key, version string) {
+	m := versionRe.FindStringSubmatch(p)
+	if m == nil {
+		return p, ""
 	}
-	var out []Entry
-	for i, e := range entries {
-		if keys[i] == "" || best[keys[i]] == i {
-			out = append(out, e)
-		}
-	}
-	return out
+	return m[1] + "\x1f" + m[3], m[2]
 }
 
-func versionOf(path string) string { return versionRe.FindStringSubmatch(path)[2] }
-
-// newer reports whether version a is greater than b.
-func newer(a, b string) bool {
+// Newer reports whether version a is greater than b, comparing numeric components
+// (1.10 > 1.9). An empty version is the lowest.
+func Newer(a, b string) bool {
+	if a == "" || b == "" {
+		return a != "" && b == ""
+	}
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(as) || i < len(bs); i++ {
 		var x, y int

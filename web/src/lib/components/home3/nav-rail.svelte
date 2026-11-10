@@ -513,7 +513,8 @@
 						{ id: 'sysadmin-system-releases', label: m.nav_sysadmin_system_releases() },
 						{ id: 'sysadmin-system-prices', label: m.nav_sysadmin_system_prices() },
 						{ id: 'sysadmin-schedules', label: m.nav_sysadmin_schedules() },
-						{ id: 'sysadmin-page-config', label: m.nav_sysadmin_page_config() }
+						{ id: 'sysadmin-page-config', label: m.nav_sysadmin_page_config() },
+						{ id: 'sysadmin-doc-groups', label: m.nav_sysadmin_doc_groups() }
 					]
 				}
 			]
@@ -537,16 +538,41 @@
 	// the workspace tree — keeps these items off /home3 (which passes no pageKey,
 	// so the page-config overlay is fail-open there). Labels/visibility are still
 	// overlaid from the seeded `resources` page-config.
+	// Document groups (openspec document-groups) are the children of their parent menu, ordered by the
+	// server (position number, then key) and already limited to what this user may see.
+	type DocGroupMenuItem = { group_key: string; label: string; parent_menu_id: string };
+	let docGroups = $state<DocGroupMenuItem[]>([]);
+	const docGroupChildren = (parent: string): NavChild[] =>
+		docGroups
+			.filter((g) => g.parent_menu_id === parent)
+			.map((g) => ({ id: `docgroup-${g.group_key}`, label: g.label }));
+
+	$effect(() => {
+		if (pageKey !== 'resources') return;
+		let current = true;
+		const lang = getLocale();
+		fetch(`/api/v1/doc-groups/menu?lang=${encodeURIComponent(lang)}`, {
+			credentials: 'same-origin'
+		})
+			.then((r) => (r.ok ? r.json() : []))
+			.then((items: DocGroupMenuItem[]) => {
+				if (current) docGroups = items;
+			})
+			.catch(() => {
+				// No groups on failure: the Documents menu stays empty.
+			});
+		return () => {
+			current = false;
+		};
+	});
+
 	const resourcesNav: NavItem[] = $derived([
 		{
 			id: 'documents',
 			label: m.nav_documents(),
 			icon: FolderIcon,
 			group: 'Resources',
-			children: [
-				{ id: 'docs-users-manual', label: m.nav_docs_users_manual() },
-				{ id: 'docs-development', label: m.nav_docs_development() }
-			]
+			children: docGroupChildren('documents')
 		},
 		{
 			id: 'videos',

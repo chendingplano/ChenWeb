@@ -2,6 +2,7 @@ package docbuilder
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -32,7 +33,7 @@ func BuildTree(entries []Entry) []TreeNode {
 		sort.SliceStable(es, func(i, j int) bool { return strings.ToLower(es[i].Title) < strings.ToLower(es[j].Title) })
 		node := TreeNode{ID: "cat:" + c, Label: c}
 		for _, e := range es {
-			node.Children = append(node.Children, TreeNode{ID: "doc:" + e.Path, Label: e.Title, Kind: e.Kind, Path: e.Path})
+			node.Children = append(node.Children, TreeNode{ID: "doc:" + strconv.FormatInt(e.DocID, 10), Label: e.Title, Kind: e.Kind, DocID: e.DocID})
 		}
 		tree = append(tree, node)
 	}

@@ -2,98 +2,60 @@ package docbuilder
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
-
-	"github.com/labstack/echo/v4"
 )
 
-func write(t *testing.T, dir, rel, body string) {
-	t.Helper()
-	p := filepath.Join(dir, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
+func TestParsePathAndNewer(t *testing.T) {
+	k1, v1 := ParsePath("a/m-v1.10-en.md")
+	k2, v2 := ParsePath("a/m-v1.9-en.md")
+	k3, _ := ParsePath("a/m-v1.9-zh.md")
+	k4, v4 := ParsePath("a/plain.md")
+	if k1 != k2 || k1 == k3 || v1 != "1.10" || v2 != "1.9" || v4 != "" || k4 != "a/plain.md" {
+		t.Fatalf("keys/versions wrong: %q %q %q %q %q", k1, k2, k3, k4, v4)
 	}
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-type fakeClassifier struct{ calls int }
-
-func (f *fakeClassifier) Classify(_ context.Context, _ []string, docs []Candidate) (map[string]string, error) {
-	f.calls++
-	out := map[string]string{}
-	for _, d := range docs {
-		out[d.Path] = "Guides"
-	}
-	return out, nil
-}
-
-func fixture(t *testing.T) string {
-	dir := t.TempDir()
-	write(t, dir, "a.md", "# Alpha Guide\n\ntext")
-	write(t, dir, "sub/b.md", "---\ntitle: Beta Notes\n---\nbody")
-	write(t, dir, "sub/deep/c.pdf", "%PDF-1.4 fake")
-	write(t, dir, "ignored.txt", "x")
-	write(t, dir, ".hidden/d.md", "# no")
-	return dir
-}
-
-func TestScanFindsMarkdownAndPDFRecursively(t *testing.T) {
-	es, err := Scan(fixture(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]Entry{}
-	for _, e := range es {
-		got[e.Path] = e
-	}
-	if len(es) != 3 {
-		t.Fatalf("want 3 entries, got %d: %+v", len(es), es)
-	}
-	if got["a.md"].Title != "Alpha Guide" || got["sub/b.md"].Title != "Beta Notes" || got["sub/deep/c.pdf"].Kind != KindPDF {
-		t.Fatalf("titles/kinds wrong: %+v", got)
+	if !Newer("1.10", "1.9") || Newer("1.9", "1.10") || Newer("1.1", "1.1") || !Newer("2", "1.9") || !Newer("1.0", "") || Newer("", "1.0") {
+		t.Fatal("Newer compares numerically")
 	}
 }
 
-func TestClassifyIsOneTime(t *testing.T) {
-	dir := fixture(t)
-	m, _ := LoadManifest(dir)
-	if err := Refresh(dir, m); err != nil {
-		t.Fatal(err)
+func TestCleanRel(t *testing.T) {
+	for _, ok := range []string{"a", "a/b.md", "KnowledgeStore/doc-repo/devdocs", "a//b/../c"} {
+		if _, err := CleanRel(ok); err != nil {
+			t.Errorf("%q should be valid: %v", ok, err)
+		}
 	}
-	fc := &fakeClassifier{}
-	n, err := ClassifyNew(context.Background(), dir, m, fc, "test", false)
-	if err != nil || n != 3 || fc.calls != 1 {
-		t.Fatalf("first run: n=%d calls=%d err=%v", n, fc.calls, err)
+	for _, bad := range []string{"", "/etc", "../x", "a/../../x", "..", ".", "a/.hidden/b", ".git", "C:\\x"} {
+		if _, err := CleanRel(bad); err == nil && bad != "C:\\x" {
+			t.Errorf("%q should be rejected", bad)
+		}
 	}
-	// Reload from disk: nothing is pending, so no model call; a new file is the only one classified.
-	m2, _ := LoadManifest(dir)
-	write(t, dir, "new.md", "# New")
-	if err := Refresh(dir, m2); err != nil {
-		t.Fatal(err)
+}
+
+func TestMemberCovers(t *testing.T) {
+	dir := Member{Type: "dir", Path: "docs/a"}
+	file := Member{Type: "file", Path: "docs/b/g-v1.0-en.md"}
+	cases := []struct {
+		m    Member
+		p    string
+		want bool
+	}{
+		{dir, "docs/a/x.md", true}, {dir, "docs/a/deep/y.pdf", true}, {dir, "docs/ab/x.md", false}, {dir, "docs/a", false},
+		{file, "docs/b/g-v1.0-en.md", true}, {file, "docs/b/g-v1.3-en.md", true}, {file, "docs/b/g-v1.3-zh.md", false}, {file, "docs/c/g-v1.0-en.md", false},
 	}
-	n, err = ClassifyNew(context.Background(), dir, m2, fc, "test", false)
-	if err != nil || n != 1 || fc.calls != 2 {
-		t.Fatalf("second run: n=%d calls=%d err=%v", n, fc.calls, err)
-	}
-	n, _ = ClassifyNew(context.Background(), dir, m2, fc, "test", false)
-	if n != 0 || fc.calls != 2 {
-		t.Fatalf("third run must not call the model: n=%d calls=%d", n, fc.calls)
+	for _, c := range cases {
+		if got := memberCovers(c.m, c.p); got != c.want {
+			t.Errorf("memberCovers(%v, %q) = %v", c.m, c.p, got)
+		}
 	}
 }
 
 func TestBuildTreeUncategorizedLast(t *testing.T) {
 	tree := BuildTree([]Entry{
-		{Path: "x.md", Title: "X", Kind: KindMarkdown},
-		{Path: "z.md", Title: "Z", Kind: KindMarkdown, Category: "Zeta"},
-		{Path: "a.md", Title: "A", Kind: KindMarkdown, Category: "Alpha"},
+		{DocID: 1, Title: "X", Kind: KindMarkdown},
+		{DocID: 2, Title: "Z", Kind: KindMarkdown, Category: "Zeta"},
+		{DocID: 3, Title: "A", Kind: KindMarkdown, Category: "Alpha"},
 	})
-	if len(tree) != 3 || tree[0].Label != "Alpha" || tree[2].Label != Uncategorized || tree[2].Children[0].Path != "x.md" {
+	if len(tree) != 3 || tree[0].Label != "Alpha" || tree[2].Label != Uncategorized || tree[2].Children[0].DocID != 1 {
 		t.Fatalf("unexpected tree: %+v", tree)
 	}
 }
@@ -108,53 +70,26 @@ func TestParseAnswersToleratesFence(t *testing.T) {
 	}
 }
 
-func TestFileEndpointOnlyServesScannedFiles(t *testing.T) {
-	dir := fixture(t)
-	e := echo.New()
-	Register(e.Group("/api/v1"), map[string]Source{"s": {Key: "s", Dir: dir, Title: "S"}})
-	get := func(url string) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
-		return rec
+type fakeClassifier struct{ calls int }
+
+func (f *fakeClassifier) Classify(_ context.Context, _ []string, docs []Candidate) (map[string]string, error) {
+	f.calls++
+	out := map[string]string{}
+	for _, d := range docs {
+		out[d.Path] = "Guides"
 	}
-	if r := get("/api/v1/docbuilder/s/file?path=a.md"); r.Code != 200 || r.Header().Get("Content-Type") == "" {
-		t.Fatalf("a.md: %d", r.Code)
-	}
-	if r := get("/api/v1/docbuilder/s/file?path=sub/deep/c.pdf"); r.Header().Get("Content-Type") != "application/pdf" {
-		t.Fatalf("pdf type %q", r.Header().Get("Content-Type"))
-	}
-	for _, bad := range []string{"../../etc/passwd", "ignored.txt", ".hidden/d.md", "/etc/passwd"} {
-		if r := get("/api/v1/docbuilder/s/file?path=" + bad); r.Code != 404 {
-			t.Fatalf("%s must be 404, got %d", bad, r.Code)
-		}
-	}
-	if r := get("/api/v1/docbuilder/nope/tree"); r.Code != 404 {
-		t.Fatalf("unknown source: %d", r.Code)
-	}
-	if r := get("/api/v1/docbuilder/s/tree"); r.Code != 200 {
-		t.Fatalf("tree: %d", r.Code)
-	}
+	return out, nil
 }
 
-func TestLatestVersionsKeepsNewestPerLanguage(t *testing.T) {
-	var es []Entry
-	for _, p := range []string{
-		"m-v1.0-en.md", "m-v1.1-en.md", "m-v1.9-en.md", "m-v1.10-en.md", "m-v1.5-zh.md",
-		"plain.md", "sub/x-v2.md", "sub/x-v10.md", "other/x-v3.md",
-	} {
-		es = append(es, Entry{Path: p})
+func TestClassifyBatchesSavesEachBatch(t *testing.T) {
+	var items []Candidate
+	for i := 0; i < 60; i++ {
+		items = append(items, Candidate{Path: string(rune('a'+i%26)) + string(rune('a'+i/26)) + ".md"})
 	}
-	var got []string
-	for _, e := range LatestVersions(es) {
-		got = append(got, e.Path)
-	}
-	want := []string{"m-v1.10-en.md", "m-v1.5-zh.md", "plain.md", "sub/x-v10.md", "other/x-v3.md"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v want %v", got, want)
-		}
+	fc := &fakeClassifier{}
+	saves := 0
+	n, err := ClassifyBatches(context.Background(), nil, items, fc, func(m map[string]string) error { saves++; return nil })
+	if err != nil || n != 60 || fc.calls != 3 || saves != 3 {
+		t.Fatalf("n=%d calls=%d saves=%d err=%v", n, fc.calls, saves, err)
 	}
 }

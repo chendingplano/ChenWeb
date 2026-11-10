@@ -1,33 +1,35 @@
-// Shape of GET /api/v1/docbuilder/:source/tree (server/api/docbuilder).
+// Shape of GET /api/v1/doc-groups/:group/tree (server/api/docbuilder).
 export type DocTreeNode = {
 	id: string;
 	label: string;
 	kind?: 'markdown' | 'pdf';
-	path?: string; // leaf only
+	doc_id?: number; // leaf only
 	children?: DocTreeNode[];
 };
 
 export type DocTreeResponse = { title: string; tree: DocTreeNode[]; uncategorized: number };
 
-export const docbuilderTreeUrl = (source: string) =>
-	`/api/v1/docbuilder/${encodeURIComponent(source)}/tree`;
-export const docbuilderFileUrl = (source: string, path: string) =>
-	`/api/v1/docbuilder/${encodeURIComponent(source)}/file?path=${encodeURIComponent(path)}`;
+export const docGroupTreeUrl = (group: string) =>
+	`/api/v1/doc-groups/${encodeURIComponent(group)}/tree`;
+export const docGroupFileUrl = (group: string, docId: number) =>
+	`/api/v1/doc-groups/${encodeURIComponent(group)}/documents/${docId}/file`;
+export const docGroupPdfUrl = (group: string, docId: number) =>
+	`/api/v1/doc-groups/${encodeURIComponent(group)}/documents/${docId}/pdf`;
 
 // First leaf in tree order, used to open something when nothing was selected before.
 export function firstLeaf(nodes: DocTreeNode[]): DocTreeNode | undefined {
 	for (const n of nodes) {
-		if (n.path) return n;
+		if (n.doc_id) return n;
 		const f = n.children && firstLeaf(n.children);
 		if (f) return f;
 	}
 	return undefined;
 }
 
-export function findLeaf(nodes: DocTreeNode[], path: string): DocTreeNode | undefined {
+export function findLeaf(nodes: DocTreeNode[], docId: number): DocTreeNode | undefined {
 	for (const n of nodes) {
-		if (n.path === path) return n;
-		const f = n.children && findLeaf(n.children, path);
+		if (n.doc_id === docId) return n;
+		const f = n.children && findLeaf(n.children, docId);
 		if (f) return f;
 	}
 	return undefined;

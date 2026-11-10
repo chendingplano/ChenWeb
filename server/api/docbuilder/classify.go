@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -29,59 +28,43 @@ type Candidate struct {
 	Excerpt string `json:"excerpt"`
 }
 
-// ClassifyNew sends every uncategorised entry of m to c, in batches, and stores the answers.
-// Entries that already have a category are never reclassified (the operation is one-time per
-// file); set force to clear them first. m is saved after each batch, so a failure keeps progress.
-// It returns the number of entries newly categorised.
-func ClassifyNew(ctx context.Context, dir string, m *Manifest, c Classifier, model string, force bool) (int, error) {
-	if force {
-		for i := range m.Entries {
-			m.Entries[i].Category = ""
-		}
-	}
-	m.Model = model
-	var pending []int
-	for i, e := range m.Entries {
-		if e.Category == "" {
-			pending = append(pending, i)
-		}
-	}
+// ClassifyBatches sends items to c in batches of batchSize and passes each batch's cleaned
+// answers (key → category, empty answers dropped) to save before the next batch, so a failure
+// keeps the progress already saved. existing lists the categories in use; it grows as batches
+// are answered. It returns how many items were categorised.
+func ClassifyBatches(ctx context.Context, existing []string, items []Candidate, c Classifier,
+	save func(answers map[string]string) error) (int, error) {
 	done := 0
-	for start := 0; start < len(pending); start += batchSize {
-		end := min(start+batchSize, len(pending))
-		var docs []Candidate
-		for _, i := range pending[start:end] {
-			e := m.Entries[i]
-			docs = append(docs, Candidate{Path: e.Path, Title: e.Title, Excerpt: excerpt(dir, e)})
-		}
-		answers, err := c.Classify(ctx, categoriesOf(m), docs)
+	for start := 0; start < len(items); start += batchSize {
+		end := min(start+batchSize, len(items))
+		answers, err := c.Classify(ctx, existing, items[start:end])
 		if err != nil {
-			_ = SaveManifest(dir, m)
 			return done, err
 		}
-		for _, i := range pending[start:end] {
-			if cat := cleanCategory(answers[m.Entries[i].Path]); cat != "" {
-				m.Entries[i].Category = cat
-				done++
+		clean := map[string]string{}
+		for _, it := range items[start:end] {
+			if cat := cleanCategory(answers[it.Path]); cat != "" {
+				clean[it.Path] = cat
+				if !contains(existing, cat) {
+					existing = append(existing, cat)
+				}
 			}
 		}
-		if err := SaveManifest(dir, m); err != nil {
+		if err := save(clean); err != nil {
 			return done, err
 		}
+		done += len(clean)
 	}
 	return done, nil
 }
 
-func categoriesOf(m *Manifest) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, e := range m.Entries {
-		if e.Category != "" && !seen[e.Category] {
-			seen[e.Category] = true
-			out = append(out, e.Category)
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
 		}
 	}
-	return out
+	return false
 }
 
 func cleanCategory(s string) string {
@@ -92,16 +75,9 @@ func cleanCategory(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// excerpt is the start of a Markdown file; a PDF has none (its title and path are what we have).
-func excerpt(dir string, e Entry) string {
-	if e.Kind != KindMarkdown {
-		return ""
-	}
-	raw, err := os.ReadFile(safeJoin(dir, e.Path))
-	if err != nil {
-		return ""
-	}
-	r := []rune(string(raw))
+// Excerpt returns the first characters of a document's text for the classifier.
+func Excerpt(text string) string {
+	r := []rune(text)
 	if len(r) > excerptRunes {
 		r = r[:excerptRunes]
 	}

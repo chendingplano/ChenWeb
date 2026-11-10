@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-	docbuilderFileUrl,
+	docGroupFileUrl,
 	findLeaf,
 	firstLeaf,
 	stripFrontMatter,
@@ -11,26 +11,24 @@ const tree: DocTreeNode[] = [
 	{
 		id: 'cat:A',
 		label: 'A',
-		children: [{ id: 'doc:a/x.md', label: 'X', kind: 'markdown', path: 'a/x.md' }]
+		children: [{ id: 'doc:a/x.md', label: 'X', kind: 'markdown', doc_id: 11 }]
 	},
 	{
 		id: 'cat:B',
 		label: 'B',
-		children: [{ id: 'doc:y.pdf', label: 'Y', kind: 'pdf', path: 'y.pdf' }]
+		children: [{ id: 'doc:y.pdf', label: 'Y', kind: 'pdf', doc_id: 22 }]
 	}
 ];
 
 describe('document builder tree helpers', () => {
 	test('finds the first and a named leaf', () => {
-		expect(firstLeaf(tree)?.path).toBe('a/x.md');
-		expect(findLeaf(tree, 'y.pdf')?.kind).toBe('pdf');
-		expect(findLeaf(tree, 'nope')).toBeUndefined();
+		expect(firstLeaf(tree)?.doc_id).toBe(11);
+		expect(findLeaf(tree, 22)?.kind).toBe('pdf');
+		expect(findLeaf(tree, 99)).toBeUndefined();
 		expect(firstLeaf([])).toBeUndefined();
 	});
-	test('encodes the file path', () => {
-		expect(docbuilderFileUrl('s k', 'a b/c&d.md')).toBe(
-			'/api/v1/docbuilder/s%20k/file?path=a%20b%2Fc%26d.md'
-		);
+	test('builds group URLs', () => {
+		expect(docGroupFileUrl('s k', 7)).toBe('/api/v1/doc-groups/s%20k/documents/7/file');
 	});
 
 	test('strips front matter only at the start', () => {

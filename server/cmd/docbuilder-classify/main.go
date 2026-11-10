@@ -1,75 +1,116 @@
-// Command docbuilder-classify classifies the unclassified documents of one Document Builder
-// source with an LLM and saves the result in <dir>/.docbuilder/manifest.json. Files that already
-// have a category are left alone, so this is run once per batch of new files.
+// Command docbuilder-classify registers a document group's documents and classifies those that
+// have no category in that group with an LLM. Documents that already have a category are left
+// alone, so this is run once per batch of new documents.
 //
-//	docbuilder-classify -source user-manuals [-config docbuilder.local.toml] [-model profile] [-dry-run] [-force]
+//	docbuilder-classify -group user-manuals [-model profile] [-dry-run] [-force]
+//
+// Needs PG_* (project database, which also holds the shared ID manager) and DOCUMENT_ROOT_DIR.
 package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
-	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	_ "github.com/lib/pq"
+
 	"github.com/chendingplano/deepdoc/server/api/docbuilder"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 func main() {
-	cfg := flag.String("config", "docbuilder.local.toml", "sources file")
-	key := flag.String("source", "", "source key in the sources file (required)")
-	model := flag.String("model", os.Getenv("DOCBUILDER_MODEL"), "model profile in .models.toml (default deepseek-flash-processor)")
-	promptRef := flag.String("prompt", "prompt-docbuilder-classify-v1.md", "classification prompt file in prompts/")
-	dry := flag.Bool("dry-run", false, "scan and report what would be classified; no model call, nothing saved")
-	force := flag.Bool("force", false, "reclassify files that already have a category")
+	key := flag.String("group", "", "group key, e.g. user-manuals (required)")
+	model := flag.String("model", "", "model profile in .models.toml (default $DOCBUILDER_MODEL or deepseek-flash-processor)")
+	dry := flag.Bool("dry-run", false, "register documents and report what would be classified; no model call")
+	force := flag.Bool("force", false, "reclassify documents that already have a category")
 	flag.Parse()
-	if err := run(*cfg, *key, *model, *promptRef, *dry, *force); err != nil {
+	if err := run(*key, *model, *dry, *force); err != nil {
 		fmt.Fprintln(os.Stderr, "docbuilder-classify:", err)
 		os.Exit(1)
 	}
 }
 
-func run(cfgPath, key, model, promptRef string, dry, force bool) error {
-	sources, err := docbuilder.LoadSources(cfgPath)
+func run(key, model string, dry, force bool) error {
+	if key == "" {
+		return fmt.Errorf("-group is required")
+	}
+	ctx := context.Background()
+	db, err := connect()
 	if err != nil {
 		return err
 	}
-	src, ok := sources[key]
-	if !ok {
-		return fmt.Errorf("source %q not found in %s", key, cfgPath)
-	}
-	m, err := docbuilder.LoadManifest(src.Dir)
+	defer db.Close()
+	logger := loggerutil.CreateDefaultLogger("20261110-802")
+	st, err := docbuilder.NewStoreFromEnv(ctx, db, db, "docbuilder-classify", func(f string, a ...any) { logger.Error(fmt.Sprintf(f, a...)) })
 	if err != nil {
 		return err
 	}
-	if err := docbuilder.Refresh(src.Dir, m); err != nil {
+	g, err := st.GroupByKey(ctx, key)
+	if err != nil {
+		return fmt.Errorf("group %q: %w", key, err)
+	}
+	if err := st.SyncGroup(ctx, g.ID); err != nil {
+		return err
+	}
+	entries, err := st.GroupDocs(ctx, g.ID)
+	if err != nil {
 		return err
 	}
 	pending := 0
-	for _, e := range m.Entries {
+	for _, e := range entries {
 		if e.Category == "" || force {
 			pending++
 		}
 	}
-	fmt.Printf("%s: %d files, %d to classify\n", src.Dir, len(m.Entries), pending)
+	fmt.Printf("group %s: %d documents, %d to classify\n", key, len(entries), pending)
 	if dry || pending == 0 {
 		return nil
 	}
-	if model == "" {
-		model = "deepseek-flash-processor"
-	}
-	logger := loggerutil.CreateDefaultLogger("20261109-701")
-	client, modelName, err := docprocessing.BuildReviewerToolClient(model, logger)
+	cl, modelName, err := docbuilder.NewClassifierFromEnv(model, logger)
 	if err != nil {
 		return err
 	}
-	prompt, _, _, err := docprocessing.LoadPromptByRef(promptRef)
-	if err != nil {
-		return err
-	}
-	n, err := docbuilder.ClassifyNew(context.Background(), src.Dir, m,
-		&docbuilder.LLMClassifier{Client: client, Model: modelName, Prompt: prompt}, model, force)
-	fmt.Printf("classified %d files\n", n)
+	n, err := st.ClassifyGroup(ctx, g, cl, modelName, force)
+	fmt.Printf("classified %d documents\n", n)
 	return err
+}
+
+func connect() (*sql.DB, error) {
+	name := os.Getenv("PG_DB_NAME")
+	if name == "" {
+		return nil, fmt.Errorf("PG_DB_NAME must be set")
+	}
+	user := firstEnv("PG_USER_NAME", "PG_USER")
+	if user == "" {
+		user = "cding"
+	}
+	host := os.Getenv("PG_HOST")
+	if host == "" {
+		host = "/tmp"
+	}
+	port := os.Getenv("PG_PORT")
+	if port == "" {
+		port = "5432"
+	}
+	dsn := fmt.Sprintf("host=%s port=%s user=%s dbname=%s sslmode=disable", host, port, user, name)
+	if pw := os.Getenv("PG_PASSWORD"); pw != "" {
+		dsn += " password=" + pw
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	return db, db.Ping()
+}
+
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }

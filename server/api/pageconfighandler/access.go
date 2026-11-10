@@ -48,3 +48,10 @@ func toLowerSet(items []string) map[string]bool {
 	}
 	return out
 }
+
+// RoleAllowed applies the same accessibility model as page-config entries to any resource that
+// carries an access_role list (document groups): it is allowed iff accessRoles holds at least one
+// valid role and the user holds at least one of those roles. An empty or all-invalid list allows nobody.
+func RoleAllowed(accessRoles, userRoles, validRoles []string) bool {
+	return isAuthorized(configRow{Enabled: true, Accessible: true, AccessRole: accessRoles}, userRoles, validRoles)
+}

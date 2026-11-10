@@ -327,15 +327,20 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
 	apiGroup.GET("/reusable-modules", reusablemodules.Handler(ApiTypes.ProjectDBHandle))
-	docBuilderConfig := os.Getenv("DOCBUILDER_CONFIG")
-	if docBuilderConfig == "" {
-		docBuilderConfig = "docbuilder.local.toml"
+	docLogger := loggerutil.CreateDefaultLogger("20261110-801")
+	if docStore, err := docbuilder.NewStoreFromEnv(context.Background(), ApiTypes.ProjectDBHandle, ApiTypes.SharedDBHandle,
+		"chenweb-docgroups", func(f string, a ...any) { docLogger.Error(fmt.Sprintf(f, a...)) }); err != nil {
+		// Document groups are optional: without a document root the menu stays empty.
+		docLogger.Error("document groups disabled", "error", err)
+	} else {
+		(&docbuilder.API{
+			Store:      docStore,
+			ValidRoles: func() []string { return appconfig.GetAccessRoles(nil) },
+			NewClassifier: func() (docbuilder.Classifier, string, error) {
+				return docbuilder.NewClassifierFromEnv("", docLogger)
+			},
+		}).Register(apiGroup)
 	}
-	docBuilderSources, err := docbuilder.LoadSources(docBuilderConfig)
-	if err != nil {
-		return fmt.Errorf("load document builder sources: %w", err)
-	}
-	docbuilder.Register(apiGroup, docBuilderSources)
 	monitorLoc, err := time.LoadLocation(appconfig.GetLLMConfig().WorkspaceTimezone)
 	if err != nil {
 		return fmt.Errorf("load code monitor timezone: %w", err)

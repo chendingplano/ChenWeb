@@ -11,8 +11,9 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import MarkdownViewer from '$lib/components/shared-ui/markdown-viewer/markdown-viewer.svelte';
 	import {
-		docbuilderFileUrl,
-		docbuilderTreeUrl,
+		docGroupFileUrl,
+		docGroupPdfUrl,
+		docGroupTreeUrl,
 		findLeaf,
 		firstLeaf,
 		stripFrontMatter,
@@ -21,10 +22,10 @@
 	} from './document-builder-types';
 
 	let {
-		source,
+		group,
 		darkMode = true,
 		leftWidthDefault = 260
-	}: { source: string; darkMode?: boolean; leftWidthDefault?: number } = $props();
+	}: { group: string; darkMode?: boolean; leftWidthDefault?: number } = $props();
 
 	const LEFT_MIN = 180;
 	const LEFT_MAX = 480;
@@ -45,41 +46,41 @@
 	let error = $state<string | null>(null);
 	let leftWidth = $state(leftWidthDefault);
 	let contentEl = $state<HTMLElement | null>(null);
-	let scrollTops: Record<string, number> = {};
+	let scrollTops: Record<number, number> = {};
 
-	// Work is kept per source for the browser session so leaving and returning restores it.
-	const storeKey = () => `docbuilder:${source}`;
+	// Work is kept per group for the browser session so leaving and returning restores it.
+	const storeKey = () => `docbuilder:${group}`;
 	function saveState() {
 		try {
 			sessionStorage.setItem(
 				storeKey(),
-				JSON.stringify({ path: selected?.path, expanded, leftWidth, scrollTops })
+				JSON.stringify({ docId: selected?.doc_id, expanded, leftWidth, scrollTops })
 			);
 		} catch {
 			/* storage unavailable: nothing to restore next time */
 		}
 	}
-	function restoreState(): { path?: string } {
+	function restoreState(): { docId?: number } {
 		try {
 			const s = JSON.parse(sessionStorage.getItem(storeKey()) ?? '{}');
 			expanded = s.expanded ?? {};
 			leftWidth = s.leftWidth ?? leftWidthDefault;
 			scrollTops = s.scrollTops ?? {};
-			return { path: s.path };
+			return { docId: s.docId };
 		} catch {
 			return {};
 		}
 	}
 
 	async function select(node: DocTreeNode) {
-		if (!node.path) return;
-		if (selected?.path && contentEl) scrollTops[selected.path] = contentEl.scrollTop;
+		if (!node.doc_id) return;
+		if (selected?.doc_id && contentEl) scrollTops[selected.doc_id] = contentEl.scrollTop;
 		selected = node;
 		error = null;
 		markdown = '';
 		if (node.kind === 'markdown') {
 			try {
-				const r = await fetch(docbuilderFileUrl(source, node.path), { credentials: 'same-origin' });
+				const r = await fetch(docGroupFileUrl(group, node.doc_id), { credentials: 'same-origin' });
 				if (!r.ok) throw new Error(String(r.status));
 				markdown = stripFrontMatter(await r.text());
 			} catch {
@@ -88,23 +89,23 @@
 		}
 		saveState();
 		requestAnimationFrame(() => {
-			if (contentEl) contentEl.scrollTop = scrollTops[node.path!] ?? 0;
+			if (contentEl) contentEl.scrollTop = scrollTops[node.doc_id!] ?? 0;
 		});
 	}
 
 	onMount(async () => {
 		const saved = restoreState();
 		try {
-			const r = await fetch(docbuilderTreeUrl(source), { credentials: 'same-origin' });
+			const r = await fetch(docGroupTreeUrl(group), { credentials: 'same-origin' });
 			if (!r.ok) throw new Error(String(r.status));
 			const data = (await r.json()) as DocTreeResponse;
 			tree = data.tree;
 			pending = data.uncategorized;
-			const restored = saved.path ? findLeaf(tree, saved.path) : undefined;
+			const restored = saved.docId ? findLeaf(tree, saved.docId) : undefined;
 			const start = restored ?? firstLeaf(tree);
 			if (start) {
 				for (const c of tree)
-					if (c.children?.some((l) => l.path === start.path)) expanded[c.id] = true;
+					if (c.children?.some((l) => l.doc_id === start.doc_id)) expanded[c.id] = true;
 				await select(start);
 			}
 		} catch {
@@ -168,9 +169,9 @@
 						{#each cat.children ?? [] as leaf (leaf.id)}
 							<button
 								class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left"
-								style="font-size:13px; color:{selected?.path === leaf.path
+								style="font-size:13px; color:{selected?.doc_id === leaf.doc_id
 									? accent
-									: textMuted}; background:{selected?.path === leaf.path
+									: textMuted}; background:{selected?.doc_id === leaf.doc_id
 									? accentTint
 									: 'transparent'};"
 								onclick={() => select(leaf)}
@@ -209,14 +210,25 @@
 			<p class="p-6" style="color:#EF4444;">{error}</p>
 		{:else if !selected}
 			<p class="p-6" style="color:{textMuted};">{m.docbuilder_select_document()}</p>
-		{:else if selected.kind === 'pdf' && selected.path}
+		{:else if selected.kind === 'pdf' && selected.doc_id}
 			<iframe
 				class="h-full w-full border-0"
 				title={selected.label}
-				src={docbuilderFileUrl(source, selected.path)}
+				src={docGroupFileUrl(group, selected.doc_id)}
 			></iframe>
 		{:else}
-			<div class="p-6"><MarkdownViewer source={markdown} breaks={false} /></div>
+			<div class="p-6">
+				<div class="mb-3 flex justify-end">
+					<a
+						class="rounded-md px-3 py-1"
+						style="font-size:12px; color:{accent}; border:1px solid {borderColor};"
+						href={docGroupPdfUrl(group, selected.doc_id!)}
+						target="_blank"
+						rel="noopener">{m.docbuilder_export_pdf()}</a
+					>
+				</div>
+				<MarkdownViewer source={markdown} breaks={false} />
+			</div>
 		{/if}
 	</div>
 </div>

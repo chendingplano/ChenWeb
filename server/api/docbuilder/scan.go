@@ -3,11 +3,10 @@ package docbuilder
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"io/fs"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -16,56 +15,45 @@ var (
 	frontTitle = regexp.MustCompile(`(?m)^title:\s*["']?(.+?)["']?\s*$`)
 )
 
-// Scan walks root recursively and returns every .md and .pdf file (hidden files and
-// directories are skipped), sorted by path. Other file types are ignored.
-func Scan(root string) ([]Entry, error) {
-	var out []Entry
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if p != root && strings.HasPrefix(d.Name(), ".") {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		kind := ""
-		switch strings.ToLower(filepath.Ext(d.Name())) {
-		case ".md", ".markdown":
-			kind = KindMarkdown
-		case ".pdf":
-			kind = KindPDF
-		default:
-			return nil
-		}
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256(raw)
-		e := Entry{Path: filepath.ToSlash(rel), Kind: kind, Hash: hex.EncodeToString(sum[:])[:16]}
-		e.Title = fileTitle(d.Name())
-		if kind == KindMarkdown {
-			if t := markdownTitle(string(raw)); t != "" {
-				e.Title = t
-			}
-		}
-		out = append(out, e)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+// kindOf returns the document kind of a file name, or "" when it is not a supported type.
+func kindOf(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".md", ".markdown":
+		return KindMarkdown
+	case ".pdf":
+		return KindPDF
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
+	return ""
+}
+
+// hashFile returns the hex sha256 of a file.
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// titleOf reads a document's title: front-matter title, else first heading, else the file name.
+func titleOf(path, kind string) string {
+	t := fileTitle(filepath.Base(path))
+	if kind != KindMarkdown {
+		return t
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return t
+	}
+	if h := markdownTitle(string(raw)); h != "" {
+		return h
+	}
+	return t
 }
 
 func fileTitle(name string) string {

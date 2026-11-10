@@ -68,6 +68,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import HybridSearchBenchmarkAnalyzeView from '$lib/components/home3/hybrid-search-benchmark-analyze-view.svelte';
 	import PiHarnessAdminView from '$lib/components/home3/pi-harness-admin-view.svelte';
 	import PageConfigAdminView from '$lib/components/home3/page-config-admin-view.svelte';
+	import DocGroupsAdminView from '$lib/components/home3/doc-groups-admin-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -507,6 +508,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<BenchmarkSetupView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-page-config'}
 			<PageConfigAdminView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-groups'}
+			<DocGroupsAdminView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}
@@ -554,8 +557,12 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<MechanicalProductNamesImportView {darkMode} />
 		{:else if activeMenu?.childId === 'videos-training'}
 			<TrainingVideoViewer {darkMode} />
+		{:else if activeMenu?.childId?.startsWith('docgroup-')}
+			{#key activeMenu.childId}
+				<DocumentBuilderView group={activeMenu.childId.slice('docgroup-'.length)} {darkMode} />
+			{/key}
 		{:else if activeMenu?.childId === 'docs-users-manual'}
-			<DocumentBuilderView source="user-manuals" {darkMode} />
+			<DocumentBuilderView group="user-manuals" {darkMode} />
 		{:else if sectionId === '__user_info__'}
 			<CurrentUserInfoView {darkMode} />
 		{:else if sectionId === 'chat'}
