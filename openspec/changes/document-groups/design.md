@@ -36,6 +36,8 @@ Sizing: ~100 documents now, thousands at most. Sync walks only member directorie
 
 **D12 Frontend.** `DocumentBuilderView` takes a `group` key; the admin page is a view under Development › System Admin. All text in Paraglide.
 
+**D13 Overview page.** A card view at Development › System Admin › Resources › Documents (`sysadmin-resources-documents`, development page only) over the existing admin API, no new endpoints: Sync = `rescan` then `classify` (`force=false`), so a missing model (503) still leaves the rescan done; Build Page = `PUT` the group with `enabled=true`. "Page exists" is `enabled`, not a new column, because an enabled group is exactly what the menu shows, and a second flag would allow a built-but-hidden state that the button could not explain. New groups are created disabled under `documents`; members are added one by one and, if one is refused, the new group is deleted again (client-side rollback, so no transactional create endpoint is needed). Editing members, removing documents and deleting groups stay on the full admin page (System › Document Groups).
+
 ## Reused modules
 
 Markdown Viewer `20261109-01` (rendering, unchanged); Document Builder `20261109-02/-03` (scan, title, version parsing, classifier, tree builder and view are extended; the TOML source loader, manifest and old handler/CLI are removed because groups supersede them); ID manager (document IDs); pageconfighandler (admin check pattern, role validation). Not extended: page-config entries themselves, because group menu entries need per-installation rows that an admin creates at run time, which the seed-based page-config does not model.

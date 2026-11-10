@@ -435,6 +435,14 @@
 					id: 'sysadmin-resources',
 					label: m.nav_sysadmin_resources(),
 					children: [
+						...(pageKey === 'development'
+							? [
+									{
+										id: 'sysadmin-resources-documents',
+										label: m.nav_sysadmin_resources_documents()
+									}
+								]
+							: []),
 						{ id: 'sysadmin-resources-videos', label: m.nav_sysadmin_resources_videos() },
 						{
 							id: 'sysadmin-resources-product-drawings',

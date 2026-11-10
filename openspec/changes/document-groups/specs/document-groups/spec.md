@@ -84,6 +84,26 @@ Exporting a Markdown document as PDF SHALL convert the current version only when
 - **WHEN** the Markdown file changes and the group is rescanned
 - **THEN** its stored PDF is deleted and the next export converts again
 
+### Requirement: Group overview page
+
+Development › System Admin › Resources › Documents SHALL list every group as a card showing its label, key, members (flagging those not found on disk), document and uncategorised counts, and whether its page exists. A group's page is its entry at its menu location; it SHALL exist exactly when the group is enabled.
+
+- **Sync** SHALL rescan the group and then classify its documents that have no category, as `mise build-docs <group>` does. When no classification model is available, the rescan SHALL still be kept and the card SHALL say that `DOCBUILDER_MODEL` must be set.
+- **Build Page** SHALL create the group's page (enable the group). It SHALL be disabled while the page exists.
+- **New group** SHALL take a key, English and Chinese labels, a position (default: after the last group under Documents), roles and at least one member. The group SHALL be created without a page under Documents. When a member is refused, the group SHALL NOT be kept and the reason SHALL be shown.
+
+#### Scenario: Build Page once
+- **WHEN** an administrator presses Build Page on a group without a page
+- **THEN** the group appears in Resources › Documents for its roles, and the card's Build Page button is disabled
+
+#### Scenario: Sync without a model
+- **WHEN** Sync is pressed and the server has no classification model
+- **THEN** new files are registered, nothing is classified, and the card asks for `DOCBUILDER_MODEL`
+
+#### Scenario: Refused member
+- **WHEN** a new group names a path that does not exist under the Document Root Directory
+- **THEN** no group is left behind and the form shows why the path was refused
+
 ### Requirement: Comments, tickets, to-dos and upload (phase 2)
 
 Groups SHALL later support comments, tickets and to-dos attached to a document (not to a group) and uploads into member directories. These are specified when implemented.

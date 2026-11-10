@@ -3,4 +3,5 @@ declare module 'bun:test' {
 	export const test: (name: string, callback: () => void | Promise<void>) => void;
 	export const expect: { (value: unknown): any; objectContaining(value: unknown): unknown };
 	export const mock: (...args: any[]) => any;
+	export const afterEach: (callback: () => void | Promise<void>) => void;
 }

@@ -69,6 +69,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import PiHarnessAdminView from '$lib/components/home3/pi-harness-admin-view.svelte';
 	import PageConfigAdminView from '$lib/components/home3/page-config-admin-view.svelte';
 	import DocGroupsAdminView from '$lib/components/home3/doc-groups-admin-view.svelte';
+	import DocGroupsCardsView from '$lib/components/home3/doc-groups-cards-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -510,6 +511,8 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<PageConfigAdminView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-groups'}
 			<DocGroupsAdminView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-resources-documents'}
+			<DocGroupsCardsView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}

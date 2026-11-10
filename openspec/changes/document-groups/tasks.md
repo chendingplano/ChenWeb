@@ -21,6 +21,12 @@
 - [ ] 3.1 Migration applied through the service and groups registered/classified on real data (done). STILL OPEN: restart the server with DOCUMENT_ROOT_DIR, then check in a browser: menu order, reader, admin page, PDF export, delete/archive.
 - [x] 3.2 Update module docs and catalogue (versions, files, config), user manual, add devdoc; commit through jj.
 
+## 5. Group overview page
+
+- [x] 5.1 Client: `syncGroup` (rescan, then classify new; model-unavailable reported, not thrown), `buildPage`, `createGroup` with rollback, `nextPosition`, `groupLabel`; unit tests.
+- [x] 5.2 Card view with Sync, Build Page (disabled when the page exists) and a New group form; menu entry Development › System Admin › Resources › Documents; content panel binding.
+- [x] 5.3 Messages (en, zh-cn), type and i18n checks; user manual, module doc and catalogue row, devdoc; commit through jj.
+
 ## 4. Phase 2 (not started)
 
 - [ ] 4.1 Comments on documents.
