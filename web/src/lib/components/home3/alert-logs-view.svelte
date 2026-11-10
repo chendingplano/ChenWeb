@@ -54,6 +54,9 @@
 	let userNames = $state<Record<string, string>>({});
 	let expandedId = $state<number | null>(null);
 	let resolvingId = $state<number | null>(null), resolutionDraft = $state(''), resolveError = $state('');
+	let checkedIds = $state<number[]>([]);
+	let bulkDialog: HTMLDialogElement;
+	let bulkReason = $state(''), bulkError = $state(''), bulkSaving = $state(false);
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 
 	function formatTime(value: string | null) {
@@ -113,6 +116,8 @@
 			rows = Array.isArray(data.results) ? (data.results as AlertRow[]).map((row) => ({
 				...row, owner: !row.owner?.trim() || row.owner.trim().toLowerCase() === 'unassigned' ? null : row.owner
 			})) : [];
+			const resolvedIds = new Set(rows.filter((row) => row.status === 'resolved').map((row) => row.id));
+			checkedIds = checkedIds.filter((id) => !resolvedIds.has(id));
 			total = typeof data.total === 'number' ? data.total : 0;
 			ownerDraft = Object.fromEntries(rows.map((r) => [r.id, displayUser(r.owner)]));
 		} catch (err) {
@@ -213,10 +218,32 @@
 				body: JSON.stringify({ resolution: resolutionDraft.trim() })
 			});
 			resolvingId = null;
+			checkedIds = checkedIds.filter((id) => id !== row.id);
 			if (expandedId === row.id) expandedId = null;
 			if (commentsId === row.id) commentsId = null;
 			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
+	}
+	function toggleChecked(id: number, checked: boolean) {
+		checkedIds = checked ? [...checkedIds, id] : checkedIds.filter((value) => value !== id);
+	}
+	function openBulkResolve() {
+		bulkReason = ''; bulkError = '';
+		bulkDialog.showModal();
+	}
+	async function saveBulkResolve() {
+		if (!bulkReason.trim()) { bulkError = m.alert_logs_resolution_required(); return; }
+		bulkSaving = true; bulkError = '';
+		try {
+			await call(`${API}/resolve-bulk`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: checkedIds, resolution: bulkReason.trim() }) });
+			if (expandedId !== null && checkedIds.includes(expandedId)) expandedId = null;
+			if (commentsId !== null && checkedIds.includes(commentsId)) commentsId = null;
+			if (resolvingId !== null && checkedIds.includes(resolvingId)) resolvingId = null;
+			checkedIds = [];
+			bulkDialog.close();
+			await Promise.all([load(), loadFilterOptions()]);
+		} catch (err) { bulkError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
+		finally { bulkSaving = false; }
 	}
 	function levelColor(level: string) { return level === 'ERROR' ? danger : warning; }
 	onMount(() => {
@@ -273,7 +300,7 @@
 	{/if}
 	<div class="rounded-xl flex flex-col flex-1 min-h-0" style="background:{cardBg};border:1px solid {borderColor}">
 		<div class="px-5 py-3 flex justify-between flex-shrink-0" style="border-bottom:1px solid {borderColor}">
-			<span style="font-size:13px;color:{textMuted}">{m.alert_logs_total({ total })}{#if total} · {m.alert_logs_page_of({ page, totalPages })}{/if}</span>
+			<div class="flex items-center gap-3"><span style="font-size:13px;color:{textMuted}">{m.alert_logs_total({ total })}{#if total} · {m.alert_logs_page_of({ page, totalPages })}{/if}</span><button onclick={openBulkResolve} disabled={!checkedIds.length || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{accent};color:white">{m.alert_logs_resolve_all({ count: checkedIds.length })}</button>{#if checkedIds.length}<button onclick={() => (checkedIds = [])} class="rounded px-2 py-1 text-sm" style="color:{textSecondary};background:{surface2}">{m.alert_logs_clear_selection()}</button>{/if}</div>
 			<div class="flex gap-2">
 				<label class="flex items-center gap-2" style="color:{textSecondary};font-size:12px">{m.alert_logs_page_size()}<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:4px">{#each [20, 50, 100, 200] as size}<option value={size}>{size}</option>{/each}</select></label>
 				<button onclick={() => { if (page > 1) { page--; load(); } }} disabled={page <= 1 || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_prev()}</button>
@@ -289,6 +316,7 @@
 				<table class="w-full text-sm" style="border-collapse:separate;border-spacing:0">
 					<thead>
 						<tr style="background:{surface2}">
+							<th class="sticky top-0 z-10 px-4" style="background:{surface2};border-bottom:1px solid {borderColor}"><span class="sr-only">{m.alert_logs_selection()}</span></th>
 							{#each columns as col (col.key)}
 								<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}">
 									<span class="inline-flex items-center gap-1">
@@ -305,6 +333,7 @@
 					<tbody>
 						{#each rows as row (row.id)}
 							<tr class="hover:bg-white/5">
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}"><input type="checkbox" checked={checkedIds.includes(row.id)} disabled={row.status === 'resolved'} onchange={(event) => toggleChecked(row.id, event.currentTarget.checked)} aria-label={m.alert_logs_select_row({ id: String(row.id) })} /></td>
 								<td onclick={() => (selected = { id: row.id, col: 'created_at' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textMuted};white-space:nowrap;font-size:12px;{selected?.id === row.id && selected.col === 'created_at' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{formatTime(row.created_at)}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'level' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{levelColor(row.level)};font-weight:600;{selected?.id === row.id && selected.col === 'level' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.level}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'message' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};max-width:420px;{selected?.id === row.id && selected.col === 'message' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">
@@ -330,7 +359,7 @@
 							</tr>
 							{#if expandedId === row.id || resolvingId === row.id || commentsId === row.id}
 								<tr>
-									<td colspan="7" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
+									<td colspan="8" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
 										{#if row.status === 'resolved' && expandedId === row.id}
 											<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: displayUser(row.resolver) || '—', time: formatTime(row.resolve_time) })}</div>
 											<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{row.resolution}</div>
@@ -375,6 +404,19 @@
 		{/if}
 	</div>
 </div>
+
+<dialog bind:this={bulkDialog} aria-labelledby="alert-bulk-title" oncancel={(event) => { if (bulkSaving) event.preventDefault(); }} style="width:min(32rem, 90vw);background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
+	<form onsubmit={(event) => { event.preventDefault(); void saveBulkResolve(); }}>
+		<h2 id="alert-bulk-title" style="font-size:16px;font-weight:600">{m.alert_logs_bulk_title({ count: checkedIds.length })}</h2>
+		<label for="alert-bulk-reason" class="block mt-4 mb-1" style="font-size:13px;color:{textSecondary}">{m.alert_logs_resolution()}</label>
+		<textarea id="alert-bulk-reason" bind:value={bulkReason} required disabled={bulkSaving} rows="4" placeholder={m.alert_logs_resolution_placeholder()} class="w-full rounded px-2 py-1.5 text-sm" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"></textarea>
+		{#if bulkError}<p role="alert" style="font-size:12px;color:{danger};margin-top:4px">{bulkError}</p>{/if}
+		<div class="flex justify-end gap-2 mt-4">
+			<button type="button" onclick={() => bulkDialog.close()} disabled={bulkSaving} class="rounded px-3 py-1.5 text-sm disabled:opacity-40" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_cancel()}</button>
+			<button type="submit" disabled={bulkSaving} class="rounded px-3 py-1.5 text-sm disabled:opacity-40" style="background:{accent};color:white">{m.alert_logs_resolve()}</button>
+		</div>
+	</form>
+</dialog>
 
 {#if menu}
 	{@const col = menu.col}

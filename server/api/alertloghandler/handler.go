@@ -13,6 +13,7 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 )
 
 const (
@@ -77,6 +78,11 @@ type assignRequest struct {
 
 type resolveRequest struct {
 	Resolution string `json:"resolution"`
+}
+
+type bulkResolveRequest struct {
+	IDs        []int64 `json:"ids"`
+	Resolution string  `json:"resolution"`
 }
 
 func fail(c echo.Context, code int, msg string) error {
@@ -158,7 +164,9 @@ func List(c echo.Context) error {
 	rows, err := db.QueryContext(c.Request().Context(),
 		`SELECT id, level, message, COALESCE(req_id,''), COALESCE(loc,''), COALESCE(call_flow,''),
 		        COALESCE(attrs::text,'{}'), created_at, status, owner, resolution, resolver, resolve_time,
-		        (SELECT COUNT(*) FROM public.jimo_alert_comments k WHERE k.alert_id = l.id)
+		        (SELECT COUNT(*) FROM public.jimo_alert_comments k WHERE k.alert_id = l.id) +
+		        CASE WHEN l.status = 'resolved' AND NULLIF(BTRIM(l.resolution), '') IS NOT NULL AND NOT EXISTS
+		          (SELECT 1 FROM public.jimo_alert_comments k WHERE k.alert_id = l.id AND k.body = l.resolution AND k.author = COALESCE(l.resolver, '')) THEN 1 ELSE 0 END
 		   FROM public.jimo_alert_log l WHERE `+whereSQL+
 			` ORDER BY `+orderSQL+` LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -265,7 +273,6 @@ func Assign(c echo.Context) error {
 func Resolve(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_ALT_020")
 	defer rc.Close()
-	logger := rc.GetLogger()
 	user := rc.IsAuthenticated()
 	if user == nil {
 		return fail(c, http.StatusUnauthorized, "authentication required (CWB_ALT_021)")
@@ -286,9 +293,72 @@ func Resolve(c echo.Context) error {
 	if resolver == "" {
 		resolver = strings.TrimSpace(user.UserName)
 	}
-	return update(c, logger, id,
-		"status = 'resolved', resolution = $1, resolver = $2, resolve_time = NOW(), owner = CASE WHEN owner IS NULL OR BTRIM(owner) = '' OR LOWER(BTRIM(owner)) = 'unassigned' THEN $2 ELSE owner END",
-		[]any{resolution, resolver}, "resolve", "CWB_ALT_025")
+	return resolveAlerts(c, rc.GetLogger(), []int64{id}, resolution, resolver)
+}
+
+// ResolveBulk resolves all selected open alerts with the same reason atomically.
+func ResolveBulk(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_ALT_060")
+	defer rc.Close()
+	user := rc.IsAuthenticated()
+	if user == nil {
+		return fail(c, http.StatusUnauthorized, "authentication required (CWB_ALT_061)")
+	}
+	var req bulkResolveRequest
+	if err := c.Bind(&req); err != nil {
+		return fail(c, http.StatusBadRequest, "invalid request body (CWB_ALT_062)")
+	}
+	reason := strings.TrimSpace(req.Resolution)
+	if reason == "" || len(req.IDs) == 0 || len(req.IDs) > 1000 {
+		return fail(c, http.StatusBadRequest, "reason and 1 to 1000 alert IDs are required (CWB_ALT_063)")
+	}
+	seen := make(map[int64]bool, len(req.IDs))
+	for _, id := range req.IDs {
+		if id <= 0 || seen[id] {
+			return fail(c, http.StatusBadRequest, "invalid or duplicate alert ID (CWB_ALT_064)")
+		}
+		seen[id] = true
+	}
+	resolver := strings.TrimSpace(user.Email)
+	if resolver == "" {
+		resolver = strings.TrimSpace(user.UserName)
+	}
+	return resolveAlerts(c, rc.GetLogger(), req.IDs, reason, resolver)
+}
+
+func resolveAlerts(c echo.Context, logger ApiTypes.JimoLogger, ids []int64, reason, resolver string) error {
+	db := ApiTypes.SharedDBHandle
+	if db == nil {
+		return fail(c, http.StatusInternalServerError, "database not initialised (CWB_ALT_065)")
+	}
+	tx, err := db.BeginTx(c.Request().Context(), nil)
+	if err != nil {
+		logger.Error("begin alert resolution failed", "error", err)
+		return fail(c, http.StatusInternalServerError, "failed to resolve alerts (CWB_ALT_066)")
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(c.Request().Context(), `WITH updated AS (
+		UPDATE public.jimo_alert_log SET status = 'resolved', resolution = $1, resolver = $2, resolve_time = NOW(),
+		owner = CASE WHEN owner IS NULL OR BTRIM(owner) = '' OR LOWER(BTRIM(owner)) = 'unassigned' THEN $2 ELSE owner END
+		WHERE id = ANY($3) AND status = 'open' RETURNING id
+	) INSERT INTO public.jimo_alert_comments (alert_id, author, body) SELECT id, $2, $1 FROM updated`, reason, resolver, pq.Array(ids))
+	if err != nil {
+		logger.Error("resolve alerts failed", "error", err)
+		return fail(c, http.StatusInternalServerError, "failed to resolve alerts (CWB_ALT_067)")
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("count resolved alerts failed", "error", err)
+		return fail(c, http.StatusInternalServerError, "failed to resolve alerts (CWB_ALT_068)")
+	}
+	if count != int64(len(ids)) {
+		return fail(c, http.StatusConflict, "some alerts no longer exist or are already resolved; refresh and try again (CWB_ALT_069)")
+	}
+	if err := tx.Commit(); err != nil {
+		logger.Error("commit alert resolution failed", "error", err)
+		return fail(c, http.StatusInternalServerError, "failed to resolve alerts (CWB_ALT_070)")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
 
 func update(c echo.Context, logger ApiTypes.JimoLogger, id int64, set string, args []any, op, loc string) error {
@@ -326,8 +396,13 @@ func ListComments(c echo.Context) error {
 		return fail(c, http.StatusInternalServerError, "database not initialised (CWB_ALT_043)")
 	}
 	rows, err := db.QueryContext(c.Request().Context(),
-		`SELECT id, author, body, created_at FROM public.jimo_alert_comments
-		  WHERE alert_id = $1 ORDER BY created_at, id`, id)
+		`SELECT id, author, body, created_at FROM (
+		 SELECT id, author, body, created_at FROM public.jimo_alert_comments WHERE alert_id = $1
+		 UNION ALL
+		 SELECT -l.id, COALESCE(l.resolver, ''), l.resolution, COALESCE(l.resolve_time, l.created_at)
+		 FROM public.jimo_alert_log l WHERE l.id = $1 AND l.status = 'resolved' AND NULLIF(BTRIM(l.resolution), '') IS NOT NULL
+		 AND NOT EXISTS (SELECT 1 FROM public.jimo_alert_comments k WHERE k.alert_id = l.id AND k.body = l.resolution AND k.author = COALESCE(l.resolver, ''))
+		) comments ORDER BY created_at, id`, id)
 	if err != nil {
 		logger.Error("list alert comments failed", "id", id, "error", err)
 		return fail(c, http.StatusInternalServerError, "failed to list comments (CWB_ALT_044)")
