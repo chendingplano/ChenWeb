@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -103,7 +105,10 @@ func StartQuestionGeneration(c echo.Context) error {
 			req.preparedMetrics, req.preparedLines = metrics, lines
 		}
 	}
-	modelRef := envOrDefault("QUESTION_GEN_MODEL_NAME", "deepseek-flash-processor")
+	modelRef := strings.TrimSpace(os.Getenv("QUESTION_GEN_MODEL_NAME"))
+	if modelRef == "" {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "QUESTION_GEN_MODEL_NAME is required"})
+	}
 	userID, _ := c.Get("question-generator-user-id").(string)
 	promptName, _ := questionPurposePrompt(req.Purpose)
 	timeout := questionGenerationTimeout

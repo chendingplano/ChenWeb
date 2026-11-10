@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -24,11 +22,7 @@ func profileStoreFixture(t *testing.T) (*SQLProfileVersionStore, sqlmock.Sqlmock
 
 func profileRegistryFixture(t *testing.T) *ProfileRegistry {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test file path")
-	}
-	registry, err := LoadProfileRegistry(filepath.Clean(filepath.Join(filepath.Dir(file), "../../../prompts")))
+	registry, err := LoadProfileRegistry(repositoryPromptDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,8 @@ package flowhandler
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/labstack/echo/v4"
@@ -18,12 +20,12 @@ func GetNodeTypes(c echo.Context) error {
 			{
 				"id": "ai-assistant", "label": "AI Assistant", "category": "AI", "icon": "Bot",
 				"inputs": []string{"text", "context"}, "outputs": []string{"response"},
-				"defaultData": map[string]any{"model": "gpt-4o", "system_prompt": "", "temperature": 0.7},
+				"defaultData": map[string]any{"model": strings.TrimSpace(os.Getenv("FLOW_ASSISTANT_MODEL_NAME")), "system_prompt": "", "temperature": 0.7},
 			},
 			{
 				"id": "coding-assistant", "label": "Coding Assistant", "category": "AI", "icon": "Terminal",
 				"inputs": []string{"code", "context"}, "outputs": []string{"code", "explanation"},
-				"defaultData": map[string]any{"language": "typescript", "model": "gpt-4o"},
+				"defaultData": map[string]any{"language": "typescript", "model": strings.TrimSpace(os.Getenv("FLOW_ASSISTANT_MODEL_NAME"))},
 			},
 			{
 				"id": "text", "label": "Text", "category": "Data", "icon": "Type",

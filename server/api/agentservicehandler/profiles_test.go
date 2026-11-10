@@ -3,6 +3,7 @@ package agentservicehandler
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,6 +33,11 @@ func (s resolvingProfileStore) RestoreActiveVersion(context.Context, string, str
 
 func repositoryPromptDir(t *testing.T) string {
 	t.Helper()
+	for _, key := range []string{"PI_KNOWLEDGE_GUIDE_MODEL", "PI_PROBLEM_DIAGNOSTICS_MODEL"} {
+		if _, set := os.LookupEnv(key); !set {
+			t.Setenv(key, "test-agent-model")
+		}
+	}
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test file path")
@@ -85,6 +91,14 @@ func TestLoadProfileRegistryLoadsTwoIndependentVersionedProfiles(t *testing.T) {
 	if !strings.Contains(strings.ToLower(diagnostics.SystemPrompt), "medical") ||
 		!strings.Contains(strings.ToLower(diagnostics.SystemPrompt), "read-only") {
 		t.Fatal("diagnostics prompt must state high-stakes and read-only limits")
+	}
+}
+
+func TestLoadProfileRegistryRequiresModelEnvironment(t *testing.T) {
+	t.Setenv("PI_KNOWLEDGE_GUIDE_MODEL", "  ")
+	_, err := LoadProfileRegistry(repositoryPromptDir(t))
+	if err == nil || !strings.Contains(err.Error(), "PI_KNOWLEDGE_GUIDE_MODEL is required") {
+		t.Fatalf("expected missing model configuration error, got %v", err)
 	}
 }
 

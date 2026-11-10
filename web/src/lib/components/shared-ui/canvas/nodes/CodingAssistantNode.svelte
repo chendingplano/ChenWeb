@@ -7,6 +7,6 @@
   inputHandles={['code','context']} outputHandles={['code','explanation']}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
-    {data.language ?? 'typescript'} · {data.model ?? 'gpt-4o'}
+    {data.language ?? 'typescript'} · {data.model ?? ''}
   </div>
 </BaseNode>

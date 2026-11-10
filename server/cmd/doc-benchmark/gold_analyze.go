@@ -88,12 +88,13 @@ func runRoutingAnalyze(args []string, stdout, stderr io.Writer) error {
 }
 
 func runGoldAnalyze(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	_ = godotenv.Load()
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	datasetRoot := fs.String("dataset", "", "corpus dataset root (contains manifest.json)")
 	caseID := fs.String("case", "", "corpus case id within the dataset")
 	resultsPath := fs.String("results", "", "path to gold-run's JSON stdout output")
-	modelRef := fs.String("model", envOr("ANALYZE_BENCHMARK_MODEL_NAME", "deepseek-flash-chen"), "model ref (key in MODEL_DEF_FILE / .models.toml)")
+	modelRef := strings.TrimSpace(os.Getenv("ANALYZE_BENCHMARK_MODEL_NAME"))
 	promptRef := fs.String("prompt", envOr("ANALYZE_BENCHMARK_RESULTS_PROMPT", "prompt-analyze-benchmark-results-v1.md"), "prompt file name or path")
 	output := fs.String("output", "", "output markdown file (stdout when omitted)")
 	if err := fs.Parse(args); err != nil {
@@ -101,6 +102,10 @@ func runGoldAnalyze(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	if *datasetRoot == "" || *caseID == "" || *resultsPath == "" {
 		return fmt.Errorf("%w: --dataset, --case, and --results are required", errUsage)
+	}
+
+	if modelRef == "" {
+		return fmt.Errorf("%w: ANALYZE_BENCHMARK_MODEL_NAME is required", errUsage)
 	}
 
 	ds, err := docbenchmark.LoadCorpusDataset(*datasetRoot)
@@ -129,15 +134,14 @@ func runGoldAnalyze(ctx context.Context, args []string, stdout, stderr io.Writer
 		return err
 	}
 
-	_ = godotenv.Load()
 	promptText, promptRefOut, _, err := docprocessing.LoadPromptByRef(*promptRef)
 	if err != nil {
 		return fmt.Errorf("load prompt %q: %w", *promptRef, err)
 	}
 
-	client, modelName, err := docprocessing.BuildReviewerLLMClient(*modelRef)
+	client, modelName, err := docprocessing.BuildReviewerLLMClient(modelRef)
 	if err != nil {
-		return fmt.Errorf("build LLM client for model %q: %w", *modelRef, err)
+		return fmt.Errorf("build LLM client for model %q: %w", modelRef, err)
 	}
 
 	in := docprocessing.NewLLMJSONInput(ctx, promptRefOut, promptText, modelName, inputText, "gold-run corpus analysis", "CWB_DOC_BENCHMARK/analyze")

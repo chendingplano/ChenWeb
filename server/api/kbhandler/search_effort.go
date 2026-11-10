@@ -33,7 +33,6 @@ const (
 	envSearchEffortHigh      = "HYBRID_SEARCH_HIGH_EFFORTS"
 	envSearchEffortTimeoutMS = "HYBRID_SEARCH_EFFORT_TIMEOUT_MS"
 
-	defaultSearchEffortModel   = "deepseek-flash-processor"
 	defaultSearchEffortMedium  = 2
 	defaultSearchEffortHigh    = 5
 	defaultSearchEffortTimeout = 20 * time.Second
@@ -151,7 +150,10 @@ type searchEffortLLM struct {
 }
 
 func loadSearchEffortLLM(logger ApiTypes.JimoLogger) (searchEffortLLM, error) {
-	modelRef := envOrDefault(envSearchEffortModel, defaultSearchEffortModel)
+	modelRef := strings.TrimSpace(os.Getenv(envSearchEffortModel))
+	if modelRef == "" {
+		return searchEffortLLM{}, fmt.Errorf("%s is required", envSearchEffortModel)
+	}
 	cfg, err := loadSearchEffortModel(modelRef)
 	if err != nil {
 		return searchEffortLLM{}, fmt.Errorf("model %q: %w", modelRef, err)

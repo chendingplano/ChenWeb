@@ -40,6 +40,7 @@ func TestQuestionGenerationRequestedQuestionsRoundUp(t *testing.T) {
 }
 
 func TestQuestionGenerationCapacityStartsWithPreparedPool(t *testing.T) {
+	t.Setenv("QUESTION_GEN_MODEL_NAME", "test-question-model")
 	for _, tc := range []struct {
 		name                                   string
 		available, wanted, confirmed, expected int
@@ -90,7 +91,7 @@ func TestQuestionGenerationCapacityStartsWithPreparedPool(t *testing.T) {
 			for i := range columns {
 				columns[i] = strings.TrimSpace(columns[i])
 			}
-			mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(753), "search_metrics", "", tc.expected, tc.expected, tc.expected, "mixed", "deepseek-flash-processor", questionGenerationPrompt, "", tc.expected, tc.expected, tc.expected, 600).WillReturnRows(sqlmock.NewRows(columns).AddRow(12, 753, "search_metrics", "", tc.expected, tc.expected, tc.expected, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, tc.expected, tc.expected, tc.expected, 0, 0, 0, 0, time.Now().Add(time.Hour)))
+			mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(753), "search_metrics", "", tc.expected, tc.expected, tc.expected, "mixed", "test-question-model", questionGenerationPrompt, "", tc.expected, tc.expected, tc.expected, 600).WillReturnRows(sqlmock.NewRows(columns).AddRow(12, 753, "search_metrics", "", tc.expected, tc.expected, tc.expected, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, tc.expected, tc.expected, tc.expected, 0, 0, 0, 0, time.Now().Add(time.Hour)))
 			body := map[string]any{"input_record_id": 753, "purpose": "search_metrics", "num_questions_to_generate": tc.wanted}
 			if tc.confirmed >= 0 {
 				body["confirmed_available_questions"] = tc.confirmed

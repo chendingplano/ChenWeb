@@ -14,7 +14,7 @@ import (
 
 func TestValidateEmitsMachineReadableSnapshot(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
-	t.Setenv("DOC_BENCHMARK_METRICS_MODEL_NAME", "deepseek-flash-chen")
+	t.Setenv("DOC_BENCHMARK_METRICS_MODEL_NAME", "test-model-profile")
 	var stdout, stderr bytes.Buffer
 	code := execute(context.Background(), []string{"validate", "--experiment", filepath.Join(root, "benchmark/doc-processors/experiments/example.toml"), "--datasets-root", filepath.Join(root, "benchmark/doc-processors/datasets")}, &stdout, &stderr)
 	if code != 0 {
@@ -23,6 +23,15 @@ func TestValidateEmitsMachineReadableSnapshot(t *testing.T) {
 	var got map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || got["dataset_hash"] == "" || got["request_hash"] == "" {
 		t.Fatalf("output=%s err=%v", stdout.String(), err)
+	}
+}
+
+func TestAnalyzeRequiresModelEnvironment(t *testing.T) {
+	t.Setenv("ANALYZE_BENCHMARK_MODEL_NAME", "  ")
+	var stdout, stderr bytes.Buffer
+	err := runGoldAnalyze(context.Background(), []string{"--dataset", "missing", "--case", "case", "--results", "missing.json"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "ANALYZE_BENCHMARK_MODEL_NAME is required") {
+		t.Fatalf("expected missing model configuration error, got %v", err)
 	}
 }
 

@@ -62,7 +62,7 @@ func StartHybridSearchBenchmark(c echo.Context) error {
 	}
 	keywordsModel, keywordsPrompt := "", ""
 	if opts.QueryKeywords {
-		keywordsModel = envOrDefault(envSearchKeywordsModel, defaultSearchKeywordsModel)
+		keywordsModel = strings.TrimSpace(os.Getenv(envSearchKeywordsModel))
 		keywordsPrompt = envOrDefault(envSearchKeywordsPrompt, defaultSearchKeywordsPrompt)
 	}
 	userID, _ := c.Get("question-generator-user-id").(string)

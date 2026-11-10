@@ -22,7 +22,7 @@ const pendingLifetime = 30 * time.Minute
 
 func NewHandler(cfg Config) echo.HandlerFunc {
 	if strings.TrimSpace(cfg.Model) == "" {
-		cfg.Model = defaultModel
+		cfg.Model = openAIModelName()
 	}
 	if cfg.Provider == nil {
 		cfg.Provider = newOpenAIProvider(cfg.BaseURL, cfg.APIKey)

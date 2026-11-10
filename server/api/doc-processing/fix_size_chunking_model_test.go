@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func TestChunkModelsRequireEnvironment(t *testing.T) {
+	t.Setenv("EXTRACT_TOPIC_MODEL_NAME", "  ")
+	t.Setenv("CHUNK_SUMMARY_MODEL_NAME", "")
+	if _, _, _, err := loadFixedSizeTopicModelFromEnv(); err == nil {
+		t.Fatal("topic model must require EXTRACT_TOPIC_MODEL_NAME")
+	}
+	if _, _, _, err := loadFixedSizeSummaryModelFromEnv(); err == nil {
+		t.Fatal("summary model must require CHUNK_SUMMARY_MODEL_NAME or EXTRACT_TOPIC_MODEL_NAME")
+	}
+}
+
 // Regression test for the Spend Reports dashboard showing a phantom, always-empty
 // "deepseek-flash-processor" chart: when EXTRACT_TOPIC_MODEL_NAME names a profile
 // that is not defined in the resolved models file, the loader must fail loudly

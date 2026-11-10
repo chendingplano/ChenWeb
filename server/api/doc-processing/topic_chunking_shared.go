@@ -17,8 +17,6 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
-const DefaultChunkTopicModelName = "deepseek-v4-flash"
-
 func buildRecordArtifactDir(baseDir string, recordID int64) (string, error) {
 	if strings.TrimSpace(baseDir) == "" {
 		return "", errors.New("(MID_26042801) artifact dir is empty")

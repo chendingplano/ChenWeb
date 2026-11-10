@@ -162,12 +162,12 @@ func TestRefMentionKeyStable(t *testing.T) {
 
 func TestNewReferencesProcessor_NoReasoningPolicy(t *testing.T) {
 	modelsPath := filepath.Join(t.TempDir(), ".models.toml")
-	body := "[deepseek-flash-chen]\nhost = \"cloud\"\nmodel_name = \"deepseek-v4-flash\"\napi_key = \"sk-test\"\nbase_url = \"https://api.deepseek.com\"\nthinking_type = \"enabled\"\n"
+	body := "[test-model-profile]\nhost = \"cloud\"\nmodel_name = \"deepseek-v4-flash\"\napi_key = \"sk-test\"\nbase_url = \"https://api.deepseek.com\"\nthinking_type = \"enabled\"\n"
 	if err := os.WriteFile(modelsPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("MODEL_DEF_FILE", modelsPath)
-	t.Setenv("EXTRACT_REFERENCES_MODEL_NAME", "deepseek-flash-chen")
+	t.Setenv("EXTRACT_REFERENCES_MODEL_NAME", "test-model-profile")
 
 	t.Setenv("MODEL_DEFAULT_REASONING_POLICY", "")
 	kept := &llmclients.OpenAIJSONClient{}

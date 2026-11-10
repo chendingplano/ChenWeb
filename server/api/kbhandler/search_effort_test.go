@@ -41,6 +41,7 @@ func (s *effortStub) ExtractJSON(_ context.Context, in llmclients.JSONExtraction
 
 func useEffortStub(t *testing.T, stub *effortStub, search func(query string) []artifactSearchResult) *[]string {
 	t.Helper()
+	t.Setenv(envSearchEffortModel, "test-search-model")
 	oldClient, oldModel, oldPrompt, oldQuery, oldDetails := newSearchEffortClient, loadSearchEffortModel, loadSearchEffortPrompt, searchEffortQuery, searchEffortDetails
 	t.Cleanup(func() {
 		newSearchEffortClient, loadSearchEffortModel, loadSearchEffortPrompt, searchEffortQuery, searchEffortDetails = oldClient, oldModel, oldPrompt, oldQuery, oldDetails

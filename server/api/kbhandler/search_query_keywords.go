@@ -27,7 +27,6 @@ const (
 	envSearchKeywordsPrompt    = "SEARCH_QUERY_KEYWORDS_PROMPT"
 	envSearchKeywordsTimeoutMS = "SEARCH_QUERY_KEYWORDS_TIMEOUT_MS"
 
-	defaultSearchKeywordsModel   = "deepseek-flash-processor"
 	defaultSearchKeywordsPrompt  = "prompt-search-query-keywords-v1.md"
 	defaultSearchKeywordsTimeout = 3 * time.Second
 
@@ -154,7 +153,10 @@ func searchKeywordsTimeout() time.Duration {
 // load returns the client, model name and prompt, (re)building them when the configured model or
 // prompt changes. Reasoning is always disabled: the call is on the search's critical path.
 func (s *searchKeywordsState) load(logger ApiTypes.JimoLogger) (metricJSONExtractor, string, string, error) {
-	modelRef := envOrDefault(envSearchKeywordsModel, defaultSearchKeywordsModel)
+	modelRef := strings.TrimSpace(os.Getenv(envSearchKeywordsModel))
+	if modelRef == "" {
+		return nil, "", "", fmt.Errorf("%s is required", envSearchKeywordsModel)
+	}
 	promptRef := envOrDefault(envSearchKeywordsPrompt, defaultSearchKeywordsPrompt)
 	s.mu.Lock()
 	defer s.mu.Unlock()

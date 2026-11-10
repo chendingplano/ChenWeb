@@ -12,7 +12,7 @@ func TestNewTestMethodsProcessor_ConfiguresExtractorFromModelsFile(t *testing.T)
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, ".models.toml")
 	modelsBody := `
-[deepseek-flash-chen]
+[test-model-profile]
 host = "cloud"
 model_name = "deepseek-v4-flash"
 api_key = "sk-test-test-methods"
@@ -23,7 +23,7 @@ timeout_sec = 120
 		t.Fatalf("write models file: %v", err)
 	}
 
-	t.Setenv("EXTRACT_TEST_METHODS_MODEL_NAME", "deepseek-flash-chen")
+	t.Setenv("EXTRACT_TEST_METHODS_MODEL_NAME", "test-model-profile")
 	t.Setenv("MODEL_DEF_FILE", modelsPath)
 
 	client := &llmclients.OpenAIJSONClient{}

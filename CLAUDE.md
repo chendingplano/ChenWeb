@@ -135,3 +135,33 @@ A matching `llm_account_model_profile` row is needed for profile linkage. An
 absent setting preserves the empty model name.
 Restart the API after changing this configuration. This setting controls usage
 attribution; the provider request remains `GET /user/balance`.
+
+# Model configuration
+
+Model selections and defaults in application code must come from environment variables.
+Never embed a concrete model name or profile reference in code, including fallback values,
+UI examples, and fixed option lists. Resolve configured profile references through
+`MODEL_DEF_FILE`; model definitions and operator-maintained configuration stay outside code.
+Missing model configuration must report the variable to set rather than select a model.
+Tests use explicit environment variables with synthetic model profiles.
+
+Model settings used by the affected features:
+
+- Benchmark analysis: `ANALYZE_BENCHMARK_MODEL_NAME` (required; replaces `analyze --model`).
+- Document classification: `DOCBUILDER_MODEL`; category decisions: `CATEGORY_DECISION_MODEL`.
+- Chunk topics: `EXTRACT_TOPIC_MODEL_NAME`; chunk summaries: `CHUNK_SUMMARY_MODEL_NAME`
+  with `EXTRACT_TOPIC_MODEL_NAME` as the environment-only fallback.
+- Search keywords: `SEARCH_QUERY_KEYWORDS_MODEL_NAME`; search effort:
+  `HYBRID_SEARCH_EFFORT_MODEL_NAME`; question generation: `QUESTION_GEN_MODEL_NAME`.
+- Image generation: `OPENAI_IMAGE_GEN_MODEL`, or `QWEN_IMAGE_GEN_MODEL` with
+  `IMAGE_GEN_MODEL` as its environment-only fallback.
+- Agent profiles: `PI_KNOWLEDGE_GUIDE_MODEL` and `PI_PROBLEM_DIAGNOSTICS_MODEL`.
+- Review model suggestions: `DOC_REVIEW_<ASPECT>_MODEL_NAME` (uppercase aspect name),
+  falling back to `DOC_REVIEW_MODEL_NAME`. Reviewer execution retains its operator-maintained
+  reviewer/package configuration.
+- Canvas node defaults: `FLOW_ASSISTANT_MODEL_NAME`.
+- Assistant dashboard settings: `AI_ASSISTANT_MODEL_NAME` and
+  `AI_ASSISTANT_FALLBACK_MODEL_NAME`.
+
+Set these in the launch environment (or the application's loaded `.env`) before using the
+corresponding feature. Optional UI suggestions stay empty when unset.

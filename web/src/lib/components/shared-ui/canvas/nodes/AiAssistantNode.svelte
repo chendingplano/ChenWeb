@@ -8,7 +8,7 @@
   inputHandles={['text','context']} outputHandles={['response']}
 >
   <div style="padding:6px 10px; font-size:9px; color:var(--cv-text-muted);">
-    {data.model ?? 'gpt-4o'}
+    {data.model ?? ''}
     {#if data.system_prompt}<span style="margin-left:4px;color:var(--cv-text-faint);">{m.aiassistantnode_prompt_set()}</span>{/if}
   </div>
 </BaseNode>

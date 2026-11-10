@@ -27,7 +27,6 @@
 
   // Map of attribute → UI control type
   const SELECT_ATTRS: Record<string, string[]> = {
-    model:      ['gpt-4o', 'gpt-4o-mini', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     language:   ['typescript', 'python', 'go', 'rust', 'java', 'c++', 'bash'],
     file_type:  ['txt', 'csv', 'json', 'pdf', 'md', 'html'],
     media_type: ['image', 'audio', 'video'],

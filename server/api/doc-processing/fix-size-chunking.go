@@ -3322,7 +3322,7 @@ func envFloat(key string, fallback float64, minVal float64) float64 {
 func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
 	modelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_MODEL_NAME"))
 	if modelRef == "" {
-		return "", "", structureModelConfig{ModelName: DefaultChunkTopicModelName}, nil
+		return "", "", structureModelConfig{}, fmt.Errorf("EXTRACT_TOPIC_MODEL_NAME is required")
 	}
 
 	modelPath, err = resolveModelsFilePath("CHUNK_EXTRACT_TOPIC_MODELS_FILE")
@@ -3366,7 +3366,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 		modelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_MODEL_NAME"))
 	}
 	if modelRef == "" {
-		return "", "", structureModelConfig{ModelName: DefaultChunkTopicModelName}, nil
+		return "", "", structureModelConfig{}, fmt.Errorf("CHUNK_SUMMARY_MODEL_NAME or EXTRACT_TOPIC_MODEL_NAME is required")
 	}
 
 	modelPath, err = resolveModelsFilePath("CHUNK_SUMMARY_MODELS_FILE")

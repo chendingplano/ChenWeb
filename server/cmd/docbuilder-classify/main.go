@@ -23,7 +23,7 @@ import (
 
 func main() {
 	key := flag.String("group", "", "group key, e.g. user-manuals (required)")
-	model := flag.String("model", "", "model profile in .models.toml (default $DOCBUILDER_MODEL or deepseek-flash-processor)")
+	model := flag.String("model", "", "model profile in .models.toml (default $DOCBUILDER_MODEL; required when omitted)")
 	dry := flag.Bool("dry-run", false, "register documents and report what would be classified; no model call")
 	force := flag.Bool("force", false, "reclassify documents that already have a category")
 	flag.Parse()

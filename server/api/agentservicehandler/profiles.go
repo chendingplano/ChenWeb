@@ -159,7 +159,6 @@ type profileDefinition struct {
 	description  string
 	promptFile   string
 	provider     string
-	model        string
 	thinking     string
 	stores       []string
 	limits       ProfileLimits
@@ -185,14 +184,14 @@ func LoadProfileRegistry(promptDir string) (*ProfileRegistry, error) {
 		{
 			slug: "knowledge-guide", envPrefix: "PI_KNOWLEDGE_GUIDE", friendlyName: "Knowledge Guide",
 			description: "Answers questions using evidence from ChenWeb's knowledge base.",
-			promptFile:  "prompt-agent-knowledge-guide-v1.md", provider: "anthropic", model: "claude-sonnet-4-5",
+			promptFile:  "prompt-agent-knowledge-guide-v1.md", provider: "anthropic",
 			thinking: "medium", stores: []string{"Research"},
 			limits: ProfileLimits{MaxToolCalls: 12, MaxElapsed: 90 * time.Second, MaxOutputTokens: 1200, MaxEvidenceBytes: 65536},
 		},
 		{
 			slug: "problem-diagnostics", envPrefix: "PI_PROBLEM_DIAGNOSTICS", friendlyName: "Problem Diagnosis Guide",
 			description: "Investigates product, process, and documentation problems using read-only evidence.",
-			promptFile:  "prompt-agent-problem-diagnosis-v1.md", provider: "anthropic", model: "claude-sonnet-4-5",
+			promptFile:  "prompt-agent-problem-diagnosis-v1.md", provider: "anthropic",
 			thinking: "high", stores: []string{"Research"},
 			limits: ProfileLimits{MaxToolCalls: 16, MaxElapsed: 120 * time.Second, MaxOutputTokens: 1600, MaxEvidenceBytes: 98304},
 		},
@@ -279,7 +278,10 @@ func loadProfile(promptDir string, definition profileDefinition) (AgentServicePr
 	}
 
 	provider := envDefault(definition.envPrefix+"_PROVIDER", definition.provider)
-	model := envDefault(definition.envPrefix+"_MODEL", definition.model)
+	model := strings.TrimSpace(os.Getenv(definition.envPrefix + "_MODEL"))
+	if model == "" {
+		return AgentServiceProfile{}, fmt.Errorf("%s_MODEL is required", definition.envPrefix)
+	}
 	stores := envCSV(definition.envPrefix+"_ALLOWED_STORES", definition.stores)
 	if len(stores) == 0 {
 		return AgentServiceProfile{}, fmt.Errorf("%s_ALLOWED_STORES must contain at least one store", definition.envPrefix)

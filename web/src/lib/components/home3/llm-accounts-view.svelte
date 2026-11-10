@@ -50,7 +50,7 @@
 		status: 'active',
 		reconciliation_kind: 'provider_balance',
 		is_reconciliation_enabled: true,
-		default_model_name: 'deepseek-chat'
+		default_model_name: ''
 	});
 	let editDraft = $state<CreateLLMAccountInput>({
 		account_name: '',

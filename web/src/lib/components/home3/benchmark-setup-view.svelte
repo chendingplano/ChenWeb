@@ -142,7 +142,6 @@
 		{
 			key: 'metrics_model_name',
 			label: m.benchmark_setup_metrics_model_name(),
-			placeholder: 'deepseek-flash-chen',
 			help: {
 				purpose: m.benchmark_setup_the_model_reference_injected_into(),
 				valid: m.benchmark_setup_a_model_name_that_resolves(),

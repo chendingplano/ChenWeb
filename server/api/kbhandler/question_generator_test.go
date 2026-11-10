@@ -227,13 +227,13 @@ func TestQuestionGeneratorAdmin(t *testing.T) {
 
 func TestStartQuestionGenerationPersistsBeforeLaunch(t *testing.T) {
 	_, mock := installPolicyDB(t)
-	t.Setenv("QUESTION_GEN_MODEL_NAME", "")
+	t.Setenv("QUESTION_GEN_MODEL_NAME", "test-question-model")
 	original := launchQuestionGeneration
 	t.Cleanup(func() { launchQuestionGeneration = original })
 	launched := false
 	launchQuestionGeneration = func(_ *sql.DB, id int64, req questionGenerationRequest, model, user string) {
 		launched = true
-		if id != 12 || model != "deepseek-flash-processor" || user != "admin" || *req.OneHopCount != 10 {
+		if id != 12 || model != "test-question-model" || user != "admin" || *req.OneHopCount != 10 {
 			t.Errorf("incorrect launch: %d %s %s %+v", id, model, user, req)
 		}
 	}
@@ -242,7 +242,7 @@ func TestStartQuestionGenerationPersistsBeforeLaunch(t *testing.T) {
 	for i := range columns {
 		columns[i] = strings.TrimSpace(columns[i])
 	}
-	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(416), "search_metrics", "context", 10, 10, 10, "mixed", "deepseek-flash-processor", questionGenerationPrompt, "admin", 10, 10, 10, 600).WillReturnRows(sqlmock.NewRows(columns).AddRow(12, 416, "search_metrics", "context", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 10, 10, 10, 0, 0, 0, 0, time.Now().Add(time.Hour)))
+	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(416), "search_metrics", "context", 10, 10, 10, "mixed", "test-question-model", questionGenerationPrompt, "admin", 10, 10, 10, 600).WillReturnRows(sqlmock.NewRows(columns).AddRow(12, 416, "search_metrics", "context", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 10, 10, 10, 0, 0, 0, 0, time.Now().Add(time.Hour)))
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"input_record_id":416,"purpose":"search_metrics","description":"context"}`)), rec)

@@ -238,7 +238,7 @@ func TestQuestionGeneratorBatchStopsWithoutMetrics(t *testing.T) {
 
 func TestStartQuestionGenerationBatchWithoutInput(t *testing.T) {
 	_, mock := installPolicyDB(t)
-	t.Setenv("QUESTION_GEN_MODEL_NAME", "")
+	t.Setenv("QUESTION_GEN_MODEL_NAME", "test-question-model")
 	old := launchQuestionGeneration
 	t.Cleanup(func() { launchQuestionGeneration = old })
 	launched := false
@@ -252,7 +252,7 @@ func TestStartQuestionGenerationBatchWithoutInput(t *testing.T) {
 	for i := range cols {
 		cols[i] = strings.TrimSpace(cols[i])
 	}
-	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(0), "search_metrics", "", 10, 10, 10, "mixed", "deepseek-flash-processor", questionGenerationPrompt, "", 7, 7, 7, 3600).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, nil, "search_metrics", "", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 7, 7, 7, 0, 0, 0, 0, time.Now().Add(time.Hour)))
+	mock.ExpectQuery("INSERT INTO testbed.generated_question_runs").WithArgs(int64(0), "search_metrics", "", 10, 10, 10, "mixed", "test-question-model", questionGenerationPrompt, "", 7, 7, 7, 3600).WillReturnRows(sqlmock.NewRows(cols).AddRow(12, nil, "search_metrics", "", 10, 10, 10, "mixed", "running", "", "", questionGenerationPrompt, "", time.Now(), nil, 7, 7, 7, 0, 0, 0, 0, time.Now().Add(time.Hour)))
 	e := echo.New()
 	rec := httptest.NewRecorder()
 	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"purpose":"search_metrics","total_metrics":7}`)), rec)

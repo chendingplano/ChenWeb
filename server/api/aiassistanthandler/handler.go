@@ -4,6 +4,7 @@ package aiassistanthandler
 
 import (
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
@@ -50,10 +51,10 @@ func GetAgents(c echo.Context) error {
 	// TODO: fetch agents from database
 	return c.JSON(http.StatusOK, map[string]any{
 		"agents": []map[string]any{
-			{"id": "agent-1", "name": "ResearchBot", "status": "active", "model": "claude-sonnet-4-6", "desc": "Web research and summarization"},
-			{"id": "agent-2", "name": "SchedulerBot", "status": "active", "model": "gpt-4o", "desc": "Task scheduling and calendar management"},
-			{"id": "agent-3", "name": "CodeReviewBot", "status": "idle", "model": "claude-sonnet-4-6", "desc": "Automated code review"},
-			{"id": "agent-4", "name": "WriterBot", "status": "idle", "model": "claude-sonnet-4-6", "desc": "Technical writing and documentation"},
+			{"id": "agent-1", "name": "ResearchBot", "status": "active", "model": strings.TrimSpace(os.Getenv("AI_ASSISTANT_MODEL_NAME")), "desc": "Web research and summarization"},
+			{"id": "agent-2", "name": "SchedulerBot", "status": "active", "model": strings.TrimSpace(os.Getenv("AI_ASSISTANT_MODEL_NAME")), "desc": "Task scheduling and calendar management"},
+			{"id": "agent-3", "name": "CodeReviewBot", "status": "idle", "model": strings.TrimSpace(os.Getenv("AI_ASSISTANT_MODEL_NAME")), "desc": "Automated code review"},
+			{"id": "agent-4", "name": "WriterBot", "status": "idle", "model": strings.TrimSpace(os.Getenv("AI_ASSISTANT_MODEL_NAME")), "desc": "Technical writing and documentation"},
 		},
 		"total":  4,
 		"active": 2,
@@ -241,8 +242,8 @@ func GetSettings(c echo.Context) error {
 				"autoSave":      true,
 			},
 			"aiModels": map[string]any{
-				"defaultModel":  "claude-sonnet-4-6",
-				"fallbackModel": "gpt-4o",
+				"defaultModel":  strings.TrimSpace(os.Getenv("AI_ASSISTANT_MODEL_NAME")),
+				"fallbackModel": strings.TrimSpace(os.Getenv("AI_ASSISTANT_FALLBACK_MODEL_NAME")),
 				"maxTokens":     4096,
 				"temperature":   0.7,
 			},

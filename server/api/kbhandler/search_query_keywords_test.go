@@ -34,6 +34,7 @@ func (s *stubKeywordExtractor) ExtractJSON(ctx context.Context, in llmclients.JS
 // shared state. It returns the model config the client factory received.
 func useStubKeywordExtractor(t *testing.T, stub *stubKeywordExtractor) *ApiTypes.LLMModelDef {
 	t.Helper()
+	t.Setenv(envSearchKeywordsModel, "test-search-model")
 	oldClient, oldModel, oldPrompt, oldNow, oldState := newSearchKeywordsClient, loadSearchKeywordsModel, loadSearchKeywordsPrompt, searchKeywordsNow, searchKeywords
 	t.Cleanup(func() {
 		newSearchKeywordsClient, loadSearchKeywordsModel, loadSearchKeywordsPrompt, searchKeywordsNow, searchKeywords = oldClient, oldModel, oldPrompt, oldNow, oldState
@@ -71,6 +72,14 @@ func TestSearchQueryKeywordsOffMakesNoCall(t *testing.T) {
 	}
 	if stub.calls != 0 {
 		t.Fatalf("calls=%d", stub.calls)
+	}
+}
+
+func TestSearchKeywordsRequiresModelEnvironment(t *testing.T) {
+	t.Setenv(envSearchKeywordsModel, "  ")
+	s := &searchKeywordsState{}
+	if _, _, _, err := s.load(nil); err == nil || !strings.Contains(err.Error(), envSearchKeywordsModel) {
+		t.Fatalf("expected missing model configuration error, got %v", err)
 	}
 }
 

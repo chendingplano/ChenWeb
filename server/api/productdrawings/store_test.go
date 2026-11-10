@@ -73,6 +73,7 @@ func TestFindByNameRequiresDB(t *testing.T) {
 }
 
 func TestGenerateAndSaveInsertsRow(t *testing.T) {
+	t.Setenv("QWEN_IMAGE_GEN_MODEL", "test-image-model")
 	mock := installMockDB(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"data":[{"b64_json":"iVBORw0KGgo="}]}`)

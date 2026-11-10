@@ -239,10 +239,10 @@ func TestOverrideRejectsSecretShapedKeysRatherThanMasking(t *testing.T) {
 }
 
 func TestExperimentOverrideExpandsEnvVariableValues(t *testing.T) {
-	t.Setenv("DOC_BENCHMARK_METRICS_MODEL_NAME", "deepseek-flash-chen")
+	t.Setenv("DOC_BENCHMARK_METRICS_MODEL_NAME", "test-model-profile")
 	raw := []byte("name=\"x\"\ndataset=\"doc-processors-synthetic-core@1.0.0\"\nprocessors=[\"extract_metrics\"]\n[[variants]]\nname=\"base\"\n[variants.overrides]\nEXTRACT_METRIC_CANDIDATES_MODEL_NAME=\"${DOC_BENCHMARK_METRICS_MODEL_NAME}\"\n")
 	exp := resolveExperimentForTest(t, raw)
-	if got := exp.Variants[0].Overrides["EXTRACT_METRIC_CANDIDATES_MODEL_NAME"]; got != "deepseek-flash-chen" {
+	if got := exp.Variants[0].Overrides["EXTRACT_METRIC_CANDIDATES_MODEL_NAME"]; got != "test-model-profile" {
 		t.Fatalf("expanded override=%q", got)
 	}
 }

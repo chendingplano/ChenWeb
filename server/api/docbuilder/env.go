@@ -20,10 +20,9 @@ import (
 //	DOCUMENT_PDF_DIR      default <root>/.doc-pdf: cached PDF exports
 //	DOCUMENT_PDF_ENGINE   default typst: pandoc --pdf-engine for Markdown → PDF
 //	DOCUMENT_PDF_FONT     default Helvetica: main font name (must be installed; Chinese falls back automatically)
-//	DOCBUILDER_MODEL      default deepseek-flash-processor: .models.toml profile for classification
+//	DOCBUILDER_MODEL      required: .models.toml profile for classification
 //	DOCBUILDER_PROMPT     default prompt-docbuilder-classify-v1.md
 const (
-	defaultModel  = "deepseek-flash-processor"
 	defaultPrompt = "prompt-docbuilder-classify-v1.md"
 )
 
@@ -73,7 +72,10 @@ func NewStoreFromEnv(ctx context.Context, projectDB, sharedDB *sql.DB, requester
 // The model is returned as the profile name that is saved with each category.
 func NewClassifierFromEnv(model string, logger ApiTypes.JimoLogger) (Classifier, string, error) {
 	if model == "" {
-		model = envOr("DOCBUILDER_MODEL", defaultModel)
+		model = strings.TrimSpace(os.Getenv("DOCBUILDER_MODEL"))
+	}
+	if strings.TrimSpace(model) == "" {
+		return nil, "", fmt.Errorf("DOCBUILDER_MODEL is required")
 	}
 	client, modelName, err := docprocessing.BuildReviewerToolClient(model, logger)
 	if err != nil {
