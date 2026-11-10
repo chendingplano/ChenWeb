@@ -187,8 +187,13 @@
 		const top = below + rect.height <= window.innerHeight - gap ? below : Math.max(gap, anchor.top - rect.height - gap);
 		dialog.style.left = `${left}px`;
 		dialog.style.top = `${top}px`;
+		if (dialog === bulkDialog) {
+			dialog.style.maxWidth = `${window.innerWidth - left}px`;
+			dialog.style.maxHeight = `${window.innerHeight - top}px`;
+		}
 	}
 	async function showDialog(dialog: HTMLDialogElement, anchor: DOMRect) {
+		if (dialog === bulkDialog) { dialog.style.maxWidth = '90vw'; dialog.style.maxHeight = '85vh'; }
 		dialog.showModal();
 		await tick();
 		positionDialog(dialog, anchor);
@@ -203,6 +208,10 @@
 	function moveDialog(dialog: HTMLDialogElement, left: number, top: number) {
 		dialog.style.left = `${Math.max(0, Math.min(left, window.innerWidth - dialog.offsetWidth))}px`;
 		dialog.style.top = `${Math.max(0, Math.min(top, window.innerHeight - dialog.offsetHeight))}px`;
+		if (dialog === bulkDialog) {
+			dialog.style.maxWidth = `${window.innerWidth - dialog.offsetLeft}px`;
+			dialog.style.maxHeight = `${window.innerHeight - dialog.offsetTop}px`;
+		}
 	}
 	function dragDialog(event: PointerEvent) {
 		if (drag?.pointer === event.pointerId) moveDialog(drag.dialog, event.clientX - drag.x, event.clientY - drag.y);
@@ -277,9 +286,10 @@
 	function toggleChecked(id: number, checked: boolean) {
 		checkedIds = checked ? [...checkedIds, id] : checkedIds.filter((value) => value !== id);
 	}
-	function openBulkResolve() {
+	function openBulkResolve(event: MouseEvent) {
+		const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		bulkReason = ''; bulkError = '';
-		bulkDialog.showModal();
+		void showDialog(bulkDialog, anchor);
 	}
 	async function saveBulkResolve() {
 		if (!bulkReason.trim()) { bulkError = m.alert_logs_resolution_required(); return; }
@@ -463,9 +473,9 @@
 </dialog>
 
 
-<dialog bind:this={bulkDialog} aria-labelledby="alert-bulk-title" oncancel={(event) => { if (bulkSaving) event.preventDefault(); }} style="width:min(32rem, 90vw);background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
+<dialog bind:this={bulkDialog} aria-labelledby="alert-bulk-title" oncancel={(event) => { if (bulkSaving) event.preventDefault(); }} style="position:fixed;inset:auto;left:0;top:0;margin:0;width:min(32rem, 90vw);min-width:min(20rem, 90vw);min-height:12rem;max-width:90vw;max-height:85vh;overflow:auto;resize:both;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
 	<form onsubmit={(event) => { event.preventDefault(); void saveBulkResolve(); }}>
-		<h2 id="alert-bulk-title" style="font-size:16px;font-weight:600">{m.alert_logs_bulk_title({ count: checkedIds.length })}</h2>
+		<h2 id="alert-bulk-title"><button type="button" aria-label={m.alert_logs_move_dialog()} title={m.alert_logs_move_dialog()} onpointerdown={(event) => startDialogDrag(event, bulkDialog)} onpointermove={dragDialog} onpointerup={() => (drag = null)} onpointercancel={() => (drag = null)} onkeydown={(event) => moveDialogByKey(event, bulkDialog)} class="w-full text-left" style="cursor:move;touch-action:none;font-size:16px;font-weight:600">⋮⋮ &nbsp;{m.alert_logs_bulk_title({ count: checkedIds.length })}</button></h2>
 		<label for="alert-bulk-reason" class="block mt-4 mb-1" style="font-size:13px;color:{textSecondary}">{m.alert_logs_resolution()}</label>
 		<textarea id="alert-bulk-reason" bind:value={bulkReason} required disabled={bulkSaving} rows="4" placeholder={m.alert_logs_resolution_placeholder()} class="w-full rounded px-2 py-1.5 text-sm" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"></textarea>
 		{#if bulkError}<p role="alert" style="font-size:12px;color:{danger};margin-top:4px">{bulkError}</p>{/if}
