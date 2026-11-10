@@ -1,16 +1,98 @@
 package alertloghandler
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
+
+func TestListRequestCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name, stage string
+		canceled    bool
+		deadline    bool
+		queryErr    error
+	}{
+		{name: "canceled before count", stage: "count", canceled: true},
+		{name: "canceled during list", stage: "list", canceled: true},
+		{name: "active count cancellation error", stage: "count", queryErr: context.Canceled},
+		{name: "active list database error", stage: "list", queryErr: sql.ErrConnDone},
+		{name: "request deadline exceeded", deadline: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.deadline {
+				var stop context.CancelFunc
+				ctx, stop = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer stop()
+			}
+			matcher := sqlmock.QueryMatcherFunc(func(expected, actual string) error {
+				if err := sqlmock.QueryMatcherRegexp.Match(expected, actual); err != nil {
+					return err
+				}
+				if tc.canceled && tc.stage == "list" && strings.HasPrefix(actual, "SELECT id,") {
+					cancel()
+				}
+				return nil
+			})
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			oldDB, oldAuth := ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator
+			ApiTypes.SharedDBHandle = db
+			EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+				return &ApiTypes.UserInfo{Email: "alice@example.com"}, nil
+			}
+			defer func() { ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator = oldDB, oldAuth }()
+
+			switch {
+			case tc.canceled && tc.stage == "count":
+				cancel()
+			case tc.deadline:
+				// database/sql rejects an expired context before querying the driver.
+			case tc.stage == "list":
+				mock.ExpectQuery(`SELECT COUNT\(\*\)`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+				query := mock.ExpectQuery(`SELECT id, level, message`)
+				if tc.canceled {
+					query.WillDelayFor(time.Second).WillReturnError(sqlmock.ErrCancelled)
+				} else {
+					query.WillReturnError(tc.queryErr)
+				}
+			default:
+				mock.ExpectQuery(`SELECT COUNT\(\*\)`).WillReturnError(tc.queryErr)
+			}
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+			c := echo.New().NewContext(req, rec)
+			if err := List(c); err != nil {
+				t.Fatal(err)
+			}
+			if tc.canceled {
+				if c.Response().Committed || rec.Body.Len() != 0 {
+					t.Fatalf("canceled request wrote status %d: %s", rec.Code, rec.Body.String())
+				}
+			} else if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestAssignAndResolve(t *testing.T) {
 	db, mock, err := sqlmock.New()

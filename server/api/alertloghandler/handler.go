@@ -4,6 +4,7 @@
 package alertloghandler
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
@@ -91,6 +92,8 @@ func fail(c echo.Context, code int, msg string) error {
 
 // List handles GET /api/v1/system-admin/alert-logs, newest first by default.
 // Optional query params: page, page_size, sort, filter (repeatable).
+// Canceled requests stop without writing a response or creating an error alert;
+// query failures on active requests and expired deadlines remain server errors.
 func List(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_ALT_001")
 	defer rc.Close()
@@ -156,6 +159,10 @@ func List(c echo.Context) error {
 	var total int64
 	if err := db.QueryRowContext(c.Request().Context(),
 		"SELECT COUNT(*) FROM public.jimo_alert_log l WHERE "+whereSQL, args...).Scan(&total); err != nil {
+		if c.Request().Context().Err() == context.Canceled {
+			logger.Info("alert log list request canceled", "stage", "count")
+			return nil
+		}
 		logger.Error("count alert logs failed", "error", err)
 		return fail(c, http.StatusInternalServerError, "failed to list alert logs (CWB_ALT_006)")
 	}
@@ -170,6 +177,10 @@ func List(c echo.Context) error {
 		   FROM public.jimo_alert_log l WHERE `+whereSQL+
 			` ORDER BY `+orderSQL+` LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
+		if c.Request().Context().Err() == context.Canceled {
+			logger.Info("alert log list request canceled", "stage", "query")
+			return nil
+		}
 		logger.Error("list alert logs failed", "error", err)
 		return fail(c, http.StatusInternalServerError, "failed to list alert logs (CWB_ALT_007)")
 	}
@@ -182,6 +193,10 @@ func List(c echo.Context) error {
 		var resolveTime sql.NullTime
 		if err := rows.Scan(&r.ID, &r.Level, &r.Message, &r.ReqID, &r.Loc, &r.CallFlow, &r.Attrs,
 			&created, &r.Status, &r.Owner, &r.Resolution, &r.Resolver, &resolveTime, &r.Comments); err != nil {
+			if c.Request().Context().Err() == context.Canceled {
+				logger.Info("alert log list request canceled", "stage", "scan")
+				return nil
+			}
 			logger.Error("scan alert log failed", "error", err)
 			return fail(c, http.StatusInternalServerError, "failed to list alert logs (CWB_ALT_008)")
 		}
@@ -193,6 +208,10 @@ func List(c echo.Context) error {
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
+		if c.Request().Context().Err() == context.Canceled {
+			logger.Info("alert log list request canceled", "stage", "iterate")
+			return nil
+		}
 		logger.Error("iterate alert logs failed", "error", err)
 		return fail(c, http.StatusInternalServerError, "failed to list alert logs (CWB_ALT_009)")
 	}
