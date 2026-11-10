@@ -47,7 +47,7 @@ name_zh_cn = "技术与合规"
 desc_en = "regulations"
 desc_zh_cn = "法规与合规标准"
 strategy = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 max_tool_turns = 12
 
 [packages.P4]
@@ -57,7 +57,7 @@ name_zh_cn = "一致性"
 desc_en = "Cross-document coherence"
 desc_zh_cn = "跨文档一致性"
 strategy = "document-level"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 max_tool_turns = 0
 
 [packages.P3]
@@ -67,7 +67,7 @@ name_zh_cn = "内容质量"
 desc_en = "Depth and correctness of content"
 desc_zh_cn = "内容的深度与正确性"
 strategy = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 max_tool_turns = 0
 
 [packages.P2]
@@ -77,7 +77,7 @@ name_zh_cn = "结构与组织"
 desc_en = "Document architecture"
 desc_zh_cn = "文档架构"
 strategy = "document"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 max_tool_turns = 0
 
 [packages.P1]
@@ -87,7 +87,7 @@ name_zh_cn = "语言与文风"
 desc_en = "Surface-level writing quality"
 desc_zh_cn = "表层写作质量"
 strategy = "document-level"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 max_tool_turns = 0
 
 [packages.P6]
@@ -97,7 +97,7 @@ name_zh_cn = "元信息与流程"
 desc_en = "Document housekeeping"
 desc_zh_cn = "文档维护"
 strategy = "document-level"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 max_tool_turns = 0
 
 
@@ -113,7 +113,7 @@ enabled = true
 checked = true
 group = "P1"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-grammar-spelling.md"
 max_tool_turns = 0
 
@@ -126,7 +126,7 @@ enabled = true
 checked = true
 group = "P1"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-tone-voice.md"
 max_tool_turns = 0
 
@@ -139,7 +139,7 @@ enabled = true
 checked = true
 group = "P1"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-formatting-consistency.md"
 max_tool_turns = 0
 
@@ -152,7 +152,7 @@ enabled = true
 checked = true
 group = "P1"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-readability.md"
 max_tool_turns = 0
 
@@ -165,7 +165,7 @@ enabled = true
 checked = false
 group = "P1"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-localization.md"
 max_tool_turns = 0
 
@@ -179,7 +179,7 @@ enabled = true
 checked = true
 group = "P2"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-logical-flow.md"
 max_tool_turns = 0
 
@@ -192,7 +192,7 @@ enabled = true
 checked = true
 group = "P2"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-heading-hierarchy.md"
 max_tool_turns = 0
 
@@ -205,7 +205,7 @@ enabled = true
 checked = false
 group = "P2"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-toc-accuracy.md"
 max_tool_turns = 0
 
@@ -218,7 +218,7 @@ enabled = true
 checked = true
 group = "P2"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-navigability.md"
 max_tool_turns = 0
 
@@ -231,7 +231,7 @@ enabled = true
 checked = true
 group = "P2"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-section-balance.md"
 max_tool_turns = 0
 
@@ -244,7 +244,7 @@ enabled = true
 checked = true
 group = "P2"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-modularity.md"
 max_tool_turns = 0
 
@@ -258,7 +258,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-completeness.md"
 max_tool_turns = 5
 
@@ -271,7 +271,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-correctness.md"
 max_tool_turns = 5
 
@@ -284,7 +284,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-clarity.md"
 max_tool_turns = 5
 
@@ -297,7 +297,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-conciseness.md"
 max_tool_turns = 5
 
@@ -310,7 +310,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-relevance.md"
 max_tool_turns = 5
 
@@ -323,7 +323,7 @@ enabled = true
 checked = false
 group = "P3"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-currency.md"
 max_tool_turns = 5
 
@@ -336,7 +336,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-examples.md"
 max_tool_turns = 5
 
@@ -349,7 +349,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-diagrams.md"
 max_tool_turns = 5
 
@@ -362,7 +362,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-testable-claims.md"
 max_tool_turns = 5
 
@@ -375,7 +375,7 @@ enabled = true
 checked = true
 group = "P3"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-evidence-rationale.md"
 max_tool_turns = 5
 
@@ -389,7 +389,7 @@ enabled = true
 checked = true
 group = "P4"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-internal-contradictions.md"
 max_tool_turns = 8
 
@@ -402,7 +402,7 @@ enabled = true
 checked = true
 group = "P4"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-terminology-consistency.md"
 max_tool_turns = 8
 
@@ -415,7 +415,7 @@ enabled = true
 checked = true
 group = "P4"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-cross-reference-correctness.md"
 max_tool_turns = 8
 
@@ -428,7 +428,7 @@ enabled = true
 checked = true
 group = "P4"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-requirement-traceability.md"
 max_tool_turns = 8
 
@@ -458,7 +458,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "artifact"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-metrics-v6.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
@@ -479,7 +479,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "artifact"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-metrics-missing-v1.md"
 max_tool_turns = 4
 max_tool_tokens = 32000
@@ -494,7 +494,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "artifact"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-provisions-v4.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
@@ -509,7 +509,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "artifact"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-entities-v1.md"
 max_tool_turns = 0
 
@@ -522,7 +522,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "artifact"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-inventory-items-v3.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
@@ -537,7 +537,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-technical-accuracy.md"
 max_tool_turns = 12
 
@@ -550,7 +550,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-assumptions.md"
 max_tool_turns = 12
 
@@ -563,7 +563,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-prerequisites.md"
 max_tool_turns = 12
 
@@ -576,7 +576,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-standards-compliance.md"
 max_tool_turns = 12
 
@@ -589,7 +589,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-legal-compliance.md"
 max_tool_turns = 12
 
@@ -602,7 +602,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-regulatory-compliance.md"
 max_tool_turns = 12
 
@@ -615,7 +615,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-internal-policy.md"
 max_tool_turns = 12
 
@@ -628,7 +628,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-security.md"
 max_tool_turns = 12
 
@@ -641,7 +641,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-performance.md"
 max_tool_turns = 12
 
@@ -654,7 +654,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-error-handling.md"
 max_tool_turns = 12
 
@@ -667,7 +667,7 @@ enabled = true
 checked = true
 group = "P5"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-limitations.md"
 max_tool_turns = 12
 
@@ -681,7 +681,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-version-history.md"
 max_tool_turns = 0
 
@@ -694,7 +694,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-review-status.md"
 max_tool_turns = 0
 
@@ -707,7 +707,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-ownership.md"
 max_tool_turns = 0
 
@@ -720,7 +720,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-block"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-references.md"
 max_tool_turns = 0
 
@@ -733,7 +733,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-related-documents.md"
 max_tool_turns = 0
 
@@ -746,7 +746,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-confidentiality.md"
 max_tool_turns = 0
 
@@ -759,7 +759,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-sensitive-data.md"
 max_tool_turns = 0
 
@@ -772,7 +772,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-pii.md"
 max_tool_turns = 0
 
@@ -785,7 +785,7 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-data-retention.md"
 max_tool_turns = 0
 
@@ -798,6 +798,6 @@ enabled = false
 checked = false
 group = "P6"
 input = "per-chunk"
-model = "deepseek-flash-chen"
+model = "deepseek-flash-processor"
 prompt = "prompt-review-license-ip.md"
 max_tool_turns = 0
