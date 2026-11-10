@@ -71,6 +71,7 @@ type errorResponse struct {
 
 type assignRequest struct {
 	Owner *string `json:"owner"` // null or blank clears the owner
+	Self  bool    `json:"self"`
 }
 
 type resolveRequest struct {
@@ -190,7 +191,8 @@ func Assign(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_ALT_010")
 	defer rc.Close()
 	logger := rc.GetLogger()
-	if rc.IsAuthenticated() == nil {
+	user := rc.IsAuthenticated()
+	if user == nil {
 		return fail(c, http.StatusUnauthorized, "authentication required (CWB_ALT_011)")
 	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -202,7 +204,16 @@ func Assign(c echo.Context) error {
 		return fail(c, http.StatusBadRequest, "invalid request body (CWB_ALT_013)")
 	}
 	var owner any // nil -> NULL
-	if req.Owner != nil && strings.TrimSpace(*req.Owner) != "" {
+	if req.Self {
+		name := strings.TrimSpace(user.Email)
+		if name == "" {
+			name = strings.TrimSpace(user.UserName)
+		}
+		if name == "" {
+			return fail(c, http.StatusBadRequest, "authenticated user has no name or email (CWB_ALT_015)")
+		}
+		owner = name
+	} else if req.Owner != nil && strings.TrimSpace(*req.Owner) != "" {
 		owner = strings.TrimSpace(*req.Owner)
 	}
 	return update(c, logger, id, "owner = $1", []any{owner}, "assign", "CWB_ALT_014")
@@ -235,7 +246,7 @@ func Resolve(c echo.Context) error {
 		resolver = strings.TrimSpace(user.UserName)
 	}
 	return update(c, logger, id,
-		"status = 'resolved', resolution = $1, resolver = $2, resolve_time = NOW()",
+		"status = 'resolved', resolution = $1, resolver = $2, resolve_time = NOW(), owner = CASE WHEN owner IS NULL OR BTRIM(owner) = '' OR LOWER(BTRIM(owner)) = 'unassigned' THEN $2 ELSE owner END",
 		[]any{resolution, resolver}, "resolve", "CWB_ALT_025")
 }
 

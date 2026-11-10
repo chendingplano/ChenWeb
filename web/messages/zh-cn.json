@@ -394,6 +394,8 @@
 	"alert_logs_unassigned": "未分配",
 	"alert_logs_owner_placeholder": "开发人员邮箱",
 	"alert_logs_assign": "分配",
+	"alert_logs_assign_self": "分配给自己",
+	"alert_logs_resolver": "由 {resolver} 解决",
 	"alert_logs_resolve": "解决",
 	"alert_logs_resolution": "解决方案",
 	"alert_logs_resolution_placeholder": "问题原因是什么，是如何修复的？",

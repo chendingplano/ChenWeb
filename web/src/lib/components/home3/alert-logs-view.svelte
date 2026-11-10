@@ -71,7 +71,9 @@
 			if (sort) params.set('sort', `${sort.col}|${sort.dir}`);
 			for (const f of filters) params.append('filter', `${f.col}|${f.op}|${f.value}`);
 			const data = await call(`${API}?${params}`);
-			rows = Array.isArray(data.results) ? (data.results as AlertRow[]) : [];
+			rows = Array.isArray(data.results) ? (data.results as AlertRow[]).map((row) => ({
+				...row, owner: !row.owner?.trim() || row.owner.trim().toLowerCase() === 'unassigned' ? null : row.owner
+			})) : [];
 			total = typeof data.total === 'number' ? data.total : 0;
 			ownerDraft = Object.fromEntries(rows.map((r) => [r.id, r.owner ?? '']));
 		} catch (err) {
@@ -147,9 +149,9 @@
 			const owner = (ownerDraft[row.id] ?? '').trim();
 			await call(`${API}/${row.id}/assign`, {
 				method: 'PUT', headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ owner: owner || null })
+				body: JSON.stringify(!owner && !row.owner ? { self: true } : { owner: owner || null })
 			});
-			row.owner = owner || null;
+			await load();
 		} catch (err) { error = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
 	function startResolve(row: AlertRow) { resolvingId = row.id; resolutionDraft = ''; resolveError = ''; }
@@ -241,11 +243,11 @@
 									<button onclick={() => (expandedId = expandedId === row.id ? null : row.id)} class="text-left cursor-pointer" title={m.alert_logs_details()} style="color:{textPrimary};background:none;border:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:block">{row.message}</button>
 								</td>
 								<td onclick={() => (selected = { id: row.id, col: 'loc' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary};font-family:monospace;font-size:12px;{selected?.id === row.id && selected.col === 'loc' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.loc || '—'}</td>
-								<td onclick={() => (selected = { id: row.id, col: 'status' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{row.status === 'resolved' ? success : textSecondary};{selected?.id === row.id && selected.col === 'status' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.status === 'resolved' ? m.alert_logs_status_resolved() : m.alert_logs_status_open()}</td>
+								<td onclick={() => (selected = { id: row.id, col: 'status' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{row.status === 'resolved' ? success : textSecondary};{selected?.id === row.id && selected.col === 'status' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.status === 'resolved' ? m.alert_logs_status_resolved() : m.alert_logs_status_open()}{#if row.status === 'resolved' && row.resolver}<div style="font-size:12px;color:{textSecondary}">{m.alert_logs_resolver({ resolver: row.resolver })}</div>{/if}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'owner' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};{selected?.id === row.id && selected.col === 'owner' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">
 									<div class="flex gap-1">
 										<input bind:value={ownerDraft[row.id]} placeholder={m.alert_logs_unassigned()} aria-label={m.alert_logs_owner_placeholder()} class="rounded px-2 py-1 text-sm" style="width:180px;background:{surface2};color:{textPrimary};border:1px solid {borderColor}" />
-										<button onclick={() => assign(row)} disabled={(ownerDraft[row.id] ?? '').trim() === (row.owner ?? '')} class="rounded px-2 py-1 text-xs cursor-pointer disabled:opacity-40" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_assign()}</button>
+										<button onclick={() => assign(row)} disabled={!!row.owner && (ownerDraft[row.id] ?? '').trim() === row.owner} class="rounded px-2 py-1 text-xs cursor-pointer disabled:opacity-40" style="background:{surface2};color:{accent};border:1px solid {borderColor};white-space:nowrap">{!row.owner && !(ownerDraft[row.id] ?? '').trim() ? m.alert_logs_assign_self() : m.alert_logs_assign()}</button>
 									</div>
 								</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}">

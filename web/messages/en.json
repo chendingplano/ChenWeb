@@ -394,6 +394,8 @@
 	"alert_logs_unassigned": "Unassigned",
 	"alert_logs_owner_placeholder": "Developer email",
 	"alert_logs_assign": "Assign",
+	"alert_logs_assign_self": "Assign to yourself",
+	"alert_logs_resolver": "Resolved by {resolver}",
 	"alert_logs_resolve": "Resolve",
 	"alert_logs_resolution": "Resolution",
 	"alert_logs_resolution_placeholder": "What was the cause and how was it fixed?",
