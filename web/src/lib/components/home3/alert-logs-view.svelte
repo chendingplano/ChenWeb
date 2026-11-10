@@ -47,6 +47,7 @@
 	let commentsId = $state<number | null>(null), comments = $state<{ id: number; author: string; body: string; created_at: string }[]>([]);
 	let commentDraft = $state(''), commentError = $state('');
 	let ownerDraft = $state<Record<number, string>>({});
+	let userNames = $state<Record<string, string>>({});
 	let expandedId = $state<number | null>(null);
 	let resolvingId = $state<number | null>(null), resolutionDraft = $state(''), resolveError = $state('');
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
@@ -64,6 +65,23 @@
 		if (!response.ok || !data.status) throw new Error(String(data.error_msg ?? text ?? ''));
 		return data;
 	}
+	function displayUser(value: string | null): string {
+		if (!value) return '';
+		return userNames[value.trim().toLowerCase()] || value;
+	}
+	async function loadUserNames() {
+		try {
+			const data = await call('/api/v1/system-admin/users');
+			if (!Array.isArray(data.users)) return;
+			const names: Record<string, string> = {};
+			for (const user of data.users as { email?: string; name?: string; first_name?: string; last_name?: string }[]) {
+				const email = user.email?.trim().toLowerCase();
+				const name = [user.first_name, user.last_name].map((part) => part?.trim()).filter(Boolean).join(' ') || user.name?.trim();
+				if (email && name) names[email] = name;
+			}
+			userNames = names;
+		} catch { /* Keep stored identifiers visible if profiles are unavailable. */ }
+	}
 	async function load() {
 		loading = true; error = '';
 		try {
@@ -75,7 +93,7 @@
 				...row, owner: !row.owner?.trim() || row.owner.trim().toLowerCase() === 'unassigned' ? null : row.owner
 			})) : [];
 			total = typeof data.total === 'number' ? data.total : 0;
-			ownerDraft = Object.fromEntries(rows.map((r) => [r.id, r.owner ?? '']));
+			ownerDraft = Object.fromEntries(rows.map((r) => [r.id, displayUser(r.owner)]));
 		} catch (err) {
 			error = (err instanceof Error && err.message) || m.alert_logs_failed_to_load();
 			rows = []; total = 0;
@@ -169,7 +187,7 @@
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
 	function levelColor(level: string) { return level === 'ERROR' ? danger : warning; }
-	onMount(() => { loadSettings(); load(); });
+	onMount(() => { loadSettings(); void (async () => { await loadUserNames(); await load(); })(); });
 </script>
 
 <div class="p-6 space-y-4 h-full flex flex-col overflow-hidden select-text" style="background:{pageBg}">
@@ -243,11 +261,11 @@
 									<button onclick={() => (expandedId = expandedId === row.id ? null : row.id)} class="text-left cursor-pointer" title={m.alert_logs_details()} style="color:{textPrimary};background:none;border:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:block">{row.message}</button>
 								</td>
 								<td onclick={() => (selected = { id: row.id, col: 'loc' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary};font-family:monospace;font-size:12px;{selected?.id === row.id && selected.col === 'loc' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.loc || '—'}</td>
-								<td onclick={() => (selected = { id: row.id, col: 'status' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{row.status === 'resolved' ? success : textSecondary};{selected?.id === row.id && selected.col === 'status' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.status === 'resolved' ? m.alert_logs_status_resolved() : m.alert_logs_status_open()}{#if row.status === 'resolved' && row.resolver}<div style="font-size:12px;color:{textSecondary}">{m.alert_logs_resolver({ resolver: row.resolver })}</div>{/if}</td>
+								<td onclick={() => (selected = { id: row.id, col: 'status' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{row.status === 'resolved' ? success : textSecondary};{selected?.id === row.id && selected.col === 'status' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.status === 'resolved' ? m.alert_logs_status_resolved() : m.alert_logs_status_open()}{#if row.status === 'resolved' && row.resolver}<div style="font-size:12px;color:{textSecondary}">{m.alert_logs_resolver({ resolver: displayUser(row.resolver) })}</div>{/if}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'owner' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};{selected?.id === row.id && selected.col === 'owner' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">
 									<div class="flex gap-1">
 										<input bind:value={ownerDraft[row.id]} placeholder={m.alert_logs_unassigned()} aria-label={m.alert_logs_owner_placeholder()} class="rounded px-2 py-1 text-sm" style="width:180px;background:{surface2};color:{textPrimary};border:1px solid {borderColor}" />
-										<button onclick={() => assign(row)} disabled={!!row.owner && (ownerDraft[row.id] ?? '').trim() === row.owner} class="rounded px-2 py-1 text-xs cursor-pointer disabled:opacity-40" style="background:{surface2};color:{accent};border:1px solid {borderColor};white-space:nowrap">{!row.owner && !(ownerDraft[row.id] ?? '').trim() ? m.alert_logs_assign_self() : m.alert_logs_assign()}</button>
+										<button onclick={() => assign(row)} disabled={!!row.owner && (ownerDraft[row.id] ?? '').trim() === displayUser(row.owner)} class="rounded px-2 py-1 text-xs cursor-pointer disabled:opacity-40" style="background:{surface2};color:{accent};border:1px solid {borderColor};white-space:nowrap">{!row.owner && !(ownerDraft[row.id] ?? '').trim() ? m.alert_logs_assign_self() : m.alert_logs_assign()}</button>
 									</div>
 								</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}">
@@ -264,7 +282,7 @@
 								<tr>
 									<td colspan="7" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
 										{#if row.status === 'resolved' && expandedId === row.id}
-											<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: row.resolver ?? '—', time: formatTime(row.resolve_time) })}</div>
+											<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: displayUser(row.resolver) || '—', time: formatTime(row.resolve_time) })}</div>
 											<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{row.resolution}</div>
 										{/if}
 										{#if resolvingId === row.id}
@@ -278,7 +296,7 @@
 										{#if commentsId === row.id}
 											<div class="space-y-2" style="margin-top:8px">
 												{#each comments as cm (cm.id)}
-													<div style="font-size:13px;color:{textSecondary}"><span style="color:{textMuted};font-size:12px">{cm.author} · {formatTime(cm.created_at)}</span><div style="white-space:pre-wrap">{cm.body}</div></div>
+															<div style="font-size:13px;color:{textSecondary}"><span style="color:{textMuted};font-size:12px">{displayUser(cm.author)} · {formatTime(cm.created_at)}</span><div style="white-space:pre-wrap">{cm.body}</div></div>
 												{:else}
 													<div style="font-size:12px;color:{textMuted}">{m.alert_logs_no_comments()}</div>
 												{/each}
