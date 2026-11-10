@@ -28,6 +28,15 @@ DELETE FROM kb.semantic_assertions;
 DELETE FROM kb.metrics;
 DELETE FROM kb.provisions;
 
+-- Rows built from metrics and provisions. They have no foreign keys to
+-- kb.metrics / kb.provisions, so nothing cascades: without these the search
+-- index, the connections and the object mentions keep pointing at deleted
+-- artifacts (cleaned up by migrations 20261110000005 and 20261110000006).
+DELETE FROM kb.search_artifacts WHERE artifact_type IN ('metric', 'provision');
+DELETE FROM kb.artifact_connections
+ WHERE source_type IN ('metric', 'provision') OR target_type IN ('metric', 'provision');
+DELETE FROM kb.artifact_objects WHERE artifact_type IN ('metric', 'provision');
+
 DELETE FROM kb.projection_state;
 UPDATE kb.ontology_term_headers
    SET current_contract_revision_id = NULL
