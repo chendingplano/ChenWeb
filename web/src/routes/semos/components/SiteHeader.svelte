@@ -150,10 +150,10 @@
 				{/if}
 			</button>
 			{#if $appAuthStore.isLoggedIn}
-				<span class="relative inline-flex p-2 text-[#17181c]/45 dark:text-white/45" role="status" aria-label={hasOpenErrors ? m.siteheader_open_errors() : m.siteheader_no_open_errors()} title={hasOpenErrors ? m.siteheader_open_errors() : m.siteheader_no_open_errors()}>
+				<a href="/development?view=system-admin&child=sysadmin-alert-logs" target="_blank" rel="noopener noreferrer" class="relative inline-flex rounded-full p-2 text-[#17181c]/45 transition-colors hover:bg-[#17181c]/5 hover:text-[#17181c] dark:text-white/45 dark:hover:bg-white/10 dark:hover:text-white" aria-label={hasOpenErrors ? m.siteheader_open_errors() : m.siteheader_no_open_errors()} title={hasOpenErrors ? m.siteheader_open_errors() : m.siteheader_no_open_errors()}>
 					<Bell class="h-4 w-4" aria-hidden="true" />
 					{#if hasOpenErrors}<span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" aria-hidden="true"></span>{/if}
-				</span>
+				</a>
 				<button
 					type="button"
 					onclick={handleLogout}
