@@ -239,16 +239,12 @@ func loadIndexedProvisionsForRecord(ctx context.Context, db *sql.DB, recordID in
 		if err := rows.Scan(&provID, &rowID, &spansRaw, &searchDoc); err != nil {
 			return nil, err
 		}
-		artifactID := strings.TrimSpace(provID)
-		if artifactID == "" {
-			artifactID = strconv.FormatInt(rowID, 10)
-		}
 		var spansAny any
 		if len(spansRaw) > 0 {
 			_ = json.Unmarshal(spansRaw, &spansAny)
 		}
 		out = append(out, indexedArtifact{
-			ID:             kbsearch.BuildArtifactID(recordID, searchArtifactProvision, artifactID),
+			ID:             provisionArtifactID(recordID, provID, rowID),
 			UpdateKey:      rowIDToProvisionKey(provID, rowID),
 			SourceSpans:    normalizeSourceLineSpans(spansAny),
 			SearchDocument: strings.TrimSpace(searchDoc),

@@ -549,6 +549,23 @@ func formatMetricSearchNumber(v sql.NullFloat64) string {
 	return strconv.FormatFloat(v.Float64, 'g', -1, 64)
 }
 
+// provisionArtifactID is a provision's artifact_id in kb.search_artifacts and
+// kb.artifact_connections: its prov_id, which already has the
+// "<record>_prv_<n>" form. Passing the prov_id to BuildArtifactID as the
+// sequence doubled the prefix ("416_prv_416_prv_1"), so lookups by prov_id
+// found nothing. A prov_id without the prefix is wrapped by BuildArtifactID;
+// a provision without a prov_id falls back to its row id.
+func provisionArtifactID(recordID int64, provID string, rowID int64) string {
+	provID = strings.TrimSpace(provID)
+	if provID == "" {
+		return kbsearch.BuildArtifactID(recordID, searchArtifactProvision, strconv.FormatInt(rowID, 10))
+	}
+	if strings.HasPrefix(provID, fmt.Sprintf("%d_%s_", recordID, kbsearch.ArtifactTypeCode(searchArtifactProvision))) {
+		return provID
+	}
+	return kbsearch.BuildArtifactID(recordID, searchArtifactProvision, provID)
+}
+
 func buildProvisionRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
 	const q = `
 SELECT id, prov_id, prov_name, provision_type, prov_desc, provision_keywords, category_paths, source_line_spans, input_filename, search_document
@@ -596,11 +613,7 @@ ORDER BY id`
 			CategoryPaths: flattenSearchCategoryPaths(categoryPaths),
 		})
 		objectText := objectTextByID[strings.TrimSpace(provID)]
-		artifactID := provID
-		if strings.TrimSpace(artifactID) == "" {
-			artifactID = strconv.FormatInt(id, 10)
-		}
-		artifactID = kbsearch.BuildArtifactID(recordID, searchArtifactProvision, artifactID)
+		artifactID := provisionArtifactID(recordID, provID, id)
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactProvision,
 			ArtifactID:      artifactID,
