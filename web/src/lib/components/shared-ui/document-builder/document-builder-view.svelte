@@ -24,14 +24,22 @@
 	let {
 		group,
 		darkMode = true,
-		leftWidthDefault = 260
-	}: { group: string; darkMode?: boolean; leftWidthDefault?: number } = $props();
+		leftWidthDefault = 260,
+		docId = undefined
+	}: { group: string; darkMode?: boolean; leftWidthDefault?: number; docId?: number } = $props();
+
+	// With docId the category tree lives in the host's menu, so only that document is shown.
+	const treeHidden = $derived(docId !== undefined);
 
 	const LEFT_MIN = 180;
 	const LEFT_MAX = 480;
+	const DOC_WIDTH_DEFAULT = 800;
+	const DOC_WIDTH_MIN = 400;
+	const DOC_WIDTH_MAX = 2400;
 
 	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB');
 	let panelBg = $derived(darkMode ? '#252A3A' : '#ECEEF2');
+	let docBg = $derived(darkMode ? '#252A3A' : '#FFFFFF');
 	let accent = $derived(darkMode ? '#818CF8' : '#6366F1');
 	let accentTint = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
 	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
@@ -45,6 +53,7 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let leftWidth = $state(leftWidthDefault);
+	let docWidth = $state(DOC_WIDTH_DEFAULT);
 	let contentEl = $state<HTMLElement | null>(null);
 	let scrollTops: Record<number, number> = {};
 
@@ -58,6 +67,23 @@
 			);
 		} catch {
 			/* storage unavailable: nothing to restore next time */
+		}
+	}
+	// The reading width is a user preference: kept across sessions, once the user has adjusted it.
+	const WIDTH_KEY = 'docbuilder:docWidth';
+	function loadDocWidth() {
+		try {
+			const w = Number(localStorage.getItem(WIDTH_KEY));
+			if (w >= DOC_WIDTH_MIN && w <= DOC_WIDTH_MAX) docWidth = w;
+		} catch {
+			/* storage unavailable: keep the default */
+		}
+	}
+	function saveDocWidth() {
+		try {
+			localStorage.setItem(WIDTH_KEY, String(docWidth));
+		} catch {
+			/* storage unavailable: width is not remembered */
 		}
 	}
 	function restoreState(): { docId?: number } {
@@ -94,6 +120,7 @@
 	}
 
 	onMount(async () => {
+		loadDocWidth();
 		const saved = restoreState();
 		try {
 			const r = await fetch(docGroupTreeUrl(group), { credentials: 'same-origin' });
@@ -101,7 +128,7 @@
 			const data = (await r.json()) as DocTreeResponse;
 			tree = data.tree;
 			pending = data.uncategorized;
-			const restored = saved.docId ? findLeaf(tree, saved.docId) : undefined;
+			const restored = docId ? findLeaf(tree, docId) : saved.docId ? findLeaf(tree, saved.docId) : undefined;
 			const start = restored ?? firstLeaf(tree);
 			if (start) {
 				for (const c of tree)
@@ -114,6 +141,21 @@
 			loading = false;
 		}
 	});
+
+	function startDocDrag(e: MouseEvent) {
+		const x0 = e.clientX;
+		const w0 = docWidth;
+		const move = (ev: MouseEvent) => {
+			docWidth = Math.max(DOC_WIDTH_MIN, Math.min(DOC_WIDTH_MAX, w0 + 2 * (ev.clientX - x0)));
+		};
+		const up = () => {
+			document.removeEventListener('mousemove', move);
+			document.removeEventListener('mouseup', up);
+			saveDocWidth();
+		};
+		document.addEventListener('mousemove', move);
+		document.addEventListener('mouseup', up);
+	}
 
 	let dragStartX = 0;
 	let dragStartWidth = 0;
@@ -135,6 +177,7 @@
 </script>
 
 <div class="flex h-full overflow-hidden select-text" style="color:{textPrimary};">
+	{#if !treeHidden}
 	<nav
 		class="flex-shrink-0 overflow-y-auto py-2"
 		style="width:{leftWidth}px; background:{panelBg}; border-right:1px solid {borderColor};"
@@ -202,6 +245,7 @@
 		onmousedown={startDrag}
 		title={m.docbuilder_drag_to_resize()}
 	></div>
+	{/if}
 
 	<div class="min-w-0 flex-1 overflow-y-auto" bind:this={contentEl} onscroll={saveState}>
 		{#if loading}
@@ -219,17 +263,29 @@
 				src={docGroupFileUrl(group, selected.doc_id)}
 			></iframe>
 		{:else}
-			<div class="p-6">
-				<div class="mb-3 flex justify-end">
-					<a
-						class="rounded-md px-3 py-1"
-						style="font-size:12px; color:{accent}; border:1px solid {borderColor};"
-						href={docGroupPdfUrl(group, selected.doc_id!)}
-						target="_blank"
-						rel="noopener">{m.docbuilder_export_pdf()}</a
-					>
+			<div class="flex min-h-full justify-center">
+				<div
+					class="min-w-0 p-6"
+					style="width:{docWidth}px; max-width:100%; background:{docBg};"
+				>
+					<div class="mb-3 flex justify-end">
+						<a
+							class="rounded-md px-3 py-1"
+							style="font-size:12px; color:{accent}; border:1px solid {borderColor};"
+							href={docGroupPdfUrl(group, selected.doc_id!)}
+							target="_blank"
+							rel="noopener">{m.docbuilder_export_pdf()}</a
+						>
+					</div>
+					<MarkdownViewer source={markdown} breaks={false} />
 				</div>
-				<MarkdownViewer source={markdown} breaks={false} />
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="flex-shrink-0 cursor-col-resize select-none"
+					style="width:4px; background:{borderColor};"
+					onmousedown={startDocDrag}
+					title={m.docbuilder_drag_to_resize()}
+				></div>
 			</div>
 		{/if}
 	</div>

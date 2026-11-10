@@ -14,8 +14,8 @@
 # Retrieval, scoring, tiering and reporting never call an LLM.
 
 [models]
-structure       = "deepseek-flash-chen"   # prompt-product-structure-v1.md
-aspect_mapping  = "deepseek-flash-chen"    # prompt-product-aspect-mapping-v1.md
+structure       = "deepseek-flash-processor"   # prompt-product-structure-v1.md
+aspect_mapping  = "deepseek-flash-processor"    # prompt-product-aspect-mapping-v1.md
 
 # ── Construction budgets ─────────────────────────────────────────────────────
 # Propose + ground + expand iterate to `max_depth` and stop at `max_nodes`;

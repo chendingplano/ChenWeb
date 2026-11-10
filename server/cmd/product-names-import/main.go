@@ -16,7 +16,7 @@
 // Usage:
 //
 //	product-names-import --xlsx <medical-product-names.xlsx> [--source <id>]
-//	    [--translate-model-ref <ref>] [--translate-batch-size 40]
+//	    [--translate-batch-size 40]
 //	    [--skip-translate] [--dry-run]
 //
 // Re-running is safe: rows are scoped by --source and fully replaced
@@ -42,7 +42,7 @@ func main() {
 	log.SetFlags(0)
 	xlsxPath := flag.String("xlsx", "", "path to medical-product-names.xlsx (required)")
 	source := flag.String("source", defaultSource, "source identifier; existing rows with this source are replaced")
-	translateModelRef := flag.String("translate-model-ref", envOr("TRANSLATION_MODEL_NAME", "deepseek-flash-chen"), "model ref (key in MODEL_DEF_FILE) for name translation")
+	translateModelRef := strings.TrimSpace(os.Getenv("TRANSLATION_MODEL_NAME"))
 	translateBatchSize := flag.Int("translate-batch-size", 40, "names per translation LLM call")
 	skipTranslate := flag.Bool("skip-translate", false, "skip LLM translation; product_name_en stays empty")
 	dryRun := flag.Bool("dry-run", false, "parse and translate but do not write to the database")
@@ -50,6 +50,10 @@ func main() {
 
 	if strings.TrimSpace(*xlsxPath) == "" {
 		log.Fatal("--xlsx is required")
+	}
+
+	if !*skipTranslate && translateModelRef == "" {
+		log.Fatal("TRANSLATION_MODEL_NAME is required unless --skip-translate is set")
 	}
 
 	catalogRows, err := readCatalogRows(*xlsxPath)
@@ -64,7 +68,7 @@ func main() {
 	ctx := context.Background()
 	translations := map[string]string{}
 	if !*skipTranslate {
-		translations = translateUniqueNames(ctx, rows, *translateModelRef, *translateBatchSize)
+		translations = translateUniqueNames(ctx, rows, translateModelRef, *translateBatchSize)
 	}
 
 	for i := range rows {

@@ -542,10 +542,33 @@
 	// server (position number, then key) and already limited to what this user may see.
 	type DocGroupMenuItem = { group_key: string; label: string; parent_menu_id: string };
 	let docGroups = $state<DocGroupMenuItem[]>([]);
+	// Each group's category tree is shown under the group: group > category > document. A document's
+	// menu id is docgroup-<key>/<docId>; a group with no categorised documents stays a plain leaf.
+	type DocTreeNode = { id: string; label: string; doc_id?: number; children?: DocTreeNode[] };
+	let docGroupTrees = $state<Record<string, DocTreeNode[]>>({});
 	const docGroupChildren = (parent: string): NavChild[] =>
 		docGroups
 			.filter((g) => g.parent_menu_id === parent)
-			.map((g) => ({ id: `docgroup-${g.group_key}`, label: g.label }));
+			.map((g) => {
+				const id = `docgroup-${g.group_key}`;
+				const cats = (docGroupTrees[g.group_key] ?? []).filter((c) => c.children?.length);
+				return {
+					id,
+					label: g.label,
+					...(cats.length
+						? {
+								children: cats.map((c) => ({
+									id: `${id}/${c.id}`,
+									label: c.label,
+									children: (c.children ?? []).map((d) => ({
+										id: `${id}/${d.doc_id}`,
+										label: d.label
+									}))
+								}))
+							}
+						: {})
+				};
+			});
 
 	$effect(() => {
 		if (pageKey !== 'resources') return;
@@ -555,8 +578,21 @@
 			credentials: 'same-origin'
 		})
 			.then((r) => (r.ok ? r.json() : []))
-			.then((items: DocGroupMenuItem[]) => {
-				if (current) docGroups = items;
+			.then(async (items: DocGroupMenuItem[]) => {
+				if (!current) return;
+				docGroups = items;
+				for (const g of items) {
+					fetch(`/api/v1/doc-groups/${encodeURIComponent(g.group_key)}/tree`, {
+						credentials: 'same-origin'
+					})
+						.then((r) => (r.ok ? r.json() : null))
+						.then((t: { tree?: DocTreeNode[] } | null) => {
+							if (current && t?.tree) docGroupTrees[g.group_key] = t.tree;
+						})
+						.catch(() => {
+							// The group stays a plain leaf; its own view still shows the tree.
+						});
+				}
 			})
 			.catch(() => {
 				// No groups on failure: the Documents menu stays empty.

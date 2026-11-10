@@ -559,7 +559,12 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<TrainingVideoViewer {darkMode} />
 		{:else if activeMenu?.childId?.startsWith('docgroup-')}
 			{#key activeMenu.childId}
-				<DocumentBuilderView group={activeMenu.childId.slice('docgroup-'.length)} {darkMode} />
+				{@const ref = activeMenu.childId.slice('docgroup-'.length).split('/')}
+				<DocumentBuilderView
+					group={ref[0]}
+					docId={ref[1] ? Number(ref[1]) : undefined}
+					{darkMode}
+				/>
 			{/key}
 		{:else if activeMenu?.childId === 'docs-users-manual'}
 			<DocumentBuilderView group="user-manuals" {darkMode} />

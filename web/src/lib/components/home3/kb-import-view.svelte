@@ -85,6 +85,9 @@
 	let statusDialogRawJson = $state('{}');
 	let statusDialogRawJsonEl = $state<HTMLElement | null>(null);
 	let statusDialogHasOverflow = $state(false);
+	const columnWidthsKey = 'chenweb-kb-import-column-widths';
+	const defaultColumnWidths = [40, 90, 160, 325, 160, 100, 325, 520, 140, 180, 180, 270];
+	let columnWidths = $state([...defaultColumnWidths]);
 	let uploadDialogOpen = $state(false);
 	let uploadSubmitting = $state(false);
 	let uploadError = $state('');
@@ -255,6 +258,37 @@
 		const d = new Date(value);
 		if (Number.isNaN(d.getTime())) return value;
 		return d.toLocaleString();
+	}
+
+	function startColumnResize(event: PointerEvent, index: number) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = columnWidths[index];
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (moveEvent: PointerEvent) => {
+			const next = [...columnWidths];
+			next[index] = Math.max(index === 0 ? 32 : 48, Math.round(startWidth + moveEvent.clientX - startX));
+			columnWidths = next;
+		};
+		const finish = () => {
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			localStorage.setItem(columnWidthsKey, JSON.stringify(columnWidths));
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', finish);
+			window.removeEventListener('pointercancel', finish);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', finish, { once: true });
+		window.addEventListener('pointercancel', finish, { once: true });
+	}
+
+	function resizeColumnByKey(index: number, amount: number) {
+		const next = [...columnWidths];
+		next[index] = Math.max(index === 0 ? 32 : 48, next[index] + amount);
+		columnWidths = next;
+		localStorage.setItem(columnWidthsKey, JSON.stringify(columnWidths));
 	}
 
 	async function openStatusDialog(record: KbInputRecord) {
@@ -990,6 +1024,14 @@
 	});
 
 	onMount(() => {
+		try {
+			const savedWidths: unknown = JSON.parse(localStorage.getItem(columnWidthsKey) ?? 'null');
+			if (Array.isArray(savedWidths) && savedWidths.length === defaultColumnWidths.length && savedWidths.every((width) => typeof width === 'number' && Number.isFinite(width))) {
+				columnWidths = savedWidths.map((width, index) => Math.max(index === 0 ? 32 : 48, width));
+			}
+		} catch {
+			// Ignore invalid saved widths and use the defaults.
+		}
 		loadRecords();
 		loadUsers();
 		getKbFrontendConfig()
@@ -1284,39 +1326,26 @@
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
 		<div class="kb-import-table-scroll" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
-			{#snippet sortHead(label: string, field: string)}
-				<th class="cell head">
+			{#snippet sortHead(label: string, field: string, columnIndex: number)}
+				<th class="cell head resizable-head">
 					<button
 						type="button"
 						onclick={() => toggleSort(field)}
 						title={m.kb_import_sort_by({ label })}
 						style="display:inline-flex; align-items:center; gap:4px; background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; cursor:pointer; white-space:nowrap;"
 					>
-						<span>{label}</span>
-						<span style="font-size:10px; line-height:1; opacity:{sortField === field ? 1 : 0.3}; color:{sortField === field ? accent : 'inherit'};">
-							{sortField === field ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
-						</span>
+						<span class="sort-label">{label}</span>
 					</button>
+					<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label })} onpointerdown={(event) => startColumnResize(event, columnIndex)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(columnIndex, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(columnIndex, 16); } }}></button>
 				</th>
 			{/snippet}
-			<table style="width:100%; border-collapse:collapse; min-width:2200px;">
+			<table style="width:{columnWidths.reduce((total, width) => total + width, 0)}px; border-collapse:collapse; table-layout:fixed;">
 				<colgroup>
-					<col style="width:40px;" />
-					<col />
-					<col style="width:160px;" />
-					<col style="width:325px;" />
-					<col />
-					<col style="width:100px;" />
-					<col style="width:325px;" />
-					<col style="width:520px;" />
-					<col style="width:140px;" />
-					<col style="width:180px;" />
-					<col style="width:180px;" />
-					<col style="width:270px;" />
+					{#each columnWidths as width, index (index)}<col style="width:{width}px;" />{/each}
 				</colgroup>
 				<thead style="background:{pageBg};">
 					<tr>
-						<th class="cell head" style="width:40px; text-align:center;">
+						<th class="cell head resizable-head" style="text-align:center;">
 							<input
 								type="checkbox"
 								checked={allVisibleSelected}
@@ -1325,18 +1354,19 @@
 								aria-label={m.kb_import_select_all_records_on_this()}
 								style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;"
 							/>
+							<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label: m.kb_import_select_all_records_on_this() })} onpointerdown={(event) => startColumnResize(event, 0)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(0, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(0, 16); } }}></button>
 						</th>
-						{@render sortHead('ID', 'id')}
-						<th class="cell head">{m.kb_import_user()}</th>
-						{@render sortHead('Title', 'title')}
-						{@render sortHead('Doc No', 'doc_no')}
-						{@render sortHead('Type', 'type')}
-						{@render sortHead('File Name', 'file_name')}
-						<th class="cell head">{m.kb_import_status()}</th>
-						<th class="cell head">{m.kb_import_process_mode()}</th>
-						{@render sortHead('Create Time', 'create_time')}
-						{@render sortHead('Modify Time', 'modify_time')}
-						<th class="cell head">{m.kb_import_actions()}</th>
+						{@render sortHead('ID', 'id', 1)}
+						<th class="cell head resizable-head">{m.kb_import_user()}<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label: m.kb_import_user() })} onpointerdown={(event) => startColumnResize(event, 2)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(2, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(2, 16); } }}></button></th>
+						{@render sortHead('Title', 'title', 3)}
+						{@render sortHead('Doc No', 'doc_no', 4)}
+						{@render sortHead('Type', 'type', 5)}
+						{@render sortHead('File Name', 'file_name', 6)}
+						<th class="cell head resizable-head">{m.kb_import_status()}<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label: m.kb_import_status() })} onpointerdown={(event) => startColumnResize(event, 7)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(7, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(7, 16); } }}></button></th>
+						<th class="cell head resizable-head">{m.kb_import_process_mode()}<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label: m.kb_import_process_mode() })} onpointerdown={(event) => startColumnResize(event, 8)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(8, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(8, 16); } }}></button></th>
+						{@render sortHead('Create Time', 'create_time', 9)}
+						{@render sortHead('Modify Time', 'modify_time', 10)}
+						<th class="cell head resizable-head">{m.kb_import_actions()}<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label: m.kb_import_actions() })} onpointerdown={(event) => startColumnResize(event, 11)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(11, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(11, 16); } }}></button></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -1348,7 +1378,7 @@
 						{#each records as record (record.id)}
 							{@const statusSummary = formatInputStatus(record.status)}
 							<tr style="border-top:1px solid {borderColor};">
-								<td class="cell" style="width:40px; text-align:center;">
+								<td class="cell" style="text-align:center;">
 									<input
 										type="checkbox"
 										checked={selectedRecordIds.has(record.id)}
@@ -2229,31 +2259,9 @@
 		font-size: 13px;
 		vertical-align: middle;
 		text-align: left;
-	}
-
-	.file-name-cell {
-		width: 325px;
-		max-width: 325px;
-	}
-
-	.status-cell {
-		width: 520px;
-		max-width: 520px;
-	}
-
-	.process-mode-cell {
-		width: 140px;
-		max-width: 140px;
-	}
-
-	.title-cell {
-		width: 325px;
-		max-width: 325px;
-	}
-
-	.user-cell {
-		width: 160px;
-		max-width: 160px;
+		box-sizing: border-box;
+		max-width: none;
+		overflow: hidden;
 	}
 
 	.ellipsis-cell {
@@ -2296,6 +2304,21 @@
 		font-size: 12px;
 		font-weight: 600;
 		letter-spacing: 0.02em;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+
+	.head > button:not(.column-resizer) {
+		width: 100%;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.sort-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.kb-import-root {
@@ -2324,4 +2347,32 @@
 		min-height: 0;
 		overflow: auto;
 	}
+
+	.resizable-head { position: relative; }
+	.column-resizer {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 1;
+		width: 10px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		touch-action: none;
+		user-select: none;
+	}
+	.column-resizer::after {
+		content: '';
+		position: absolute;
+		top: 20%;
+		bottom: 20%;
+		left: 4px;
+		width: 1px;
+		background: currentColor;
+		opacity: 0.45;
+	}
+	.column-resizer:hover::after,
+	.column-resizer:focus-visible::after { width: 2px; opacity: 1; }
 </style>
