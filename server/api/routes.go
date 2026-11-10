@@ -562,6 +562,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/system-admin/users", useradminhandler.CreateUser)
 	apiGroup.GET("/system-admin/roles", useradminhandler.ListRoles)
 	apiGroup.GET("/system-admin/alert-logs", alertloghandler.List)
+	apiGroup.GET("/system-admin/alert-logs/filter-options", alertloghandler.FilterOptions)
 	apiGroup.PUT("/system-admin/alert-logs/:id/assign", alertloghandler.Assign)
 	apiGroup.PUT("/system-admin/alert-logs/:id/resolve", alertloghandler.Resolve)
 	apiGroup.GET("/system-admin/alert-logs/:id/comments", alertloghandler.ListComments)

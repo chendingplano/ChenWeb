@@ -62,3 +62,58 @@ func TestAssignAndResolve(t *testing.T) {
 		})
 	}
 }
+
+func TestListFiltersAcrossPages(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB, oldAuth := ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator
+	ApiTypes.SharedDBHandle = db
+	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+		return &ApiTypes.UserInfo{Email: "alice@example.com"}, nil
+	}
+	defer func() { ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator = oldDB, oldAuth }()
+	mock.ExpectQuery(`SELECT COUNT\(\*\).*l\.message ILIKE.*l\.resolver =`).WithArgs("%failure%", "alice@example.com").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT id, level, message.*l\.message ILIKE.*l\.resolver =`).WithArgs("%failure%", "alice@example.com", 20, 20).WillReturnRows(sqlmock.NewRows([]string{"id", "level", "message", "req_id", "loc", "call_flow", "attrs", "created_at", "status", "owner", "resolution", "resolver", "resolve_time", "comments"}))
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/?page=2&page_size=20&filter=message%7Ccontains%7Cfailure&filter=resolver%7Ceq%7Calice%40example.com", nil)
+	rec := httptest.NewRecorder()
+	if err := List(e.NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFilterOptionsIncludeValuesOutsideCurrentPage(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB, oldAuth := ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator
+	ApiTypes.SharedDBHandle = db
+	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+		return &ApiTypes.UserInfo{Email: "alice@example.com"}, nil
+	}
+	defer func() { ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator = oldDB, oldAuth }()
+	mock.ExpectQuery(`SELECT 'level', level FROM public\.jimo_alert_log`).WillReturnRows(sqlmock.NewRows([]string{"kind", "value"}).AddRow("loc", "CWB_001").AddRow("owner", "alice@example.com").AddRow("resolver", "bob@example.com"))
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/filter-options", nil)
+	if err := FilterOptions(e.NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"loc":["CWB_001"]`) || !strings.Contains(rec.Body.String(), `"resolver":["bob@example.com"]`) {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

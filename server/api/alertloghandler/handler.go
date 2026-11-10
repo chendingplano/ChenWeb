@@ -52,9 +52,10 @@ type commentRequest struct {
 var sortableColumns = map[string]string{
 	"created_at": "l.created_at", "level": "l.level", "message": "l.message",
 	"loc": "l.loc", "status": "l.status", "owner": "l.owner",
+	"resolver": "l.resolver",
 }
 
-var filterOps = map[string]string{"eq": "=", "ne": "<>", "gt": ">", "lt": "<"}
+var filterOps = map[string]string{"eq": "=", "ne": "<>", "gt": ">", "ge": ">=", "lt": "<", "contains": "ILIKE"}
 
 type listResponse struct {
 	Status   bool       `json:"status"`
@@ -114,10 +115,14 @@ func List(c echo.Context) error {
 	for _, raw := range c.QueryParams()["filter"] {
 		parts := strings.SplitN(raw, "|", 3)
 		col, ok := sortableColumns[parts[0]]
-		if len(parts) != 3 || !ok || filterOps[parts[1]] == "" {
+		if len(parts) != 3 || !ok || filterOps[parts[1]] == "" || (parts[1] == "contains" && parts[0] != "message") {
 			return fail(c, http.StatusBadRequest, "invalid filter '"+raw+"' (CWB_ALT_030)")
 		}
-		args = append(args, parts[2])
+		value := parts[2]
+		if parts[1] == "contains" {
+			value = "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value) + "%"
+		}
+		args = append(args, value)
 		ph := "$" + strconv.Itoa(len(args))
 		if parts[0] == "created_at" {
 			ph += "::timestamptz"
@@ -184,6 +189,42 @@ func List(c echo.Context) error {
 		return fail(c, http.StatusInternalServerError, "failed to list alert logs (CWB_ALT_009)")
 	}
 	return c.JSON(http.StatusOK, listResponse{Status: true, Results: results, Page: page, PageSize: pageSize, Total: total})
+}
+
+// FilterOptions returns distinct values across the complete alert history.
+func FilterOptions(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_ALT_050")
+	defer rc.Close()
+	if rc.IsAuthenticated() == nil {
+		return fail(c, http.StatusUnauthorized, "authentication required (CWB_ALT_051)")
+	}
+	db := ApiTypes.SharedDBHandle
+	if db == nil {
+		return fail(c, http.StatusInternalServerError, "database not initialised (CWB_ALT_052)")
+	}
+	rows, err := db.QueryContext(c.Request().Context(), `SELECT 'level', level FROM public.jimo_alert_log WHERE NULLIF(BTRIM(level), '') IS NOT NULL
+		UNION SELECT 'loc', loc FROM public.jimo_alert_log WHERE NULLIF(BTRIM(loc), '') IS NOT NULL
+		UNION SELECT 'owner', owner FROM public.jimo_alert_log WHERE NULLIF(BTRIM(owner), '') IS NOT NULL AND LOWER(BTRIM(owner)) <> 'unassigned'
+		UNION SELECT 'resolver', resolver FROM public.jimo_alert_log WHERE NULLIF(BTRIM(resolver), '') IS NOT NULL ORDER BY 1, 2`)
+	if err != nil {
+		rc.GetLogger().Error("list alert filter options failed", "error", err)
+		return fail(c, http.StatusInternalServerError, "failed to list filter options (CWB_ALT_053)")
+	}
+	defer rows.Close()
+	options := map[string][]string{"level": {}, "loc": {}, "owner": {}, "resolver": {}}
+	for rows.Next() {
+		var kind, value string
+		if err := rows.Scan(&kind, &value); err != nil {
+			rc.GetLogger().Error("scan alert filter option failed", "error", err)
+			return fail(c, http.StatusInternalServerError, "failed to list filter options (CWB_ALT_054)")
+		}
+		options[kind] = append(options[kind], value)
+	}
+	if err := rows.Err(); err != nil {
+		rc.GetLogger().Error("iterate alert filter options failed", "error", err)
+		return fail(c, http.StatusInternalServerError, "failed to list filter options (CWB_ALT_055)")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "options": options})
 }
 
 // Assign handles PUT /api/v1/system-admin/alert-logs/:id/assign.

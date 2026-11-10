@@ -38,7 +38,11 @@
 	const SAVED_KEY = 'alertLogsView.v1';
 	const API = '/api/v1/system-admin/alert-logs';
 
-	let rows = $state<AlertRow[]>([]), total = $state(0), page = $state(1), pageSize = 50;
+	let rows = $state<AlertRow[]>([]), total = $state(0), page = $state(1), pageSize = $state(50);
+	let filterDraft = $state({ from: '', to: '', level: '', message: '', loc: '', status: '', resolver: '', owner: '' });
+	let appliedFilters = $state({ from: '', to: '', level: '', message: '', loc: '', status: '', resolver: '', owner: '' });
+	let filterOptions = $state<{ level: string[]; loc: string[]; resolver: string[]; owner: string[] }>({ level: [], loc: [], resolver: [], owner: [] });
+	let optionsError = $state('');
 	let loading = $state(false), error = $state('');
 	let sort = $state<Sort | null>(null), filters = $state<Filter[]>([]);
 	let menu = $state<{ col: ColKey; x: number; y: number } | null>(null);
@@ -82,12 +86,29 @@
 			userNames = names;
 		} catch { /* Keep stored identifiers visible if profiles are unavailable. */ }
 	}
+	async function loadFilterOptions() {
+		try {
+			const data = await call(`${API}/filter-options`);
+			filterOptions = data.options as typeof filterOptions;
+			optionsError = '';
+		} catch { optionsError = m.alert_logs_options_failed(); }
+	}
 	async function load() {
 		loading = true; error = '';
 		try {
 			const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
 			if (sort) params.set('sort', `${sort.col}|${sort.dir}`);
 			for (const f of filters) params.append('filter', `${f.col}|${f.op}|${f.value}`);
+			for (const key of ['level', 'loc', 'status', 'resolver', 'owner'] as const) {
+				if (appliedFilters[key]) params.append('filter', `${key}|eq|${appliedFilters[key]}`);
+			}
+			if (appliedFilters.message.trim()) params.append('filter', `message|contains|${appliedFilters.message.trim()}`);
+			if (appliedFilters.from) params.append('filter', `created_at|ge|${new Date(`${appliedFilters.from}T00:00:00`).toISOString()}`);
+			if (appliedFilters.to) {
+				const end = new Date(`${appliedFilters.to}T00:00:00`);
+				end.setDate(end.getDate() + 1);
+				params.append('filter', `created_at|lt|${end.toISOString()}`);
+			}
 			const data = await call(`${API}?${params}`);
 			rows = Array.isArray(data.results) ? (data.results as AlertRow[]).map((row) => ({
 				...row, owner: !row.owner?.trim() || row.owner.trim().toLowerCase() === 'unassigned' ? null : row.owner
@@ -100,6 +121,17 @@
 		} finally { loading = false; }
 	}
 	function applyFilters() { page = 1; load(); }
+	function applyFormFilters() { appliedFilters = { ...filterDraft }; applyFilters(); }
+	function resetFormFilters() {
+		filterDraft = { from: '', to: '', level: '', message: '', loc: '', status: '', resolver: '', owner: '' };
+		filters = [];
+		applyFormFilters();
+	}
+	function changePageSize(value: number) {
+		pageSize = value;
+		try { localStorage.setItem('alertLogsPageSize', String(value)); } catch { /* storage unavailable */ }
+		page = 1; load();
+	}
 	function cellValue(row: AlertRow, col: ColKey): string { return row[col] ?? ''; }
 	function selectedValue(col: ColKey): string {
 		if (!selected || selected.col !== col) return '';
@@ -125,7 +157,7 @@
 		applyFilters();
 	}
 	function removeFilter(index: number) { filters = filters.filter((_, i) => i !== index); applyFilters(); }
-	function clearAll() { sort = null; filters = []; closeMenu(); applyFilters(); }
+	function clearAll() { sort = null; closeMenu(); resetFormFilters(); }
 	function saveSettings() {
 		try { localStorage.setItem(SAVED_KEY, JSON.stringify({ sort, filters })); } catch { /* storage unavailable */ }
 		closeMenu();
@@ -169,7 +201,7 @@
 				method: 'PUT', headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(!owner && !row.owner ? { self: true } : { owner: owner || null })
 			});
-			await load();
+			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { error = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
 	function startResolve(row: AlertRow) { resolvingId = row.id; resolutionDraft = ''; resolveError = ''; }
@@ -183,11 +215,15 @@
 			resolvingId = null;
 			if (expandedId === row.id) expandedId = null;
 			if (commentsId === row.id) commentsId = null;
-			await load();
+			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
 	function levelColor(level: string) { return level === 'ERROR' ? danger : warning; }
-	onMount(() => { loadSettings(); void (async () => { await loadUserNames(); await load(); })(); });
+	onMount(() => {
+		loadSettings();
+		try { const saved = Number(localStorage.getItem('alertLogsPageSize')); if ([20, 50, 100, 200].includes(saved)) pageSize = saved; } catch { /* storage unavailable */ }
+		void (async () => { await loadUserNames(); await Promise.all([load(), loadFilterOptions()]); })();
+	});
 </script>
 
 <div class="p-6 space-y-4 h-full flex flex-col overflow-hidden select-text" style="background:{pageBg}">
@@ -198,7 +234,7 @@
 				<p style="font-size:13px;color:{textSecondary};margin-top:2px">{m.alert_logs_subtitle()}</p>
 			</div>
 			<div class="flex flex-wrap items-center gap-2">
-				<button onclick={load} disabled={loading} class="inline-flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">
+				<button onclick={() => { void Promise.all([load(), loadFilterOptions()]); }} disabled={loading} class="inline-flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">
 					<RefreshCwIcon class="w-4 h-4 {loading ? 'animate-spin' : ''}" />{m.alert_logs_refresh()}
 				</button>
 			</div>
@@ -209,6 +245,19 @@
 			<CircleAlertIcon class="w-4 h-4" /><span style="font-size:13px">{error}</span>
 		</div>
 	{/if}
+	{#if optionsError}<div style="color:{danger};font-size:13px">{optionsError}</div>{/if}
+	<form onsubmit={(event) => { event.preventDefault(); applyFormFilters(); }} class="rounded-xl p-4 flex flex-wrap items-end gap-3 flex-shrink-0" style="background:{cardBg};border:1px solid {borderColor};font-size:12px;color:{textSecondary}">
+		<label class="grid gap-1">{m.alert_logs_from()}<input type="date" bind:value={filterDraft.from} max={filterDraft.to || undefined} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px" /></label>
+		<label class="grid gap-1">{m.alert_logs_to()}<input type="date" bind:value={filterDraft.to} min={filterDraft.from || undefined} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px" /></label>
+		<label class="grid gap-1">{m.alert_logs_level()}<select bind:value={filterDraft.level} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"><option value="">{m.alert_logs_all()}</option>{#each filterOptions.level as value}<option {value}>{value}</option>{/each}</select></label>
+		<label class="grid gap-1">{m.alert_logs_message()}<input bind:value={filterDraft.message} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px" /></label>
+		<label class="grid gap-1">{m.alert_logs_location()}<select bind:value={filterDraft.loc} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"><option value="">{m.alert_logs_all()}</option>{#each filterOptions.loc as value}<option {value}>{value}</option>{/each}</select></label>
+		<label class="grid gap-1">{m.alert_logs_status()}<select bind:value={filterDraft.status} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"><option value="">{m.alert_logs_all()}</option><option value="open">{m.alert_logs_status_open()}</option><option value="resolved">{m.alert_logs_status_resolved()}</option></select></label>
+		<label class="grid gap-1">{m.alert_logs_resolver_label()}<select bind:value={filterDraft.resolver} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"><option value="">{m.alert_logs_all()}</option>{#each filterOptions.resolver as value}<option {value}>{displayUser(value)}</option>{/each}</select></label>
+		<label class="grid gap-1">{m.alert_logs_owner()}<select bind:value={filterDraft.owner} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"><option value="">{m.alert_logs_all()}</option>{#each filterOptions.owner as value}<option {value}>{displayUser(value)}</option>{/each}</select></label>
+		<button type="submit" class="rounded px-3 py-1.5" style="background:{accent};color:white">{m.alert_logs_apply()}</button>
+		<button type="button" onclick={resetFormFilters} class="rounded px-3 py-1.5" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_clear()}</button>
+	</form>
 	{#if sort || filters.length}
 		<div class="flex flex-wrap items-center gap-2 flex-shrink-0" style="font-size:12px">
 			{#if sort}
@@ -226,6 +275,7 @@
 		<div class="px-5 py-3 flex justify-between flex-shrink-0" style="border-bottom:1px solid {borderColor}">
 			<span style="font-size:13px;color:{textMuted}">{m.alert_logs_total({ total })}{#if total} · {m.alert_logs_page_of({ page, totalPages })}{/if}</span>
 			<div class="flex gap-2">
+				<label class="flex items-center gap-2" style="color:{textSecondary};font-size:12px">{m.alert_logs_page_size()}<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:4px">{#each [20, 50, 100, 200] as size}<option value={size}>{size}</option>{/each}</select></label>
 				<button onclick={() => { if (page > 1) { page--; load(); } }} disabled={page <= 1 || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_prev()}</button>
 				<button onclick={() => { if (page < totalPages) { page++; load(); } }} disabled={page >= totalPages || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_next()}</button>
 			</div>
