@@ -174,7 +174,9 @@ null, long attribute names, translated attributes, or unlisted attributes.
   code. New types are retained as proposals for human review. Use an existing
   type for synonyms or narrower instances of that type.
 - Object `r`: `reg` regulated object; `tgt` requirement target; `part` component;
-  `par` parent system; `oth` other. Prefer a specific supported role over `oth`.
+  `par` parent system; `loc` location; `oth` other. Prefer a specific supported
+  role over `oth`. For a different role, use a concise descriptive name rather
+  than inventing a short code.
 
 ## Packed flags
 

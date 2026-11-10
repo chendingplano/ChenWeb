@@ -21,7 +21,7 @@ var provisionV2ObjectTypes = map[string]string{
 	"per": "person", "loc": "place", "doc": "document", "con": "concept", "oth": "other",
 }
 var provisionV2ObjectRoles = map[string]string{
-	"reg": "regulated_object", "tgt": "requirement_target", "part": "component", "par": "parent_system", "oth": "other",
+	"reg": "regulated_object", "tgt": "requirement_target", "part": "component", "par": "parent_system", "oth": "other", "loc": "location",
 }
 
 // The same schema governs provider retries and decoding plain JSON clients.
@@ -36,7 +36,7 @@ func provisionV2Schema() map[string]any {
 		}},
 	}
 	objects := schemaArrayOfObjects(map[string]any{
-		"n": text, "t": map[string]any{"type": "string", "pattern": `\S`}, "r": provisionV2Enum(provisionV2ObjectRoles),
+		"n": text, "t": map[string]any{"type": "string", "pattern": `\S`}, "r": map[string]any{"type": "string", "pattern": `\S`},
 		"s": spans, "q": score, "a": schemaStringArray(), "y": schemaStringArray(), "d": schemaString(),
 	}, []string{"n", "t", "r", "s", "q"}, false)
 	provisions := schemaArrayOfObjects(map[string]any{
@@ -127,9 +127,13 @@ func decodeProvisionV2(payload map[string]any) (map[string]any, error) {
 			if canonical, ok := provisionV2ObjectTypes[objectType]; ok {
 				objectType = canonical
 			}
+			role := normalizeObjectToken(asString(object["r"]))
+			if canonical, ok := provisionV2ObjectRoles[role]; ok {
+				role = canonical
+			}
 			decoded := map[string]any{
 				"object_name": object["n"], "object_type": objectType, "object_type_raw": rawType,
-				"object_role": provisionV2ObjectRoles[asString(object["r"])], "source_line_spans": objectSpans, "confidence": object["q"],
+				"object_role": role, "source_line_spans": objectSpans, "confidence": object["q"],
 				"description": asString(object["d"]), "aliases": append([]string{}, toStringSlice(object["a"])...),
 				"acronyms": append([]string{}, toStringSlice(object["y"])...),
 			}

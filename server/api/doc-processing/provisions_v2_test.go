@@ -236,6 +236,8 @@ func TestProvisionsV2RejectsInvalidWireRecords(t *testing.T) {
 		func(p map[string]any) { p["o"].([]any)[0].(map[string]any)["s"] = []any{} },
 		func(p map[string]any) { delete(p["o"].([]any)[0].(map[string]any), "s") },
 		func(p map[string]any) { p["o"].([]any)[0].(map[string]any)["eq"] = "quote" },
+		func(p map[string]any) { p["o"].([]any)[0].(map[string]any)["r"] = "   " },
+		func(p map[string]any) { delete(p["o"].([]any)[0].(map[string]any), "r") },
 		func(p map[string]any) { p["o"] = nil },
 	} {
 		var raw map[string]any
@@ -303,6 +305,23 @@ func TestProvisionsV2StructuredRetriesNonconformingResponses(t *testing.T) {
 				}
 			}
 
+		})
+	}
+}
+
+func TestProvisionsV2AcceptsDiscoveredObjectRoles(t *testing.T) {
+	for _, tc := range []struct{ wire, want string }{{"loc", "location"}, {"installation location", "installation_location"}, {"reg", "regulated_object"}} {
+		t.Run(tc.wire, func(t *testing.T) {
+			payload := strings.Replace(provisionV2Example, `"r":"reg"`, `"r":"`+tc.wire+`"`, 1)
+			got := extractProvisionTestPayload(t, payload)
+			p := got["provisions"].([]any)[0].(map[string]any)
+			if role := objectItemsFromValue(p["objects"])[0]["object_role"]; role != tc.want {
+				t.Fatalf("role = %v, want %q", role, tc.want)
+			}
+			objects := normalizeArtifactObjectsForArtifact(280, searchArtifactProvision, "test", p)
+			if len(objects) != 1 || objects[0].ObjectRole != tc.want {
+				t.Fatalf("stored objects = %#v, want role %q", objects, tc.want)
+			}
 		})
 	}
 }
