@@ -42,8 +42,11 @@ Each run stores the authenticated initiator's string user ID in
 `kb.doc_review_runs.user_id`. A manual restart records the user who restarted it;
 automatic recovery copies the previous run's user ID. The worker reloads this ID
 before invoking the reviewers, so both JSON extraction and tool-use calls attribute
-LLM usage to the run's initiator. Runs created before this field existed have no
-reliable stored identity and remain unattributed when automatically recovered.
+LLM usage to the run's initiator. When no initiator is known (automatic recovery
+of a run created before this field existed, or a request without an authenticated
+user), the new run stores the reviewed document's owner (`kb.inputs.user_id`),
+the same attribution doc-processing uses for automatic triggers. The run is
+unattributed, with a warning, only if the document has no owner either.
 
 After re-arming, the run is re-triggered exactly like a fresh submit:
 `PublishReviewEvent` (JetStream), falling back to an inline goroutine.

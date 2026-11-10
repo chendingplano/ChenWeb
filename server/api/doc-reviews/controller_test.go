@@ -1232,9 +1232,18 @@ func TestController_RunReviewBindingFailureLeavesRunUnclaimed(t *testing.T) {
 }
 
 func TestRestartRequestPreservesOrReplacesInitiatingUser(t *testing.T) {
-	for _, tc := range []struct{ name, actor, want string }{
-		{"recovery retains previous user", "", "original-user"},
-		{"manual restart uses current user", "new-user", "new-user"},
+	for _, tc := range []struct {
+		name, actor string
+		previous    any
+		owner       string
+		want        string
+	}{
+		{"recovery retains previous user", "", "original-user", "", "original-user"},
+		{"manual restart uses current user", "new-user", "original-user", "", "new-user"},
+		// A run created before kb.doc_review_runs.user_id existed has no user;
+		// its recovery is attributed to the document's owner.
+		{"recovery of unattributed run uses document owner", "", nil, "owner-user", "owner-user"},
+		{"legacy owner sentinel stays unattributed", "", nil, "-", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
@@ -1250,11 +1259,19 @@ func TestRestartRequestPreservesOrReplacesInitiatingUser(t *testing.T) {
 			}).AddRow(int64(11), int64(42), 1, "custom", `["grammar_spelling"]`, `[]`, "", `{}`,
 				"test-user", int64(0), "", "", "completed", "2026-07-10", nil, "", "", "", ""))
 			mock.ExpectQuery(`SELECT id, status, user_id FROM kb.doc_review_runs`).WithArgs(int64(11)).
-				WillReturnRows(sqlmock.NewRows([]string{"id", "status", "user_id"}).AddRow(21, "completed", "original-user"))
+				WillReturnRows(sqlmock.NewRows([]string{"id", "status", "user_id"}).AddRow(21, "completed", tc.previous))
 			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM kb.doc_review_runs`).WithArgs(int64(11)).
 				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+			if tc.owner != "" {
+				mock.ExpectQuery(`SELECT user_id FROM kb\.inputs WHERE id = \$1`).WithArgs(int64(42)).
+					WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(tc.owner))
+			}
+			var wantUser any = tc.want
+			if tc.want == "" {
+				wantUser = nil
+			}
 			mock.ExpectQuery(`(?s)INSERT INTO kb\.doc_review_runs.*RETURNING id`).
-				WithArgs(int64(11), int64(42), 2, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user", int64(0), tc.want).
+				WithArgs(int64(11), int64(42), 2, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user", int64(0), wantUser).
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(22))
 			mock.ExpectExec(`UPDATE kb.doc_review_requests SET status`).WithArgs(int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec(`(?s)INSERT INTO kb\.doc_review_status`).WithArgs(int64(11), int64(42), int64(22), "grammar_spelling", "P1").WillReturnResult(sqlmock.NewResult(0, 1))

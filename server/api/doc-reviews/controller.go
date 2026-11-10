@@ -153,13 +153,32 @@ func (c *DocReviewController) createRun(ctx context.Context, requestID, recordID
 		return 0, fmt.Errorf("marshal model overrides: %w", err)
 	}
 
+	// With no initiating user (recovery of a run created before user_id
+	// existed, or an unauthenticated request), attribute the run's LLM usage
+	// to the document's owner, as doc-processing does for automatic triggers.
+	userID := strings.TrimSpace(docprocessing.LLMUserIDFromContext(ctx))
+	if userID == "" {
+		var owner sql.NullString
+		if err := c.DB.QueryRowContext(ctx, `SELECT user_id FROM kb.inputs WHERE id = $1`, recordID).Scan(&owner); err != nil && err != sql.ErrNoRows {
+			return 0, fmt.Errorf("load owner of record %d: %w", recordID, err)
+		}
+		// NULL, empty and the legacy "-" sentinel all mean unset.
+		if o := strings.TrimSpace(owner.String); o != "-" {
+			userID = o
+		}
+		if userID == "" {
+			logger.Warn("doc-review run has no initiating user and its document has no owner; LLM usage will be unattributed",
+				"request_id", requestID, "record_id", recordID)
+		}
+	}
+
 	var runID int64
 	err = c.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_runs
 			(request_id, input_record_id, run_number, aspects, model_overrides, notes, status, created_by, llm_run_id, user_id)
 		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
 		RETURNING id`,
-		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy), llmrun.Next(ctx), nullableStr(docprocessing.LLMUserIDFromContext(ctx)),
+		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy), llmrun.Next(ctx), nullableStr(userID),
 	).Scan(&runID)
 	return runID, err
 }
