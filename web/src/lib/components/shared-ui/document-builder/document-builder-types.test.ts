@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { docbuilderFileUrl, findLeaf, firstLeaf, type DocTreeNode } from './document-builder-types';
+import {
+	docbuilderFileUrl,
+	findLeaf,
+	firstLeaf,
+	stripFrontMatter,
+	type DocTreeNode
+} from './document-builder-types';
 
 const tree: DocTreeNode[] = [
 	{
@@ -25,5 +31,13 @@ describe('document builder tree helpers', () => {
 		expect(docbuilderFileUrl('s k', 'a b/c&d.md')).toBe(
 			'/api/v1/docbuilder/s%20k/file?path=a%20b%2Fc%26d.md'
 		);
+	});
+
+	test('strips front matter only at the start', () => {
+		expect(stripFrontMatter('---\ntitle: A\nx: y\n---\n# Body\n')).toBe('# Body\n');
+		expect(stripFrontMatter('# Body\n---\nnot: front\n---\n')).toBe(
+			'# Body\n---\nnot: front\n---\n'
+		);
+		expect(stripFrontMatter('---\nno end')).toBe('---\nno end');
 	});
 });

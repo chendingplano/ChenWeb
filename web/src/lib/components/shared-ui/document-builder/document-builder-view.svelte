@@ -4,6 +4,10 @@
 	// viewer in an iframe. See KnowledgeStore/doc-repo/modules/module-document-builder-frontend.md.
 	import { onMount } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import FileIcon from '@lucide/svelte/icons/file';
 	import { m } from '$lib/paraglide/messages.js';
 	import MarkdownViewer from '$lib/components/shared-ui/markdown-viewer/markdown-viewer.svelte';
 	import {
@@ -11,6 +15,7 @@
 		docbuilderTreeUrl,
 		findLeaf,
 		firstLeaf,
+		stripFrontMatter,
 		type DocTreeNode,
 		type DocTreeResponse
 	} from './document-builder-types';
@@ -76,7 +81,7 @@
 			try {
 				const r = await fetch(docbuilderFileUrl(source, node.path), { credentials: 'same-origin' });
 				if (!r.ok) throw new Error(String(r.status));
-				markdown = await r.text();
+				markdown = stripFrontMatter(await r.text());
 			} catch {
 				error = m.docbuilder_load_failed({ label: node.label });
 			}
@@ -144,6 +149,11 @@
 						saveState();
 					}}
 				>
+					{#if expanded[cat.id]}
+						<FolderOpenIcon class="flex-shrink-0" style="width:16px; height:16px;" />
+					{:else}
+						<FolderIcon class="flex-shrink-0" style="width:16px; height:16px;" />
+					{/if}
 					<span class="flex-1 truncate text-left">{cat.label}</span>
 					<span style="font-size:12px;">{cat.children?.length ?? 0}</span>
 					<ChevronDownIcon
@@ -157,7 +167,7 @@
 					<div class="mt-0.5 mb-1 ml-3" style="border-left:2px solid {borderColor};">
 						{#each cat.children ?? [] as leaf (leaf.id)}
 							<button
-								class="flex w-full cursor-pointer items-center px-3 py-1.5 text-left"
+								class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left"
 								style="font-size:13px; color:{selected?.path === leaf.path
 									? accent
 									: textMuted}; background:{selected?.path === leaf.path
@@ -165,6 +175,11 @@
 									: 'transparent'};"
 								onclick={() => select(leaf)}
 							>
+								{#if leaf.kind === 'pdf'}
+									<FileIcon class="flex-shrink-0" style="width:14px; height:14px;" />
+								{:else}
+									<FileTextIcon class="flex-shrink-0" style="width:14px; height:14px;" />
+								{/if}
 								<span class="truncate">{leaf.label}</span>
 							</button>
 						{/each}

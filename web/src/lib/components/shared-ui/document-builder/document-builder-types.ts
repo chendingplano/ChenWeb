@@ -32,3 +32,9 @@ export function findLeaf(nodes: DocTreeNode[], path: string): DocTreeNode | unde
 	}
 	return undefined;
 }
+
+// Removes a leading YAML front-matter block (--- ... ---) so it is not shown as body text.
+export function stripFrontMatter(src: string): string {
+	const m = /^﻿?---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(src);
+	return m ? src.slice(m[0].length) : src;
+}

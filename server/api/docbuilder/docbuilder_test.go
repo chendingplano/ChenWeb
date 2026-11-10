@@ -135,3 +135,26 @@ func TestFileEndpointOnlyServesScannedFiles(t *testing.T) {
 		t.Fatalf("tree: %d", r.Code)
 	}
 }
+
+func TestLatestVersionsKeepsNewestPerLanguage(t *testing.T) {
+	var es []Entry
+	for _, p := range []string{
+		"m-v1.0-en.md", "m-v1.1-en.md", "m-v1.9-en.md", "m-v1.10-en.md", "m-v1.5-zh.md",
+		"plain.md", "sub/x-v2.md", "sub/x-v10.md", "other/x-v3.md",
+	} {
+		es = append(es, Entry{Path: p})
+	}
+	var got []string
+	for _, e := range LatestVersions(es) {
+		got = append(got, e.Path)
+	}
+	want := []string{"m-v1.10-en.md", "m-v1.5-zh.md", "plain.md", "sub/x-v10.md", "other/x-v3.md"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}

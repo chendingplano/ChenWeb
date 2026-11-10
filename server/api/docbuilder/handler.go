@@ -13,7 +13,8 @@ func safeJoin(dir, rel string) string { return filepath.Join(dir, filepath.FromS
 
 // Register adds the read-only routes to an authenticated group:
 //
-//	GET /docbuilder/:source/tree          → {title, tree, uncategorized}
+//	GET /docbuilder/:source/tree[?all=1]  → {title, tree, uncategorized}; only the latest version of each
+//	                                         document unless all=1
 //	GET /docbuilder/:source/file?path=... → the Markdown text or the PDF bytes
 //
 // Serving never calls an LLM: categories come from the saved manifest, and files not yet
@@ -28,13 +29,17 @@ func Register(g *echo.Group, sources map[string]Source) {
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "unable to read documents"})
 		}
+		entries := m.Entries
+		if c.QueryParam("all") != "1" {
+			entries = LatestVersions(entries)
+		}
 		pending := 0
-		for _, e := range m.Entries {
+		for _, e := range entries {
 			if e.Category == "" {
 				pending++
 			}
 		}
-		return c.JSON(http.StatusOK, map[string]any{"title": src.Title, "tree": BuildTree(m.Entries), "uncategorized": pending})
+		return c.JSON(http.StatusOK, map[string]any{"title": src.Title, "tree": BuildTree(entries), "uncategorized": pending})
 	})
 	g.GET("/docbuilder/:source/file", func(c echo.Context) error {
 		src, ok := sources[c.Param("source")]
