@@ -381,6 +381,7 @@
 	"nav_sysadmin_doc_review_logs": "文档审核日志",
 	"nav_sysadmin_alert_logs": "警告与错误",
 	"alert_logs_title": "警告与错误",
+	"alert_logs_id": "编号",
 	"alert_logs_from": "开始日期",
 	"alert_logs_to": "结束日期",
 	"alert_logs_all": "全部",

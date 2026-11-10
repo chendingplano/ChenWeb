@@ -381,6 +381,7 @@
 	"nav_sysadmin_doc_review_logs": "Doc Review Logs",
 	"nav_sysadmin_alert_logs": "Warnings and Errors",
 	"alert_logs_title": "Warnings and Errors",
+	"alert_logs_id": "ID",
 	"alert_logs_from": "From date",
 	"alert_logs_to": "Through date",
 	"alert_logs_all": "All",

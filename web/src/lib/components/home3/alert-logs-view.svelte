@@ -317,6 +317,7 @@
 					<thead>
 						<tr style="background:{surface2}">
 							<th class="sticky top-0 z-10 px-4" style="background:{surface2};border-bottom:1px solid {borderColor}"><span class="sr-only">{m.alert_logs_selection()}</span></th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}">{m.alert_logs_id()}</th>
 							{#each columns as col (col.key)}
 								<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}">
 									<span class="inline-flex items-center gap-1">
@@ -334,6 +335,7 @@
 						{#each rows as row (row.id)}
 							<tr class="hover:bg-white/5">
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}"><input type="checkbox" checked={checkedIds.includes(row.id)} disabled={row.status === 'resolved'} onchange={(event) => toggleChecked(row.id, event.currentTarget.checked)} aria-label={m.alert_logs_select_row({ id: String(row.id) })} /></td>
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary};font-size:12px">{row.id}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'created_at' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textMuted};white-space:nowrap;font-size:12px;{selected?.id === row.id && selected.col === 'created_at' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{formatTime(row.created_at)}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'level' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{levelColor(row.level)};font-weight:600;{selected?.id === row.id && selected.col === 'level' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.level}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'message' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};max-width:420px;{selected?.id === row.id && selected.col === 'message' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">
@@ -359,7 +361,7 @@
 							</tr>
 							{#if expandedId === row.id || resolvingId === row.id || commentsId === row.id}
 								<tr>
-									<td colspan="8" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
+									<td colspan="9" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
 										{#if row.status === 'resolved' && expandedId === row.id}
 											<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: displayUser(row.resolver) || '—', time: formatTime(row.resolve_time) })}</div>
 											<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{row.resolution}</div>
