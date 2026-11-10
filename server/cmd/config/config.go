@@ -13,6 +13,7 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	sharedgoose "github.com/chendingplano/shared/go/api/goose"
+	"github.com/chendingplano/shared/go/api/sysdatastores"
 	"github.com/spf13/viper"
 )
 
@@ -1035,6 +1036,9 @@ func RunMigrations(ctx context.Context, logger ApiTypes.JimoLogger) error {
 	if err := sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedDBHandle); err != nil {
 		return fmt.Errorf("shared migrations failed: %w", err)
 	}
+	// Workers do not call libmanager.InitLib, so start the alert sink here once
+	// the shared alert table exists and before any background jobs begin.
+	sysdatastores.StartAlertLogWriter(ApiTypes.SharedDBHandle)
 	if err := llmrun.Provision(ctx, ApiTypes.SharedDBHandle); err != nil {
 		return err
 	}
