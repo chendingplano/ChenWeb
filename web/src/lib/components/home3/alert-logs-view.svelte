@@ -52,7 +52,8 @@
 	let commentDraft = $state(''), commentError = $state('');
 	let ownerDraft = $state<Record<number, string>>({});
 	let userNames = $state<Record<string, string>>({});
-	let expandedId = $state<number | null>(null);
+	let detailRow = $state<AlertRow | null>(null), commentRow = $state<AlertRow | null>(null);
+	let detailDialog: HTMLDialogElement, commentsDialog: HTMLDialogElement;
 	let resolvingId = $state<number | null>(null), resolutionDraft = $state(''), resolveError = $state('');
 	let checkedIds = $state<number[]>([]);
 	let bulkDialog: HTMLDialogElement;
@@ -175,16 +176,17 @@
 	}
 	function opSym(op: Op) { return ops.find((o) => o.op === op)?.sym ?? '='; }
 	function shorten(text: string) { return text.length > 40 ? `${text.slice(0, 39)}…` : text; }
-	async function toggleComments(row: AlertRow) {
-		if (commentsId === row.id) { commentsId = null; return; }
-		commentsId = row.id; commentDraft = ''; commentError = ''; comments = [];
+	function openDetails(row: AlertRow) { detailRow = row; detailDialog.showModal(); }
+	async function openComments(row: AlertRow) {
+		commentRow = row; commentsId = row.id; commentDraft = ''; commentError = ''; comments = [];
+		commentsDialog.showModal();
 		await loadComments(row.id);
 	}
 	async function loadComments(id: number) {
 		try {
 			const data = await call(`${API}/${id}/comments`);
-			comments = Array.isArray(data.results) ? (data.results as typeof comments) : [];
-		} catch (err) { commentError = (err instanceof Error && err.message) || m.alert_logs_failed_to_load(); }
+			if (commentsId === id) comments = Array.isArray(data.results) ? (data.results as typeof comments) : [];
+		} catch (err) { if (commentsId === id) commentError = (err instanceof Error && err.message) || m.alert_logs_failed_to_load(); }
 	}
 	async function addComment(row: AlertRow) {
 		if (!commentDraft.trim()) return;
@@ -219,7 +221,6 @@
 			});
 			resolvingId = null;
 			checkedIds = checkedIds.filter((id) => id !== row.id);
-			if (expandedId === row.id) expandedId = null;
 			if (commentsId === row.id) commentsId = null;
 			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
@@ -236,7 +237,6 @@
 		bulkSaving = true; bulkError = '';
 		try {
 			await call(`${API}/resolve-bulk`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: checkedIds, resolution: bulkReason.trim() }) });
-			if (expandedId !== null && checkedIds.includes(expandedId)) expandedId = null;
 			if (commentsId !== null && checkedIds.includes(commentsId)) commentsId = null;
 			if (resolvingId !== null && checkedIds.includes(resolvingId)) resolvingId = null;
 			checkedIds = [];
@@ -339,7 +339,7 @@
 								<td onclick={() => (selected = { id: row.id, col: 'created_at' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textMuted};white-space:nowrap;font-size:12px;{selected?.id === row.id && selected.col === 'created_at' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{formatTime(row.created_at)}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'level' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{levelColor(row.level)};font-weight:600;{selected?.id === row.id && selected.col === 'level' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.level}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'message' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};max-width:420px;{selected?.id === row.id && selected.col === 'message' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">
-									<button onclick={() => (expandedId = expandedId === row.id ? null : row.id)} class="text-left cursor-pointer" title={m.alert_logs_details()} style="color:{textPrimary};background:none;border:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:block">{row.message}</button>
+									<button onclick={() => openDetails(row)} class="text-left cursor-pointer" title={m.alert_logs_details()} style="color:{textPrimary};background:none;border:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:block">{row.message}</button>
 								</td>
 								<td onclick={() => (selected = { id: row.id, col: 'loc' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{textSecondary};font-family:monospace;font-size:12px;{selected?.id === row.id && selected.col === 'loc' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.loc || '—'}</td>
 								<td onclick={() => (selected = { id: row.id, col: 'status' })} class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};color:{row.status === 'resolved' ? success : textSecondary};{selected?.id === row.id && selected.col === 'status' ? `outline:1px solid ${accent};outline-offset:-1px` : ''}">{row.status === 'resolved' ? m.alert_logs_status_resolved() : m.alert_logs_status_open()}{#if row.status === 'resolved' && row.resolver}<div style="font-size:12px;color:{textSecondary}">{m.alert_logs_resolver({ resolver: displayUser(row.resolver) })}</div>{/if}</td>
@@ -351,49 +351,23 @@
 								</td>
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}">
 									<div class="flex gap-1">
-										<button onclick={() => (expandedId = expandedId === row.id ? null : row.id)} aria-expanded={expandedId === row.id} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_view()}</button>
-										<button onclick={() => toggleComments(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_comment({ count: row.comment_count })}</button>
+										<button onclick={() => openDetails(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_view()}</button>
+										<button onclick={() => openComments(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{surface2};color:{accent};border:1px solid {borderColor}">{m.alert_logs_comment({ count: row.comment_count })}</button>
 										{#if row.status !== 'resolved'}
 											<button onclick={() => startResolve(row)} class="rounded px-2 py-1 text-xs cursor-pointer" style="background:{accent};color:white">{m.alert_logs_resolve()}</button>
 										{/if}
 									</div>
 								</td>
 							</tr>
-							{#if expandedId === row.id || resolvingId === row.id || commentsId === row.id}
+							{#if resolvingId === row.id}
 								<tr>
 									<td colspan="9" class="px-4 py-3" style="border-bottom:1px solid {borderColor};background:{surface2}">
-										{#if row.status === 'resolved' && expandedId === row.id}
-											<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: displayUser(row.resolver) || '—', time: formatTime(row.resolve_time) })}</div>
-											<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{row.resolution}</div>
-										{/if}
 										{#if resolvingId === row.id}
 											<textarea bind:value={resolutionDraft} rows="3" placeholder={m.alert_logs_resolution_placeholder()} aria-label={m.alert_logs_resolution()} class="w-full rounded px-2 py-1.5 text-sm" style="background:{cardBg};color:{textPrimary};border:1px solid {borderColor}"></textarea>
 											{#if resolveError}<div style="font-size:12px;color:{danger};margin-top:4px">{resolveError}</div>{/if}
 											<div class="flex gap-2 mt-2">
 												<button onclick={() => saveResolve(row)} class="rounded px-3 py-1 text-sm cursor-pointer" style="background:{accent};color:white">{m.alert_logs_save()}</button>
 												<button onclick={() => (resolvingId = null)} class="rounded px-3 py-1 text-sm cursor-pointer" style="background:{cardBg};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_cancel()}</button>
-											</div>
-										{/if}
-										{#if commentsId === row.id}
-											<div class="space-y-2" style="margin-top:8px">
-												{#each comments as cm (cm.id)}
-															<div style="font-size:13px;color:{textSecondary}"><span style="color:{textMuted};font-size:12px">{displayUser(cm.author)} · {formatTime(cm.created_at)}</span><div style="white-space:pre-wrap">{cm.body}</div></div>
-												{:else}
-													<div style="font-size:12px;color:{textMuted}">{m.alert_logs_no_comments()}</div>
-												{/each}
-												<textarea bind:value={commentDraft} rows="2" placeholder={m.alert_logs_comment_placeholder()} aria-label={m.alert_logs_comment_placeholder()} class="w-full rounded px-2 py-1.5 text-sm" style="background:{cardBg};color:{textPrimary};border:1px solid {borderColor}"></textarea>
-												{#if commentError}<div style="font-size:12px;color:{danger}">{commentError}</div>{/if}
-												<button onclick={() => addComment(row)} disabled={!commentDraft.trim()} class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40" style="background:{accent};color:white">{m.alert_logs_add_comment()}</button>
-											</div>
-										{/if}
-										{#if expandedId === row.id}
-											<div style="font-size:12px;color:{textSecondary};margin-top:8px">
-												<NameValueVisualizer ariaLabel={m.alert_logs_details()} fields={[
-													{ key: 'message', label: m.alert_logs_message(), values: [row.message] },
-													{ key: 'req_id', label: m.alert_logs_request_id(), values: [row.req_id] },
-													{ key: 'call_flow', label: m.alert_logs_call_flow(), values: [row.call_flow] },
-													{ key: 'attrs', label: m.alert_logs_attributes(), values: [row.attrs] }
-												]} />
 											</div>
 										{/if}
 									</td>
@@ -406,6 +380,39 @@
 		{/if}
 	</div>
 </div>
+
+<dialog bind:this={detailDialog} aria-labelledby="alert-detail-title" onclose={() => (detailRow = null)} style="width:min(48rem, 90vw);max-height:85vh;overflow:auto;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
+{#if detailRow}<h2 id="alert-detail-title" style="font-size:16px;font-weight:600">{m.alert_logs_details()} · {detailRow.id}</h2>
+	{#if detailRow.status === 'resolved'}
+	<div style="font-size:12px;color:{success}">{m.alert_logs_resolved_by({ resolver: displayUser(detailRow.resolver) || '—', time: formatTime(detailRow.resolve_time) })}</div>
+	<div style="font-size:13px;color:{textSecondary};white-space:pre-wrap;margin-top:2px">{detailRow.resolution}</div>
+	{/if}
+
+<div style="font-size:12px;color:{textSecondary};margin-top:8px">
+	<NameValueVisualizer ariaLabel={m.alert_logs_details()} fields={[
+	{ key: 'message', label: m.alert_logs_message(), values: [detailRow.message] },
+	{ key: 'req_id', label: m.alert_logs_request_id(), values: [detailRow.req_id] },
+	{ key: 'call_flow', label: m.alert_logs_call_flow(), values: [detailRow.call_flow] },
+	{ key: 'attrs', label: m.alert_logs_attributes(), values: [detailRow.attrs] }
+	]} />
+	</div>
+<div class="flex justify-end mt-4"><button onclick={() => detailDialog.close()} class="rounded px-3 py-1.5 text-sm" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_close()}</button></div>{/if}
+</dialog>
+<dialog bind:this={commentsDialog} aria-labelledby="alert-comments-title" onclose={() => { commentsId = null; commentRow = null; }} style="width:min(48rem, 90vw);max-height:85vh;overflow:auto;background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
+{#if commentRow}<h2 id="alert-comments-title" style="font-size:16px;font-weight:600">{m.alert_logs_comment({ count: commentRow.comment_count })} · {commentRow.id}</h2>
+<div class="space-y-2" style="margin-top:8px">
+	{#each comments as cm (cm.id)}
+	<div style="font-size:13px;color:{textSecondary}"><span style="color:{textMuted};font-size:12px">{displayUser(cm.author)} · {formatTime(cm.created_at)}</span><div style="white-space:pre-wrap">{cm.body}</div></div>
+	{:else}
+	<div style="font-size:12px;color:{textMuted}">{m.alert_logs_no_comments()}</div>
+	{/each}
+	<textarea bind:value={commentDraft} rows="2" placeholder={m.alert_logs_comment_placeholder()} aria-label={m.alert_logs_comment_placeholder()} class="w-full rounded px-2 py-1.5 text-sm" style="background:{cardBg};color:{textPrimary};border:1px solid {borderColor}"></textarea>
+	{#if commentError}<div style="font-size:12px;color:{danger}">{commentError}</div>{/if}
+	<button onclick={() => { if (commentRow) void addComment(commentRow); }} disabled={!commentDraft.trim()} class="rounded px-3 py-1 text-sm cursor-pointer disabled:opacity-40" style="background:{accent};color:white">{m.alert_logs_add_comment()}</button>
+	</div>
+<div class="flex justify-end mt-4"><button onclick={() => commentsDialog.close()} class="rounded px-3 py-1.5 text-sm" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_close()}</button></div>{/if}
+</dialog>
+
 
 <dialog bind:this={bulkDialog} aria-labelledby="alert-bulk-title" oncancel={(event) => { if (bulkSaving) event.preventDefault(); }} style="width:min(32rem, 90vw);background:{cardBg};color:{textPrimary};border:1px solid {borderColor};border-radius:12px;padding:20px;box-shadow:0 12px 40px #0008">
 	<form onsubmit={(event) => { event.preventDefault(); void saveBulkResolve(); }}>

@@ -420,6 +420,7 @@
 	"alert_logs_call_flow": "Call flow",
 	"alert_logs_attributes": "Attributes",
 	"alert_logs_save": "Save",
+	"alert_logs_close": "Close",
 	"alert_logs_cancel": "Cancel",
 	"alert_logs_total": "{total} records",
 	"alert_logs_page_of": "Page {page} of {totalPages}",
