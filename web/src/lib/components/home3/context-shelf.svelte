@@ -479,9 +479,13 @@
 		{:else if summaryDetails}
 			{@render summaryDetails?.()}
 		{:else if provisionDetails}
-			{@render provisionDetails?.()}
+			<div class="details-scroll" style="scrollbar-color:{textMuted} transparent;">
+				{@render provisionDetails?.()}
+			</div>
 		{:else if productDetails}
-			{@render productDetails?.()}
+			<div class="details-scroll" style="scrollbar-color:{textMuted} transparent;">
+				{@render productDetails?.()}
+			</div>
 		{:else if metricDetails}
 			{@render metricDetails?.()}
 		{:else if compare}
@@ -977,5 +981,11 @@
 		flex: 1;
 		min-height: 0;
 		overflow: hidden;
+	}
+	.details-scroll {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		scrollbar-width: thin;
 	}
 </style>

@@ -473,7 +473,7 @@
 	.records :global(.retrieve-btn){grid-column:1 / -1;white-space:nowrap}
 	.records :global(.reset-btn),.records :global(.settings-btn){min-width:0;min-height:40px;padding:.6rem .5rem;font-size:12px;white-space:nowrap}
 	.records,.mention-column,.document,.details-panel{min-width:0;min-height:0;border-right:1px solid var(--ref-line);background:var(--ref-panel)}
-	.records{position:relative;overflow:hidden;--panel-bg:var(--ref-card);--ink-line:var(--ref-line);--text-primary:var(--ref-text);--text-muted:var(--ref-muted);--brass:var(--ref-accent);--font-mono:'JetBrains Mono',monospace}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0}
+	.records{position:relative;overflow:hidden;--panel-bg:var(--ref-card);--ink-line:var(--ref-line);--text-primary:var(--ref-text);--text-muted:var(--ref-muted);--brass:var(--ref-accent);--font-mono:'JetBrains Mono',monospace}.mention-column{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.document{display:flex;flex-direction:column;overflow:hidden;background:var(--ref-bg)}.details-panel{overflow-y:auto;overflow-x:hidden;border-right:0;scrollbar-width:thin;scrollbar-color:var(--ref-muted) transparent}
 	.column-head{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--ref-line);color:var(--ref-text)}
 	.column-head span{font:10px 'JetBrains Mono',monospace;color:var(--ref-accent);text-transform:uppercase;letter-spacing:.1em}
 	.reference-navigation{flex:none;display:flex;gap:8px;margin:0 8px 12px}
@@ -484,7 +484,7 @@
 	.reference-filters summary::-webkit-details-marker{display:none}.reference-filters[open] summary :global(svg){transform:rotate(90deg)}
 	.filter-controls{display:grid;gap:6px;padding:0 10px 10px}.filter-controls input,.filter-controls select{width:100%;min-width:0;height:30px;padding:0 8px;background:var(--ref-panel);border:1px solid var(--ref-line);color:var(--ref-secondary);font:10px 'JetBrains Mono',monospace}
 	.mention-list{flex:1;min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 16px 24px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--ref-line) transparent}
-	.mention-list::-webkit-scrollbar,.details-panel::-webkit-scrollbar{width:8px}.mention-list::-webkit-scrollbar-thumb,.details-panel::-webkit-scrollbar-thumb{background:var(--ref-line)}
+	.mention-list::-webkit-scrollbar,.details-panel::-webkit-scrollbar{width:8px}.mention-list::-webkit-scrollbar-thumb{background:var(--ref-line)}.details-panel::-webkit-scrollbar-thumb{background:var(--ref-muted)}
 	/* Cards keep their content height while the list scrolls. */
 	.mention-card{all:unset;box-sizing:border-box;flex-shrink:0;min-width:0;display:flex;position:relative;text-align:left;background:var(--ref-card);border:1px solid var(--ref-line-soft);color:var(--ref-text);cursor:pointer;transition:border-color 150ms,background 150ms}
 	.mention-card:hover{border-color:var(--ref-accent);background:var(--ref-panel)}.mention-card.active{border-color:var(--ref-crimson);background:var(--ref-crimson-faint)}
