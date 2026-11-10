@@ -306,8 +306,8 @@
             reviewerPackages = res.reviewer_packages;
             selectedReviewerPackage = reviewerPackages[0]?.key ?? 'all';
             tiers = await listTiers();
-            // Initial selection driven by [reviewers.<aspect>].checked in doc-review.local.toml.
-            selectedAspects = new Set(aspects.filter(a => a.checked).map(a => a.name));
+            // Keep new reviews unselected. Only explicit reviewer, tier, or package
+            // choices populate selectedAspects; config defaults can be hidden in collapsed tiers.
         } catch (e) {
             submitError = m.document_review_failed_to_load_aspects();
         }
