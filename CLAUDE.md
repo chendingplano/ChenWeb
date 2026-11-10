@@ -118,6 +118,24 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   its sequence. `server/api/llmrun/id_allocation_guard_test.go` fails on a new
   `CREATE SEQUENCE`, `nextval(` or `MAX(x)+1` unless the file is allowlisted with a reason.
 
+# Frontend production builds
+
+From `web/`, install with `bun install --frozen-lockfile` and build with `bun run build`.
+`mise build-web` also copies the completed static build into the Go embed directory.
+The shared frontend dependency uses `file:../../shared/svelte`, so installation does
+not depend on a globally registered Bun link.
+
+Svelte is pinned to 5.48.4, which provides the `fork` export used by SvelteKit.
+Keep Paraglide's `outputStructure: 'locale-modules'` in `web/vite.config.ts` for both
+development and production. With 8,889 messages, per-message output exhausted a
+16 GB Node heap during client chunk rendering. Per-locale output reduced the client
+graph from 16,164 to 7,277 modules and completed the same build in 69 seconds with
+about 5.2 GB peak resident memory. This is a measured baseline, not a memory limit.
+The normal build without a heap override also passed in 68 seconds with about
+4.8 GB peak resident memory. Locale modules can reduce tree-shaking efficiency;
+check production bundle sizes when changing the translation setup.
+Keep `cleanOutdir: false` so concurrent builds preserve the dev server's generated imports.
+
 # Balance Query Usage Attribution
 
 `[model-balance-queries]` in `config.toml` / `config.local.toml` maps provider IDs

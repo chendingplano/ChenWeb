@@ -20,6 +20,9 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
+			// Thousands of per-message modules exhaust Rollup's heap during the
+			// combined SSR/client build. Match the dev server's locale modules.
+			outputStructure: 'locale-modules',
 			// Builds can run alongside the dev server. Keep its generated imports
 			// available while Paraglide rewrites the output.
 			cleanOutdir: false,
