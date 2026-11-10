@@ -19,6 +19,7 @@ import (
 //	DOCUMENT_ARCHIVE_DIR  default <root>/.doc-archive: where deleted documents are moved
 //	DOCUMENT_PDF_DIR      default <root>/.doc-pdf: cached PDF exports
 //	DOCUMENT_PDF_ENGINE   default typst: pandoc --pdf-engine for Markdown → PDF
+//	DOCUMENT_PDF_FONT     default Helvetica: main font name (must be installed; Chinese falls back automatically)
 //	DOCBUILDER_MODEL      default deepseek-flash-processor: .models.toml profile for classification
 //	DOCBUILDER_PROMPT     default prompt-docbuilder-classify-v1.md
 const (
@@ -63,7 +64,7 @@ func NewStoreFromEnv(ctx context.Context, projectDB, sharedDB *sql.DB, requester
 		ArchiveDir: envOr("DOCUMENT_ARCHIVE_DIR", filepath.Join(root, ".doc-archive")),
 		PDFDir:     envOr("DOCUMENT_PDF_DIR", filepath.Join(root, ".doc-pdf")),
 		NextID:     func(ctx context.Context) (int64, error) { return ids.Next(ctx, IDSequence) },
-		Convert:    PandocConvert(envOr("DOCUMENT_PDF_ENGINE", "typst")),
+		Convert:    PandocConvert(envOr("DOCUMENT_PDF_ENGINE", "typst"), envOr("DOCUMENT_PDF_FONT", "Helvetica")),
 		Logf:       logf,
 	}, nil
 }

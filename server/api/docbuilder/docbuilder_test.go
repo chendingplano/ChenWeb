@@ -2,6 +2,10 @@ package docbuilder
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +95,26 @@ func TestClassifyBatchesSavesEachBatch(t *testing.T) {
 	n, err := ClassifyBatches(context.Background(), nil, items, fc, func(m map[string]string) error { saves++; return nil })
 	if err != nil || n != 60 || fc.calls != 3 || saves != 3 {
 		t.Fatalf("n=%d calls=%d saves=%d err=%v", n, fc.calls, saves, err)
+	}
+}
+
+func TestPandocConvertRealMarkdown(t *testing.T) {
+	for _, bin := range []string{"pandoc", "typst"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not installed")
+		}
+	}
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "a.md"), filepath.Join(dir, "a.pdf")
+	md := "---\ntitle: 测试 Title\n---\n\nSee [the section](#1-first-part) and [中文](#2-second).\n\n## 1. First part\n\ntext\n\n## 2. Second\n\n| a | b |\n|---|---|\n| 1 | 中 |\n"
+	if err := os.WriteFile(src, []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := PandocConvert("typst", "Helvetica")(context.Background(), src, dst); err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	raw, err := os.ReadFile(dst)
+	if err != nil || !strings.HasPrefix(string(raw), "%PDF") {
+		t.Fatalf("not a PDF: %v", err)
 	}
 }

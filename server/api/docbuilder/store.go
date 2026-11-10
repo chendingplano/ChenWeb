@@ -838,7 +838,7 @@ func (s *Store) ExportPDF(ctx context.Context, groupID, docID int64) (string, er
 	}
 	convert := s.Convert
 	if convert == nil {
-		convert = PandocConvert("typst")
+		convert = PandocConvert("typst", "Helvetica")
 	}
 	if err := convert(ctx, s.abs(rel), dst); err != nil {
 		return "", err
@@ -859,9 +859,13 @@ func (s *Store) dropExport(ctx context.Context, fileID int64) {
 }
 
 // PandocConvert converts Markdown to PDF with pandoc and the given PDF engine (for example "typst").
-func PandocConvert(engine string) func(ctx context.Context, src, dst string) error {
+// It reads GitHub-flavoured Markdown with YAML metadata, so heading anchors such as
+// (#1-document-groups) resolve and the front-matter title becomes the PDF title. Typst needs an
+// explicit main font (an empty font list is an error); Chinese text falls back to a system font.
+func PandocConvert(engine, mainFont string) func(ctx context.Context, src, dst string) error {
 	return func(ctx context.Context, src, dst string) error {
-		cmd := exec.CommandContext(ctx, "pandoc", "-f", "markdown", src, "-o", dst, "--pdf-engine="+engine)
+		cmd := exec.CommandContext(ctx, "pandoc", "-f", "gfm+yaml_metadata_block", src, "-o", dst,
+			"--pdf-engine="+engine, "-V", "mainfont="+mainFont)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			_ = os.Remove(dst)
 			return fmt.Errorf("pandoc: %v: %s", err, strings.TrimSpace(string(out)))
