@@ -408,6 +408,7 @@
 	"alert_logs_resolve": "Resolve",
 	"alert_logs_resolve_all": "Resolve all ({count})",
 	"alert_logs_bulk_title": "Resolve {count} selected alerts",
+	"alert_logs_select_page": "Select all open records on this page",
 	"alert_logs_selection": "Selection",
 	"alert_logs_clear_selection": "Clear selection",
 	"alert_logs_select_row": "Select alert {id}",

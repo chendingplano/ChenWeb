@@ -408,6 +408,7 @@
 	"alert_logs_resolve": "解决",
 	"alert_logs_resolve_all": "全部解决（{count}）",
 	"alert_logs_bulk_title": "解决选中的 {count} 条警告或错误",
+	"alert_logs_select_page": "选择此页所有未解决的记录",
 	"alert_logs_selection": "选择",
 	"alert_logs_clear_selection": "清除选择",
 	"alert_logs_select_row": "选择警告或错误 {id}",

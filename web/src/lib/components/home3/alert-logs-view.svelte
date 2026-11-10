@@ -56,6 +56,8 @@
 	let detailDialog: HTMLDialogElement, commentsDialog: HTMLDialogElement;
 	let resolvingId = $state<number | null>(null), resolutionDraft = $state(''), resolveError = $state('');
 	let checkedIds = $state<number[]>([]);
+	let selectableIds = $derived(rows.filter((row) => row.status !== 'resolved').map((row) => row.id));
+	let selectedOnPage = $derived(selectableIds.filter((id) => checkedIds.includes(id)).length);
 	let bulkDialog: HTMLDialogElement;
 	let bulkReason = $state(''), bulkError = $state(''), bulkSaving = $state(false);
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
@@ -268,6 +270,10 @@
 			await Promise.all([load(), loadFilterOptions()]);
 		} catch (err) { resolveError = (err instanceof Error && err.message) || m.alert_logs_failed_to_save(); }
 	}
+	function togglePage(checked: boolean) {
+		const pageIds = new Set(selectableIds);
+		checkedIds = checked ? [...new Set([...checkedIds, ...selectableIds])] : checkedIds.filter((id) => !pageIds.has(id));
+	}
 	function toggleChecked(id: number, checked: boolean) {
 		checkedIds = checked ? [...checkedIds, id] : checkedIds.filter((value) => value !== id);
 	}
@@ -359,7 +365,7 @@
 				<table class="w-full text-sm" style="border-collapse:separate;border-spacing:0">
 					<thead>
 						<tr style="background:{surface2}">
-							<th class="sticky top-0 z-10 px-4" style="background:{surface2};border-bottom:1px solid {borderColor}"><span class="sr-only">{m.alert_logs_selection()}</span></th>
+							<th class="sticky top-0 z-10 px-4" style="background:{surface2};border-bottom:1px solid {borderColor}"><input type="checkbox" aria-label={m.alert_logs_select_page()} checked={selectableIds.length > 0 && selectedOnPage === selectableIds.length} indeterminate={selectedOnPage > 0 && selectedOnPage < selectableIds.length} disabled={!selectableIds.length} onchange={(event) => togglePage(event.currentTarget.checked)} /></th>
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}">{m.alert_logs_id()}</th>
 							{#each columns as col (col.key)}
 								<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted};font-weight:500;white-space:nowrap;font-size:12px;background:{surface2};border-bottom:1px solid {borderColor}">
