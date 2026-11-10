@@ -11,32 +11,44 @@ import (
 	"sync"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
-// This file implements ADR 2026070201 AR2/AR3 for the artifact reviewers
-// (metrics, provisions, inventory_items):
+// This file implements the source passage and scheduling of the artifact
+// reviewers (metrics, provisions, inventory_items, metrics_completeness):
+// ADR 2026070201 AR2/AR3 as amended on 2026-11-10 (openspec change
+// artifact-review-source-chunk).
 //
-//   - AR2: every artifact review call includes the canonical 200-line scheduler
-//     window containing the artifact's span start, placed FIRST in the user
-//     message so calls sharing a window share a DeepSeek-cacheable prefix. The
-//     window is byte-identical to buildChunkInputs output, so artifact calls
-//     ride on prefixes the per-chunk reviewers already warmed in the same run.
-//   - AR3: artifact review units are grouped by window and executed with the
-//     scheduler's seed → stagger → remainder pattern: one unit per window fires
-//     first to plant (or confirm) the prefix, the window's siblings follow.
-//     There is no per-window group cap; sibling bursts are bounded by the
-//     run-level semaphore (maxTasks) plus LLM_CALL_STAGGER.
+//   - Source passage: every artifact review call carries the extraction chunk
+//     that contains the artifact — the chunk the extractors read, from the
+//     record's saved .chunks file — rendered compactly (RenderLinesCompact) and
+//     placed FIRST in the user message.
+//   - Scheduling: units are grouped by chunk and run seed → stagger →
+//     remainder: one unit per chunk fires first, its siblings follow, so calls
+//     sharing a chunk share a cacheable prefix. Sibling bursts are bounded by
+//     the run-level semaphore (maxTasks) plus LLM_CALL_STAGGER.
 
-// loadArtifactReviewWindows loads the document's lines and builds the canonical
-// scheduler windows for it. It uses the exact code path the prompt-cache
-// scheduler uses (same lines, same doc_context envelope, same serialization),
-// so the returned windows are byte-identical to the per-chunk reviewers'
-// inputs for the same document.
-func loadArtifactReviewWindows(ctx context.Context, recordID int64) ([]chunkInput, error) {
+// artifactSourceChunk is one extraction chunk prepared as an artifact review
+// passage: its compact text and its line ranges. A chunk's lines are its
+// overlap lines (the previous chunk's tail) followed by its regular lines;
+// every document line is regular in exactly one chunk.
+type artifactSourceChunk struct {
+	text         string
+	startLine    int // first line, overlap or regular
+	endLine      int // last line
+	regularStart int // first regular line; 0 when the chunk has none
+	regularEnd   int // last regular line
+}
+
+// loadArtifactReviewChunks loads the document's lines and its saved extraction
+// chunks and renders each chunk as a compact passage. When the record has no
+// saved .chunks file the chunks are rebuilt with the configured chunk size and
+// a warning is logged, because they may differ from what the extractors read.
+func loadArtifactReviewChunks(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) ([]artifactSourceChunk, error) {
 	rec, err := (&DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}).GetInputRecord(ctx, recordID)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26070201) load record %d for artifact windows: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26070201) load record %d for artifact review chunks: %w", recordID, err)
 	}
 	lineFilePath, err := ResolveInputFilePath(
 		LineFileGeneratedEvent{RecordID: recordID},
@@ -53,8 +65,44 @@ func loadArtifactReviewWindows(ctx context.Context, recordID int64) ([]chunkInpu
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26070204) parse line file for record %d: %w", recordID, err)
 	}
-	docCtx := buildDocContextLine(rec)
-	return buildChunkInputs(lines, docCtx, DefaultChunkInputSize), nil
+	chunks, rebuilt, err := docprocessing.LoadRecordChunks(rec, lines)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26111001) load extraction chunks for record %d: %w", recordID, err)
+	}
+	if rebuilt && logger != nil {
+		logger.Warn("artifact review: no saved .chunks file; rebuilt extraction chunks with the current chunk size",
+			"record_id", recordID, "chunks", len(chunks))
+	}
+	return buildArtifactSourceChunks(chunks, buildDocContextLine(rec)), nil
+}
+
+// buildArtifactSourceChunks renders chunks as compact passages with their line
+// ranges. Chunks without lines are kept (empty) so indexes match the chunk list.
+func buildArtifactSourceChunks(chunks []docprocessing.Chunk, docCtx string) []artifactSourceChunk {
+	out := make([]artifactSourceChunk, len(chunks))
+	for i, c := range chunks {
+		sc := artifactSourceChunk{text: docprocessing.RenderLinesCompact(c.Lines, docCtx)}
+		for _, ml := range c.Lines {
+			n := ml.Line.LineNo
+			if sc.startLine == 0 || n < sc.startLine {
+				sc.startLine = n
+			}
+			if n > sc.endLine {
+				sc.endLine = n
+			}
+			if strings.EqualFold(strings.TrimSpace(ml.Mark), "o") {
+				continue
+			}
+			if sc.regularStart == 0 || n < sc.regularStart {
+				sc.regularStart = n
+			}
+			if n > sc.regularEnd {
+				sc.regularEnd = n
+			}
+		}
+		out[i] = sc
+	}
+	return out
 }
 
 // parseArtifactSpan parses one line-span string ("14", "14-16", or "14:16")
@@ -77,66 +125,81 @@ func parseArtifactSpan(s string) (start, end int) {
 	return n, n
 }
 
-// windowIndexForSpans maps an artifact's line spans to the window containing
-// the earliest span start (AR2). Spans crossing a window boundary map to the
-// window containing the span start; windows are never concatenated (a
-// concatenation is a new, uncacheable prefix). Returns -1 when no span parses
-// or no window contains the start line.
-func windowIndexForSpans(spans []string, windows []chunkInput) int {
-	if len(windows) == 0 {
-		return -1
-	}
-	minStart := 0
-	for _, s := range spans {
-		start, _ := parseArtifactSpan(s)
-		if start > 0 && (minStart == 0 || start < minStart) {
-			minStart = start
-		}
-	}
-	if minStart == 0 {
-		return -1
-	}
-	for i, w := range windows {
-		if minStart >= w.startLine && minStart <= w.endLine {
-			return i
-		}
-	}
-	return -1
-}
-
-// spansTruncatedByWindow reports whether any of the artifact's spans extend
-// outside the window (AR2 multi-window mitigation: the payload flags the
-// truncation so the model does not misread it as an extraction error).
-func spansTruncatedByWindow(spans []string, w chunkInput) bool {
-	for _, s := range spans {
-		start, end := parseArtifactSpan(s)
+// chunkForSpans picks the extraction chunk for an artifact whose spans run from
+// line s (earliest start) to line e (latest end):
+//
+//  1. the chunk whose regular lines contain s and whose range contains e;
+//  2. else a chunk whose range contains s..e (the artifact sits in the overlap
+//     of the next chunk, the chunk that could have produced it);
+//  3. else the chunk whose regular lines contain s, with truncated = true (the
+//     spans run past it; the payload flags this so the model does not misread
+//     the cut-off as an extraction error).
+//
+// Returns -1 when no span parses or no chunk contains s.
+func chunkForSpans(spans []string, chunks []artifactSourceChunk) (idx int, truncated bool) {
+	s, e := 0, 0
+	for _, sp := range spans {
+		start, end := parseArtifactSpan(sp)
 		if start == 0 {
 			continue
 		}
-		if start < w.startLine || end > w.endLine {
-			return true
+		if s == 0 || start < s {
+			s = start
+		}
+		if end > e {
+			e = end
 		}
 	}
-	return false
+	if s == 0 {
+		return -1, false
+	}
+	regularHas := func(c artifactSourceChunk, n int) bool {
+		return c.regularStart > 0 && n >= c.regularStart && n <= c.regularEnd
+	}
+	for i, c := range chunks {
+		if regularHas(c, s) && e <= c.endLine {
+			return i, false
+		}
+	}
+	for i, c := range chunks {
+		if c.startLine > 0 && s >= c.startLine && e <= c.endLine {
+			return i, false
+		}
+	}
+	for i, c := range chunks {
+		if regularHas(c, s) {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// sourceChunkFor resolves an artifact's spans to its chunk index, compact
+// passage and truncation flag; passage is "" when no chunk resolves.
+func sourceChunkFor(spans []string, chunks []artifactSourceChunk) (idx int, passage string, truncated bool) {
+	idx, truncated = chunkForSpans(spans, chunks)
+	if idx < 0 {
+		return -1, "", false
+	}
+	return idx, chunks[idx].text, truncated
 }
 
 // artifactReviewTaskText appends the unique per-artifact payload after the
-// stable reviewer rubric. With the window as the document input, the composed
-// user message is: window (cached across reviewers) → rubric (cached within
-// reviewer+window) → payload (the only regularly-paid tokens).
+// stable reviewer rubric. With the source chunk as the document input, the
+// composed user message is: chunk (shared by the artifacts in it) → rubric →
+// payload (the only tokens unique to the call).
 func artifactReviewTaskText(rubric, payloadJSON string) string {
 	return rubric + "\n\n# ARTIFACT REVIEW INPUT\n\n" + payloadJSON
 }
 
-// artifactReviewToolUserContext composes the tool-use loop's user message with
-// the AR2 window-first layout, mirroring the per-chunk tool-use reviewers'
-// envelope so the <DOCUMENT_INPUT> prefix is byte-identical and cacheable.
-// When no window is resolvable the task text is sent alone.
-func artifactReviewToolUserContext(windowJSON, taskText string) string {
-	if windowJSON == "" {
+// artifactReviewToolUserContext composes the tool-use loop's user message:
+// the source passage in <DOCUMENT_INPUT>, then the task. When no source chunk
+// resolved the task text is sent alone.
+func artifactReviewToolUserContext(passage, taskText string) string {
+	if passage == "" {
 		return "<REVIEW_TASK>\n" + taskText + "\n</REVIEW_TASK>"
 	}
-	return "<DOCUMENT_INPUT>\n" + windowJSON + "\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n" + taskText + "\n</REVIEW_TASK>"
+	return "<DOCUMENT_INPUT>\n" + passage + "\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n" + taskText + "\n</REVIEW_TASK>"
 }
 
 // docAuthorityRegex matches document numbers of governing standards bodies
@@ -161,26 +224,26 @@ func docAuthorityClass(docNo, title, filename string) string {
 	return "peer_document"
 }
 
-// artifactReviewUnit is one artifact review LLM call, tagged with the AR2
-// window whose prefix it shares. windowIdx -1 means no window was resolvable;
-// such units have unique prefixes and run in the remainder phase only.
+// artifactReviewUnit is one artifact review LLM call, tagged with the source
+// chunk whose prefix it shares. chunkIdx -1 means no chunk resolved; such
+// units have unique prefixes and run in the remainder phase only.
 type artifactReviewUnit struct {
-	windowIdx int
-	run       func(ctx context.Context) []ReviewFinding
+	chunkIdx int
+	run      func(ctx context.Context) []ReviewFinding
 }
 
-// runArtifactUnitsWindowGrouped executes artifact review units with the AR3
-// window-grouped seed → stagger → remainder pattern:
+// runArtifactUnitsChunkGrouped executes artifact review units with the
+// chunk-grouped seed → stagger → remainder pattern:
 //
-//  1. For each window, the first unit fires concurrently to plant (or confirm)
-//     the window's prefix in DeepSeek's cache. Seeds keep running.
+//  1. For each chunk, the first unit fires concurrently to plant (or confirm)
+//     the chunk's prefix in DeepSeek's cache. Seeds keep running.
 //  2. Wait LLM_CALL_STAGGER for the prefixes to persist.
 //  3. All remaining units fire, bounded by maxTasks; there is deliberately no
-//     per-window group cap (the cache is keyed by prefix, not by group).
+//     per-chunk group cap (the cache is keyed by prefix, not by group).
 //
 // Unit run functions handle their own LLM errors (returning nil findings), so
 // the only error returned here is ErrPipelineStopped.
-func runArtifactUnitsWindowGrouped(
+func runArtifactUnitsChunkGrouped(
 	ctx context.Context,
 	maxTasks int,
 	units []artifactReviewUnit,
@@ -195,12 +258,12 @@ func runArtifactUnitsWindowGrouped(
 	}
 	tracker := newReviewerProgressTracker(len(units), onProgress)
 
-	// Partition into seeds (first unit per window) and remainder.
+	// Partition into seeds (first unit per chunk) and remainder.
 	seen := make(map[int]bool)
 	var seedIdxs, remainIdxs []int
 	for i, u := range units {
-		if u.windowIdx >= 0 && !seen[u.windowIdx] {
-			seen[u.windowIdx] = true
+		if u.chunkIdx >= 0 && !seen[u.chunkIdx] {
+			seen[u.chunkIdx] = true
 			seedIdxs = append(seedIdxs, i)
 		} else {
 			remainIdxs = append(remainIdxs, i)
@@ -253,7 +316,7 @@ func runArtifactUnitsWindowGrouped(
 		claimedSeeds = append(claimedSeeds, idx)
 	}
 
-	// Phase 1: fire all window seeds concurrently; do NOT wait for completion.
+	// Phase 1: fire all chunk seeds concurrently; do NOT wait for completion.
 	for _, i := range claimedSeeds {
 		wg.Add(1)
 		go func(idx int) {

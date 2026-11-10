@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -36,49 +37,79 @@ func TestParseArtifactSpan(t *testing.T) {
 	}
 }
 
-func testWindows() []chunkInput {
-	return []chunkInput{
-		{inputJSON: "w0", startLine: 1, endLine: 200},
-		{inputJSON: "w1", startLine: 201, endLine: 400},
-		{inputJSON: "w2", startLine: 401, endLine: 600},
+// testChunks mirrors record 416's first saved chunks: each chunk is its overlap
+// lines (the previous chunk's tail) followed by its regular lines.
+func testChunks() []docprocessing.Chunk {
+	mk := func(seq int, overlap, regular [2]int) docprocessing.Chunk {
+		c := docprocessing.Chunk{SeqNo: seq}
+		add := func(r [2]int, mark string) {
+			for n := r[0]; n > 0 && n <= r[1]; n++ {
+				c.Lines = append(c.Lines, docprocessing.MarkedLine{
+					Line: docprocessing.Line{LineNo: n, LineType: "paragraph", Content: "line"},
+					Mark: mark,
+				})
+			}
+		}
+		add(overlap, "o")
+		add(regular, "n")
+		return c
+	}
+	return []docprocessing.Chunk{
+		mk(1, [2]int{0, 0}, [2]int{1, 26}),
+		mk(2, [2]int{22, 26}, [2]int{27, 50}),
+		mk(3, [2]int{50, 50}, [2]int{51, 69}),
 	}
 }
 
-func TestWindowIndexForSpans(t *testing.T) {
-	windows := testWindows()
+func TestBuildArtifactSourceChunksRanges(t *testing.T) {
+	chunks := buildArtifactSourceChunks(testChunks(), "Doc | NO 1")
+	c := chunks[1]
+	if c.startLine != 22 || c.endLine != 50 || c.regularStart != 27 || c.regularEnd != 50 {
+		t.Fatalf("chunk 2 ranges = %d-%d regular %d-%d, want 22-50 regular 27-50",
+			c.startLine, c.endLine, c.regularStart, c.regularEnd)
+	}
+	if !strings.HasPrefix(c.text, "Document: Doc | NO 1\n[22] line\n") || !strings.HasSuffix(c.text, "[50] line") {
+		t.Fatalf("chunk 2 text is not the compact passage of lines 22-50:\n%s", c.text)
+	}
+}
+
+func TestChunkForSpans(t *testing.T) {
+	chunks := buildArtifactSourceChunks(testChunks(), "")
 	cases := []struct {
-		name  string
-		spans []string
-		want  int
+		name          string
+		spans         []string
+		wantIdx       int
+		wantTruncated bool
 	}{
-		{"inside first window", []string{"12-14"}, 0},
-		{"inside middle window", []string{"250:260"}, 1},
-		{"boundary-crossing maps to span-start window", []string{"195-210"}, 0},
-		{"multiple spans use earliest start", []string{"450", "205-207"}, 1},
-		{"unparseable spans", []string{"abc"}, -1},
-		{"no spans", nil, -1},
-		{"start beyond all windows", []string{"999"}, -1},
+		{"inside one chunk's regular lines", []string{"43"}, 1, false},
+		{"multiple spans use earliest start", []string{"45", "30-31"}, 1, false},
+		{"in the overlap of the next chunk", []string{"50-52"}, 2, false},
+		{"spans run past every chunk", []string{"40-60"}, 1, true},
+		{"overlap line owned by the earlier chunk", []string{"24"}, 0, false},
+		{"unparseable spans", []string{"abc"}, -1, false},
+		{"no spans", nil, -1, false},
+		{"start beyond all chunks", []string{"999"}, -1, false},
 	}
 	for _, c := range cases {
-		if got := windowIndexForSpans(c.spans, windows); got != c.want {
-			t.Errorf("%s: windowIndexForSpans(%v) = %d, want %d", c.name, c.spans, got, c.want)
+		idx, truncated := chunkForSpans(c.spans, chunks)
+		if idx != c.wantIdx || truncated != c.wantTruncated {
+			t.Errorf("%s: chunkForSpans(%v) = (%d,%v), want (%d,%v)",
+				c.name, c.spans, idx, truncated, c.wantIdx, c.wantTruncated)
 		}
 	}
-	if got := windowIndexForSpans([]string{"12"}, nil); got != -1 {
-		t.Errorf("empty windows: got %d, want -1", got)
+	if idx, _ := chunkForSpans([]string{"12"}, nil); idx != -1 {
+		t.Errorf("no chunks: got %d, want -1", idx)
 	}
 }
 
-func TestSpansTruncatedByWindow(t *testing.T) {
-	w := chunkInput{startLine: 1, endLine: 200}
-	if spansTruncatedByWindow([]string{"12-14"}, w) {
-		t.Error("span fully inside window reported truncated")
+func TestSourceChunkForReturnsPassage(t *testing.T) {
+	chunks := buildArtifactSourceChunks(testChunks(), "")
+	idx, passage, truncated := sourceChunkFor([]string{"43"}, chunks)
+	if idx != 1 || passage != chunks[1].text || truncated {
+		t.Fatalf("sourceChunkFor = (%d, %q…, %v), want chunk 1's passage", idx, passage[:min(len(passage), 20)], truncated)
 	}
-	if !spansTruncatedByWindow([]string{"195-210"}, w) {
-		t.Error("span crossing window end not reported truncated")
-	}
-	if spansTruncatedByWindow([]string{"abc"}, w) {
-		t.Error("unparseable span reported truncated")
+	if idx, passage, _ := sourceChunkFor([]string{"abc"}, chunks); idx != -1 || passage != "" {
+		t.Fatalf("unresolved spans: got (%d, %q), want (-1, \"\")", idx, passage)
 	}
 }
 
@@ -103,9 +134,9 @@ func TestDocAuthorityClass(t *testing.T) {
 	}
 }
 
-// One seed per window must start before any sibling of that window; siblings
-// (and windowless units) run in the remainder phase while seeds still run.
-func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
+// One seed per chunk must start before any sibling of that chunk; siblings
+// (and chunkless units) run in the remainder phase while seeds still run.
+func TestRunArtifactUnitsChunkGroupedSeedPerChunk(t *testing.T) {
 	t.Setenv("LLM_CALL_STAGGER", "0")
 
 	seedsRelease := make(chan struct{})
@@ -129,18 +160,18 @@ func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
 	}
 
 	units := []artifactReviewUnit{
-		{windowIdx: 0, run: mkSeedRun()},        // seed of window 0
-		{windowIdx: 0, run: mkRemainderRun(1)},  // sibling of window 0
-		{windowIdx: 1, run: mkSeedRun()},        // seed of window 1
-		{windowIdx: 1, run: mkRemainderRun(3)},  // sibling of window 1
-		{windowIdx: -1, run: mkRemainderRun(4)}, // windowless → remainder
+		{chunkIdx: 0, run: mkSeedRun()},        // seed of chunk 0
+		{chunkIdx: 0, run: mkRemainderRun(1)},  // sibling of chunk 0
+		{chunkIdx: 1, run: mkSeedRun()},        // seed of chunk 1
+		{chunkIdx: 1, run: mkRemainderRun(3)},  // sibling of chunk 1
+		{chunkIdx: -1, run: mkRemainderRun(4)}, // chunkless → remainder
 	}
 
 	done := make(chan struct{})
 	var findings []ReviewFinding
 	var runErr error
 	go func() {
-		findings, runErr = runArtifactUnitsWindowGrouped(
+		findings, runErr = runArtifactUnitsChunkGrouped(
 			context.Background(),
 			4,
 			units,
@@ -172,7 +203,7 @@ func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
 		}
 	}
 	if got := atomic.LoadInt32(&seedStarts); got != 2 {
-		t.Fatalf("seed starts = %d, want 2 (exactly one per window)", got)
+		t.Fatalf("seed starts = %d, want 2 (exactly one per chunk)", got)
 	}
 
 	close(seedsRelease)
@@ -190,7 +221,7 @@ func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
 }
 
 // Progress is reported once per unit with the aggregate finding count.
-func TestRunArtifactUnitsWindowGroupedProgress(t *testing.T) {
+func TestRunArtifactUnitsChunkGroupedProgress(t *testing.T) {
 	t.Setenv("LLM_CALL_STAGGER", "0")
 
 	var mu sync.Mutex
@@ -202,10 +233,10 @@ func TestRunArtifactUnitsWindowGroupedProgress(t *testing.T) {
 	}
 
 	units := []artifactReviewUnit{
-		{windowIdx: 0, run: func(context.Context) []ReviewFinding { return []ReviewFinding{{Title: "a"}} }},
-		{windowIdx: 0, run: func(context.Context) []ReviewFinding { return nil }},
+		{chunkIdx: 0, run: func(context.Context) []ReviewFinding { return []ReviewFinding{{Title: "a"}} }},
+		{chunkIdx: 0, run: func(context.Context) []ReviewFinding { return nil }},
 	}
-	findings, err := runArtifactUnitsWindowGrouped(
+	findings, err := runArtifactUnitsChunkGrouped(
 		context.Background(),
 		2,
 		units,
@@ -232,7 +263,7 @@ func TestRunArtifactUnitsWindowGroupedProgress(t *testing.T) {
 	}
 }
 
-func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
+func TestRunArtifactUnitsChunkGroupedLimitSkipsRemainders(t *testing.T) {
 	t.Setenv("LLM_CALL_STAGGER", "1")
 
 	logger := &captureLogger{}
@@ -245,12 +276,12 @@ func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
 	findingsCh := make(chan []ReviewFinding, 1)
 
 	go func() {
-		findings, err := runArtifactUnitsWindowGrouped(
+		findings, err := runArtifactUnitsChunkGrouped(
 			context.Background(),
 			2,
 			[]artifactReviewUnit{
 				{
-					windowIdx: 0,
+					chunkIdx: 0,
 					run: func(context.Context) []ReviewFinding {
 						started <- 0
 						close(seed0Done)
@@ -258,14 +289,14 @@ func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
 					},
 				},
 				{
-					windowIdx: 0,
+					chunkIdx: 0,
 					run: func(context.Context) []ReviewFinding {
 						started <- 1
 						return []ReviewFinding{{Title: "remainder1"}}
 					},
 				},
 				{
-					windowIdx: 1,
+					chunkIdx: 1,
 					run: func(context.Context) []ReviewFinding {
 						started <- 2
 						<-seed2Release
@@ -273,7 +304,7 @@ func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
 					},
 				},
 				{
-					windowIdx: 1,
+					chunkIdx: 1,
 					run: func(context.Context) []ReviewFinding {
 						started <- 3
 						return []ReviewFinding{{Title: "remainder3"}}
@@ -307,7 +338,7 @@ func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
 	findings := <-findingsCh
 	err := <-errCh
 	if err != nil {
-		t.Fatalf("runArtifactUnitsWindowGrouped err = %v, want nil", err)
+		t.Fatalf("runArtifactUnitsChunkGrouped err = %v, want nil", err)
 	}
 	if len(findings) != 1 {
 		t.Fatalf("findings len = %d, want 1", len(findings))
@@ -347,10 +378,10 @@ func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
 	}
 }
 
-// AR2 one-shot layout: with a window, the window JSON is the document input and
-// the rubric + per-artifact payload form the task text; without a window the
-// payload is the document input (pre-AR2 layout).
-func TestReviewMetricWindowFirstLayout(t *testing.T) {
+// One-shot layout: with a source chunk, the compact passage is the document
+// input and the rubric + per-artifact payload form the task text; without a
+// chunk the payload is the document input.
+func TestReviewMetricSourceFirstLayout(t *testing.T) {
 	fake := &fakeJSONExtractor{out: map[string]any{"findings": []any{}}}
 	r := &metricsReviewer{
 		client: fake,
@@ -363,16 +394,16 @@ func TestReviewMetricWindowFirstLayout(t *testing.T) {
 	ms := []matchedMetric{
 		{view: metricView{MetricID: "2_m_9"}, recordID: 2, filename: "GB_50316.pdf", via: "hybrid_search"},
 	}
-	windowJSON := `{"doc_context":"t","lines":[]}`
+	passage := "Document: t\n[195] 设计压力 1.6 MPa"
 
 	r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "m",
 		PromptText: "RUBRIC",
 		PromptRef:  "prompt-review-metrics-v2.md",
-	}, doc, ms, windowJSON, true)
+	}, doc, ms, passage, true)
 
-	if fake.inputTexts[0] != windowJSON {
-		t.Errorf("input text = %q, want the window JSON", fake.inputTexts[0])
+	if fake.inputTexts[0] != passage {
+		t.Errorf("input text = %q, want the source passage", fake.inputTexts[0])
 	}
 	prompt := fake.promptTexts[0]
 	if !strings.HasPrefix(prompt, "RUBRIC") {
@@ -387,7 +418,7 @@ func TestReviewMetricWindowFirstLayout(t *testing.T) {
 		t.Errorf("task text still carries raw match confidence: %s", prompt)
 	}
 
-	// Without a window the payload itself is the document input.
+	// Without a chunk the payload itself is the document input.
 	fake2 := &fakeJSONExtractor{out: map[string]any{"findings": []any{}}}
 	r.client = fake2
 	r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
@@ -396,10 +427,10 @@ func TestReviewMetricWindowFirstLayout(t *testing.T) {
 		PromptRef:  "prompt-review-metrics-v2.md",
 	}, doc, ms, "", false)
 	if !strings.Contains(fake2.inputTexts[0], "metric_under_review") {
-		t.Errorf("windowless input text should be the payload, got %q", fake2.inputTexts[0])
+		t.Errorf("chunkless input text should be the payload, got %q", fake2.inputTexts[0])
 	}
 	if fake2.promptTexts[0] != "RUBRIC" {
-		t.Errorf("windowless prompt should be the bare rubric, got %q", fake2.promptTexts[0])
+		t.Errorf("chunkless prompt should be the bare rubric, got %q", fake2.promptTexts[0])
 	}
 	if strings.Contains(fake2.inputTexts[0], "context_truncated") {
 		t.Errorf("context_truncated must be omitted when spans are not truncated")

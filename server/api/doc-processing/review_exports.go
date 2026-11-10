@@ -3,6 +3,8 @@ package docprocessing
 import (
 	"context"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -59,6 +61,29 @@ func RawLinesToJSON(lines []Line) string { return rawLinesToJSON(lines) }
 // WrapLinesWithDocContext wraps a lines JSON payload in the doc_context envelope.
 func WrapLinesWithDocContext(linesJSON, docCtx string) string {
 	return wrapLinesWithDocContext(linesJSON, docCtx)
+}
+
+// LoadRecordChunks returns the record's extraction chunks, the units the
+// chunk-based extractors read, from its saved .chunks file under ARTIFACT_DIR
+// (the file the per-chunk batching coordinator reads). When there is no saved
+// file it rebuilds them with BuildChunks and the configured CHUNK_SIZE /
+// CHUNK_OVERLAP_PERCENT, and reports rebuilt=true.
+func LoadRecordChunks(rec DocMetadataInputRecord, lines []Line) (chunks []Chunk, rebuilt bool, err error) {
+	if artDir := strings.TrimSpace(os.Getenv("ARTIFACT_DIR")); artDir != "" {
+		artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
+		chunks, err = loadChunksFromArtifactFile(artDir, rec.ID, artifactBase+".chunks", lines)
+		if err == nil {
+			return chunks, false, nil
+		}
+		if !isChunkArtifactNotFoundError(err) {
+			return nil, false, err
+		}
+	}
+	chunks, err = BuildChunks(lines, ChunkOptions{
+		ChunkSize:      envInt("CHUNK_SIZE", DefaultChunkSize, 1),
+		OverlapPercent: envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+	})
+	return chunks, true, err
 }
 
 // LoadPromptByRef resolves a prompt file reference to its text.

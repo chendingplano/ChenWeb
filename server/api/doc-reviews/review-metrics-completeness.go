@@ -18,8 +18,9 @@ import (
 // against what peer documents attach to the same canonical object (or
 // comparable objects sharing the same type and normalized names).
 //
-// Each object generates one LLM call; calls carry the AR2 source window as a
-// cacheable prefix and run under the AR4 tool-use loop (search_metrics is
+// Each object generates one LLM call; calls carry the extraction chunk of the
+// object's first metric as the source passage (ADR 2026070201 AR2, amended
+// 2026-11-10) and run under the AR4 tool-use loop (search_metrics is
 // available to verify absence before claiming it).
 type metricsCompletenessReviewer struct {
 	client       LLMJSONExtractor
@@ -55,10 +56,10 @@ type objectMetricRoster struct {
 	objectName  string
 	objectType  string
 	description string
-	// AR2 window mapping (first window that covers any of the doc metrics).
-	windowIdx  int
-	windowJSON string
-	truncated  bool
+	// Source chunk of the doc metrics (chunkForSpans over docSpan).
+	chunkIdx  int
+	passage   string
+	truncated bool
 	// docMetrics are the metrics the document under review attaches to this
 	// object. They may be empty (the doc mentions the object but lacks
 	// metrics for it — a strong signal in itself).
@@ -91,41 +92,37 @@ func (r *metricsCompletenessReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	// AR2: load the canonical scheduler windows.
-	windows, err := loadArtifactReviewWindows(ctx, recordID)
+	// Each call carries the extraction chunk of the object's doc metrics.
+	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("metrics_completeness: windows unavailable; reviewing without source context",
+		r.logger.Warn("metrics_completeness: extraction chunks unavailable; reviewing without source context",
 			"record_id", recordID, "error", err)
 	}
 
 	r.logger.Info("metrics_completeness review running",
 		"record_id", recordID,
 		"objects", len(rosters),
-		"windows", len(windows),
+		"chunks", len(chunks),
 	)
 
-	// Resolve window idx and JSON per roster.
+	// Resolve the source chunk per roster.
 	for i := range rosters {
-		rosters[i].windowIdx = windowIndexForSpans(rosters[i].docSpan, windows)
-		if rosters[i].windowIdx >= 0 {
-			rosters[i].windowJSON = windows[rosters[i].windowIdx].inputJSON
-			rosters[i].truncated = spansTruncatedByWindow(rosters[i].docSpan, windows[rosters[i].windowIdx])
-		}
+		rosters[i].chunkIdx, rosters[i].passage, rosters[i].truncated = sourceChunkFor(rosters[i].docSpan, chunks)
 	}
 
-	// AR3: build units and run window-grouped.
+	// Build units and run them chunk-grouped.
 	execUnits := make([]artifactReviewUnit, len(rosters))
 	for i := range rosters {
 		i := i
 		ro := rosters[i]
 		execUnits[i] = artifactReviewUnit{
-			windowIdx: ro.windowIdx,
+			chunkIdx: ro.chunkIdx,
 			run: func(workerCtx context.Context) []ReviewFinding {
 				return r.reviewObject(workerCtx, recordID, i, cfg, ro)
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
+	return runArtifactUnitsChunkGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 // reviewObject runs one LLM call for a single object, comparing what the doc
@@ -165,7 +162,7 @@ func (r *metricsCompletenessReviewer) reviewObject(
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
-		userCtx := artifactReviewToolUserContext(ro.windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		userCtx := artifactReviewToolUserContext(ro.passage, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := docReviewCallInfo(ctx, map[string]any{"object_id": ro.objectID})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
@@ -182,8 +179,8 @@ func (r *metricsCompletenessReviewer) reviewObject(
 		findings = loopFindings
 	} else {
 		promptText, inputText := cfg.PromptText, payloadJSON
-		if ro.windowJSON != "" {
-			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), ro.windowJSON
+		if ro.passage != "" {
+			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), ro.passage
 		}
 		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,

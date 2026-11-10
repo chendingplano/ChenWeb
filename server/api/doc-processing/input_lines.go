@@ -1,6 +1,10 @@
 package docprocessing
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+)
 
 // lineForLLM is the JSON representation of a document line sent to LLMs.
 type lineForLLM struct {
@@ -68,6 +72,63 @@ func markedLinesToJSON(lines []MarkedLine) string {
 // every processor's envelope matches. See ADR 2026062701 §Phase 2.3 and +CAPSULE §6.2.
 func canonicalChunkInputText(lines []MarkedLine, docCtx string) string {
 	return wrapLinesWithDocContext(markedLinesToJSON(lines), docCtx)
+}
+
+// RenderLinesCompact is the compact serialization of document lines for LLM input
+// (openspec change artifact-review-source-chunk): an optional "Document: <docCtx>"
+// line, then one text line per document line, "[<line_number>] <content>", with a
+// type tag only where it matters ("[36 h1] …", "[121 table] …"). Lines that hold
+// only an image path are left out. Table lines keep llmLineContent's numbered rows
+// (one per text line); newlines inside any other line become spaces. Unlike
+// canonicalChunkInputText it carries no overlap flags and no page numbers.
+func RenderLinesCompact(lines []MarkedLine, docCtx string) string {
+	var b strings.Builder
+	if docCtx = strings.TrimSpace(docCtx); docCtx != "" {
+		b.WriteString("Document: ")
+		b.WriteString(docCtx)
+		b.WriteByte('\n')
+	}
+	for _, ml := range lines {
+		l := ml.Line
+		if strings.HasSuffix(l.LineType, "image") {
+			continue
+		}
+		content := llmLineContent(l.LineType, l.LineNo, l.Content)
+		if l.LineType != "table" {
+			content = compactNewlines.Replace(content)
+		}
+		b.WriteByte('[')
+		b.WriteString(strconv.Itoa(l.LineNo))
+		if tag := compactLineTag(l.LineType); tag != "" {
+			b.WriteByte(' ')
+			b.WriteString(tag)
+		}
+		b.WriteString("] ")
+		b.WriteString(content)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+var compactNewlines = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+// compactLineTag is the RenderLinesCompact type tag: none for running text,
+// hN for headings, short names for captions and equations, the raw type otherwise.
+func compactLineTag(lineType string) string {
+	switch {
+	case lineType == "", lineType == "paragraph", lineType == "list-item", lineType == "text":
+		return ""
+	case lineType == "heading":
+		return "h"
+	case strings.HasPrefix(lineType, "heading-"):
+		return "h" + strings.TrimPrefix(lineType, "heading-")
+	case lineType == "table-caption":
+		return "caption"
+	case lineType == "equation":
+		return "eq"
+	default:
+		return lineType
+	}
 }
 
 // rawLinesToJSON serialises []Line as a JSON array for LLM input, using flag "n".

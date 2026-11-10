@@ -27,10 +27,10 @@ import (
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
 //
-// Per ADR 2026070201 AR2/AR3 each per-item call carries the canonical scheduler
-// window containing the item's span start as a cacheable prefix, and units are
-// executed window-grouped (seed → stagger → remainder). With max_tool_turns > 0
-// the call runs the DR10b tool loop (AR4).
+// Per ADR 2026070201 AR2/AR3 (amended 2026-11-10) each per-item call carries
+// the extraction chunk containing the item as its source passage, and units
+// are executed chunk-grouped (seed → stagger → remainder). With
+// max_tool_turns > 0 the call runs the DR10b tool loop (AR4).
 type inventoryItemsReviewer struct {
 	client       LLMJSONExtractor
 	toolClient   LLMChatClient
@@ -122,12 +122,11 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	// AR2: load the canonical scheduler windows so each call carries the
-	// item's extraction context as a cacheable prefix. A load failure only
-	// disables the window layout (units fall back to the payload-only input).
-	windows, err := loadArtifactReviewWindows(ctx, recordID)
+	// Each call carries the item's extraction chunk as its source passage.
+	// A load failure only drops the passage (units send the payload alone).
+	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("inventory items review: windows unavailable; reviewing without source context",
+		r.logger.Warn("inventory items review: extraction chunks unavailable; reviewing without source context",
 			"record_id", recordID, "error", err)
 	}
 
@@ -135,34 +134,28 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 		"record_id", recordID,
 		"items", len(docItems),
 		"reviewed_items", len(units),
-		"windows", len(windows),
+		"chunks", len(chunks),
 	)
 
-	// AR3: group units by source window and run seed → stagger → remainder.
+	// Group units by source chunk and run seed → stagger → remainder.
 	execUnits := make([]artifactReviewUnit, len(units))
 	for i := range units {
 		i := i
 		u := units[i]
-		wIdx := windowIndexForSpans(u.di.spans, windows)
-		windowJSON := ""
-		truncated := false
-		if wIdx >= 0 {
-			windowJSON = windows[wIdx].inputJSON
-			truncated = spansTruncatedByWindow(u.di.spans, windows[wIdx])
-		}
+		cIdx, passage, truncated := sourceChunkFor(u.di.spans, chunks)
 		execUnits[i] = artifactReviewUnit{
-			windowIdx: wIdx,
+			chunkIdx: cIdx,
 			run: func(workerCtx context.Context) []ReviewFinding {
-				return r.reviewItem(workerCtx, recordID, i, cfg, u.di, u.matches, windowJSON, truncated)
+				return r.reviewItem(workerCtx, recordID, i, cfg, u.di, u.matches, passage, truncated)
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
+	return runArtifactUnitsChunkGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 // reviewItem runs one LLM comparison for a single doc inventory item and its
-// matches. windowJSON is the canonical scheduler window containing the item's
-// span start (AR2); empty when no window was resolvable.
+// matches. passage is the compact extraction chunk containing the item; empty
+// when no chunk resolved.
 func (r *inventoryItemsReviewer) reviewItem(
 	ctx context.Context,
 	recordID int64,
@@ -170,7 +163,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 	cfg ReviewerConfig,
 	di docInventoryItem,
 	ms []matchedInventoryItem,
-	windowJSON string,
+	passage string,
 	truncated bool,
 ) []ReviewFinding {
 	start := time.Now()
@@ -182,8 +175,8 @@ func (r *inventoryItemsReviewer) reviewItem(
 		"matching_items":              matchedInventoryItemsPayload(matchesSentToLLM),
 	}
 	if truncated {
-		// AR2: the item's spans extend past the included window; tell the
-		// model so it does not misread the cut-off as an extraction error.
+		// The item's spans run past its source chunk; tell the model so it
+		// does not misread the cut-off as an extraction error.
 		payloadObj["context_truncated"] = true
 	}
 	payloadJSON := marshalArtifactPayload(payloadObj)
@@ -197,7 +190,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
-		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		userCtx := artifactReviewToolUserContext(passage, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := docReviewCallInfo(ctx, map[string]any{"inv_item_id": di.view.ItemID})
 		loopFindings, loopPayload, loopUsage, loopErr := runToolUseReviewWithPayload(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
@@ -214,12 +207,12 @@ func (r *inventoryItemsReviewer) reviewItem(
 		findings = loopFindings
 		payload = loopPayload
 	} else {
-		// AR2 window-first layout: the window is the document input; the rubric
-		// plus the per-item payload form the task tail. Without a window the
-		// payload itself is the document input (pre-AR2 layout).
+		// Source-first layout: the chunk is the document input; the rubric plus
+		// the per-item payload form the task tail. Without a chunk the payload
+		// itself is the document input.
 		promptText, inputText := cfg.PromptText, payloadJSON
-		if windowJSON != "" {
-			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), windowJSON
+		if passage != "" {
+			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), passage
 		}
 		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,

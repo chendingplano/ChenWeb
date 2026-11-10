@@ -26,9 +26,9 @@ import (
 // ReviewStrategy StrategyDocument + Input="artifact" routes it to runReviewersLegacy,
 // which calls ReviewDocument directly.
 //
-// Per ADR 2026070201 AR2/AR3 each per-provision call carries the canonical
-// scheduler window containing the provision's span start as a cacheable
-// prefix, and units are executed window-grouped (seed → stagger → remainder).
+// Per ADR 2026070201 AR2/AR3 (amended 2026-11-10) each per-provision call carries
+// the extraction chunk containing the provision as its source passage, and units
+// are executed chunk-grouped (seed → stagger → remainder).
 // With max_tool_turns > 0 the call runs the DR10b tool loop (AR4).
 type provisionsReviewer struct {
 	client       LLMJSONExtractor
@@ -107,12 +107,11 @@ func (r *provisionsReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	// AR2: load the canonical scheduler windows so each call carries the
-	// provision's extraction context as a cacheable prefix. A load failure only
-	// disables the window layout (units fall back to the payload-only input).
-	windows, err := loadArtifactReviewWindows(ctx, recordID)
+	// Each call carries the provision's extraction chunk as its source passage.
+	// A load failure only drops the passage (units send the payload alone).
+	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("provisions review: windows unavailable; reviewing without source context",
+		r.logger.Warn("provisions review: extraction chunks unavailable; reviewing without source context",
 			"record_id", recordID, "error", err)
 	}
 
@@ -120,29 +119,23 @@ func (r *provisionsReviewer) ReviewDocument(
 		"record_id", recordID,
 		"provisions", len(docProvs),
 		"reviewed_provisions", len(units),
-		"windows", len(windows),
+		"chunks", len(chunks),
 	)
 
-	// AR3: group units by source window and run seed → stagger → remainder.
+	// Group units by source chunk and run seed → stagger → remainder.
 	execUnits := make([]artifactReviewUnit, len(units))
 	for i := range units {
 		i := i
 		u := units[i]
-		wIdx := windowIndexForSpans(u.dp.spans, windows)
-		windowJSON := ""
-		truncated := false
-		if wIdx >= 0 {
-			windowJSON = windows[wIdx].inputJSON
-			truncated = spansTruncatedByWindow(u.dp.spans, windows[wIdx])
-		}
+		cIdx, passage, truncated := sourceChunkFor(u.dp.spans, chunks)
 		execUnits[i] = artifactReviewUnit{
-			windowIdx: wIdx,
+			chunkIdx: cIdx,
 			run: func(workerCtx context.Context) []ReviewFinding {
-				return r.reviewProvision(workerCtx, recordID, i, cfg, u.dp, u.matches, windowJSON, truncated)
+				return r.reviewProvision(workerCtx, recordID, i, cfg, u.dp, u.matches, passage, truncated)
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
+	return runArtifactUnitsChunkGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 type provisionReviewUnit struct {
@@ -159,8 +152,8 @@ func buildProvisionReviewUnits(docProvs []docProvision, matches map[int][]matche
 }
 
 // reviewProvision runs one LLM comparison for a single doc provision and its
-// matches. windowJSON is the canonical scheduler window containing the
-// provision's span start (AR2); empty when no window was resolvable.
+// matches. passage is the compact extraction chunk containing the provision; empty when
+// no chunk resolved.
 func (r *provisionsReviewer) reviewProvision(
 	ctx context.Context,
 	recordID int64,
@@ -168,7 +161,7 @@ func (r *provisionsReviewer) reviewProvision(
 	cfg ReviewerConfig,
 	dp docProvision,
 	ms []matchedProvision,
-	windowJSON string,
+	passage string,
 	truncated bool,
 ) []ReviewFinding {
 	start := time.Now()
@@ -180,8 +173,8 @@ func (r *provisionsReviewer) reviewProvision(
 		"matching_provisions":    matchedProvisionsPayload(matchesSentToLLM),
 	}
 	if truncated {
-		// AR2: the provision's spans extend past the included window; tell the
-		// model so it does not misread the cut-off as an extraction error.
+		// The provision's spans run past its source chunk; tell the model so it
+		// does not misread the cut-off as an extraction error.
 		payloadObj["context_truncated"] = true
 	}
 	payloadJSON := marshalArtifactPayload(payloadObj)
@@ -195,7 +188,7 @@ func (r *provisionsReviewer) reviewProvision(
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
-		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		userCtx := artifactReviewToolUserContext(passage, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := provisionToolReviewCallInfo(ctx, dp.view.ProvID)
 		loopFindings, loopPayload, loopUsage, loopErr := runToolUseReviewWithPayload(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
@@ -212,12 +205,12 @@ func (r *provisionsReviewer) reviewProvision(
 		findings = loopFindings
 		payload = loopPayload
 	} else {
-		// AR2 window-first layout: the window is the document input; the rubric
-		// plus the per-provision payload form the task tail. Without a window
-		// the payload itself is the document input (pre-AR2 layout).
+		// Source-first layout: the chunk is the document input; the rubric plus
+		// the per-provision payload form the task tail. Without a chunk the payload
+		// itself is the document input.
 		promptText, inputText := cfg.PromptText, payloadJSON
-		if windowJSON != "" {
-			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), windowJSON
+		if passage != "" {
+			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), passage
 		}
 		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInputWithMetadata(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
