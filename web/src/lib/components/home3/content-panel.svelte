@@ -80,7 +80,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	import SyncDataView from '$lib/components/home3/sync-data-view.svelte';
 	import ProductDrawingsView from '$lib/components/home3/product-drawings-view.svelte';
 	import TrainingVideoViewer from '$lib/components/home3/training-video-viewer.svelte';
-	import UserManualViewer from '$lib/components/home3/user-manual-viewer.svelte';
+	import DocumentBuilderView from '$lib/components/shared-ui/document-builder/document-builder-view.svelte';
 	import CurrentUserInfoView from '$lib/components/home3/current-user-info-view.svelte';
 	import KeywordRewriteRulesView from '$lib/components/home3/keyword-rewrite-rules-view.svelte';
 	import CalendarAdminView from '$lib/components/home3/calendar-admin-view.svelte';
@@ -555,7 +555,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'videos-training'}
 			<TrainingVideoViewer {darkMode} />
 		{:else if activeMenu?.childId === 'docs-users-manual'}
-			<UserManualViewer {darkMode} />
+			<DocumentBuilderView source="user-manuals" {darkMode} />
 		{:else if sectionId === '__user_info__'}
 			<CurrentUserInfoView {darkMode} />
 		{:else if sectionId === 'chat'}
