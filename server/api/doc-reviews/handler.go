@@ -1,12 +1,14 @@
 package docreviews
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
@@ -60,6 +62,9 @@ func SubmitRequest(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+	if userInfo != nil {
+		ctx = docprocessing.WithLLMUserID(ctx, userInfo.UserId)
+	}
 
 	result, err := ctrl.AcceptRequest(ctx, input)
 	if err != nil {
@@ -84,7 +89,7 @@ func SubmitRequest(c echo.Context) error {
 		requestID, runID := result.RequestID, result.RunID
 		go func() {
 			bgCtrl := NewDocReviewController()
-			bgCtrl.RunReviewAndReport(c.Request().Context(), requestID, runID)
+			bgCtrl.RunReviewAndReport(context.WithoutCancel(ctx), requestID, runID)
 		}()
 	}
 
@@ -430,7 +435,11 @@ func RestartRequest(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
 	ctrl := NewDocReviewController()
-	runID, err := ctrl.RestartRequest(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	if user := EchoFactory.NewFromEcho(c, "CWB_DRH_002").IsAuthenticated(); user != nil {
+		ctx = docprocessing.WithLLMUserID(ctx, user.UserId)
+	}
+	runID, err := ctrl.RestartRequest(ctx, id)
 	if err != nil {
 		if re, ok := err.(*RequestError); ok {
 			return c.JSON(re.Status, map[string]any{"status": false, "error_msg": re.Message})
@@ -442,13 +451,12 @@ func RestartRequest(c echo.Context) error {
 		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 
-	ctx := c.Request().Context()
 	if pubErr := PublishReviewEvent(ctx, id, runID); pubErr != nil {
 		logger.Warn("JetStream publish failed on restart; falling back to inline goroutine",
 			"request_id", id, "run_id", runID, "error", pubErr)
 		go func() {
 			bgCtrl := NewDocReviewController()
-			bgCtrl.RunReviewAndReport(c.Request().Context(), id, runID)
+			bgCtrl.RunReviewAndReport(context.WithoutCancel(ctx), id, runID)
 		}()
 	}
 

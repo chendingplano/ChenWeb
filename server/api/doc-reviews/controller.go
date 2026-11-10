@@ -156,10 +156,10 @@ func (c *DocReviewController) createRun(ctx context.Context, requestID, recordID
 	var runID int64
 	err = c.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_runs
-			(request_id, input_record_id, run_number, aspects, model_overrides, notes, status, created_by, llm_run_id)
-		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+			(request_id, input_record_id, run_number, aspects, model_overrides, notes, status, created_by, llm_run_id, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
 		RETURNING id`,
-		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy), llmrun.Next(ctx),
+		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy), llmrun.Next(ctx), nullableStr(docprocessing.LLMUserIDFromContext(ctx)),
 	).Scan(&runID)
 	return runID, err
 }
@@ -184,9 +184,11 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 
 	// The run row carries the decision made at creation, including zero.
 	var executionID sql.NullInt64
-	if err := c.DB.QueryRowContext(ctx, `SELECT llm_run_id FROM kb.doc_review_runs WHERE id = $1`, runID).Scan(&executionID); err != nil {
+	var userID sql.NullString
+	if err := c.DB.QueryRowContext(ctx, `SELECT llm_run_id, user_id FROM kb.doc_review_runs WHERE id = $1 AND request_id = $2`, runID, requestID).Scan(&executionID, &userID); err != nil {
 		return fmt.Errorf("load review LLM execution ID for run %d: %w", runID, err)
 	}
+	ctx = docprocessing.WithLLMUserID(ctx, userID.String)
 
 	// Transition run -> running (atomic: only one worker wins).
 	res, err := c.DB.ExecContext(ctx,
@@ -429,10 +431,11 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 	// Find the latest run for this request.
 	var previousRunID int64
 	var runStatus string
+	var previousUserID sql.NullString
 	err = c.DB.QueryRowContext(ctx,
-		`SELECT id, status FROM kb.doc_review_runs WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
+		`SELECT id, status, user_id FROM kb.doc_review_runs WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
 		requestID,
-	).Scan(&previousRunID, &runStatus)
+	).Scan(&previousRunID, &runStatus, &previousUserID)
 	if err == sql.ErrNoRows {
 		return 0, &RequestError{
 			Status:  http.StatusConflict,
@@ -460,6 +463,9 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 		c.failOpenAspects(ctx, previousRunID, "stopped")
 	}
 
+	if docprocessing.LLMUserIDFromContext(ctx) == "" {
+		ctx = docprocessing.WithLLMUserID(ctx, previousUserID.String)
+	}
 	runID, err := c.createRun(ctx, requestID, req.InputRecordID, req.Aspects, req.ModelOverrides, req.Notes, req.RequesterName)
 	if err != nil {
 		return 0, fmt.Errorf("create rerun for request %d: %w", requestID, err)

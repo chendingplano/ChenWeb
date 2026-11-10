@@ -47,6 +47,7 @@ var (
 	withLLMRecordID         = docprocessing.WithLLMRecordID
 	withLLMRunID            = docprocessing.WithLLMRunID
 	llmRunIDFromContext     = docprocessing.LLMRunIDFromContext
+	llmUserIDFromContext    = docprocessing.LLMUserIDFromContext
 	buildDocContextLine     = docprocessing.BuildDocContextLine
 	rawLinesToJSON          = docprocessing.RawLinesToJSON
 	wrapLinesWithDocContext = docprocessing.WrapLinesWithDocContext
@@ -61,7 +62,7 @@ var (
 
 	// BuildReviewerToolClient builds a tool-capable chat client for tool-use
 	// reviewers (DR10b). Distinct from BuildReviewerLLMClient (JSON-only).
-	BuildReviewerToolClient = docprocessing.BuildReviewerToolClient
+	BuildReviewerToolClient             = docprocessing.BuildReviewerToolClient
 	docprocessingBuildReviewerLLMClient = docprocessing.BuildReviewerLLMClient
 
 	// ErrPipelineStopped re-exports the doc-processing stop sentinel.

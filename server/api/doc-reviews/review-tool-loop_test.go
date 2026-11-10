@@ -7,9 +7,32 @@ import (
 	"strings"
 	"testing"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
+
+func TestToolUseReviewCarriesUserIDThroughFinalizeAndRepair(t *testing.T) {
+	client := &fakeToolClient{responses: []*llmclients.Response{
+		{ToolCalls: []llmclients.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{}`}}},
+		{Content: `{"findings": [}`},
+		{Content: `{"findings":[]}`},
+	}}
+	ctx := docprocessing.WithLLMUserID(context.Background(), "user-123")
+	_, _, err := runToolUseReview(ctx, client, "test-model", ReviewerConfig{MaxToolTurns: 1},
+		"prompt", "document", nil, 42, loggerutil.CreateDefaultLogger("TEST_USER"), "review_provisions", "", "TEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 3 {
+		t.Fatalf("got %d calls, want 3", len(client.requests))
+	}
+	for i, req := range client.requests {
+		if req.UserID != "user-123" {
+			t.Errorf("call %d user ID = %q", i, req.UserID)
+		}
+	}
+}
 
 // fakeToolClient implements LLMChatClient (llmclients.Client) for loop tests.
 type fakeToolClient struct {

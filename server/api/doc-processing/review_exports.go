@@ -40,6 +40,16 @@ func LLMRunIDFromContext(ctx context.Context) int64 {
 	return llmRunIDFromContext(ctx)
 }
 
+// WithLLMUserID carries the initiating user through a document review.
+func WithLLMUserID(ctx context.Context, userID string) context.Context {
+	return withLLMUserID(ctx, userID)
+}
+
+// LLMUserIDFromContext returns the initiating user, if present.
+func LLMUserIDFromContext(ctx context.Context) string {
+	return llmUserIDFromContext(ctx)
+}
+
 // BuildDocContextLine renders the doc_context envelope string for a record.
 func BuildDocContextLine(rec DocMetadataInputRecord) string { return buildDocContextLine(rec) }
 

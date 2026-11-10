@@ -34,18 +34,22 @@ So resetting all aspects to `pending` and re-running loses no committed work.
 
 `server/api/doc-reviews/controller.go`
 
-1. Reject if the request is already `completed` (HTTP 409 — nothing to restart).
-2. `UPDATE kb.doc_review_requests SET status='accepted', start_time=NULL,
-   end_time=NULL, error_message=NULL`.
-3. `UPDATE kb.doc_review_status SET status='pending', progress=0,
-   finding_count=0, error_message=NULL, start_time=NULL, end_time=NULL` for the
-   whole `review_run_id`.
+1. Load the request and its latest run; reject requests without configured aspects.
+2. Mark a still-active prior run stopped, preserving its history.
+3. Create a new run and pending aspect statuses, then set the request to `accepted`.
+
+Each run stores the authenticated initiator's string user ID in
+`kb.doc_review_runs.user_id`. A manual restart records the user who restarted it;
+automatic recovery copies the previous run's user ID. The worker reloads this ID
+before invoking the reviewers, so both JSON extraction and tool-use calls attribute
+LLM usage to the run's initiator. Runs created before this field existed have no
+reliable stored identity and remain unattributed when automatically recovered.
 
 After re-arming, the run is re-triggered exactly like a fresh submit:
 `PublishReviewEvent` (JetStream), falling back to an inline goroutine.
 
 Duplicate runs are prevented by `RunReview`'s atomic claim
-(`UPDATE … WHERE id=$1 AND status='accepted'` + `RowsAffected` check): if a
+(`UPDATE … WHERE id=$1 AND status IN ('pending', 'accepted')` + `RowsAffected` check): if a
 re-armed request is triggered by both the recovery sweep and a redelivered
 JetStream event, only one transitions `accepted → running`; the other logs
 *"claimed by another worker; skipping"* and returns.

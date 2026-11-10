@@ -143,6 +143,7 @@ func runToolUseReviewWithPayload(
 
 		resp, err := client.Complete(ctx, LLMRequest{
 			Model:      modelName,
+			UserID:     llmUserIDFromContext(ctx),
 			PromptName: cfg.PromptRef,
 			Messages:   messages,
 			Tools:      toolDefs,
@@ -263,6 +264,7 @@ func finalizeFindingsWithPayload(
 	})
 	resp, err := client.Complete(ctx, LLMRequest{
 		Model:      modelName,
+		UserID:     llmUserIDFromContext(ctx),
 		PromptName: promptName,
 		Messages:   messages,
 		RecordID:   recordID,
@@ -383,6 +385,7 @@ func callFinalFindingsRepairWithPayload(
 ) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	resp, err := client.Complete(ctx, LLMRequest{
 		Model:      modelName,
+		UserID:     llmUserIDFromContext(ctx),
 		PromptName: promptName,
 		Messages:   repairMessages,
 		RecordID:   recordID,

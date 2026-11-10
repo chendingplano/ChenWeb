@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 // connectTestDB opens a test PostgreSQL connection or skips the test.
@@ -82,6 +83,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			error_message TEXT
 		)`,
 		`ALTER TABLE kb.doc_review_runs ADD COLUMN IF NOT EXISTS llm_run_id BIGINT`,
+		`ALTER TABLE kb.doc_review_runs ADD COLUMN IF NOT EXISTS user_id TEXT`,
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_findings (
 			id BIGSERIAL PRIMARY KEY,
 			input_record_id BIGINT NOT NULL DEFAULT 0,
@@ -352,13 +354,14 @@ func TestController_AcceptRequest_InsertsNormalizedAndExplicitReviewDepth(t *tes
 				WithArgs(int64(11)).
 				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 			mock.ExpectQuery(`(?s)INSERT INTO kb\.doc_review_runs.*RETURNING id`).
-				WithArgs(int64(11), int64(42), 1, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user", int64(0)).
+				WithArgs(int64(11), int64(42), 1, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user", int64(0), "user-123").
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(21)))
 			mock.ExpectExec(`(?s)INSERT INTO kb\.doc_review_status`).
 				WithArgs(int64(11), int64(42), int64(21), "grammar_spelling", "P1").
 				WillReturnResult(sqlmock.NewResult(0, 1))
 
-			result, err := (&DocReviewController{DB: db}).AcceptRequest(context.Background(), SubmitRequestInput{
+			ctx := docprocessing.WithLLMUserID(context.Background(), "user-123")
+			result, err := (&DocReviewController{DB: db}).AcceptRequest(ctx, SubmitRequestInput{
 				InputRecordID: 42,
 				ReviewDepth:   tc.inputDepth,
 				Tier:          "custom",
@@ -1217,7 +1220,7 @@ func TestController_RunReviewBindingFailureLeavesRunUnclaimed(t *testing.T) {
 			nil, "", "", "", "",
 		))
 
-	mock.ExpectQuery(`SELECT llm_run_id FROM kb.doc_review_runs`).WithArgs(int64(21)).WillReturnError(fmt.Errorf("binding unavailable"))
+	mock.ExpectQuery(`SELECT llm_run_id, user_id FROM kb.doc_review_runs`).WithArgs(int64(21), int64(11)).WillReturnError(fmt.Errorf("binding unavailable"))
 	err = (&DocReviewController{DB: db}).RunReview(context.Background(), 11, 21)
 	if err == nil || !strings.Contains(err.Error(), "binding unavailable") {
 		t.Fatalf("run continued after binding failure: %v", err)
@@ -1225,5 +1228,43 @@ func TestController_RunReviewBindingFailureLeavesRunUnclaimed(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
+func TestRestartRequestPreservesOrReplacesInitiatingUser(t *testing.T) {
+	for _, tc := range []struct{ name, actor, want string }{
+		{"recovery retains previous user", "", "original-user"},
+		{"manual restart uses current user", "new-user", "new-user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery(`(?s)SELECT r\.id, r\.input_record_id, r\.review_depth.*FROM kb\.doc_review_requests`).
+				WithArgs(int64(11)).WillReturnRows(sqlmock.NewRows([]string{
+				"id", "input_record_id", "review_depth", "tier", "aspects", "reference_docs", "notes", "model_overrides",
+				"requester_name", "requester_id", "report_template", "doc_template", "status", "create_time",
+				"run_id", "run_status", "start_time", "end_time", "error_message",
+			}).AddRow(int64(11), int64(42), 1, "custom", `["grammar_spelling"]`, `[]`, "", `{}`,
+				"test-user", int64(0), "", "", "completed", "2026-07-10", nil, "", "", "", ""))
+			mock.ExpectQuery(`SELECT id, status, user_id FROM kb.doc_review_runs`).WithArgs(int64(11)).
+				WillReturnRows(sqlmock.NewRows([]string{"id", "status", "user_id"}).AddRow(21, "completed", "original-user"))
+			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM kb.doc_review_runs`).WithArgs(int64(11)).
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+			mock.ExpectQuery(`(?s)INSERT INTO kb\.doc_review_runs.*RETURNING id`).
+				WithArgs(int64(11), int64(42), 2, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user", int64(0), tc.want).
+				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(22))
+			mock.ExpectExec(`UPDATE kb.doc_review_requests SET status`).WithArgs(int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec(`(?s)INSERT INTO kb\.doc_review_status`).WithArgs(int64(11), int64(42), int64(22), "grammar_spelling", "P1").WillReturnResult(sqlmock.NewResult(0, 1))
+			ctx := docprocessing.WithLLMUserID(context.Background(), tc.actor)
+			if _, err := (&DocReviewController{DB: db}).RestartRequest(ctx, 11); err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
