@@ -20,6 +20,9 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
+			// Builds can run alongside the dev server. Keep its generated imports
+			// available while Paraglide rewrites the output.
+			cleanOutdir: false,
 			// "cookie" persists a visitor's explicit language choice (set via
 			// setLocale() in the language switcher) across reloads and future
 			// visits. New visitors with no cookie yet still land on baseLocale
