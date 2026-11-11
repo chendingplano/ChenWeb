@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/searchengine"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -78,7 +79,17 @@ WHERE object_id = $1`, objectID).Scan(&n.ObjectID, &n.CanonicalName, &n.Canonica
 }
 
 func (s sqlObjectGraphSource) SimilarArtifacts(ctx context.Context, artifactType, artifactID string, topN int) ([]docprocessing.OnTheFlySemanticMatch, error) {
-	return docprocessing.FindSimilarArtifactsOnTheFly(ctx, s.DB, artifactType, artifactID, "", topN)
+	results, err := searchengine.Similar(ctx, s.DB, searchengine.ArtifactRef{Type: artifactType, ID: artifactID}, searchengine.SimilarOptions{Limit: topN})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]docprocessing.OnTheFlySemanticMatch, 0, len(results))
+	for _, res := range results {
+		out = append(out, docprocessing.OnTheFlySemanticMatch{
+			ArtifactType: res.ArtifactType, ArtifactID: res.ArtifactID, RecordID: res.InputRecordID, RRFScore: res.Score,
+		})
+	}
+	return out, nil
 }
 
 // GetConnectedNodesByObjectId builds the relation graph seeded from a canonical

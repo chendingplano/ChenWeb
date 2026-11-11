@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -16,39 +14,6 @@ const (
 	RelationMethodHybridSearch  = "hybrid_search"
 	RelationSemanticallyRelated = "semantically_related"
 )
-
-// Hybrid-connect tuning. These mirror the search handler's RRF constants so the
-// connection ranking matches /api/v1/kb/metrics/search. See
-// KnowledgeStore/Capsules/coding-capsules/llm-wiki/hybrid-search.md. Inventory-item
-// connect (spec 3.3.5) reuses these same constants per "same as 3.1.5".
-const (
-	rrfKMetricConnect                 = 60
-	hybridCandidateLimitMetricConnect = 200
-	defaultMetricConnectMinCosine     = 0.75
-	defaultMetricConnectMaxLinks      = 10
-)
-
-// metricConnectMinCosine is the minimum embedding cosine similarity for the semantic
-// acceptance channel (env ARTIFACT_CONNECT_MIN_COSINE, default 0.75).
-func metricConnectMinCosine() float64 {
-	if v := strings.TrimSpace(os.Getenv("ARTIFACT_CONNECT_MIN_COSINE")); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return defaultMetricConnectMinCosine
-}
-
-// metricConnectMaxLinks caps accepted semantic links per metric (env
-// ARTIFACT_CONNECT_MAX_LINKS, default 10).
-func metricConnectMaxLinks() int {
-	if v := strings.TrimSpace(os.Getenv("ARTIFACT_CONNECT_MAX_LINKS")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return defaultMetricConnectMaxLinks
-}
 
 // metricIndexConfig binds the shared artifact-indexing engine (artifact_indexing.go) to
 // the metric family (spec 3.1).
@@ -283,21 +248,6 @@ func loadSemanticProjectionsForCategoryPaths(ctx context.Context, db *sql.DB, re
 		})
 	}
 	return out, rows.Err()
-}
-
-// sanitizeTSDictionary guards the FTS config identifier (interpolated into SQL) against
-// injection by allowing only letters/underscore; anything else falls back to 'simple'.
-func sanitizeTSDictionary(d string) string {
-	d = strings.TrimSpace(d)
-	if d == "" {
-		return "simple"
-	}
-	for _, r := range d {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_') {
-			return "simple"
-		}
-	}
-	return d
 }
 
 // enrichArtifactCategoriesFromSemProjs fills in Categories for artifacts that have none,

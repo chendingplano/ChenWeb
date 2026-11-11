@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
-	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/deepdoc/server/api/searchengine"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
@@ -216,21 +216,15 @@ func semClusterEntities(
 	// 2. For each pending entity: hybrid search → coarse filter → build group.
 	var groups []semClusterGroup
 	skippedNoMatch := 0
-	scfg := appconfig.GetArtifactSearchConfig()
-	dict := sanitizeTSDictionary(scfg.Dictionary)
 
 	for _, e := range entities {
-		var vec []float64
-		useSem := false
-		if kbsearch.SemanticSearchEnabled() && len(e.Embedding) == kbsearch.ConfiguredEmbeddingDim() {
-			vec = e.Embedding
-			useSem = true
-		}
-
-		candidates, qErr := queryArtifactHybridCandidates(
-			ctx, db, dict, strings.TrimSpace(e.SearchDocument), vec, useSem,
-			searchArtifactEntity, e.ArtifactID, "", searchLimit,
-		)
+		results, qErr := searchengine.Similar(ctx, db,
+			searchengine.ArtifactRef{Type: searchArtifactEntity, ID: e.ArtifactID},
+			searchengine.SimilarOptions{
+				MinCosine:    semClusterMinBlockCosine(),
+				Limit:        searchLimit,
+				FallbackText: strings.TrimSpace(e.SearchDocument),
+			})
 		if qErr != nil {
 			if logger != nil {
 				logger.Warn("semantic clustering: hybrid search failed",
@@ -243,15 +237,15 @@ func semClusterEntities(
 		var members []semClusterMember
 		members = append(members, entityRowToSemClusterMember(e))
 		minCosine := semClusterMinBlockCosine()
-		for _, c := range candidates {
+		for _, c := range results {
 			cosine := 0.0
-			if c.cosineSim.Valid {
-				cosine = c.cosineSim.Float64
+			if c.Diag.Cosine != nil {
+				cosine = *c.Diag.Cosine
 			}
 			if cosine < minCosine {
 				continue
 			}
-			cand, loadErr := loadEntityForSemCluster(ctx, db, c.artifactID)
+			cand, loadErr := loadEntityForSemCluster(ctx, db, c.ArtifactID)
 			if loadErr != nil || cand == nil {
 				continue
 			}
@@ -266,8 +260,8 @@ func semClusterEntities(
 			}
 			member := entityRowToSemClusterMember(*cand)
 			member.SearchCosine = cosine
-			if c.lexScore.Valid {
-				member.SearchLexicalScore = c.lexScore.Float64
+			if c.Diag.LexicalScore != nil {
+				member.SearchLexicalScore = *c.Diag.LexicalScore
 			}
 			members = append(members, member)
 		}

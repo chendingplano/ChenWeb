@@ -28,7 +28,7 @@ var hybridBenchHopTypes = []string{"one_hop", "two_hop", "multi_hop"}
 
 type hybridBenchQuestionFilters struct {
 	questionBrowserFilters
-	HopType, MetricID          string
+	HopType, TargetID          string
 	QuestionWords, AnswerWords []string
 }
 
@@ -45,7 +45,7 @@ func parseHybridBenchQuestionFilters(c echo.Context) (hybridBenchQuestionFilters
 	if f.HopType != "" && !slices.Contains(hybridBenchHopTypes, f.HopType) {
 		return f, fmt.Errorf("invalid hop_type")
 	}
-	f.MetricID = strings.TrimSpace(c.QueryParam("metric_id"))
+	f.TargetID = strings.TrimSpace(c.QueryParam("target_id"))
 	for _, field := range []struct {
 		name   string
 		target *[]string
@@ -60,7 +60,7 @@ func parseHybridBenchQuestionFilters(c echo.Context) (hybridBenchQuestionFilters
 }
 
 // where extends the question browser's filters. Every word must occur in the field (case-insensitive
-// substring, which also works for Chinese text without spaces); the metric ID matches exactly.
+// substring, which also works for Chinese text without spaces); the target ID matches exactly.
 func (f hybridBenchQuestionFilters) where() (string, []any) {
 	where, args := f.questionBrowserFilters.where()
 	clauses := []string{}
@@ -71,8 +71,8 @@ func (f hybridBenchQuestionFilters) where() (string, []any) {
 	if f.HopType != "" {
 		add("hop_type = $%d", f.HopType)
 	}
-	if f.MetricID != "" {
-		add("metric_id = $%d", f.MetricID)
+	if f.TargetID != "" {
+		add("artifact_id = $%d", f.TargetID)
 	}
 	for _, w := range f.QuestionWords {
 		add(`question ILIKE '%%' || $%d || '%%'`, escapeLike(w))
@@ -99,7 +99,8 @@ type hybridBenchPickerQuestion struct {
 	InputRecordID int64     `json:"input_record_id"`
 	HopType       string    `json:"hop_type"`
 	Lang          string    `json:"lang"`
-	MetricID      string    `json:"metric_id"`
+	ArtifactType  string    `json:"artifact_type"`
+	ArtifactID    string    `json:"artifact_id"`
 	Question      string    `json:"question"`
 	Answer        string    `json:"answer"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -120,7 +121,7 @@ func ListHybridSearchBenchmarkQuestions(c echo.Context) error {
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load questions")
 	}
 	args = append(args, hybridBenchPickerLimit)
-	rows, err := db.QueryContext(ctx, `SELECT id, run_id, input_record_id, hop_type, lang, metric_id, question, answer, created_at
+	rows, err := db.QueryContext(ctx, `SELECT id, run_id, input_record_id, hop_type, lang, artifact_type, artifact_id, question, answer, created_at
  FROM testbed.generated_questions`+where+fmt.Sprintf(" ORDER BY id LIMIT $%d", len(args)), args...)
 	if err != nil {
 		logger.Error("list benchmark questions failed", "error", err)
@@ -130,7 +131,7 @@ func ListHybridSearchBenchmarkQuestions(c echo.Context) error {
 	questions := []hybridBenchPickerQuestion{}
 	for rows.Next() {
 		var q hybridBenchPickerQuestion
-		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Lang, &q.MetricID, &q.Question, &q.Answer, &q.CreatedAt); err != nil {
+		if err := rows.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Lang, &q.ArtifactType, &q.ArtifactID, &q.Question, &q.Answer, &q.CreatedAt); err != nil {
 			logger.Error("scan benchmark question failed", "error", err)
 			return questionGenerationError(c, http.StatusInternalServerError, "failed to load questions")
 		}
@@ -144,14 +145,20 @@ func ListHybridSearchBenchmarkQuestions(c echo.Context) error {
 }
 
 // loadHybridBenchQuestions returns the run's questions: the selected ones, or every question of the
-// purpose when none are selected. A selected ID outside the purpose is an error.
-func loadHybridBenchQuestions(ctx context.Context, db *sql.DB, purpose string, ids []int64) ([]hybridBenchQuestion, error) {
-	query := `SELECT id, input_record_id, hop_type, lang, question, metric_id
- FROM testbed.generated_questions WHERE purpose = $1 AND metric_id <> ''`
+// purpose when none are selected. A selected ID outside the purpose is an error. searchType is the
+// artifact type the run searches: without a selection only questions whose target has that type are
+// loaded (all of them for "all"), and a selected question with another target type is an error,
+// because it could never be found.
+func loadHybridBenchQuestions(ctx context.Context, db *sql.DB, purpose, searchType string, ids []int64) ([]hybridBenchQuestion, error) {
+	query := `SELECT id, input_record_id, hop_type, lang, question, artifact_type, artifact_id
+ FROM testbed.generated_questions WHERE purpose = $1 AND artifact_id <> ''`
 	args := []any{purpose}
 	if len(ids) > 0 {
 		query += ` AND id = ANY($2)`
 		args = append(args, ids)
+	} else if searchType != hybridBenchSearchAll {
+		query += ` AND artifact_type = $2`
+		args = append(args, searchType)
 	}
 	rows, err := db.QueryContext(ctx, query+` ORDER BY id`, args...)
 	if err != nil {
@@ -161,9 +168,13 @@ func loadHybridBenchQuestions(ctx context.Context, db *sql.DB, purpose string, i
 	var questions []hybridBenchQuestion
 	for rows.Next() {
 		var q hybridBenchQuestion
-		if err := rows.Scan(&q.ID, &q.InputRecordID, &q.HopType, &q.Lang, &q.Question, &q.TargetArtifactID); err != nil {
+		if err := rows.Scan(&q.ID, &q.InputRecordID, &q.HopType, &q.Lang, &q.Question, &q.TargetArtifactType, &q.TargetArtifactID); err != nil {
 			return nil, err
 		}
+		if searchType != hybridBenchSearchAll && q.TargetArtifactType != searchType {
+			return nil, errHybridBenchSearchType
+		}
+		q.SearchType = searchType
 		questions = append(questions, q)
 	}
 	if err := rows.Err(); err != nil {

@@ -4,16 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
-	"github.com/chendingplano/deepdoc/server/api/searchengine"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/lib/pq"
 )
@@ -22,7 +18,7 @@ import (
 // "provisions"; ADR 2026063003). Like the metric reviewer it does not read the document
 // body: it loads the document's extracted provisions and compares each against
 // semantically-related provisions in OTHER documents. Semantic similarity is discovered
-// LIVE at review time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather
+// LIVE at review time via the hybrid search engine (searchengine.Similar, Branch A) rather
 // than from precomputed hybrid_search/semantically_related edges — on-the-fly search is
 // always fresh and needs no inbound/outbound edge bookkeeping. Branch B adds
 // object-anchored provisions retrieved before the LLM/tool loop.
@@ -552,45 +548,10 @@ func (r *provisionsReviewer) buildMatches(
 	return assembleProvisionMatches(recordID, hybridMatches, objectMatches, resolved, r.maxMatches), nil
 }
 
-// findSimilarProvisions asks the search engine for provisions similar to one of the record's own,
-// leaving out the record's provisions before the engine ranks, so they cannot take the slots of other
-// documents. A provision with no index row is an engine error ("not in kb.search_artifacts"); the
-// reviewer treats it as having no matches, as before.
+// findSimilarProvisions asks the search engine for provisions similar to one of the record's own
+// (own provisions excluded before ranking). A provision with no index row has no matches.
 func (r *provisionsReviewer) findSimilarProvisions(ctx context.Context, recordID int64, provID string) ([]docprocessing.OnTheFlySemanticMatch, error) {
-	resp, err := searchengine.Search(ctx, r.db, searchengine.LoadConfig(), searchengine.Request{
-		Query: searchengine.Query{Ref: &searchengine.ArtifactRef{Type: "provision", ID: provID}},
-		Filters: searchengine.Filters{
-			ArtifactTypes:    []string{"provision"},
-			ExcludeRecordIDs: []int64{recordID},
-		},
-		Criteria: searchengine.Criteria{MinCosine: provisionMinCosine()},
-		Options:  searchengine.Options{Limit: r.maxMatches},
-	})
-	if err != nil {
-		if errors.Is(err, searchengine.ErrReferenceNotIndexed) {
-			if r.logger != nil {
-				r.logger.Warn("provisions review: provision has no search index row; no similarity matches", "prov_id", provID)
-			}
-			return nil, nil
-		}
-		return nil, err
-	}
-	hits := make([]docprocessing.OnTheFlySemanticMatch, 0, len(resp.Results))
-	for _, res := range resp.Results {
-		hits = append(hits, docprocessing.OnTheFlySemanticMatch{
-			ArtifactType: res.ArtifactType, ArtifactID: res.ArtifactID, RecordID: res.InputRecordID, RRFScore: res.Score,
-		})
-	}
-	return hits, nil
-}
-
-// provisionMinCosine is the semantic acceptance threshold, ARTIFACT_CONNECT_MIN_COSINE (default 0.75).
-// A result below it is dropped whichever list found it.
-func provisionMinCosine() float64 {
-	if v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv("ARTIFACT_CONNECT_MIN_COSINE")), 64); err == nil && v > 0 {
-		return v
-	}
-	return 0.75
+	return findSimilarMatches(ctx, r.db, "provision", provID, recordID, r.maxMatches)
 }
 
 // assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.

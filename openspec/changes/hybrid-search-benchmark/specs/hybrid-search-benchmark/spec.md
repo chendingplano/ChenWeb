@@ -3,15 +3,16 @@
 ### Requirement: Benchmark run over generated questions
 The system SHALL let a system administrator start a hybrid search benchmark run for a question
 purpose. A run SHALL use every `testbed.generated_questions` row with that purpose at start time.
-Only the purpose `search_metrics` SHALL be accepted.
+Every question-generator purpose SHALL be accepted (the thirteen in `questionPurposes`, including
+`search_mixed`). A question's target is its `artifact_type` and `artifact_id`.
 
 #### Scenario: Start a run
-- **WHEN** an administrator posts purpose `search_metrics` and a description
+- **WHEN** an administrator posts purpose `search_provisions` and a description
 - **THEN** a run row is created in `testbed.hybrid_search_benchmark_runs` with status `running`,
   the question count and the search settings in force, and the response is HTTP 202
 
 #### Scenario: Unsupported purpose
-- **WHEN** a run is requested with any other purpose
+- **WHEN** a run is requested with a purpose that is not a question-generator purpose
 - **THEN** the request is rejected with HTTP 400 and no run is created
 
 #### Scenario: No questions
@@ -22,10 +23,11 @@ Only the purpose `search_metrics` SHALL be accepted.
 - **WHEN** a user who is not a system administrator calls the benchmark API
 - **THEN** the request is rejected with HTTP 401 or 403
 
-### Requirement: Three search modes on the live metric search
-For each question the system SHALL search artifact type `metric` over the whole corpus three times
+### Requirement: Three search modes on the live search
+For each question the system SHALL search the artifact type of the question's purpose (the
+partition of that type; every partition for `search_mixed`) over the whole corpus three times
 with the production hybrid query: lexical only (weights 1/0), semantic only (0/1) and hybrid (the
-configured weights). It SHALL record the 1-based rank of the question's target metric among the
+configured weights). It SHALL record the 1-based rank of the question's target (matching type and ID) among the
 first 200 results of each search, treating results with a fused score of 0 and absent targets as
 misses (NULL rank).
 
@@ -74,7 +76,7 @@ prompt used.
 ### Requirement: Choose the questions to run
 The page SHALL offer a *Tests to run* dialog listing the questions of the selected purpose,
 searchable by creation time, question-generation run, hop type, language, input record, words in
-the question, words in the answer and metric ID, with a checkbox per question, select-all for the
+the question, words in the answer and target ID, with a checkbox per question, select-all for the
 search result and clear. A run SHALL use the ticked questions, or every question of the purpose
 when none is ticked.
 
@@ -156,3 +158,31 @@ includes all work performed during the run, including parallel searches and trac
 #### Scenario: Start and watch a run
 - **WHEN** an administrator starts a run on the page
 - **THEN** the run is selected and its progress and scores refresh until it is done or failed
+
+### Requirement: Targets of any artifact type
+A result SHALL store the target's artifact type (`target_artifact_type`) next to its ID, and a target
+SHALL count as found only when both match. The Analyze log SHALL open the metric details panel only
+for metric IDs; IDs of other types SHALL be shown as plain text.
+
+#### Scenario: Provision question
+- **WHEN** a run uses a `search_provisions` question
+- **THEN** its searches are restricted to the provision partition and its target is the question's provision
+
+#### Scenario: Mix question
+- **WHEN** a run uses a `search_mixed` question whose target is an entity
+- **THEN** its searches cover every partition and only the entity with that ID counts as the target
+
+### Requirement: Choose what a run searches
+A run request MAY carry `search_type`: empty (the purpose's own type; all types for `search_mixed`),
+`all` (every partition, mixed) or one artifact type with a search partition. Any other value SHALL be
+rejected with HTTP 400. The run SHALL store the resolved type in `search_type`. Without selected
+questions a run SHALL use only questions whose target has the chosen type (every question for `all`);
+a selected question whose target has another type SHALL be rejected with HTTP 400.
+
+#### Scenario: Mix questions, metrics only
+- **WHEN** a `search_mixed` run is started with `search_type = metric` and no selection
+- **THEN** only the Mix questions targeting metrics are run, each searched among metrics
+
+#### Scenario: Provision questions searched among everything
+- **WHEN** a `search_provisions` run is started with `search_type = all`
+- **THEN** the questions are searched across every partition and only the exact provision counts

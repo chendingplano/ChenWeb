@@ -1,7 +1,7 @@
 <script lang="ts">
-import { tick, type Snippet } from 'svelte';
-import { captureScroll, restoreScroll, type ScrollSnapshot } from './menu-scroll';
-import type { KbReferenceDetails } from '$lib/services/kbService';
+	import { tick, type Snippet } from 'svelte';
+	import { captureScroll, restoreScroll, type ScrollSnapshot } from './menu-scroll';
+	import type { KbReferenceDetails } from '$lib/services/kbService';
 	import { m } from '$lib/paraglide/messages.js';
 	import BuildInfoView from '$lib/components/home3/build-info-view.svelte';
 	import CodeMonitorView from '$lib/components/home3/code-monitor-view.svelte';
@@ -129,8 +129,18 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		onMetricDetailsChange,
 		onSummaryDetailsChange,
 		onReferenceDetailsChange = (_details: KbReferenceDetails | null) => {},
-		onSelectReferences = (_references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
-		onSelectMetrics = (_metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => {},
+		onSelectReferences = (
+			_references: {
+				production: Record<string, unknown> | null;
+				gold: Record<string, unknown> | null;
+			} | null
+		) => {},
+		onSelectMetrics = (
+			_metrics: {
+				production: Record<string, unknown> | null;
+				gold: Record<string, unknown> | null;
+			} | null
+		) => {},
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
 		onFocusModeChange = (_focused: boolean) => {}
 	}: {
@@ -147,8 +157,18 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		onMetricDetailsChange?: (details: Snippet | null) => void;
 		onSummaryDetailsChange?: (details: Snippet | null) => void;
 		onReferenceDetailsChange?: (details: KbReferenceDetails | null) => void;
-		onSelectReferences?: (references: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
-		onSelectMetrics?: (metrics: { production: Record<string, unknown> | null; gold: Record<string, unknown> | null } | null) => void;
+		onSelectReferences?: (
+			references: {
+				production: Record<string, unknown> | null;
+				gold: Record<string, unknown> | null;
+			} | null
+		) => void;
+		onSelectMetrics?: (
+			metrics: {
+				production: Record<string, unknown> | null;
+				gold: Record<string, unknown> | null;
+			} | null
+		) => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
@@ -220,21 +240,30 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		const current = activeMenu?.childId;
 		if (current === previousPage) return;
 		if (previousPage && contentMain) {
-			const previous = contentMain.querySelector<HTMLElement>(`[data-retained-page="${previousPage}"]`);
+			const previous = contentMain.querySelector<HTMLElement>(
+				`[data-retained-page="${previousPage}"]`
+			);
 			if (previous) pageScroll.set(previousPage, captureScroll(contentMain, previous));
 		}
 		previousPage = current;
-		if (current && retainedPages.some((entry) => entry.id === current) && !visitedPages.includes(current)) {
+		if (
+			current &&
+			retainedPages.some((entry) => entry.id === current) &&
+			!visitedPages.includes(current)
+		) {
 			visitedPages = [...visitedPages, current];
 		}
 		if (current && pageScroll.has(current)) {
 			void tick().then(() => {
-				if (previousPage === current && contentMain) restoreScroll(contentMain, pageScroll.get(current)!);
+				if (previousPage === current && contentMain)
+					restoreScroll(contentMain, pageScroll.get(current)!);
 			});
 		}
 	});
 	let wpiEditorVisited = $state(false);
-	$effect(() => { if (activeMenu?.childId === 'wpi-editor') wpiEditorVisited = true; });
+	$effect(() => {
+		if (activeMenu?.childId === 'wpi-editor') wpiEditorVisited = true;
+	});
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 	let isDashboard = $derived(sectionId === 'dashboard' || !activeMenu);
 	let metricsHeaderVisible = $state(true);
@@ -301,7 +330,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	<!-- Topbar: breadcrumb + shelf toggle -->
 	{#if !isDashboard}
 		<div
-			class="sticky top-0 flex flex-shrink-0 items-center justify-between px-6 py-3"
+			class="sticky top-0 flex shrink-0 items-center justify-between px-6 py-3"
 			style="background:{pageBg}; border-bottom:1px solid {borderColor}; z-index:5;"
 		>
 			<!-- Breadcrumb -->
@@ -324,7 +353,9 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 						aria-expanded={metricsHeaderVisible}
 						aria-controls="metrics-header"
 					>
-						{#if metricsHeaderVisible}<ChevronUpIcon class="h-3.5 w-3.5" />{:else}<ChevronDownIcon class="h-3.5 w-3.5" />{/if}
+						{#if metricsHeaderVisible}<ChevronUpIcon class="h-3.5 w-3.5" />{:else}<ChevronDownIcon
+								class="h-3.5 w-3.5"
+							/>{/if}
 						{metricsHeaderVisible ? m.metric_mgmt_hide_header() : m.metric_mgmt_show_header()}
 					</button>
 				{/if}
@@ -348,8 +379,17 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 
 	<!-- Keep the editor mounted so navigation preserves its working state. -->
 	{#if wpiEditorVisited}
-		<div style:visibility={activeMenu?.childId === 'wpi-editor' ? 'visible' : 'hidden'} inert={activeMenu?.childId !== 'wpi-editor'} aria-hidden={activeMenu?.childId !== 'wpi-editor'}>
-			<WpiEditor {darkMode} {railOffset} active={activeMenu?.childId === 'wpi-editor'} onClose={() => {}} />
+		<div
+			style:visibility={activeMenu?.childId === 'wpi-editor' ? 'visible' : 'hidden'}
+			inert={activeMenu?.childId !== 'wpi-editor'}
+			aria-hidden={activeMenu?.childId !== 'wpi-editor'}
+		>
+			<WpiEditor
+				{darkMode}
+				{railOffset}
+				active={activeMenu?.childId === 'wpi-editor'}
+				onClose={() => {}}
+			/>
 		</div>
 	{/if}
 
@@ -357,7 +397,12 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 	<div class="min-w-0 flex-1 {showFooter ? '' : 'min-h-0'}">
 		{#each retainedPages as retained (retained.id)}
 			{#if visitedPages.includes(retained.id)}
-				<div class:h-full={retained.id === 'sysadmin-alert-logs'} data-retained-page={retained.id} hidden={activeMenu?.childId !== retained.id} inert={activeMenu?.childId !== retained.id}>
+				<div
+					class:h-full={retained.id === 'sysadmin-alert-logs'}
+					data-retained-page={retained.id}
+					hidden={activeMenu?.childId !== retained.id}
+					inert={activeMenu?.childId !== retained.id}
+				>
 					<retained.component {darkMode} />
 				</div>
 			{/if}
@@ -389,9 +434,20 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}
-			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} />
+			<MetricMgmtView
+				{darkMode}
+				{onFocusModeChange}
+				{onMetricDetailsChange}
+				bind:headerVisible={metricsHeaderVisible}
+			/>
 		{:else if activeMenu?.childId === 'sysadmin-llm-metrics-gold'}
-			<MetricMgmtView {darkMode} {onFocusModeChange} {onMetricDetailsChange} bind:headerVisible={metricsHeaderVisible} source="testbed" />
+			<MetricMgmtView
+				{darkMode}
+				{onFocusModeChange}
+				{onMetricDetailsChange}
+				bind:headerVisible={metricsHeaderVisible}
+				source="testbed"
+			/>
 		{:else if activeMenu?.childId === 'sysadmin-llm-summaries-gold'}
 			<SummaryGoldView {darkMode} {onSummaryDetailsChange} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
@@ -423,15 +479,12 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<CdmEditorShell {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-logs'}
 			<JetStreamLogsView {darkMode} />
-
-
 		{:else if activeMenu?.childId === 'sysadmin-doc-proc-logs'}
 			<DocProcLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-usage-logs'}
 			<LLMUsageLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-review-logs'}
 			<DocReviewLogsView {darkMode} />
-
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-embedding'}
@@ -459,7 +512,12 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 		{:else if activeMenu?.childId === 'sysadmin-llm-provisions-benchmark'}
 			<ProvisionScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-products-gold'}
-			<ProductViewer {darkMode} {onFocusModeChange} source="testbed" browserInstanceKey="gold-products" />
+			<ProductViewer
+				{darkMode}
+				{onFocusModeChange}
+				source="testbed"
+				browserInstanceKey="gold-products"
+			/>
 		{:else if activeMenu?.childId === 'sysadmin-llm-products-benchmark'}
 			<ProductScoreView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-review-metrics'}
@@ -468,7 +526,6 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<DbConsistencyView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-clean-artifact-data'}
 			<CleanArtifactDataView {darkMode} />
-
 		{:else if activeMenu?.childId === 'sysadmin-db-resolve-ambiguous'}
 			<ResolveAmbiguousObjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-object-types'}
@@ -501,7 +558,11 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<QuestionGeneratorView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-hybrid-search-benchmark-run'}
 			{#if analyzeResultId}
-				<HybridSearchBenchmarkAnalyzeView {darkMode} resultId={analyzeResultId} {onMetricDetailsChange} />
+				<HybridSearchBenchmarkAnalyzeView
+					{darkMode}
+					resultId={analyzeResultId}
+					{onMetricDetailsChange}
+				/>
 			{:else}
 				<HybridSearchBenchmarkView {darkMode} />
 			{/if}
@@ -543,7 +604,6 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 			<CodeMonitorView {darkMode} />
 		{:else if activeMenu?.childId === 'dev-modules'}
 			<ReusableModulesView {darkMode} />
-
 		{:else if activeMenu?.childId === 'sysadmin-system-peak-hours'}
 			<PeakHoursView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-system-releases'}
@@ -604,7 +664,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 								{@const IconComponent = sectionIcons[sectionId]}
 								<div
 									role="presentation"
-									class="flex flex-shrink-0 items-center justify-center rounded-xl"
+									class="flex shrink-0 items-center justify-center rounded-xl"
 									style="width:48px; height:48px; background:{accentTint}; border:1px solid {accent}30;"
 								>
 									<IconComponent class="h-6 w-6" style="color:{accent};" />
@@ -671,7 +731,7 @@ import type { KbReferenceDetails } from '$lib/services/kbService';
 									aria-checked={autoShrinkExpand}
 									aria-label={m.content_panel_toggle_auto_shrink_expand()}
 									onclick={() => onAutoShrinkExpandChange(!autoShrinkExpand)}
-									class="relative flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200"
+									class="relative shrink-0 cursor-pointer rounded-full transition-colors duration-200"
 									style="
 										width:52px;
 										height:30px;

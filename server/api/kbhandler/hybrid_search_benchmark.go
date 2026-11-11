@@ -14,33 +14,49 @@ import (
 // hybrid-search-benchmark, spec doc-2026060201).
 
 const (
-	hybridBenchArtifactType         = "metric"
-	hybridBenchMaxDescription       = 500
-	hybridBenchHybridTopCount       = 10
-	hybridBenchHeartbeat            = 10 * time.Minute
-	hybridBenchQuestionTimeout      = 2 * time.Minute
-	hybridBenchModeLexical          = "lexical"
-	hybridBenchModeSemantic         = "semantic"
-	hybridBenchModeHybrid           = "hybrid"
-	hybridBenchModeEffort           = "effort" // medium/high runs: the effort loop's final list
-	hybridBenchGroupAll             = "all"
-	hybridBenchGroupHopType         = "hop_type"
-	hybridBenchGroupLang            = "lang"
-	hybridBenchErrEmbedding         = "query embedding failed"
-	hybridBenchErrKeywords          = "query keywords failed or empty (see LLM Usage Logs); lexical used the raw query"
-	hybridBenchErrNoTrace           = "no trace: the search failed or fell back to lexical-only"
-	hybridBenchSourceQuestion       = "question"
-	hybridBenchSourceEffort         = "effort"
-	hybridBenchRunListLimit         = 50
-	hybridBenchPurposeSearchMetrics = "search_metrics"
-	hybridBenchMaxWeight            = 100
-	hybridBenchMaxCandidates        = 1000
-	hybridBenchDefaultParallelism   = 8
-	hybridBenchMaxParallelism       = 32
+	hybridBenchMaxDescription     = 500
+	hybridBenchHybridTopCount     = 10
+	hybridBenchHeartbeat          = 10 * time.Minute
+	hybridBenchQuestionTimeout    = 2 * time.Minute
+	hybridBenchModeLexical        = "lexical"
+	hybridBenchModeSemantic       = "semantic"
+	hybridBenchModeHybrid         = "hybrid"
+	hybridBenchModeEffort         = "effort" // medium/high runs: the effort loop's final list
+	hybridBenchGroupAll           = "all"
+	hybridBenchSearchAll          = "all"
+	hybridBenchGroupHopType       = "hop_type"
+	hybridBenchGroupLang          = "lang"
+	hybridBenchErrEmbedding       = "query embedding failed"
+	hybridBenchErrKeywords        = "query keywords failed or empty (see LLM Usage Logs); lexical used the raw query"
+	hybridBenchErrNoTrace         = "no trace: the search failed or fell back to lexical-only"
+	hybridBenchSourceQuestion     = "question"
+	hybridBenchSourceEffort       = "effort"
+	hybridBenchRunListLimit       = 50
+	hybridBenchMaxWeight          = 100
+	hybridBenchMaxCandidates      = 1000
+	hybridBenchDefaultParallelism = 8
+	hybridBenchMaxParallelism     = 32
 )
 
-// hybridBenchPurposes lists the question purposes a run accepts; each needs its own artifact type.
-var hybridBenchPurposes = []string{hybridBenchPurposeSearchMetrics}
+// hybridBenchPurposes lists the question purposes a run accepts: every question-generator purpose.
+var hybridBenchPurposes = func() []string {
+	purposes := make([]string, len(questionPurposes))
+	for i, p := range questionPurposes {
+		purposes[i] = p.Purpose
+	}
+	return purposes
+}()
+
+// hybridBenchPurposeSearchType is the artifact type a purpose's questions search by default: that type's partition, or
+// every partition ("all") for Mix, whose questions target different types.
+func hybridBenchPurposeSearchType(purpose string) string {
+	for _, p := range questionPurposes {
+		if p.Purpose == purpose && p.ArtifactType != "" {
+			return p.ArtifactType
+		}
+	}
+	return hybridBenchSearchAll
+}
 
 var hybridBenchModes = []string{hybridBenchModeLexical, hybridBenchModeSemantic, hybridBenchModeHybrid}
 
@@ -72,14 +88,20 @@ type hybridBenchRequest struct {
 	CandidateLimit *int     `json:"candidate_limit"`
 	Parallelism    *int     `json:"parallelism"`
 	Effort         *string  `json:"effort"`
-	QuestionIDs    []int64  `json:"question_ids"` // empty: every question of the purpose
+	// SearchType is the artifact type to search: a type with a search partition, "all" (mixed), or
+	// empty for the purpose's own type.
+	SearchType  string  `json:"search_type"`
+	QuestionIDs []int64 `json:"question_ids"` // empty: every question of the purpose
 }
+
+var errHybridBenchSearchType = errors.New("some selected questions have targets that the chosen search type cannot return")
 
 var errHybridBenchSelection = errors.New("some selected questions do not exist or have another purpose")
 
 func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBenchOptions, error) {
 	r.Purpose = strings.TrimSpace(r.Purpose)
 	r.Description = strings.TrimSpace(r.Description)
+	r.SearchType = strings.TrimSpace(r.SearchType)
 	opts := defaults
 	if r.QueryKeywords != nil {
 		opts.QueryKeywords = *r.QueryKeywords
@@ -106,6 +128,8 @@ func (r *hybridBenchRequest) normalize(defaults hybridBenchOptions) (hybridBench
 	switch {
 	case !slices.Contains(hybridBenchPurposes, r.Purpose):
 		return opts, errors.New("unsupported purpose")
+	case r.SearchType != "" && r.SearchType != hybridBenchSearchAll && !slices.Contains(searchArtifactPartitionTypes, r.SearchType):
+		return opts, errors.New("unsupported search type")
 	case utf8.RuneCountInString(r.Description) > hybridBenchMaxDescription:
 		return opts, errors.New("description is too long")
 	case opts.LexicalWeight < 0 || opts.LexicalWeight > hybridBenchMaxWeight || opts.SemanticWeight < 0 || opts.SemanticWeight > hybridBenchMaxWeight:
@@ -133,6 +157,7 @@ type hybridBenchRun struct {
 	QuestionCount  int        `json:"question_count"`
 	DoneCount      int        `json:"done_count"`
 	LexicalBackend string     `json:"lexical_backend"`
+	SearchType     string     `json:"search_type"`
 	QueryKeywords  bool       `json:"query_keywords"`
 	EmbeddingModel string     `json:"embedding_model"`
 	KeywordsModel  string     `json:"keywords_model"`
@@ -157,28 +182,32 @@ type hybridBenchQuestion struct {
 	Lang             string
 	Question         string
 	TargetArtifactID string
+	// TargetArtifactType and SearchType: the target's own type, and the type searched (all for Mix).
+	TargetArtifactType string
+	SearchType         string
 }
 
 type hybridBenchResult struct {
-	ID               int64    `json:"id"`
-	SearchRunID      int64    `json:"search_run_id"`
-	QuestionID       *int64   `json:"question_id"`
-	InputRecordID    int64    `json:"input_record_id"`
-	HopType          string   `json:"hop_type"`
-	Lang             string   `json:"lang"`
-	Question         string   `json:"question"`
-	TargetArtifactID string   `json:"target_artifact_id"`
-	Keywords         []string `json:"keywords"`
-	LexicalRank      *int     `json:"lexical_rank"`
-	SemanticRank     *int     `json:"semantic_rank"`
-	HybridRank       *int     `json:"hybrid_rank"`
-	HybridTop        []string `json:"hybrid_top"`
-	ErrorMsg         string   `json:"error_msg"`
-	EmbeddingMs      *int     `json:"embedding_ms"`
-	KeywordsMs       *int     `json:"keywords_ms"`
-	LexicalMs        *int     `json:"lexical_ms"`
-	SemanticMs       *int     `json:"semantic_ms"`
-	HybridMs         *int     `json:"hybrid_ms"`
+	ID                 int64    `json:"id"`
+	SearchRunID        int64    `json:"search_run_id"`
+	QuestionID         *int64   `json:"question_id"`
+	InputRecordID      int64    `json:"input_record_id"`
+	HopType            string   `json:"hop_type"`
+	Lang               string   `json:"lang"`
+	Question           string   `json:"question"`
+	TargetArtifactID   string   `json:"target_artifact_id"`
+	TargetArtifactType string   `json:"target_artifact_type"`
+	Keywords           []string `json:"keywords"`
+	LexicalRank        *int     `json:"lexical_rank"`
+	SemanticRank       *int     `json:"semantic_rank"`
+	HybridRank         *int     `json:"hybrid_rank"`
+	HybridTop          []string `json:"hybrid_top"`
+	ErrorMsg           string   `json:"error_msg"`
+	EmbeddingMs        *int     `json:"embedding_ms"`
+	KeywordsMs         *int     `json:"keywords_ms"`
+	LexicalMs          *int     `json:"lexical_ms"`
+	SemanticMs         *int     `json:"semantic_ms"`
+	HybridMs           *int     `json:"hybrid_ms"`
 	// Effort loop (medium/high runs only).
 	EffortRank     *int            `json:"effort_rank"`
 	EffortFound    *bool           `json:"effort_found"`
@@ -238,14 +267,14 @@ func hybridBenchModeWeights(mode string, cfg registrySearchConfig) (lexical, sem
 	return cfg.lexicalWeight, cfg.semanticWeight
 }
 
-// hybridBenchTargetRank returns the 1-based rank of target, or nil. Results are ordered by fused
-// score, so the zero-score tail (rows only the zero-weighted list found) ends the search.
-func hybridBenchTargetRank(results []artifactSearchResult, target string) *int {
+// hybridBenchTargetRank returns the 1-based rank of the target (type and ID), or nil. Results are
+// ordered by fused score, so the zero-score tail (rows only the zero-weighted list found) ends the search.
+func hybridBenchTargetRank(results []artifactSearchResult, targetType, target string) *int {
 	for i, r := range results {
 		if r.Score <= 0 {
 			return nil
 		}
-		if r.ArtifactID == target {
+		if r.ArtifactID == target && r.ArtifactType == targetType {
 			rank := i + 1
 			return &rank
 		}

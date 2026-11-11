@@ -16,7 +16,7 @@ import (
 func benchResults(pairs ...any) []artifactSearchResult {
 	out := []artifactSearchResult{}
 	for i := 0; i < len(pairs); i += 2 {
-		out = append(out, artifactSearchResult{ArtifactID: pairs[i].(string), Score: pairs[i+1].(float64)})
+		out = append(out, artifactSearchResult{ArtifactType: "metric", ArtifactID: pairs[i].(string), Score: pairs[i+1].(float64)})
 	}
 	return out
 }
@@ -37,7 +37,7 @@ func TestHybridBenchRequestNormalize(t *testing.T) {
 	}
 	zero, negative, tooMany, noWorkers, tooManyWorkers := 0.0, -1.0, 1001, 0, 33
 	for name, req := range map[string]hybridBenchRequest{
-		"purpose":      {Purpose: "search_provisions"},
+		"purpose":      {Purpose: "search_unknown"},
 		"description":  {Purpose: "search_metrics", Description: strings.Repeat("长", hybridBenchMaxDescription+1)},
 		"negative":     {Purpose: "search_metrics", SemanticWeight: &negative},
 		"both zero":    {Purpose: "search_metrics", LexicalWeight: &zero, SemanticWeight: &zero},
@@ -62,15 +62,19 @@ func TestRegistrySearchConfigCandidates(t *testing.T) {
 
 func TestHybridBenchTargetRank(t *testing.T) {
 	results := benchResults("a", 0.03, "b", 0.02, "c", 0.0, "d", 0.0)
-	if got := hybridBenchTargetRank(results, "b"); got == nil || *got != 2 {
+	if got := hybridBenchTargetRank(results, "metric", "b"); got == nil || *got != 2 {
 		t.Fatalf("rank of b = %v, want 2", got)
 	}
 	// "d" came only from the zero-weighted list: a miss, not rank 4.
-	if got := hybridBenchTargetRank(results, "d"); got != nil {
+	if got := hybridBenchTargetRank(results, "metric", "d"); got != nil {
 		t.Fatalf("rank of zero-score d = %d, want nil", *got)
 	}
-	if got := hybridBenchTargetRank(results, "z"); got != nil {
+	if got := hybridBenchTargetRank(results, "metric", "z"); got != nil {
 		t.Fatalf("rank of absent z = %d, want nil", *got)
+	}
+	// The same ID under another artifact type is not the target.
+	if got := hybridBenchTargetRank(results, "provision", "b"); got != nil {
+		t.Fatalf("rank of b as a provision = %d, want nil", *got)
 	}
 	if top := hybridBenchTop(results); len(top) != 2 || top[0] != "a" || top[1] != "b" {
 		t.Fatalf("top = %v, want [a b]", top)
@@ -131,7 +135,7 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 	oldEmbed, oldKeywords, oldSearch := hybridBenchEmbed, hybridBenchKeywords, hybridBenchSearch
 	t.Cleanup(func() { hybridBenchEmbed, hybridBenchKeywords, hybridBenchSearch = oldEmbed, oldKeywords, oldSearch })
 	logger := loggerutil.CreateDefaultLogger("20261024-745")
-	q := hybridBenchQuestion{ID: 7, InputRecordID: 416, HopType: "one_hop", Lang: "en", Question: "q", TargetArtifactID: "416_mtc_2"}
+	q := hybridBenchQuestion{ID: 7, InputRecordID: 416, HopType: "one_hop", Lang: "en", Question: "q", TargetArtifactType: "metric", TargetArtifactID: "416_mtc_2"}
 
 	hybridBenchEmbed = func(ctx context.Context, _ string) ([]float64, bool) {
 		if got := searchCallFrom(ctx); got.runID != 42 || got.userID != "u1" {
@@ -147,7 +151,7 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 		}
 		return []string{"k"}
 	}
-	hybridBenchSearch = func(_ *sql.DB, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+	hybridBenchSearch = func(_ *sql.DB, _, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 		if cfg.call.freshKeywords {
 			t.Error("searches must read the keyword cache")
 		}
@@ -178,7 +182,7 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 	// calling the model again.
 	hybridBenchKeywords = func(context.Context, string) []string { keywordCalls++; return nil }
 	searchKeywordsSwitch := []bool{}
-	hybridBenchSearch = func(_ *sql.DB, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+	hybridBenchSearch = func(_ *sql.DB, _, _ string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 		searchKeywordsSwitch = append(searchKeywordsSwitch, cfg.call.keywords != nil && *cfg.call.keywords)
 		return benchResults("416_mtc_2", 0.03), nil
 	}
@@ -214,7 +218,7 @@ func TestBenchmarkHybridSearchQuestion(t *testing.T) {
 func TestBenchmarkHybridSearchEffort(t *testing.T) {
 	old := hybridBenchEffort
 	t.Cleanup(func() { hybridBenchEffort = old })
-	hybridBenchEffort = func(_ context.Context, _ *sql.DB, query string, _ registrySearchConfig, effort string) ([]artifactSearchResult, *searchEffortTrace, error) {
+	hybridBenchEffort = func(_ context.Context, _ *sql.DB, _, query string, _ registrySearchConfig, effort string) ([]artifactSearchResult, *searchEffortTrace, error) {
 		if query != "q" || effort != searchEffortHigh {
 			t.Errorf("effort search got %q/%q", query, effort)
 		}
@@ -222,7 +226,7 @@ func TestBenchmarkHybridSearchEffort(t *testing.T) {
 		return benchResults("other", 0.02, "416_mtc_2", 0.01), trace, nil
 	}
 	logger := loggerutil.CreateDefaultLogger("20261025-749")
-	q := hybridBenchQuestion{ID: 1, HopType: "two_hop", Lang: "en", Question: "q", TargetArtifactID: "416_mtc_2"}
+	q := hybridBenchQuestion{ID: 1, HopType: "two_hop", Lang: "en", Question: "q", TargetArtifactType: "metric", TargetArtifactID: "416_mtc_2"}
 	result := hybridBenchResult{HybridRank: intPtr(5)}
 	benchmarkHybridSearchEffort(context.Background(), nil, q, registrySearchConfig{}, searchEffortHigh, &result, logger)
 	if result.EffortRank == nil || *result.EffortRank != 2 || *result.EffortAttempts != 2 || !*result.EffortFound || result.EffortMs == nil || len(result.EffortTrace) == 0 {
@@ -252,12 +256,12 @@ func TestBenchmarkHybridSearchTrace(t *testing.T) {
 	oldEmbed, oldSearch, oldEffort := hybridBenchEmbed, hybridBenchSearch, hybridBenchEffort
 	t.Cleanup(func() { hybridBenchEmbed, hybridBenchSearch, hybridBenchEffort = oldEmbed, oldSearch, oldEffort })
 	logger := loggerutil.CreateDefaultLogger("20261025-751")
-	q := hybridBenchQuestion{ID: 7, Question: "q", TargetArtifactID: "416_mtc_2"}
+	q := hybridBenchQuestion{ID: 7, Question: "q", TargetArtifactType: "metric", TargetArtifactID: "416_mtc_2"}
 	fused := []searchTraceCandidate{{Stage: searchTraceStageFused, ArtifactType: "metric", ArtifactID: "416_mtc_2", Rank: 1}}
 
 	hybridBenchEmbed = func(context.Context, string) ([]float64, bool) { return []float64{1}, true }
 	traced := 0
-	hybridBenchSearch = func(_ *sql.DB, query string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+	hybridBenchSearch = func(_ *sql.DB, _, query string, _ []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 		time.Sleep(25 * time.Millisecond)
 		if cfg.trace != nil {
 			traced++
@@ -281,7 +285,7 @@ func TestBenchmarkHybridSearchTrace(t *testing.T) {
 
 	// Effort: queries follow the attempts; an untraced attempt query keeps a row with an error, and a
 	// traced search outside the attempts comes last without an attempt.
-	hybridBenchEffort = func(_ context.Context, _ *sql.DB, _ string, cfg registrySearchConfig, _ string) ([]artifactSearchResult, *searchEffortTrace, error) {
+	hybridBenchEffort = func(_ context.Context, _ *sql.DB, _, _ string, cfg registrySearchConfig, _ string) ([]artifactSearchResult, *searchEffortTrace, error) {
 		for _, text := range []string{"q", "fallback", "a2"} {
 			cfg.trace.entries = append(cfg.trace.entries, searchTrace{Query: text, Keywords: []string{}, Candidates: fused, Ms: 1})
 		}
@@ -347,5 +351,35 @@ func TestSaveHybridBenchResultStoresTrace(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestHybridBenchPurposesAndSearchType(t *testing.T) {
+	if len(hybridBenchPurposes) != len(questionPurposes) || !slices.Contains(hybridBenchPurposes, "search_provisions") || !slices.Contains(hybridBenchPurposes, questionPurposeMixed) {
+		t.Fatalf("purposes = %v", hybridBenchPurposes)
+	}
+	for purpose, want := range map[string]string{"search_metrics": "metric", "search_provisions": "provision", "search_relations": "relation", questionPurposeMixed: "all"} {
+		if got := hybridBenchPurposeSearchType(purpose); got != want {
+			t.Errorf("search type of %s = %q, want %q", purpose, got, want)
+		}
+	}
+	for _, p := range questionPurposes {
+		if got := hybridBenchPurposeSearchType(p.Purpose); got != "all" && !slices.Contains(searchArtifactPartitionTypes, got) {
+			t.Errorf("%s searches %q, which has no partition", p.Purpose, got)
+		}
+	}
+}
+
+func TestHybridBenchRequestSearchType(t *testing.T) {
+	defaults := hybridBenchOptions{QueryKeywords: true, LexicalWeight: 1, SemanticWeight: 1, CandidateLimit: 200, Parallelism: 8}
+	for _, st := range []string{"", " metric ", "all", "provision"} {
+		req := hybridBenchRequest{Purpose: questionPurposeMixed, SearchType: st}
+		if _, err := req.normalize(defaults); err != nil {
+			t.Errorf("search type %q rejected: %v", st, err)
+		}
+	}
+	req := hybridBenchRequest{Purpose: "search_metrics", SearchType: "bogus"}
+	if _, err := req.normalize(defaults); err == nil {
+		t.Error("unknown search type accepted")
 	}
 }

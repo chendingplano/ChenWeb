@@ -18,7 +18,7 @@ import (
 // "entities"; ADR 2026063004). Like the metric and provisions reviewers it does not read
 // the document body: it loads the document's extracted entities and compares each against
 // related entities in OTHER documents. Semantic similarity is discovered LIVE at review
-// time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather than from
+// time via the hybrid search engine (searchengine.Similar, Branch A) rather than from
 // precomputed hybrid_search/semantically_related edges — on-the-fly search is always fresh
 // and needs no inbound/outbound edge bookkeeping. Branch B is a corpus-wide name scan
 // (same-named entities in other documents).
@@ -244,7 +244,7 @@ func (r *entitiesReviewer) buildMatches(
 		if de.view.EntityID == "" {
 			continue
 		}
-		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "entity", de.view.EntityID, "entity", r.maxMatches)
+		hits, err := findSimilarMatches(ctx, r.db, "entity", de.view.EntityID, recordID, r.maxMatches)
 		if err != nil {
 			return nil, err
 		}

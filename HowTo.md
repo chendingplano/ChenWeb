@@ -1,3 +1,9 @@
+# Common Symbals
+```text
+    ↓
+    →
+```
+
 # How to Configure Local Domain Names
 Domain names can be configured in two places:
 - Service provider (such as GoDaddy)

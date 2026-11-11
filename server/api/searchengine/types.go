@@ -141,6 +141,9 @@ const (
 var (
 	ErrNoQuery        = errors.New("searchengine: a query needs a text or a reference")
 	ErrBothQueryForms = errors.New("searchengine: a query takes a text or a reference, not both")
+	// ErrNoQueryVector is returned when Criteria.MinCosine is set but the request has no query vector
+	// (semantic search off, no embedding model, or the embedding call failed).
+	ErrNoQueryVector = errors.New("searchengine: a minimum cosine needs a query vector, and none is available (semantic search off, or no embedding model)")
 	// ErrReferenceNotIndexed is wrapped by the error for a reference with no kb.search_artifacts row.
 	ErrReferenceNotIndexed = errors.New("searchengine: reference is not in kb.search_artifacts")
 )

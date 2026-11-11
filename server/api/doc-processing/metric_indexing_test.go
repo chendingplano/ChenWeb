@@ -449,48 +449,6 @@ func newMockRows(values ...any) *sqlmock.Rows {
 	return sqlmock.NewRows(rowColumns(len(values))).AddRow(driverValues...)
 }
 
-func TestSanitizeTSDictionary(t *testing.T) {
-	cases := map[string]string{
-		"":            "simple",
-		"  ":          "simple",
-		"english":     "english",
-		"simple":      "simple",
-		"en'; DROP--": "simple",
-		"weird space": "simple",
-	}
-	for in, want := range cases {
-		if got := sanitizeTSDictionary(in); got != want {
-			t.Errorf("sanitizeTSDictionary(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestMetricConnectEnvDefaults(t *testing.T) {
-	t.Setenv("ARTIFACT_CONNECT_MIN_COSINE", "")
-	t.Setenv("ARTIFACT_CONNECT_MAX_LINKS", "")
-	if got := metricConnectMinCosine(); got != defaultMetricConnectMinCosine {
-		t.Errorf("default min cosine = %v, want %v", got, defaultMetricConnectMinCosine)
-	}
-	if got := metricConnectMaxLinks(); got != defaultMetricConnectMaxLinks {
-		t.Errorf("default max links = %v, want %v", got, defaultMetricConnectMaxLinks)
-	}
-
-	t.Setenv("ARTIFACT_CONNECT_MIN_COSINE", "0.9")
-	t.Setenv("ARTIFACT_CONNECT_MAX_LINKS", "3")
-	if got := metricConnectMinCosine(); got != 0.9 {
-		t.Errorf("min cosine = %v, want 0.9", got)
-	}
-	if got := metricConnectMaxLinks(); got != 3 {
-		t.Errorf("max links = %v, want 3", got)
-	}
-
-	// Invalid values fall back to defaults.
-	t.Setenv("ARTIFACT_CONNECT_MAX_LINKS", "0")
-	if got := metricConnectMaxLinks(); got != defaultMetricConnectMaxLinks {
-		t.Errorf("invalid max links = %v, want default %v", got, defaultMetricConnectMaxLinks)
-	}
-}
-
 func TestParseVectorLiteral(t *testing.T) {
 	got, err := parseVectorLiteral("[0.25, -0.5, 1]")
 	if err != nil {
@@ -529,47 +487,6 @@ func TestHydrateArtifactEmbeddingsLoadsStoredVectors(t *testing.T) {
 	}
 	if len(artifacts[1].Embedding) != 0 {
 		t.Fatalf("unexpected embedding for second artifact: len=%d", len(artifacts[1].Embedding))
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-func TestFindSimilarArtifactsOnTheFlyUsesStoredQueryEmbedding(t *testing.T) {
-	t.Setenv("SEARCH_SEMANTIC_ENABLED", "true")
-
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
-
-	vecText := "[" + strings.TrimSpace(strings.Repeat("0.1,", kbsearch.ConfiguredEmbeddingDim()-1)) + "0.1]"
-	vec, err := parseVectorLiteral(vecText)
-	if err != nil {
-		t.Fatalf("parseVectorLiteral returned error: %v", err)
-	}
-
-	mock.ExpectQuery("SELECT COALESCE\\(search_document, ''\\), embedding::text FROM kb.search_artifacts").
-		WithArgs("metric", "1_m_1").
-		WillReturnRows(sqlmock.NewRows([]string{"search_document", "embedding"}).
-			AddRow("max pressure MPa", vecText))
-
-	mock.ExpectQuery("WITH lexical AS .*FULL OUTER JOIN semantic").
-		WithArgs("max pressure MPa", "1_m_1", kbsearch.FormatVectorLiteral(vec)).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"artifact_type", "artifact_id", "input_record_id", "primary_label", "rrf_score", "lex_score", "cosine_sim",
-		}).AddRow("metric", "2_m_9", int64(2), "other pressure metric", 0.9, 0.0, 0.91))
-
-	got, err := FindSimilarArtifactsOnTheFly(context.Background(), db, "metric", "1_m_1", "metric", 5)
-	if err != nil {
-		t.Fatalf("FindSimilarArtifactsOnTheFly returned error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("FindSimilarArtifactsOnTheFly returned %d matches, want 1", len(got))
-	}
-	if got[0].ArtifactID != "2_m_9" {
-		t.Fatalf("FindSimilarArtifactsOnTheFly match artifact_id = %q, want %q", got[0].ArtifactID, "2_m_9")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

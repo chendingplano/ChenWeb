@@ -47,3 +47,12 @@
 - [x] 8.1 `GET /kb/hybrid-search-benchmark/questions` with the dialog's filters; `question_ids` on run start
 - [x] 8.2 Dialog component with filters, per-question checkboxes, select all matching, clear
 - [x] 8.3 Tests, live check, spec 2026060201 §13.2
+
+## 9. Purposes beyond metrics
+
+- [x] 9.1 Migration `20261111000011`: `target_artifact_type` on results
+- [x] 9.2 Accept every question purpose; search the purpose's type (all partitions for Mix); load targets from `artifact_type`/`artifact_id`; rank by type and ID
+- [x] 9.3 Page: purpose list from the API with labels, `type/id` target, `target_id` filter; Analyze links details only for metrics
+- [x] 9.4 Tests; devdocs 2026102501 and 2026102401
+- [x] 9.5 `search_type` run option (migration `20261111000012`), start-form select, shown in the run viewer
+- [ ] 9.6 Live run per purpose (not done: needs LLM/embedding services)

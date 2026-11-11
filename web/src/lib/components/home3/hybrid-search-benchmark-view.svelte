@@ -19,6 +19,9 @@
 	const modes: BenchmarkMode[] = ['lexical', 'semantic', 'hybrid'];
 	let purposes = $state<string[]>(['search_metrics']);
 	let purpose = $state('search_metrics');
+	let searchTypes = $state<string[]>([]);
+	// '' = the purpose's own type, 'all' = every type (mixed), or one artifact type.
+	let searchType = $state('');
 	let description = $state('');
 	// Filled from the configured live-search settings on first load.
 	let options = $state<HybridBenchmarkOptions>({
@@ -64,8 +67,41 @@
 			options.parallelism <= 32
 	);
 
-	const purposeLabel = (value: string) =>
-		value === 'search_metrics' ? m.qg_search_metrics() : value;
+	const purposeLabels: Record<string, () => string> = {
+		search_metrics: m.qg_search_metrics,
+		search_chunks: m.qg_purpose_search_chunks,
+		search_summaries: m.qg_purpose_search_summaries,
+		search_topics: m.qg_purpose_search_topics,
+		search_scene_blocks: m.qg_purpose_search_scene_blocks,
+		search_provisions: m.qg_purpose_search_provisions,
+		search_products: m.qg_purpose_search_products,
+		search_inventory_items: m.qg_purpose_search_inventory_items,
+		search_semantic_projections: m.qg_purpose_search_semantic_projections,
+		search_knowledge: m.qg_purpose_search_knowledge,
+		search_entities: m.qg_purpose_search_entities,
+		search_relations: m.qg_purpose_search_relations,
+		search_mixed: m.qg_purpose_search_mixed
+	};
+	const purposeLabel = (value: string) => purposeLabels[value]?.() ?? value;
+	// The question purpose that asks about each artifact type, to reuse its label.
+	const typePurpose: Record<string, string> = {
+		metric: 'search_metrics',
+		chunk: 'search_chunks',
+		summary: 'search_summaries',
+		topic: 'search_topics',
+		scene_block: 'search_scene_blocks',
+		provision: 'search_provisions',
+		product: 'search_products',
+		inventory_item: 'search_inventory_items',
+		semantic_projection: 'search_semantic_projections',
+		knowledge: 'search_knowledge',
+		entity: 'search_entities',
+		relation: 'search_relations'
+	};
+	const typeLabel = (type: string) =>
+		type === 'all'
+			? m.hsb_scope_all()
+			: m.hsb_scope_only({ type: purposeLabel(typePurpose[type] ?? type) });
 	const statusLabel = (status: HybridBenchmarkRun['status']) =>
 		status === 'running' ? m.qg_running() : status === 'done' ? m.qg_done() : m.qg_failed();
 	const modeLabel = (mode: BenchmarkMode) =>
@@ -145,6 +181,7 @@
 			if (!alive || controller.signal.aborted) return;
 			runs = result.runs ?? [];
 			if (result.purposes?.length) purposes = result.purposes;
+			if (result.search_types?.length) searchTypes = result.search_types;
 			if (result.defaults && !optionsLoaded) {
 				options = { ...result.defaults };
 				optionsLoaded = true;
@@ -194,7 +231,7 @@
 		startError = false;
 		try {
 			const { run } = await startBenchmarkRun(
-				{ purpose, description: description.trim(), question_ids: questionIds, ...options },
+				{ purpose, description: description.trim(), question_ids: questionIds, search_type: searchType, ...options },
 				startController.signal
 			);
 			if (!alive) return;
@@ -303,6 +340,14 @@
 				/>
 			</div>
 			<div>
+				<label for="hsb-scope">{m.hsb_search_scope()}</label>
+				<select id="hsb-scope" bind:value={searchType} disabled={starting}>
+					<option value="">{m.hsb_scope_default()}</option>
+					<option value="all">{m.hsb_scope_all()}</option>
+					{#each searchTypes as type}<option value={type}>{typeLabel(type)}</option>{/each}
+				</select>
+			</div>
+			<div>
 				<label for="hsb-effort">{m.hsb_effort()}</label>
 				<select id="hsb-effort" bind:value={options.effort} disabled={starting}>
 					<option value="low">{m.hsb_effort_low()}</option>
@@ -404,6 +449,8 @@
 				<section aria-labelledby="hsb-search-group">
 					<h4 id="hsb-search-group">{m.hsb_group_search()}</h4>
 					<dl class="settings">
+						<dt>{m.hsb_search_scope()}</dt>
+						<dd>{typeLabel(selected.search_type)}</dd>
 						<dt>{m.hsb_lexical_backend()}</dt>
 						<dd>{selected.lexical_backend}</dd>
 						<dt>{m.hsb_query_keywords()}</dt>
@@ -533,7 +580,7 @@
 												</ol>
 											</details>{/if}</td
 									>
-									<td class="mono">{result.target_artifact_id}</td>
+									<td class="mono">{result.target_artifact_type}/{result.target_artifact_id}</td>
 									<td>{hopLabel(result.hop_type)}</td>
 									<td>{langLabel(result.lang)}</td>
 									{#each [result.lexical_rank, result.semantic_rank, result.hybrid_rank] as rank}

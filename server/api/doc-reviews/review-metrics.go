@@ -18,7 +18,7 @@ import (
 // "metrics"; ADR 2026063002). Unlike text reviewers it does not read the document
 // body: it loads the document's extracted metrics and compares each against
 // semantically-related metrics in OTHER documents. Semantic similarity is discovered
-// LIVE at review time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather
+// LIVE at review time via the hybrid search engine (searchengine.Similar, Branch A) rather
 // than from precomputed hybrid_search/semantically_related edges — on-the-fly search is
 // always fresh and needs no inbound/outbound edge bookkeeping. Branch B adds metrics
 // sharing a category key; Branch C adds object-anchored metrics retrieved before the
@@ -507,7 +507,7 @@ func (r *metricsReviewer) buildMatches(
 		if dm.view.MetricID == "" {
 			continue
 		}
-		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "metric", dm.view.MetricID, "metric", r.maxMatches)
+		hits, err := findSimilarMatches(ctx, r.db, "metric", dm.view.MetricID, recordID, r.maxMatches)
 		if err != nil {
 			return nil, err
 		}

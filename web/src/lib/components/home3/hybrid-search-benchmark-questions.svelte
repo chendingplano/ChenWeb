@@ -29,7 +29,7 @@
 		input_record_id: '',
 		question: '',
 		answer: '',
-		metric_id: ''
+		target_id: ''
 	});
 	let filters = $state(emptyFilters());
 	let options = $state<QuestionFilterOptions>({
@@ -205,7 +205,7 @@
 			<label for="hsbq-metric">{m.hsb_col_target()}</label>
 			<input
 				id="hsbq-metric"
-				bind:value={filters.metric_id}
+				bind:value={filters.target_id}
 				placeholder={m.hsbq_metric_placeholder()}
 			/>
 		</div>
@@ -273,7 +273,7 @@
 							>
 							<td class="text">{q.question}</td>
 							<td class="text answer">{q.answer}</td>
-							<td class="mono">{q.metric_id}</td>
+							<td class="mono">{q.artifact_type}/{q.artifact_id}</td>
 							<td>{hopLabel(q.hop_type)}</td>
 							<td>{langLabel(q.lang)}</td>
 							<td class="num">{q.input_record_id}</td>

@@ -195,7 +195,7 @@
 
 	<div class="flex gap-6">
 		<!-- Group list -->
-		<div class="w-64 flex-shrink-0">
+		<div class="w-64 shrink-0">
 			<button
 				class="mb-3 w-full rounded-md px-3 py-2"
 				style="border:1px solid {c.border}; color:{c.accent};"

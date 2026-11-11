@@ -9,13 +9,13 @@ import (
 )
 
 func TestHybridBenchQuestionFilters(t *testing.T) {
-	c := echo.New().NewContext(httptest.NewRequest("GET", "/?purpose=search_metrics&run_id=5&lang=en&hop_type=two_hop&metric_id=416_mtc_7&question=heavy%20100%25&answer=%E9%95%89", nil), httptest.NewRecorder())
+	c := echo.New().NewContext(httptest.NewRequest("GET", "/?purpose=search_metrics&run_id=5&lang=en&hop_type=two_hop&target_id=416_mtc_7&question=heavy%20100%25&answer=%E9%95%89", nil), httptest.NewRecorder())
 	f, err := parseHybridBenchQuestionFilters(c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	where, args := f.where()
-	for _, want := range []string{"purpose = $1", "run_id = $2", "lang = $3", "hop_type = $4", "metric_id = $5",
+	for _, want := range []string{"purpose = $1", "run_id = $2", "lang = $3", "hop_type = $4", "artifact_id = $5",
 		"question ILIKE '%' || $6 || '%'", "question ILIKE '%' || $7 || '%'", "answer ILIKE '%' || $8 || '%'"} {
 		if !strings.Contains(where, want) {
 			t.Errorf("where %q lacks %q", where, want)

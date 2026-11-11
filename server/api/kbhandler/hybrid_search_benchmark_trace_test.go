@@ -25,14 +25,14 @@ func callHybridBenchTrace(t *testing.T, id, query string) *httptest.ResponseReco
 }
 
 var hybridBenchResultRowColumns = []string{"id", "search_run_id", "question_id", "input_record_id", "hop_type", "lang", "question",
-	"target_artifact_id", "keywords", "lexical_rank", "semantic_rank", "hybrid_rank", "hybrid_top", "error_msg",
+	"target_artifact_id", "target_artifact_type", "keywords", "lexical_rank", "semantic_rank", "hybrid_rank", "hybrid_top", "error_msg",
 	"embedding_ms", "keywords_ms", "lexical_ms", "semantic_ms", "hybrid_ms",
 	"effort_rank", "effort_found", "effort_attempts", "effort_ms", "effort_trace", "lexical_backend"}
 
 // One stored result (low effort) plus its run's lexical backend.
 func hybridBenchResultRow(id int64, target string) *sqlmock.Rows {
 	return sqlmock.NewRows(hybridBenchResultRowColumns).AddRow(id, int64(612), int64(7), int64(416), "one_hop", "en", "q",
-		target, "{cadmium}", int64(2), int64(1), int64(2), `["416_mtc_1"]`, "",
+		target, "metric", "{cadmium}", int64(2), int64(1), int64(2), `["416_mtc_1"]`, "",
 		int64(40), int64(900), int64(120), int64(110), int64(125),
 		nil, nil, nil, nil, nil, "paradedb")
 }

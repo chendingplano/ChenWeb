@@ -36,7 +36,7 @@ func Search(ctx context.Context, db *sql.DB, cfg Config, req Request) (*Response
 
 	vecLiteral := queryVector(ctx, cfg, req, ref)
 	if req.Criteria.MinCosine > 0 && vecLiteral == "" {
-		return nil, fmt.Errorf("searchengine: a minimum cosine needs a query vector, and none is available (semantic search off, or no embedding model)")
+		return nil, ErrNoQueryVector
 	}
 	spec := resolveKeywordList(ctx, cfg, req, ref)
 

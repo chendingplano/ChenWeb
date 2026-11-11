@@ -20,6 +20,7 @@ export type HybridBenchmarkRun = {
 	semantic_weight: number;
 	candidate_limit: number;
 	parallelism: number;
+	search_type: string;
 	effort: SearchEffort;
 	max_efforts: number;
 	created_by: string;
@@ -46,6 +47,7 @@ export type HybridBenchmarkResult = {
 	lang: 'en' | 'zh-cn';
 	question: string;
 	target_artifact_id: string;
+	target_artifact_type: string;
 	keywords: string[];
 	lexical_rank: number | null;
 	semantic_rank: number | null;
@@ -100,6 +102,8 @@ export function startBenchmarkRun(
 		purpose: string;
 		description: string;
 		question_ids: number[];
+		// "" = the purpose's own type, "all" = every type, or one artifact type.
+		search_type: string;
 	} & HybridBenchmarkOptions,
 	signal?: AbortSignal
 ) {
@@ -114,6 +118,7 @@ export function listBenchmarkRuns(signal?: AbortSignal) {
 	return request<{
 		runs: HybridBenchmarkRun[];
 		purposes: string[];
+		search_types: string[];
 		defaults: HybridBenchmarkOptions;
 	}>(BASE, { signal });
 }
@@ -171,7 +176,7 @@ export type BenchmarkQuestionFilters = {
 	input_record_id: string;
 	question: string;
 	answer: string;
-	metric_id: string;
+	target_id: string;
 };
 export type BenchmarkQuestion = {
 	id: number;
@@ -179,7 +184,8 @@ export type BenchmarkQuestion = {
 	input_record_id: number;
 	hop_type: 'one_hop' | 'two_hop' | 'multi_hop';
 	lang: 'en' | 'zh-cn';
-	metric_id: string;
+	artifact_type: string;
+	artifact_id: string;
 	question: string;
 	answer: string;
 	created_at: string;

@@ -48,9 +48,11 @@
 			: q.attempt === null
 				? m.hsba_query_fallback({ seq: q.seq })
 				: m.hsba_query_effort({ seq: q.seq, attempt: q.attempt });
-	const isTarget = (c: TraceCandidate) => c.artifact_id === result.target_artifact_id;
+	const isTarget = (c: TraceCandidate) =>
+		c.artifact_id === result.target_artifact_id && c.artifact_type === result.target_artifact_type;
 	// The effort judge names candidates as "<type>/<id>".
 	const metricIdOf = (key: string) => key.slice(key.indexOf('/') + 1);
+	const typeOf = (key: string) => key.slice(0, key.indexOf('/'));
 	// Rows are the first `limit` ranks plus the target; a jump in rank means rows were left out.
 	const gapBefore = (rows: TraceCandidate[], i: number) =>
 		i === 0 ? rows[0].rank !== 1 : rows[i].rank !== rows[i - 1].rank + 1;
@@ -85,16 +87,23 @@
 	}
 </script>
 
-{#snippet metricButton(id: string, label = '')}
-	<button
-		type="button"
-		class="metric-link"
-		class:selected={id === selectedMetricId}
-		onclick={() => onSelectMetric(id)}
-		><span class="mono">{id}</span>{#if id === result.target_artifact_id}<span class="marker"
-				>{m.hsba_target_marker()}</span
-			>{/if}</button
-	>{#if label}<span class="label">{label}</span>{/if}
+<!-- Only metrics have a details panel; other artifact types show their ID as plain text. -->
+{#snippet metricButton(id: string, label = '', type = 'metric')}
+	{#if type === 'metric'}
+		<button
+			type="button"
+			class="metric-link"
+			class:selected={id === selectedMetricId}
+			onclick={() => onSelectMetric(id)}
+			><span class="mono">{id}</span>{#if id === result.target_artifact_id}<span class="marker"
+					>{m.hsba_target_marker()}</span
+				>{/if}</button
+		>
+	{:else}
+		<span class="mono">{id}</span>{#if id === result.target_artifact_id && type === result.target_artifact_type}<span
+				class="marker">{m.hsba_target_marker()}</span
+			>{/if}
+	{/if}{#if label}<span class="label">{label}</span>{/if}
 {/snippet}
 
 {#snippet gap(cols: number)}
@@ -147,7 +156,7 @@
 											class:picked={c.artifact_id === selectedMetricId}
 										>
 											<td class="num">{c.rank}</td>
-											<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+											<td class="metric">{@render metricButton(c.artifact_id, c.label, c.artifact_type)}</td>
 											<td class="num">{fixed(c.score, 2)}</td>
 										</tr>
 									{/each}
@@ -178,7 +187,7 @@
 										<td class="num">{c.rank}</td>
 										<td class="num">{c.partition_rank ?? ''}</td>
 										<td class="mono">{c.partition_name}</td>
-										<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+										<td class="metric">{@render metricButton(c.artifact_id, c.label, c.artifact_type)}</td>
 										<td class="num">{fixed(c.score, 2)}</td>
 									</tr>
 								{/each}
@@ -204,7 +213,7 @@
 									{#if gapBefore(rows, i)}{@render gap(3)}{/if}
 									<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
 										<td class="num">{c.rank}</td>
-										<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+										<td class="metric">{@render metricButton(c.artifact_id, c.label, c.artifact_type)}</td>
 										<td class="num">{fixed(c.score, 3)}</td>
 									</tr>
 								{/each}
@@ -232,7 +241,7 @@
 									{#if gapBefore(rows, i)}{@render gap(5)}{/if}
 									<tr class:target={isTarget(c)} class:picked={c.artifact_id === selectedMetricId}>
 										<td class="num">{c.rank}</td>
-										<td class="metric">{@render metricButton(c.artifact_id, c.label)}</td>
+										<td class="metric">{@render metricButton(c.artifact_id, c.label, c.artifact_type)}</td>
 										<td class="num">{fixed(c.score, 4)}</td>
 										<td class="num">{c.lexical_rank ?? ''}</td>
 										<td class="num">{c.semantic_rank ?? ''}</td>
@@ -253,7 +262,7 @@
 		<h2>{result.question}</h2>
 		<dl>
 			<dt>{m.hsb_col_target()}</dt>
-			<dd>{@render metricButton(result.target_artifact_id)}</dd>
+			<dd>{@render metricButton(result.target_artifact_id, '', result.target_artifact_type)}</dd>
 			<dt>{m.hsb_col_hop()}</dt>
 			<dd>{hopLabel(result.hop_type)}</dd>
 			<dt>{m.hsb_col_lang()}</dt>
@@ -301,7 +310,9 @@
 						<span class="matches"
 							>{m.hsba_judge_matches()}
 							{#each attempt.matching_ids as key}{@render metricButton(
-									metricIdOf(key)
+									metricIdOf(key),
+									'',
+									typeOf(key)
 								)}{/each}</span
 						>
 					{/if}

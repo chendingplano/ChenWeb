@@ -22,13 +22,13 @@ var launchHybridSearchBenchmark = func(db *sql.DB, run hybridBenchRun, questions
 }
 
 const hybridBenchRunColumns = `id, purpose, description, status, error_msg, question_count, done_count,
- lexical_backend, query_keywords, embedding_model, keywords_model, keywords_prompt,
+ lexical_backend, search_type, query_keywords, embedding_model, keywords_model, keywords_prompt,
  lexical_weight, semantic_weight, candidate_limit, parallelism, effort, max_efforts, created_by, created_at, finished_at`
 
 func scanHybridBenchRun(row interface{ Scan(...any) error }, extra ...any) (hybridBenchRun, error) {
 	var run hybridBenchRun
 	dest := []any{&run.ID, &run.Purpose, &run.Description, &run.Status, &run.ErrorMsg, &run.QuestionCount, &run.DoneCount,
-		&run.LexicalBackend, &run.QueryKeywords, &run.EmbeddingModel, &run.KeywordsModel, &run.KeywordsPrompt,
+		&run.LexicalBackend, &run.SearchType, &run.QueryKeywords, &run.EmbeddingModel, &run.KeywordsModel, &run.KeywordsPrompt,
 		&run.LexicalWeight, &run.SemanticWeight, &run.CandidateLimit, &run.Parallelism, &run.Effort, &run.MaxEfforts,
 		&run.CreatedBy, &run.CreatedAt, &run.FinishedAt}
 	err := row.Scan(append(dest, extra...)...)
@@ -49,8 +49,12 @@ func StartHybridSearchBenchmark(c echo.Context) error {
 		return questionGenerationError(c, http.StatusBadRequest, err.Error())
 	}
 	db, ctx := ApiTypes.ProjectDBHandle, c.Request().Context()
-	questions, err := loadHybridBenchQuestions(ctx, db, req.Purpose, req.QuestionIDs)
-	if errors.Is(err, errHybridBenchSelection) {
+	searchType := req.SearchType
+	if searchType == "" {
+		searchType = hybridBenchPurposeSearchType(req.Purpose)
+	}
+	questions, err := loadHybridBenchQuestions(ctx, db, req.Purpose, searchType, req.QuestionIDs)
+	if errors.Is(err, errHybridBenchSelection) || errors.Is(err, errHybridBenchSearchType) {
 		return questionGenerationError(c, http.StatusBadRequest, err.Error())
 	}
 	if err != nil {
@@ -67,19 +71,19 @@ func StartHybridSearchBenchmark(c echo.Context) error {
 	}
 	userID, _ := c.Get("question-generator-user-id").(string)
 	run, err := scanHybridBenchRun(db.QueryRowContext(ctx, `INSERT INTO testbed.hybrid_search_benchmark_runs
-  (purpose, description, question_count, lexical_backend, query_keywords, embedding_model, keywords_model, keywords_prompt,
+  (purpose, description, question_count, lexical_backend, search_type, query_keywords, embedding_model, keywords_model, keywords_prompt,
    lexical_weight, semantic_weight, candidate_limit, parallelism, effort, max_efforts, created_by, expires_at)
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW()+$16*INTERVAL '1 second') RETURNING `+hybridBenchRunColumns,
+  VALUES ($1,$2,$3,$4,$17,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW()+$16*INTERVAL '1 second') RETURNING `+hybridBenchRunColumns,
 		req.Purpose, req.Description, len(questions), string(registryLexicalBackend()), opts.QueryKeywords,
 		strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME")), keywordsModel, keywordsPrompt,
 		opts.LexicalWeight, opts.SemanticWeight, opts.CandidateLimit, opts.Parallelism, opts.Effort, searchEffortMaxAttempts(opts.Effort),
-		userID, int(hybridBenchHeartbeat.Seconds())))
+		userID, int(hybridBenchHeartbeat.Seconds()), searchType))
 	if err != nil {
 		logger.Error("benchmark run insert failed", "purpose", req.Purpose, "error", err)
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to create benchmark run")
 	}
 	logger.Info("hybrid search benchmark started", "run_id", run.ID, "purpose", run.Purpose,
-		"questions", run.QuestionCount, "lexical_backend", run.LexicalBackend, "query_keywords", run.QueryKeywords,
+		"questions", run.QuestionCount, "lexical_backend", run.LexicalBackend, "search_type", run.SearchType, "query_keywords", run.QueryKeywords,
 		"lexical_weight", run.LexicalWeight, "semantic_weight", run.SemanticWeight, "candidate_limit", run.CandidateLimit, "parallelism", run.Parallelism, "effort", run.Effort, "max_efforts", run.MaxEfforts, "selected_questions", len(req.QuestionIDs), "user_id", userID)
 	launchHybridSearchBenchmark(db, run, questions)
 	return c.JSON(http.StatusAccepted, map[string]any{"run": run})
@@ -121,7 +125,7 @@ func ListHybridSearchBenchmarkRuns(c echo.Context) error {
 		return questionGenerationError(c, http.StatusInternalServerError, "failed to load benchmark runs")
 	}
 	defaults := hybridBenchDefaults(loadRegistrySearchConfig(), searchKeywordsEnabled(logger))
-	return c.JSON(http.StatusOK, map[string]any{"runs": runs, "purposes": hybridBenchPurposes, "defaults": defaults})
+	return c.JSON(http.StatusOK, map[string]any{"runs": runs, "purposes": hybridBenchPurposes, "search_types": searchArtifactPartitionTypes, "defaults": defaults})
 }
 
 func GetHybridSearchBenchmarkRun(c echo.Context) error {
@@ -149,7 +153,7 @@ func GetHybridSearchBenchmarkRun(c echo.Context) error {
 }
 
 const hybridBenchResultColumns = `id, COALESCE(search_run_id, 0), question_id, input_record_id, hop_type, lang, question,
- target_artifact_id, keywords, lexical_rank, semantic_rank, hybrid_rank, hybrid_top, error_msg,
+ target_artifact_id, target_artifact_type, keywords, lexical_rank, semantic_rank, hybrid_rank, hybrid_top, error_msg,
  embedding_ms, keywords_ms, lexical_ms, semantic_ms, hybrid_ms,
  effort_rank, effort_found, effort_attempts, effort_ms, effort_trace`
 
@@ -180,7 +184,7 @@ func scanHybridBenchResult(row interface{ Scan(...any) error }, extra ...any) (h
 	var effortTrace []byte
 	var top []byte
 	dest := []any{&r.ID, &r.SearchRunID, &questionID, &r.InputRecordID, &r.HopType, &r.Lang, &r.Question,
-		&r.TargetArtifactID, pq.Array(&r.Keywords), &lexical, &semantic, &hybrid, &top, &r.ErrorMsg,
+		&r.TargetArtifactID, &r.TargetArtifactType, pq.Array(&r.Keywords), &lexical, &semantic, &hybrid, &top, &r.ErrorMsg,
 		&embeddingMs, &keywordsMs, &lexicalMs, &semanticMs, &hybridMs,
 		&effortRank, &effortFound, &effortAttempts, &effortMs, &effortTrace}
 	if err := row.Scan(append(dest, extra...)...); err != nil {

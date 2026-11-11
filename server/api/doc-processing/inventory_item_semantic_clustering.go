@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chendingplano/deepdoc/server/api/kbsearch"
-	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/deepdoc/server/api/searchengine"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
@@ -146,21 +145,15 @@ func semClusterInventoryItems(
 	// 2. For each pending item: hybrid search -> coarse filter -> build group.
 	var groups []semClusterInvItemGroup
 	skippedNoMatch := 0
-	scfg := appconfig.GetArtifactSearchConfig()
-	dict := sanitizeTSDictionary(scfg.Dictionary)
 
 	for _, item := range items {
-		var vec []float64
-		useSem := false
-		if kbsearch.SemanticSearchEnabled() && len(item.Embedding) == kbsearch.ConfiguredEmbeddingDim() {
-			vec = item.Embedding
-			useSem = true
-		}
-
-		candidates, qErr := queryArtifactHybridCandidates(
-			ctx, db, dict, strings.TrimSpace(item.SearchDocument), vec, useSem,
-			searchArtifactInventoryItem, item.ArtifactID, "", searchLimit,
-		)
+		results, qErr := searchengine.Similar(ctx, db,
+			searchengine.ArtifactRef{Type: searchArtifactInventoryItem, ID: item.ArtifactID},
+			searchengine.SimilarOptions{
+				MinCosine:    semClusterMinBlockCosine(),
+				Limit:        searchLimit,
+				FallbackText: strings.TrimSpace(item.SearchDocument),
+			})
 		if qErr != nil {
 			if logger != nil {
 				logger.Warn("inventory item semantic clustering: hybrid search failed",
@@ -173,15 +166,15 @@ func semClusterInventoryItems(
 		var members []semClusterInvItemMember
 		members = append(members, inventoryItemRowToSemClusterMember(item))
 		minCosine := semClusterMinBlockCosine()
-		for _, c := range candidates {
+		for _, c := range results {
 			cosine := 0.0
-			if c.cosineSim.Valid {
-				cosine = c.cosineSim.Float64
+			if c.Diag.Cosine != nil {
+				cosine = *c.Diag.Cosine
 			}
 			if cosine < minCosine {
 				continue
 			}
-			cand, loadErr := loadInventoryItemForSemCluster(ctx, db, c.artifactID)
+			cand, loadErr := loadInventoryItemForSemCluster(ctx, db, c.ArtifactID)
 			if loadErr != nil || cand == nil {
 				continue
 			}
@@ -193,8 +186,8 @@ func semClusterInventoryItems(
 			}
 			member := inventoryItemRowToSemClusterMember(*cand)
 			member.SearchCosine = cosine
-			if c.lexScore.Valid {
-				member.SearchLexicalScore = c.lexScore.Float64
+			if c.Diag.LexicalScore != nil {
+				member.SearchLexicalScore = *c.Diag.LexicalScore
 			}
 			members = append(members, member)
 		}

@@ -19,7 +19,7 @@ import (
 // it does not read the document body: it loads the document's extracted inventory items
 // and compares each against semantically-related items in OTHER documents. Semantic
 // similarity is discovered LIVE at review time via
-// docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather than from precomputed
+// the hybrid search engine (searchengine.Similar, Branch A) rather than from precomputed
 // hybrid_search/semantically_related edges — on-the-fly search is always fresh and needs
 // no inbound/outbound edge bookkeeping. Branch B adds items sharing an item_category
 // corpus-wide; Branch C adds object-anchored items retrieved before the LLM/tool loop.
@@ -411,7 +411,7 @@ func (r *inventoryItemsReviewer) buildMatches(
 		if di.view.ItemID == "" {
 			continue
 		}
-		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "inventory_item", di.view.ItemID, "inventory_item", r.maxMatches)
+		hits, err := findSimilarMatches(ctx, r.db, "inventory_item", di.view.ItemID, recordID, r.maxMatches)
 		if err != nil {
 			return nil, err
 		}
