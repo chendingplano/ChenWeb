@@ -367,7 +367,7 @@
 		await reloadItems(record);
 	}
 
-	let lastReloadToken = reloadToken;
+	let lastReloadToken = untrack(() => reloadToken);
 	$effect(() => {
 		const token = reloadToken;
 		if (token === lastReloadToken) return;

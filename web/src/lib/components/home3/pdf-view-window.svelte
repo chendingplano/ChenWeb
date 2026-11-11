@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import SharedPdfViewer from './shared-pdf-viewer.svelte';
 	import type { TableReference } from './pdf-table-geometry';
@@ -227,7 +227,7 @@
 	let pillText = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let pillHover = $derived(darkMode ? 'rgba(99,102,241,0.14)' : 'rgba(99,102,241,0.10)');
 
-	let panelWidth = $state(sidebarDefaultWidth);
+	let panelWidth = $state(untrack(() => sidebarDefaultWidth));
 	let resizing = $state(false);
 	let settingsOpen = $state(false);
 	let storage: Storage | null = null;

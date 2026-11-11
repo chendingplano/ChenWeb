@@ -495,7 +495,7 @@
   </div>
  {/if}
 {#if resizeNotice && selectedId === resizeNotice.id}
- <div class="resize-notice nodrag nopan" role="dialog" aria-label={m.wpi_resize_confirmation()} style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
+ <div class="resize-notice nodrag nopan" role="dialog" tabindex="-1" aria-label={m.wpi_resize_confirmation()} style:left="{resizeNotice.left}px" style:top="{resizeNotice.top}px" onpointerdown={(event) => event.stopPropagation()}>
   <span>{resizeNotice.message}</span><div class="resize-notice-actions"><button type="button" bind:this={resizeCancelButton} use:resizeDialogButton={cancelResize}>{m.wpi_create_element_cancel()}</button><button type="button" use:resizeDialogButton={confirmResize}>{m.wpi_create_element_saved_ok()}</button></div>
  </div>
 {/if}

@@ -10,7 +10,7 @@
 	// The route remounts this component for another app, so the runtime is
 	// created once from the first bundle. The app shows its initial page in its
 	// page area (devdoc 2026102601 §3.1.1).
-	const rt = new AppRuntime(untrack(() => bundle), editorPreview);
+	const rt = new AppRuntime(untrack(() => bundle), untrack(() => editorPreview));
 	setRuntime(rt);
 	onMount(() => {
 		onRuntime?.(rt);

@@ -1,8 +1,9 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import JsonTreeViewer from './json-tree-viewer.svelte';
     let { value, depth = 0, darkMode = true }: { value: unknown; depth?: number; darkMode?: boolean } = $props();
 
-    let collapsed = $state(depth > 1);
+    let collapsed = $state(untrack(() => depth > 1));
 
     let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
     let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');

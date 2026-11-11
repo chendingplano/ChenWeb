@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import {
 		getRequest,
 		listAspects,
@@ -143,8 +143,8 @@
 	// Rerun dialog state
 	let rerunDialogOpen = $state(false);
 	let isRerunning = $state(false);
-	let currentRunId = $state(runId);
-	let currentReportId = $state(reportId);
+	let currentRunId = $state(untrack(() => runId));
+	let currentReportId = $state(untrack(() => reportId));
 
 	async function openJsonModal() {
 		jsonModalOpen = true;

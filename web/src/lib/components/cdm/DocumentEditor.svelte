@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import BlockList from './BlockList.svelte';
 	import type { Document } from './types.js';
 	import {
@@ -37,7 +37,7 @@
 		previewLoading?: boolean;
 	} = $props();
 
-	let doc = $state(structuredClone(initialDocument));
+	let doc = $state(structuredClone(untrack(() => initialDocument)));
 	let isNew = $derived(doc.document_key === '');
 	let showCreateConfirm = $state(false);
 	let showVersionsDialog = $state(false);
@@ -45,7 +45,7 @@
 	let versionsError = $state<string | null>(null);
 	let versions = $state<DocumentVersionNode[]>([]);
 
-	let savedSnapshot = $state(JSON.stringify(initialDocument));
+	let savedSnapshot = $state(JSON.stringify(untrack(() => initialDocument)));
 	let dirty = $derived(JSON.stringify(doc) !== savedSnapshot);
 
 	let saving = $state(false);

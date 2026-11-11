@@ -2,7 +2,7 @@
 	// Document Builder viewer: a category tree on the left, the selected document on the right.
 	// Markdown goes through the Markdown Viewer module (20261109-01); PDFs use the browser's own
 	// viewer in an iframe. See KnowledgeStore/doc-repo/modules/module-document-builder-frontend.md.
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
@@ -52,7 +52,7 @@
 	let markdown = $state('');
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let leftWidth = $state(leftWidthDefault);
+	let leftWidth = $state(untrack(() => leftWidthDefault));
 	let docWidth = $state(DOC_WIDTH_DEFAULT);
 	let contentEl = $state<HTMLElement | null>(null);
 	let scrollTops: Record<number, number> = {};

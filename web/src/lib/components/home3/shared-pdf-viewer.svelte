@@ -816,6 +816,7 @@
 				{@render sidebarContent?.()}
 				{@render sidebarResizer?.()}
 			</div>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="pdf-canvas-host"
 				bind:this={pdfCanvasHostEl}
@@ -846,6 +847,7 @@
 										class="pdf-floating-overlay-anchor"
 										style={`left:${floatingOverlayLeft}px; top:${floatingOverlayTop}px;`}
 									>
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
 										<div
 											class="pdf-floating-overlay-card"
 											class:dragging={floatingOverlayDrag !== null}

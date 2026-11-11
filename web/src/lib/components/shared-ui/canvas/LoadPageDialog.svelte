@@ -131,6 +131,7 @@
 	style={canvasThemeVars(darkMode)}
 	aria-labelledby="wpi-load-title"
 >
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<header
 		onpointerdown={startDrag}
 		onpointermove={moveDrag}

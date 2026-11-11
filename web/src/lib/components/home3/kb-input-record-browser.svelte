@@ -125,8 +125,8 @@
 	let listPage = $state(1);
 	let listTotal = $state(0);
 	let listJumpInput = $state('1');
-	let listWidth = $state(clampKbInputRecordBrowserListWidth(defaultListWidth));
-	let selectedRecordIdInternal = $state<number | null>(selectedRecordId);
+	let listWidth = $state(clampKbInputRecordBrowserListWidth(untrack(() => defaultListWidth)));
+	let selectedRecordIdInternal = $state<number | null>(untrack(() => selectedRecordId));
 	let lastEmittedRecordId = $state<number | null>(null);
 	let lastEmittedRecordKey: string | null = null;
 	let justEmitted = $state(false);
@@ -134,7 +134,7 @@
 	let settingsHydrated = $state(false);
 
 	let highlightColor = $state(KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR);
-	let effectivePageSize = $state(clampKbInputRecordBrowserPageSize(pageSize));
+	let effectivePageSize = $state(clampKbInputRecordBrowserPageSize(untrack(() => pageSize)));
 	let listTotalPages = $derived(Math.max(1, Math.ceil(listTotal / effectivePageSize)));
 	let resetDisabled = $derived(!hasActiveRecordBrowserFilters(filters) && !pinnedMode && recordIdInput.trim() === '');
 

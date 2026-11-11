@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -60,7 +60,7 @@
 	let error = $state('');
 
 	let filterInputRecordId = $state('');
-	let filterRunId = $state(initialRunId.trim());
+	let filterRunId = $state(untrack(() => initialRunId.trim()));
 	let filterPass = $state('');
 	let filterAspect = $state('');
 	let filterSeverity = $state('');

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { listReviewRuns, listTiers } from '$lib/services/docReviewService';
 	import type { ReviewRunListItem, TierInfo } from '$lib/services/docReviewService';
 	import DocReviewSearchDialog from './doc-review-search-dialog.svelte';
@@ -86,7 +86,7 @@
 
 	// Reload whenever the parent bumps refreshKey (e.g. after a new submit). Seed
 	// with the initial key so onMount owns the first load (no redundant fetch).
-	let lastRefreshKey = $state(refreshKey);
+	let lastRefreshKey = $state(untrack(() => refreshKey));
 	$effect(() => {
 		if (refreshKey !== lastRefreshKey) {
 			lastRefreshKey = refreshKey;

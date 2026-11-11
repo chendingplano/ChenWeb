@@ -412,6 +412,7 @@
 						{#if selected}
 							<div class="reference-info select-text">
 								<div class="reference-info-heading">{m.references_mgmt_reference_info()} <span>{selected.ref_id}</span></div>
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div class="reference-info-content" onpointerdown={(event) => event.stopPropagation()} onselectstart={(event) => event.stopPropagation()}>
 									<strong>{selected.target_title || selected.cited_raw || selected.resource_title || m.references_mgmt_untitled_reference()}</strong>
 									{#if selected.evidence}<p>{selected.evidence}</p>{/if}

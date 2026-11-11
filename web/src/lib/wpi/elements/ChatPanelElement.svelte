@@ -2,7 +2,7 @@
 	// The Chat and Dialog tabs of a page's chat (KnowledgeStore
 	// doc-repo/code_modules/interpreter-chat-panel.md). Messages are sent from
 	// the page's chat-composer, which shares this page instance's chat.
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import HarnessDialog from '$lib/components/shared-ui/harness-dialog.svelte';
@@ -18,8 +18,9 @@
 	const TAB_IDS: Tab[] = ['chat', 'dialog'];
 
 	const rt = getRuntime();
-	const chat = acquireChat(rt, instanceId, rt.editorPreview);
-	onDestroy(() => releaseChat(rt, instanceId));
+	const chatId = untrack(() => instanceId);
+	const chat = acquireChat(rt, chatId, rt.editorPreview);
+	onDestroy(() => releaseChat(rt, chatId));
 
 	const d = $derived(element.desc);
 	const tabs = $derived(((d.tabs ?? TAB_IDS) as string[]).filter((t): t is Tab => TAB_IDS.includes(t as Tab)));

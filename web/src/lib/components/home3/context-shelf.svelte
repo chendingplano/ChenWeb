@@ -51,7 +51,6 @@
 		summaryDetails = null,
 		referenceDetails = null,
 		width = 280,
-		open = true,
 		onDragStart,
 		onClose
 	}: {
@@ -89,7 +88,6 @@
 
 	// Suppress unused props/consts (declared for API completeness / design-token reference)
 	void radiusCard;
-	void open;
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 

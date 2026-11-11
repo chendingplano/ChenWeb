@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
@@ -94,8 +94,8 @@
 		if (typeof window === 'undefined') return '';
 		return new URLSearchParams(window.location.search).get(name) ?? '';
 	}
-	let runIdInput = $state(initialRunId ? String(initialRunId) : param('run'));
-	let runId = $state<number | null>(initialRunId ?? (param('run') ? Number(param('run')) : null));
+	let runIdInput = $state(untrack(() => (initialRunId ? String(initialRunId) : param('run'))));
+	let runId = $state<number | null>(untrack(() => initialRunId ?? (param('run') ? Number(param('run')) : null)));
 
 	// ── loaded state ──────────────────────────────────────────────────────────
 	let loading = $state(false);

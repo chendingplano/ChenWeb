@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { Chart } from 'svelte-echarts';
 	import type { EChartsOption } from 'echarts';
 	import { init, use } from 'echarts/core';
@@ -242,7 +242,7 @@
 
 	let nodes = $state<GraphCategoryNode[]>([]);
 	let tabs = $state<GraphTab[]>(makeInitialTabs());
-	let activeTabId = $state(mode === 'summary' ? 'summary-graph' : 'topic-graph');
+	let activeTabId = $state(untrack(() => (mode === 'summary' ? 'summary-graph' : 'topic-graph')));
 	let selectedNodeId = $state<string | null>(null);
 	let dialogOpen = $state(false);
 	let dialogMode = $state<DialogMode>(null);

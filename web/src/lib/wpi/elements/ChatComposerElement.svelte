@@ -2,7 +2,7 @@
 	// The message box and tool bar of a page's chat (KnowledgeStore
 	// doc-repo/code_modules/interpreter-chat-composer.md). Replies appear in the
 	// page's chat-panel, which shares this page instance's chat.
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -22,8 +22,9 @@
 	const DEFAULT_TOOLBAR = ['agent', 'model', 'prompt', 'text_editor', 'new_session'];
 
 	const rt = getRuntime();
-	const chat = acquireChat(rt, instanceId, rt.editorPreview);
-	onDestroy(() => releaseChat(rt, instanceId));
+	const chatId = untrack(() => instanceId);
+	const chat = acquireChat(rt, chatId, rt.editorPreview);
+	onDestroy(() => releaseChat(rt, chatId));
 
 	const d = $derived(element.desc);
 	const toolbar = $derived(d.toolbar ?? DEFAULT_TOOLBAR);

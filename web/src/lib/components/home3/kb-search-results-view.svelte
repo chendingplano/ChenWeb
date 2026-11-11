@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { getLocale, locales, setLocale } from '$lib/paraglide/runtime.js';
@@ -49,10 +49,10 @@
 		label: option.value === 'all' ? m.kb_search_results_all() : option.label
 	}));
 
-	let query = $state(initialQuery.trim());
-	let submittedQuery = $state(initialQuery.trim());
-	let artifactType = $state<KbSearchArtifactType>(parseKbSearchArtifactType(initialArtifactType));
-	let pageNumber = $state(normalizeRequestedPage(initialPage));
+	let query = $state(untrack(() => initialQuery.trim()));
+	let submittedQuery = $state(untrack(() => initialQuery.trim()));
+	let artifactType = $state<KbSearchArtifactType>(parseKbSearchArtifactType(untrack(() => initialArtifactType)));
+	let pageNumber = $state(normalizeRequestedPage(untrack(() => initialPage)));
 	let currentLocale = $state<string>('en');
 	let supportedLanguages = $state<string[]>(['en', 'zh-cn']);
 	let loading = $state(false);

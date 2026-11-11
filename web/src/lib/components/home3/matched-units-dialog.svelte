@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
@@ -29,7 +30,7 @@
 	let textMuted = $derived(dark ? '#64748B' : '#9CA3AF');
 	let scrollThumb = $derived(dark ? '#2A3140' : '#D7CFB8');
 
-	let selected = $state<number | null>(initialSelected ?? null);
+	let selected = $state<number | null>(untrack(() => initialSelected ?? null));
 	let selectedRows = $derived(selected != null ? buildMatchedUnitRows(units[selected]) : []);
 	let dialogTitle = $derived(selected != null ? m.matched_units_dialog_matched({ units: matchedUnitLabel(units[selected], selected) }) : title);
 

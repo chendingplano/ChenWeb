@@ -1,6 +1,7 @@
 <!-- web/src/lib/components/shared-ui/canvas/WpiJsonDialog.svelte -->
 <!-- The WPI editor's View JSON: the descriptor JSON of the selected node or of the page, with editing and syntax checking. -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { m } from '$lib/paraglide/messages.js';
   import type { JsonObject } from '$lib/wpi/types';
   import { parseJsonObject } from './wpi-json';
@@ -23,7 +24,7 @@
   } = $props();
 
   let editing = $state(false);
-  let text = $state(JSON.stringify(json, null, 2));
+  let text = $state(JSON.stringify(untrack(() => json), null, 2));
   let status = $state('');
   let valid = $state(false);
   let backdropPressed = false;
