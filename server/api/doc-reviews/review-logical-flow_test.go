@@ -12,7 +12,7 @@ func TestLogicalFlowReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "calibration step uses a value defined two sections later",
+					"title": "calibration step uses a value defined two sections later",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestLogicalFlowReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_LOGICAL_FLOW"),
 	}
 
-	findings := reviewer.processBlock(context.Background(), 91, 0, 1, ReviewerConfig{
+	findings, err := reviewer.processBlock(context.Background(), 91, 0, 1, ReviewerConfig{
 		ModelName:  "logical-flow-model",
 		PromptText: "review logical flow",
 		PromptRef:  "prompt-review-logical-flow.md",
@@ -33,6 +33,9 @@ func TestLogicalFlowReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		lineStart: 10,
 		lineEnd:   420,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

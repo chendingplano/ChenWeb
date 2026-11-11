@@ -120,7 +120,9 @@ func (r *metricsReviewer) ReviewDocument(
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26063004) build metric matches for record %d: %w", recordID, err)
 	}
-	r.hydrateMatchedMetricContexts(ctx, matches)
+	if err := r.hydrateMatchedMetricContexts(ctx, matches); err != nil {
+		return nil, err
+	}
 
 	// Only review metrics that have at least one cross-document match.
 	type reviewUnit struct {
@@ -139,11 +141,12 @@ func (r *metricsReviewer) ReviewDocument(
 	}
 
 	// Each call carries the metric's extraction chunk as its source passage.
-	// A load failure only drops the passage (units send the payload alone).
+	// Loading source evidence is required; a failure aborts the reviewer.
 	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("metrics review: extraction chunks unavailable; reviewing without source context",
+		r.logger.Warn("metrics review: extraction chunks unavailable; aborting reviewer",
 			"record_id", recordID, "error", err)
+		return nil, fmt.Errorf("load review source chunks: %w", err)
 	}
 
 	r.logger.Info("metrics review running",
@@ -161,7 +164,7 @@ func (r *metricsReviewer) ReviewDocument(
 		cIdx, passage, truncated := sourceChunkFor(u.dm.spans, chunks)
 		execUnits[i] = artifactReviewUnit{
 			chunkIdx: cIdx,
-			run: func(workerCtx context.Context) []ReviewFinding {
+			run: func(workerCtx context.Context) ([]ReviewFinding, error) {
 				return r.reviewMetric(workerCtx, recordID, i, cfg, u.dm, u.matches, passage, truncated)
 			},
 		}
@@ -181,7 +184,10 @@ func (r *metricsReviewer) reviewMetric(
 	ms []matchedMetric,
 	passage string,
 	truncated bool,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	start := time.Now()
 	logEntry := ReviewLogEntry{
 		InputRecordID: recordID,
@@ -216,8 +222,8 @@ func (r *metricsReviewer) reviewMetric(
 		r.logger.Warn("metrics review: marshal payload failed", "record_id", recordID, "metric_index", index)
 		logEntry.Outcome = "error"
 		logEntry.Detail["error"] = "marshal payload failed"
-		r.saveReviewLog(ctx, logEntry)
-		return nil
+		_ = r.saveReviewLog(ctx, logEntry)
+		return nil, fmt.Errorf("marshal review payload failed")
 	}
 
 	var findings []ReviewFinding
@@ -239,9 +245,10 @@ func (r *metricsReviewer) reviewMetric(
 			llmEventIDs = loopUsage.EventIDs
 		}
 		if loopErr != nil {
-			r.logger.Warn("metrics review tool-use loop failed; no findings for metric",
+			r.logger.Warn("metrics review tool-use loop failed; aborting reviewer at metric",
 				"record_id", recordID, "metric_index", index, "error", loopErr)
 			logEntry.Detail["error"] = loopErr.Error()
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 		payload = loopPayload
@@ -257,14 +264,17 @@ func (r *metricsReviewer) reviewMetric(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
 			"review_metrics", "MID-20260920-02"))
 		if err != nil {
-			r.logger.Warn("metrics review metric failed; skipping",
+			r.logger.Warn("metrics review metric failed; aborting reviewer",
 				"record_id", recordID, "metric_index", index, "error", err)
 			logEntry.Outcome = "error"
 			logEntry.Detail["error"] = err.Error()
-			r.saveReviewLog(ctx, logEntry)
-			return nil
+			_ = r.saveReviewLog(ctx, logEntry)
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(out, cfg.ModelName)
+		findings, err = validatedFindingsJSON(out, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
@@ -323,7 +333,9 @@ func (r *metricsReviewer) reviewMetric(
 	} else if logEntry.Outcome == "" {
 		logEntry.Outcome = "no_issue"
 	}
-	r.saveReviewLog(ctx, logEntry)
+	if err := r.saveReviewLog(ctx, logEntry); err != nil {
+		return nil, err
+	}
 
 	r.logger.Info("metrics review metric done",
 		"record_id", recordID,
@@ -337,7 +349,7 @@ func (r *metricsReviewer) reviewMetric(
 		"cache_miss_tokens", cacheMissTokens,
 		"llm_usage_event_ids", llmEventIDs,
 	)
-	return findings
+	return findings, nil
 }
 
 // MetricAnalysis is one entry of the metrics reviewer's mandatory per-candidate
@@ -439,17 +451,17 @@ func metricAnalysesAsFinding(dm docMetric, metricSummary string, analyses []Metr
 	}
 }
 
-func (r *metricsReviewer) saveReviewLog(ctx context.Context, entry ReviewLogEntry) {
+func (r *metricsReviewer) saveReviewLog(ctx context.Context, entry ReviewLogEntry) error {
 	if r.logStore == nil || r.runID == 0 {
-		return
+		return nil
 	}
-	if _, err := r.logStore.SaveLogs(ctx, []ReviewLogEntry{entry}); err != nil && r.logger != nil {
-		r.logger.Warn("metrics review: save review log failed",
-			"run_id", r.runID,
-			"unit_key", entry.UnitKey,
-			"error", err,
-		)
+	if _, err := r.logStore.SaveLogs(ctx, []ReviewLogEntry{entry}); err != nil {
+		if r.logger != nil {
+			r.logger.Error("metrics review: save review log failed", "run_id", r.runID, "unit_key", entry.UnitKey, "error", err)
+		}
+		return fmt.Errorf("persist metric review log: %w", err)
 	}
+	return nil
 }
 
 func metricLogUnitKey(dm docMetric) string {
@@ -828,13 +840,15 @@ LIMIT $3`
 // span lines, and 10 lines after source_line_spans[0].
 const artifactSourceContextRadius = 10
 
-func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matches map[int][]matchedMetric) {
+func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matches map[int][]matchedMetric) error {
 	if len(matches) == 0 {
-		return
+		return nil
 	}
-	tableRows := r.loadMatchedMetricTableRows(ctx, matches)
+	tableRows, err := r.loadMatchedMetricTableRows(ctx, matches)
+	if err != nil {
+		return err
+	}
 	linesByRecord := make(map[int64][]Line)
-	failedRecords := make(map[int64]bool)
 	for idx, list := range matches {
 		for i := range list {
 			spans := list[i].view.SourceLineSpans
@@ -843,21 +857,11 @@ func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matc
 			}
 			lines, ok := linesByRecord[list[i].recordID]
 			if !ok {
-				if failedRecords[list[i].recordID] {
-					continue
-				}
 				var err error
 				lines, err = loadRecordLines(ctx, list[i].recordID)
 				if err != nil {
-					failedRecords[list[i].recordID] = true
-					if r.logger != nil {
-						r.logger.Warn("metrics review: matched metric context unavailable",
-							"source_record_id", list[i].recordID,
-							"metric_id", list[i].view.MetricID,
-							"error", err,
-						)
-					}
-					continue
+					r.logger.Error("metrics review: matched source unavailable", "source_record_id", list[i].recordID, "artifact_id", list[i].view.MetricID, "error", err)
+					return fmt.Errorf("load matched source record %d: %w", list[i].recordID, err)
 				}
 				linesByRecord[list[i].recordID] = lines
 			}
@@ -865,15 +869,15 @@ func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matc
 		}
 		matches[idx] = list
 	}
+	return nil
 }
 
 // loadMatchedMetricTableRows fetches kb.metrics.source_table_rows for the matched
-// metrics in one query. Failures are logged and yield no row refs (whole tables are
-// then shown as numbered rows).
-func (r *metricsReviewer) loadMatchedMetricTableRows(ctx context.Context, matches map[int][]matchedMetric) map[string][]docprocessing.TableRowRef {
+// metrics in one query. Query and row errors abort the reviewer.
+func (r *metricsReviewer) loadMatchedMetricTableRows(ctx context.Context, matches map[int][]matchedMetric) (map[string][]docprocessing.TableRowRef, error) {
 	out := map[string][]docprocessing.TableRowRef{}
 	if r.db == nil {
-		return out
+		return out, nil
 	}
 	var ids []string
 	for _, list := range matches {
@@ -884,7 +888,7 @@ func (r *metricsReviewer) loadMatchedMetricTableRows(ctx context.Context, matche
 		}
 	}
 	if len(ids) == 0 {
-		return out
+		return out, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
 SELECT metric_id, source_table_rows::text
@@ -894,19 +898,19 @@ WHERE ref_mention_id IS NULL AND metric_id = ANY($1) AND source_table_rows IS NO
 		if r.logger != nil {
 			r.logger.Warn("metrics review: table row refs unavailable", "error", err)
 		}
-		return out
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id, raw string
 		if err := rows.Scan(&id, &raw); err != nil {
-			continue
+			return nil, err
 		}
 		if refs := docprocessing.ParseTableRowRefs(raw); len(refs) > 0 {
 			out[id] = refs
 		}
 	}
-	return out
+	return out, rows.Err()
 }
 
 func artifactSourceContextLines(lines []Line, spans []string) []map[string]any {

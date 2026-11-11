@@ -1,12 +1,16 @@
 package docreviews
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
+
+// ErrReviewOutputLimit means required units remained unassessed when an output budget was exhausted.
+var ErrReviewOutputLimit = errors.New("review output budget exhausted before all required units completed")
 
 const outputLimitWarningMessage = "review output limits reached; skipped remaining units"
 

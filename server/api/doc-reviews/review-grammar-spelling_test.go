@@ -12,7 +12,7 @@ func TestGrammarSpellingReviewerProcessWindowPropagatesPromptName(t *testing.T) 
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Typo found",
+					"title": "Typo found",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestGrammarSpellingReviewerProcessWindowPropagatesPromptName(t *testing.T) 
 		logger: loggerutil.CreateDefaultLogger("TEST_GRAMMAR"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 77, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 77, 0, ReviewerConfig{
 		ModelName:  "grammar-model",
 		PromptText: "review grammar",
 		PromptRef:  "prompt-review-grammar-spelling-v1.md",
@@ -31,6 +31,9 @@ func TestGrammarSpellingReviewerProcessWindowPropagatesPromptName(t *testing.T) 
 		startLine: 1,
 		endLine:   3,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

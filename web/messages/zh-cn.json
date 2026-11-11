@@ -8918,5 +8918,6 @@
 	"docgroups_created": "分组已创建。请先同步，再生成页面。",
 	"docgroups_member_refused": "无法添加 {path}：它必须位于文档根目录下，目录必须是目录，文件必须是 .md 或 .pdf。分组未创建。",
 	"docgroups_key_taken": "已存在使用此键的分组。",
-	"docgroups_key_invalid": "键不能为空，也不能包含空格或斜杠。"
+	"docgroups_key_invalid": "键不能为空，也不能包含空格或斜杠。",
+	"document_review_supporting_documents_unavailable": "暂不支持选择辅助文档：所选文档尚无法纳入审阅证据。请继续审阅主文档。"
 }

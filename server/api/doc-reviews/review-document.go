@@ -131,13 +131,13 @@ func buildChunkInputs(lines []Line, docCtx string, size int) []chunkInput {
 // chunkReviewer is implemented by reviewers whose config input = "per-chunk".
 // The prompt-cache scheduler calls processChunk once per chunk input.
 type chunkReviewer interface {
-	processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding
+	processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) ([]ReviewFinding, error)
 }
 
 // blockReviewer is implemented by reviewers whose config input = "per-block".
 // The prompt-cache scheduler calls processBlock once per page-aligned block.
 type blockReviewer interface {
-	processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) []ReviewFinding
+	processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) ([]ReviewFinding, error)
 }
 
 // pageBlock holds one page-aligned segment of lines for document-level
@@ -217,7 +217,7 @@ type ReviewerProgress struct {
 }
 
 // ReviewerProgressFunc receives progress snapshots after each finished unit.
-type ReviewerProgressFunc func(ReviewerProgress)
+type ReviewerProgressFunc func(ReviewerProgress) error
 
 // Reviewer executes one review aspect against a document.
 type Reviewer interface {
@@ -1283,17 +1283,33 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 
 	rec, err := p.InputStore.GetInputRecord(ctx, recordID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			p.Logger.Info("document review skipped: record not found", "record_id", recordID)
-			return nil
-		}
+		p.Logger.Error("document review record load failed", "record_id", recordID, "error", err)
 		return fmt.Errorf("(MID_26061802) load kb.inputs record %d: %w", recordID, err)
 	}
 
 	reviewers := p.buildReviewers(rec)
+	var unavailable []error
+	for _, aspect := range p.RequestedAspects {
+		available := false
+		for _, runner := range reviewers {
+			if runner.reviewer.Name() == strings.TrimSpace(aspect) {
+				available = true
+				break
+			}
+		}
+		if !available {
+			err := &reviewerExecutionError{Aspect: aspect, Err: fmt.Errorf("requested reviewer is unavailable or misconfigured")}
+			p.Logger.Error("reviewer unavailable", "record_id", recordID, "aspect", aspect, "error", err)
+			unavailable = append(unavailable, err)
+		}
+	}
 	if len(reviewers) == 0 {
-		p.Logger.Info("document review skipped: no reviewers enabled", "record_id", recordID)
-		return nil
+		err := errors.Join(unavailable...)
+		if err == nil {
+			err = fmt.Errorf("document review: no reviewers enabled")
+		}
+		p.Logger.Error("document review cannot start", "record_id", recordID, "error", err)
+		return err
 	}
 
 	p.Logger.Info("document review running",
@@ -1304,19 +1320,24 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 
 	// Delete previous findings for this run (supports restart of a crashed run).
 	if _, err := p.FindingsStore.DeleteFindings(ctx, p.RunID); err != nil {
-		p.Logger.Warn("failed to delete previous review findings", "run_id", p.RunID, "error", err)
+		p.Logger.Error("failed to delete previous review findings", "run_id", p.RunID, "error", err)
+		return fmt.Errorf("delete previous review findings: %w", err)
 	}
 	if p.ReviewLogsStore != nil {
 		if _, err := p.ReviewLogsStore.DeleteLogs(ctx, p.RunID); err != nil {
-			p.Logger.Warn("failed to delete previous review logs", "run_id", p.RunID, "error", err)
+			p.Logger.Error("failed to delete previous review logs", "run_id", p.RunID, "error", err)
+			return fmt.Errorf("delete previous review logs: %w", err)
 		}
 	}
 
 	allFindings, errs := p.runReviewersPromptCacheOptimized(ctx, recordID, rec, reviewers, p.RunID)
+	errs = append(errs, unavailable...)
 
 	if len(allFindings) > 0 {
 		inserted, err := p.FindingsStore.SaveFindings(ctx, recordID, p.RunID, allFindings)
 		if err != nil {
+			p.Logger.Error("save review findings failed", "record_id", recordID, "error", err)
+			p.finishReviewAspects(ctx, p.RunID, reviewers, []error{err})
 			return fmt.Errorf("(MID_26061803) save review findings for record %d: %w", recordID, err)
 		}
 		p.Logger.Info("review findings saved",
@@ -1326,6 +1347,7 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		)
 	}
 
+	errs = append(errs, p.finishReviewAspects(ctx, p.RunID, reviewers, errs)...)
 	msUsed := p.Now().Sub(start).Milliseconds()
 	p.Logger.Info("document review complete",
 		"record_id", recordID,
@@ -1336,7 +1358,7 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 	)
 
 	if len(errs) > 0 {
-		return fmt.Errorf("(MID_26061804) %d reviewer(s) failed: %v", len(errs), errs)
+		return fmt.Errorf("(MID_26061804) review failed: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -2034,14 +2056,16 @@ func (p *ReviewProcessor) makeProgressReporter(runID int64, aspect string) Revie
 	if p.StatusStore == nil || runID <= 0 || aspect == "" {
 		return nil
 	}
-	return func(snapshot ReviewerProgress) {
+	return func(snapshot ReviewerProgress) error {
 		if err := p.StatusStore.UpdateAspectProgress(context.Background(), runID, aspect, snapshot.Progress, snapshot.FindingCount); err != nil {
 			p.Logger.Warn("reviewer progress update failed",
 				"run_id", runID,
 				"aspect", aspect,
 				"error", err,
 			)
+			return fmt.Errorf("persist reviewer progress %s: %w", aspect, err)
 		}
+		return nil
 	}
 }
 
@@ -2061,9 +2085,9 @@ func newReviewerProgressTracker(total int, report ReviewerProgressFunc) *reviewe
 	return &reviewerProgressTracker{report: report, total: total}
 }
 
-func (t *reviewerProgressTracker) add(findings int) {
+func (t *reviewerProgressTracker) add(findings int) error {
 	if t == nil {
-		return
+		return nil
 	}
 	if findings < 0 {
 		findings = 0
@@ -2080,7 +2104,7 @@ func (t *reviewerProgressTracker) add(findings int) {
 	}
 	t.mu.Unlock()
 
-	t.report(snapshot)
+	return t.report(snapshot)
 }
 
 func runReviewerConcurrent(
@@ -2093,6 +2117,12 @@ func runReviewerConcurrent(
 	report ReviewerProgressFunc,
 	fn func(ctx context.Context, i int) ([]ReviewFinding, error),
 ) ([][]ReviewFinding, error) {
+	if ctx.Err() != nil {
+		if logger != nil {
+			logger.Error("reviewer aborted before units started", "reviewer", reviewer, "record_id", recordID, "error", context.Cause(ctx))
+		}
+		return nil, context.Cause(ctx)
+	}
 	tracker := newReviewerProgressTracker(total, report)
 	if total == 0 {
 		return nil, nil
@@ -2128,6 +2158,9 @@ func runReviewerConcurrent(
 			return
 		}
 		firstErr = err
+		if logger != nil {
+			logger.Error("reviewer aborted after unit failure", "reviewer", reviewer, "record_id", recordID, "error", err)
+		}
 		stopWorkers(err)
 	}
 
@@ -2136,7 +2169,7 @@ func runReviewerConcurrent(
 		go func() {
 			defer wg.Done()
 			for {
-				if isCtxStopped(workerCtx) {
+				if workerCtx.Err() != nil {
 					return
 				}
 				idx, ok := gate.claimNext()
@@ -2149,30 +2182,35 @@ func runReviewerConcurrent(
 					recordErr(err)
 					return
 				}
+				if workerCtx.Err() != nil {
+					recordErr(context.Cause(workerCtx))
+					return
+				}
 				results[idx] = findings
 				gate.complete(findings)
-				tracker.add(len(findings))
+				if err := tracker.add(len(findings)); err != nil {
+					recordErr(fmt.Errorf("persist %s progress: %w", reviewer, err))
+					return
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
 
+	if ctx.Err() != nil {
+		recordErr(context.Cause(ctx))
+		return nil, context.Cause(ctx)
+	}
 	if firstErr != nil {
-		if isCtxStopped(ctx) {
-			return results, ErrPipelineStopped
-		}
-		return results, firstErr
+		return nil, firstErr
 	}
-	if isCtxStopped(ctx) {
-		return results, ErrPipelineStopped
-	}
-
 	skipped := gate.unclaimedIndexes(total)
-	for range skipped {
-		tracker.add(0)
-	}
 	logOutputLimitWarning(logger, reviewer, cfg, recordID, gate.snapshot(), skipped)
+	if len(skipped) > 0 {
+		recordErr(fmt.Errorf("%w: %s has %d unassessed units", ErrReviewOutputLimit, reviewer, len(skipped)))
+		return nil, firstErr
+	}
 
 	return results, nil
 }

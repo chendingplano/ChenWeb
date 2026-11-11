@@ -12,7 +12,7 @@ func TestModularityReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "The 'Calibration' procedure is duplicated verbatim in §3 and §7",
+					"title": "The 'Calibration' procedure is duplicated verbatim in §3 and §7",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestModularityReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_MODULARITY"),
 	}
 
-	findings := reviewer.processBlock(context.Background(), 92, 0, 1, ReviewerConfig{
+	findings, err := reviewer.processBlock(context.Background(), 92, 0, 1, ReviewerConfig{
 		ModelName:  "modularity-model",
 		PromptText: "review modularity",
 		PromptRef:  "prompt-review-modularity.md",
@@ -33,6 +33,9 @@ func TestModularityReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		lineStart: 10,
 		lineEnd:   420,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

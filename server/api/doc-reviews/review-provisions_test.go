@@ -144,11 +144,14 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		}
 	}
 
-	findings := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "prov-model",
 		PromptText: "compare provisions",
 		PromptRef:  "prompt-review-provisions-v1.md",
 	}, doc, ms, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))
@@ -218,11 +221,14 @@ func TestReviewProvision_ReturnsAnalysesAsFindings(t *testing.T) {
 		spans: []string{"20:24"},
 	}
 
-	findings := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "prov-model",
 		PromptText: "compare provisions",
 		PromptRef:  "prompt-review-provisions-v4.md",
 	}, doc, oneProvisionMatch(), "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)
@@ -447,7 +453,10 @@ func TestReviewProvision_NoMatchesSkipsModelAndRecordsAnalysis(t *testing.T) {
 	doc := docProvision{view: provisionView{ProvID: "1_prv_1"}, spans: []string{"20:24"}}
 
 	ctx := withLLMRunID(context.Background(), 123)
-	findings := r.reviewProvision(ctx, 1, 0, ReviewerConfig{ModelName: "m", PromptText: "p", PromptRef: "r.md"}, doc, nil, "", false)
+	findings, err := r.reviewProvision(ctx, 1, 0, ReviewerConfig{ModelName: "m", PromptText: "p", PromptRef: "r.md"}, doc, nil, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(fake.inputTexts) != 0 {
 		t.Errorf("model calls = %d, want 0 when a provision has no matches", len(fake.inputTexts))

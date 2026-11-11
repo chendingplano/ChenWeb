@@ -12,7 +12,7 @@ func TestNavigabilityReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "'see Appendix C' but the document has only Appendices A and B",
+					"title": "'see Appendix C' but the document has only Appendices A and B",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestNavigabilityReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_NAVIGABILITY"),
 	}
 
-	findings := reviewer.processBlock(context.Background(), 92, 0, 1, ReviewerConfig{
+	findings, err := reviewer.processBlock(context.Background(), 92, 0, 1, ReviewerConfig{
 		ModelName:  "navigability-model",
 		PromptText: "review navigability",
 		PromptRef:  "prompt-review-navigability.md",
@@ -33,6 +33,9 @@ func TestNavigabilityReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		lineStart: 10,
 		lineEnd:   420,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

@@ -12,20 +12,20 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
-func TestToolUseReviewCarriesUserIDThroughFinalizeAndRepair(t *testing.T) {
+func TestToolUseReviewCarriesUserIDAcrossTurns(t *testing.T) {
+	tool := &countingTool{name: "lookup", calls: new(int)}
 	client := &fakeToolClient{responses: []*llmclients.Response{
-		{ToolCalls: []llmclients.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{}`}}},
-		{Content: `{"findings": [}`},
+		{ToolCalls: []llmclients.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{"q":"term"}`}}},
 		{Content: `{"findings":[]}`},
 	}}
 	ctx := docprocessing.WithLLMUserID(context.Background(), "user-123")
-	_, _, err := runToolUseReview(ctx, client, "test-model", ReviewerConfig{MaxToolTurns: 1},
-		"prompt", "document", nil, 42, loggerutil.CreateDefaultLogger("TEST_USER"), "review_provisions", "", "TEST")
+	_, _, err := runToolUseReview(ctx, client, "test-model", ReviewerConfig{MaxToolTurns: 2},
+		"prompt", "document", []ReviewTool{tool.toReviewTool()}, 42, &captureLogger{}, "review_provisions", "", "TEST")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(client.requests) != 3 {
-		t.Fatalf("got %d calls, want 3", len(client.requests))
+	if len(client.requests) != 2 {
+		t.Fatalf("got %d calls, want 2", len(client.requests))
 	}
 	for i, req := range client.requests {
 		if req.UserID != "user-123" {
@@ -319,159 +319,199 @@ func TestRunToolUseReviewToolCallPathExecutesTool(t *testing.T) {
 	}
 }
 
-func TestFinalizeFindingsLogsInfoWhenNoFindings(t *testing.T) {
-	client := &fakeToolClient{
-		responses: []*llmclients.Response{
-			{Content: `{"findings":[]}`},
-		},
-	}
+func TestRunToolUseReviewLogsCompletedEmptyFindings(t *testing.T) {
+	client := &fakeToolClient{responses: []*llmclients.Response{{Content: `{"findings":[]}`}}}
 	logger := &captureLogger{}
-
-	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", "test-prompt", 42,
-		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
-		nil,
-		"tester",
-		logger,
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	findings, _, err := runToolUseReview(context.Background(), client, "test-model",
+		ReviewerConfig{MaxToolTurns: 2}, "prompt", "document", nil, 42, logger, "test", "", "TEST")
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("findings=%v err=%v", findings, err)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("findings=%v, want empty", findings)
+	entry := findLogEntry(logger.entries, "info", "tool-use returned no findings")
+	if entry == nil {
+		t.Fatal("missing completed-empty result log")
 	}
-	infoEntry := findLogEntry(logger.entries, "info", "tool-use returned no findings")
-	if infoEntry == nil {
-		t.Fatal("missing no-findings info log entry")
+	if got := logArgsToMap(entry.args)["phase"]; got != "response" {
+		t.Fatalf("phase=%v", got)
 	}
-	infoArgs := logArgsToMap(infoEntry.args)
-	if infoArgs["record_id"] != int64(42) || infoArgs["phase"] != "finalize" || infoArgs["turn"] != -1 {
-		t.Fatalf("info args=%v", infoArgs)
+	if len(client.requests) != 1 {
+		t.Fatalf("requests=%d, want 1", len(client.requests))
 	}
 }
 
-func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
-	client := &fakeToolClient{
-		responses: []*llmclients.Response{
-			{Content: `not json at all`},
-		},
-	}
-	logger := &captureLogger{}
-
-	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", "test-prompt", 42,
-		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
-		nil,
-		"tester",
-		logger,
-	)
-	if findings != nil {
-		t.Fatalf("findings=%v, want nil", findings)
-	}
-	if !errors.Is(err, ErrToolUseFinalizeUnparseable) {
-		t.Fatalf("err=%v, want ErrToolUseFinalizeUnparseable", err)
-	}
-	errorEntry := findLogEntry(logger.entries, "error", "tool-use finalize returned invalid findings format")
-	if errorEntry == nil {
-		t.Fatal("missing finalize error log entry")
-	}
-	errorArgs := logArgsToMap(errorEntry.args)
-	if errorArgs["record_id"] != int64(42) || errorArgs["response_preview"] != "not json at all" {
-		t.Fatalf("error args=%v", errorArgs)
+func TestRunToolUseReviewAbortsMalformedOutputWithoutRepairCall(t *testing.T) {
+	for _, content := range []string{"not json at all", `{"findings": [}`, `{"findings":null}`, `{"findings":"wrong type"}`, `{"findings":[null]}`, `{"findings":[{"description":"missing title"}]}`, "<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name=\"lookup\"></｜｜DSML｜｜invoke></｜｜DSML｜｜tool_calls>"} {
+		t.Run(content, func(t *testing.T) {
+			client := &fakeToolClient{responses: []*llmclients.Response{{Content: content}, {Content: `{"findings":[]}`}}}
+			logger := &captureLogger{}
+			findings, _, err := runToolUseReview(context.Background(), client, "test-model",
+				ReviewerConfig{MaxToolTurns: 3}, "prompt", "document", nil, 42, logger, "test", "", "TEST")
+			if err == nil || findings != nil {
+				t.Fatalf("findings=%v err=%v, want failed unit", findings, err)
+			}
+			if len(client.requests) != 1 {
+				t.Fatalf("requests=%d, want no repair/retry", len(client.requests))
+			}
+			if findLogEntry(logger.entries, "error", "tool-use response returned invalid findings format") == nil {
+				t.Fatal("missing error log")
+			}
+		})
 	}
 }
 
-// TestFinalizeFindingsRepairsInvalidJSONStringEscapes verifies that unescaped
-// ASCII double quotes inside Chinese text are repaired programmatically and
-// produce correct findings without needing an LLM repair round-trip.
-func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
-	// First response has unescaped ASCII inner quotes: 指出"从设备名称字面理解"会误导
-	// The programmatic JSON repair (RepairLLMJSON → repairUnescapedInnerQuotes)
-	// should fix this without a second LLM call.
-	client := &fakeToolClient{
-		responses: []*llmclients.Response{
-			{Content: `{"findings":[{"title":"bad","description":"附录A指出"从设备名称字面理解"会误导"}]}`},
-		},
+func TestRunToolUseReviewAbortsToolErrorsWithoutRetry(t *testing.T) {
+	boom := errors.New("tool database failed")
+	cases := []struct {
+		name, args, schema string
+		execute            func(context.Context, int64, map[string]any) (any, error)
+		wantCause          error
+	}{
+		{name: "unknown", args: `{}`},
+		{name: "lookup", args: `{`, schema: `{"type":"object"}`},
+		{name: "lookup", args: `{}`, schema: `{"type":"object","required":["q"]}`},
+		{name: "lookup", args: `{"q":7}`, schema: `{"type":"object","properties":{"q":{"type":"string"}}}`},
+		{name: "lookup", args: `{}`, schema: `{`},
+		{name: "lookup", args: `{}`, schema: `{"type":123}`},
+		{name: "lookup", args: `{}`, execute: func(context.Context, int64, map[string]any) (any, error) { return nil, boom }, wantCause: boom},
+		{name: "lookup", args: `{}`, execute: func(context.Context, int64, map[string]any) (any, error) { return make(chan int), nil }},
 	}
-	logger := &captureLogger{}
+	for i, tc := range cases {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			var executions int
+			tool := ReviewTool{Name: "lookup", Parameters: []byte(tc.schema), Execute: func(ctx context.Context, recordID int64, args map[string]any) (any, error) {
+				executions++
+				if tc.execute != nil {
+					return tc.execute(ctx, recordID, args)
+				}
+				return nil, nil
+			}}
+			client := &fakeToolClient{responses: []*llmclients.Response{
+				{ToolCalls: []llmclients.ToolCall{{ID: "call-1", Name: tc.name, Arguments: tc.args}, {ID: "call-2", Name: "lookup", Arguments: `{}`}}},
+				{Content: `{"findings":[]}`},
+			}}
+			logger := &captureLogger{}
+			findings, _, err := runToolUseReview(context.Background(), client, "test-model", ReviewerConfig{MaxToolTurns: 3}, "prompt", "document", []ReviewTool{tool}, 42, logger, "test", "", "TEST")
+			if err == nil || findings != nil {
+				t.Fatalf("findings=%v err=%v", findings, err)
+			}
+			if tc.wantCause != nil && !errors.Is(err, tc.wantCause) {
+				t.Fatalf("err=%v does not wrap cause", err)
+			}
+			if len(client.requests) != 1 {
+				t.Fatalf("requests=%d, want 1", len(client.requests))
+			}
+			wantExecutions := 0
+			if tc.execute != nil {
+				wantExecutions = 1
+			}
+			if executions != wantExecutions {
+				t.Fatalf("executions=%d, want %d", executions, wantExecutions)
+			}
+			if findLogEntry(logger.entries, "error", "tool-use tool call failed") == nil {
+				t.Fatal("missing tool failure log")
+			}
+		})
+	}
+}
 
-	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", "test-prompt", 42,
-		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
-		nil,
-		"tester",
-		logger,
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestRunToolUseReviewAbortsLLMFailure(t *testing.T) {
+	boom := errors.New("provider failed")
+	for _, tc := range []struct {
+		name   string
+		client *fakeToolClient
+		cause  error
+	}{
+		{name: "provider", client: &fakeToolClient{errs: []error{boom}}, cause: boom},
+		{name: "missing response", client: &fakeToolClient{responses: []*llmclients.Response{nil}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := &captureLogger{}
+			findings, _, err := runToolUseReview(context.Background(), tc.client, "test-model", ReviewerConfig{MaxToolTurns: 3}, "prompt", "document", nil, 42, logger, "test", "", "TEST")
+			if err == nil || findings != nil {
+				t.Fatalf("findings=%v err=%v", findings, err)
+			}
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Fatalf("err=%v", err)
+			}
+			if len(tc.client.requests) != 1 {
+				t.Fatalf("requests=%d", len(tc.client.requests))
+			}
+			if findLogEntry(logger.entries, "error", "tool-use LLM call failed") == nil {
+				t.Fatal("missing LLM error log")
+			}
+		})
 	}
-	if len(findings) != 1 {
-		t.Fatalf("findings len=%d, want 1", len(findings))
+}
+
+func TestRunToolUseReviewAbortsInvalidCallMetadata(t *testing.T) {
+	client := &fakeToolClient{}
+	logger := &captureLogger{}
+	_, _, err := runToolUseReview(context.Background(), client, "test-model", ReviewerConfig{MaxToolTurns: 3}, "prompt", "document", nil, 42, logger, "test", "{", "TEST")
+	if err == nil {
+		t.Fatal("invalid call metadata must abort")
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("requests=%d, want none", len(client.requests))
+	}
+	if findLogEntry(logger.entries, "error", "tool-use call metadata is invalid") == nil {
+		t.Fatal("missing metadata error log")
+	}
+}
+
+func TestRunToolUseReviewAbortsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := &fakeToolClient{}
+	logger := &captureLogger{}
+	_, _, err := runToolUseReview(ctx, client, "test-model", ReviewerConfig{MaxToolTurns: 3}, "prompt", "document", nil, 42, logger, "test", "", "TEST")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("requests=%d, want none", len(client.requests))
+	}
+}
+
+func TestRunToolUseReviewBudgetExhaustionDoesNotFinalize(t *testing.T) {
+	for _, cfg := range []ReviewerConfig{{MaxToolTurns: 1}, {MaxToolTurns: 3, MaxToolTokens: 1}} {
+		t.Run(fmt.Sprint(cfg), func(t *testing.T) {
+			tool := &countingTool{name: "lookup", calls: new(int)}
+			client := &fakeToolClient{responses: []*llmclients.Response{
+				{ToolCalls: []llmclients.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{"q":"term"}`}}, Usage: &llmclients.Usage{TotalTokens: 10}},
+				{Content: `{"findings":[]}`},
+			}}
+			logger := &captureLogger{}
+			findings, usage, err := runToolUseReview(context.Background(), client, "test-model", cfg, "prompt", "document", []ReviewTool{tool.toReviewTool()}, 42, logger, "test", "", "TEST")
+			if err == nil || findings != nil {
+				t.Fatalf("findings=%v err=%v", findings, err)
+			}
+			if len(client.requests) != 1 {
+				t.Fatalf("requests=%d, want 1", len(client.requests))
+			}
+			if *tool.calls != 0 {
+				t.Fatalf("tools=%d, want no unnecessary work after exhaustion", *tool.calls)
+			}
+			if usage == nil || usage.TotalTokens != 10 {
+				t.Fatalf("usage=%v", usage)
+			}
+			if findLogEntry(logger.entries, "error", "tool-use review budget exhausted") == nil {
+				t.Fatal("missing budget failure log")
+			}
+		})
+	}
+}
+
+func TestRunToolUseReviewRepairsJSONProgrammatically(t *testing.T) {
+	client := &fakeToolClient{responses: []*llmclients.Response{{Content: `{"findings":[{"title":"bad","description":"附录A指出"从设备名称字面理解"会误导"}]}`}}}
+	findings, _, err := runToolUseReview(context.Background(), client, "test-model", ReviewerConfig{MaxToolTurns: 2}, "prompt", "document", nil, 42, &captureLogger{}, "test", "", "TEST")
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("findings=%v err=%v", findings, err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("requests=%d", len(client.requests))
 	}
 	if !strings.Contains(findings[0].Description, `"从设备名称字面理解"`) {
 		t.Fatalf("description=%q", findings[0].Description)
-	}
-	// Programmatic repair succeeded — only one LLM call (the finalize), no repair round-trip.
-	if len(client.requests) != 1 {
-		t.Fatalf("requests=%d, want 1 (finalize only, no repair round-trip)", len(client.requests))
-	}
-	infoEntry := findLogEntry(logger.entries, "info", "tool-use returned findings")
-	if infoEntry == nil {
-		t.Fatal("missing findings info log entry")
-	}
-	infoArgs := logArgsToMap(infoEntry.args)
-	if infoArgs["phase"] != "finalize" {
-		t.Fatalf("info args=%v, want phase=finalize", infoArgs)
-	}
-}
-
-func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
-	var toolCalls int
-	var toolArgs []map[string]any
-	lineTool := ReviewTool{
-		Name:       "get_chunk_lines",
-		Parameters: []byte(`{"type":"object","properties":{"start_line":{"type":"integer"},"end_line":{"type":"integer"}},"required":["start_line","end_line"]}`),
-		Execute: func(_ context.Context, _ int64, args map[string]any) (any, error) {
-			toolCalls++
-			toolArgs = append(toolArgs, args)
-			return map[string]any{"lines": []map[string]any{{"line_number": 615, "content": "sample"}}}, nil
-		},
-	}
-	client := &fakeToolClient{
-		responses: []*llmclients.Response{
-			{Content: "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"get_chunk_lines\">\n<｜｜DSML｜｜parameter name=\"start_line\" string=\"false\">615</｜｜DSML｜｜parameter>\n<｜｜DSML｜｜parameter name=\"end_line\" string=\"false\">625</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>"},
-			{Content: `{"findings":[]}`},
-		},
-	}
-	logger := &captureLogger{}
-
-	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", "test-prompt", 42,
-		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
-		map[string]ReviewTool{"get_chunk_lines": lineTool},
-		"tester",
-		logger,
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("findings len=%d, want 0", len(findings))
-	}
-	if len(client.requests) != 2 {
-		t.Fatalf("requests=%d, want finalize + repair", len(client.requests))
-	}
-	if toolCalls != 1 {
-		t.Fatalf("tool calls=%d, want 1", toolCalls)
-	}
-	if len(toolArgs) != 1 || toolArgs[0]["start_line"] != float64(615) || toolArgs[0]["end_line"] != float64(625) {
-		t.Fatalf("tool args=%v", toolArgs)
-	}
-	if client.requests[1].CallReason != "review_tool_use_finalize_repair" {
-		t.Fatalf("repair call reason=%q", client.requests[1].CallReason)
-	}
-	if !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "tool results above") {
-		t.Fatalf("repair prompt=%q", client.requests[1].Messages[len(client.requests[1].Messages)-1].Content)
 	}
 }
 
@@ -531,7 +571,7 @@ func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
 		},
 	}
 	logger := loggerutil.CreateDefaultLogger("TEST_LOOP_BUDGET")
-	// maxTurns=0 — loop should run once (clamped to 1) and then finalize.
+	// maxTurns=0 is clamped to one call; a complete result needs no additional work.
 	findings, _, err := runToolUseReview(
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 0},
@@ -542,7 +582,7 @@ func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(findings) != 1 {
-		t.Fatalf("findings len=%d, want 1 (finalized)", len(findings))
+		t.Fatalf("findings len=%d, want 1 (completed in the initial call)", len(findings))
 	}
 }
 
@@ -638,37 +678,5 @@ func TestParseFindingsContentDetailedReportsTextToolCalls(t *testing.T) {
 	}
 	if reason != "tool_calls_in_final_text" {
 		t.Fatalf("reason=%q, want tool_calls_in_final_text", reason)
-	}
-}
-
-func TestParseTextToolCallsFromDSML(t *testing.T) {
-	input := "<｜｜DSML｜｜tool_calls>\n" +
-		"<｜｜DSML｜｜invoke name=\"get_chunk_lines\">\n" +
-		"<｜｜DSML｜｜parameter name=\"start_line\" string=\"false\">615</｜｜DSML｜｜parameter>\n" +
-		"<｜｜DSML｜｜parameter name=\"end_line\" string=\"false\">625</｜｜DSML｜｜parameter>\n" +
-		"</｜｜DSML｜｜invoke>\n" +
-		"</｜｜DSML｜｜tool_calls>"
-
-	calls := parseTextToolCalls(input)
-	if len(calls) != 1 {
-		t.Fatalf("calls len=%d, want 1", len(calls))
-	}
-	if calls[0].Name != "get_chunk_lines" {
-		t.Fatalf("name=%q", calls[0].Name)
-	}
-	if calls[0].Arguments != `{"end_line":625,"start_line":615}` {
-		t.Fatalf("arguments=%q", calls[0].Arguments)
-	}
-}
-
-func TestMissingRequiredArgs(t *testing.T) {
-	schema := []byte(`{"type":"object","properties":{"q":{"type":"string"}},"required":["q","limit"]}`)
-	missing := missingRequiredArgs(schema, map[string]any{"q": "hello"})
-	if len(missing) != 1 || missing[0] != "limit" {
-		t.Fatalf("missing=%v, want [limit]", missing)
-	}
-	all := missingRequiredArgs(schema, map[string]any{"q": "hello", "limit": 5})
-	if len(all) != 0 {
-		t.Fatalf("missing=%v, want empty", all)
 	}
 }

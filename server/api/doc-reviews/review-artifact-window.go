@@ -229,7 +229,7 @@ func docAuthorityClass(docNo, title, filename string) string {
 // units have unique prefixes and run in the remainder phase only.
 type artifactReviewUnit struct {
 	chunkIdx int
-	run      func(ctx context.Context) []ReviewFinding
+	run      func(ctx context.Context) ([]ReviewFinding, error)
 }
 
 // runArtifactUnitsChunkGrouped executes artifact review units with the
@@ -241,8 +241,7 @@ type artifactReviewUnit struct {
 //  3. All remaining units fire, bounded by maxTasks; there is deliberately no
 //     per-chunk group cap (the cache is keyed by prefix, not by group).
 //
-// Unit run functions handle their own LLM errors (returning nil findings), so
-// the only error returned here is ErrPipelineStopped.
+// Failed units return their error so an incomplete assessment cannot appear successful.
 func runArtifactUnitsChunkGrouped(
 	ctx context.Context,
 	maxTasks int,
@@ -253,6 +252,12 @@ func runArtifactUnitsChunkGrouped(
 	recordID int64,
 	onProgress ReviewerProgressFunc,
 ) ([]ReviewFinding, error) {
+	if ctx.Err() != nil {
+		if logger != nil {
+			logger.Error("reviewer aborted before units started", "reviewer", reviewer, "record_id", recordID, "error", context.Cause(ctx))
+		}
+		return nil, context.Cause(ctx)
+	}
 	if len(units) == 0 {
 		return nil, nil
 	}
@@ -290,20 +295,31 @@ func runArtifactUnitsChunkGrouped(
 			return
 		}
 		firstErr = err
+		if logger != nil {
+			logger.Error("reviewer aborted after unit failure", "reviewer", reviewer, "record_id", recordID, "error", err)
+		}
 		stopWorkers(err)
 	}
 
 	runUnit := func(idx int) bool {
-		if isCtxStopped(workerCtx) {
+		if workerCtx.Err() != nil {
 			return false
 		}
-		results[idx] = units[idx].run(workerCtx)
-		if isCtxStopped(workerCtx) {
-			recordErr(ErrPipelineStopped)
+		findings, err := units[idx].run(workerCtx)
+		results[idx] = findings
+		if err != nil {
+			recordErr(fmt.Errorf("%s unit %d: %w", reviewer, idx, err))
+			return false
+		}
+		if workerCtx.Err() != nil {
+			recordErr(context.Cause(workerCtx))
 			return false
 		}
 		gate.complete(results[idx])
-		tracker.add(len(results[idx]))
+		if err := tracker.add(len(results[idx])); err != nil {
+			recordErr(fmt.Errorf("persist %s progress: %w", reviewer, err))
+			return false
+		}
 		return true
 	}
 
@@ -345,7 +361,7 @@ func runArtifactUnitsChunkGrouped(
 			go func() {
 				defer wg.Done()
 				for {
-					if isCtxStopped(workerCtx) {
+					if workerCtx.Err() != nil {
 						return
 					}
 					idx, ok := gate.claimNext()
@@ -362,15 +378,19 @@ func runArtifactUnitsChunkGrouped(
 
 	wg.Wait()
 
-	if firstErr != nil || isCtxStopped(ctx) {
-		return nil, ErrPipelineStopped
+	if ctx.Err() != nil {
+		recordErr(context.Cause(ctx))
+		return nil, context.Cause(ctx)
 	}
-
+	if firstErr != nil {
+		return nil, firstErr
+	}
 	skipped := gate.unclaimedIndexes(len(units))
-	for range skipped {
-		tracker.add(0)
-	}
 	logOutputLimitWarning(logger, reviewer, cfg, recordID, gate.snapshot(), skipped)
+	if len(skipped) > 0 {
+		recordErr(fmt.Errorf("%w: %s has %d unassessed units", ErrReviewOutputLimit, reviewer, len(skipped)))
+		return nil, firstErr
+	}
 
 	var all []ReviewFinding
 	for _, fs := range results {
@@ -380,7 +400,7 @@ func runArtifactUnitsChunkGrouped(
 }
 
 // marshalArtifactPayload serializes an artifact review payload map to JSON,
-// returning "" on failure (callers log and skip the unit).
+// returning "" on failure (callers log and abort the reviewer).
 func marshalArtifactPayload(payload map[string]any) string {
 	b, err := json.Marshal(payload)
 	if err != nil {

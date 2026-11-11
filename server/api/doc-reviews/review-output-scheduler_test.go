@@ -32,10 +32,11 @@ func TestRunReviewerConcurrentLimitSkipsUnclaimedUnits(t *testing.T) {
 			"grammar_spelling",
 			logger,
 			42,
-			func(p ReviewerProgress) {
+			func(p ReviewerProgress) error {
 				mu.Lock()
 				snapshots = append(snapshots, p)
 				mu.Unlock()
+				return nil
 			},
 			func(ctx context.Context, i int) ([]ReviewFinding, error) {
 				started <- i
@@ -66,8 +67,8 @@ func TestRunReviewerConcurrentLimitSkipsUnclaimedUnits(t *testing.T) {
 	}
 	results := <-resultsCh
 	err := <-errCh
-	if err != nil {
-		t.Fatalf("runReviewerConcurrent err = %v, want nil", err)
+	if !errors.Is(err, ErrReviewOutputLimit) {
+		t.Fatalf("runReviewerConcurrent err = %v, want ErrReviewOutputLimit", err)
 	}
 
 	startedIdxs := []int{first, second}
@@ -78,16 +79,8 @@ func TestRunReviewerConcurrentLimitSkipsUnclaimedUnits(t *testing.T) {
 		}
 	}
 
-	if len(results) != 4 {
-		t.Fatalf("results len = %d, want 4", len(results))
-	}
-	if len(results[first]) != 1 || len(results[second]) != 1 {
-		t.Fatalf("started results lengths = (%d,%d), want (1,1)", len(results[first]), len(results[second]))
-	}
-	for _, idx := range unstartedIdxs {
-		if len(results[idx]) != 0 {
-			t.Fatalf("results[%d] len = %d, want 0 for skipped unit", idx, len(results[idx]))
-		}
+	if len(results) != 0 {
+		t.Fatalf("partial results published: %v", results)
 	}
 
 	mu.Lock()
@@ -96,8 +89,8 @@ func TestRunReviewerConcurrentLimitSkipsUnclaimedUnits(t *testing.T) {
 		t.Fatal("expected progress snapshots")
 	}
 	last := snapshots[len(snapshots)-1]
-	if last.CompletedUnits != 4 || last.TotalUnits != 4 || last.FindingCount != 2 {
-		t.Fatalf("final progress = %+v, want completed=4 total=4 findings=2", last)
+	if last.CompletedUnits != 2 || last.TotalUnits != 4 || last.FindingCount != 2 {
+		t.Fatalf("final progress = %+v, want completed=2 total=4 findings=2", last)
 	}
 
 	entry := findLogEntry(logger.entries, "warn", outputLimitWarningMessage)

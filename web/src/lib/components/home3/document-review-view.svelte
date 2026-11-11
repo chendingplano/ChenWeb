@@ -2,7 +2,7 @@
 	import { m } from '$lib/paraglide/messages.js';
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
-    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem, ReviewPackageInfo, ReviewerPackageInfo } from '$lib/services/docReviewService';
+    import type { AspectInfo, TierInfo, FindingItem, ReviewRunListItem, ReviewPackageInfo, ReviewerPackageInfo } from '$lib/services/docReviewService';
     import { uploadKbInputs, listKnowledgeStores } from '$lib/services/kbService';
     import type { KbInputRecord, KnowledgeStoreRecord } from '$lib/services/kbService';
     import { knowledgeStoreState } from './knowledge-store-state.svelte';
@@ -15,7 +15,6 @@
     import { getLocale } from '$lib/paraglide/runtime';
     import SearchIcon from '@lucide/svelte/icons/search';
     import CheckIcon from '@lucide/svelte/icons/check';
-    import XIcon from '@lucide/svelte/icons/x';
     import LoaderIcon from '@lucide/svelte/icons/loader';
     import UploadIcon from '@lucide/svelte/icons/upload';
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
@@ -58,7 +57,6 @@
     let requesterName = $state('');
     let notes = $state('');
     let reviewDepth = $state<1 | 2 | 3>(1);
-    let referenceDocs = $state<ReferenceDoc[]>([]);
     let viewingRun = $state<{ requestId: number; runId?: number; reportId?: number } | null>(null);  // when set, show that job's results
     let submitBanner = $state('');                        // brief "review started" notice
     let submitError = $state('');
@@ -385,21 +383,6 @@
         }
     }
 
-    async function refDocSearch() {
-        const q = (document.getElementById('ref-doc-input') as HTMLInputElement)?.value;
-        if (!q || q.length < 2) return;
-        try {
-            const res = await fetch(`/api/v1/kb/inputs?query=${encodeURIComponent(q)}&limit=5`, { credentials: 'same-origin' });
-            const data = await res.json();
-            const results = (data.inputs || data.records || data.data || []).slice(0, 5);
-            for (const r of results) {
-                if (!referenceDocs.some(d => d.record_id === r.id)) {
-                    referenceDocs = [...referenceDocs, { record_id: r.id, doc_no: r.doc_no || '', title: r.title || r.file_name || m.document_review_document({ id: r.id }) }];
-                }
-            }
-        } catch {}
-    }
-
     async function handleSubmit() {
         // Validation failures surface as a confirm dialog; confirming jumps back to the
         // step that needs fixing (no aspects → Step 2, which also blocks "Next" up front).
@@ -415,7 +398,6 @@
                 tier: submitTier,
                 aspects: effectiveAspects,
                 review_depth: reviewDepth,
-                reference_docs: referenceDocs.length > 0 ? referenceDocs : undefined,
                 notes: notes || undefined,
                 requester_name: requesterName,
                 requester_id: 0, // TODO: resolve from auth context
@@ -712,23 +694,8 @@
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s3-heading', 'Step 3: Supporting Documents')} <span style="font-weight: 400; color: {textMuted};">{m.document_review_optional()}</span></h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
-                    {m.document_review_add_reference_standards_or_supporting()}
+                    {m.document_review_supporting_documents_unavailable()}
                 </p>
-                {#each referenceDocs as doc, i}
-                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; margin-bottom: 0.5rem;">
-                        <span style="flex: 1; color: {textPrimary}; font-size: 0.9rem;">{doc.title}</span>
-                        <button onclick={() => referenceDocs = referenceDocs.filter((_, idx) => idx !== i)}
-                            style="background: none; border: none; color: {textMuted}; cursor: pointer;">
-                            <XIcon size={14} />
-                        </button>
-                    </div>
-                {/each}
-                <div style="display: flex; gap: 0.5rem;">
-                    <input id="ref-doc-input" type="text" placeholder={labelFor('dr-s3-ref-placeholder', 'Reference document title or ID')}
-                        style="flex: 1; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
-                    <button onclick={refDocSearch}
-                        style="padding: 0.5rem 1rem; background: {accentTint}; color: {accent}; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{labelFor('dr-s3-add-btn', 'Add')}</button>
-                </div>
             </div>
             <div style="display: flex; gap: 0.5rem;">
                 <button onclick={() => currentStep = 2}

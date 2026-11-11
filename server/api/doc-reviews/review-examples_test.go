@@ -12,7 +12,7 @@ func TestExamplesReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Section 4.1 describes the authentication flow but provides no code example",
+					"title": "Section 4.1 describes the authentication flow but provides no code example",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestExamplesReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_EXAMPLES"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 101, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 101, 0, ReviewerConfig{
 		ModelName:  "examples-model",
 		PromptText: "review examples",
 		PromptRef:  "prompt-review-examples.md",
@@ -31,6 +31,9 @@ func TestExamplesReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 20,
 		endLine:   60,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

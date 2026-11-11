@@ -8918,5 +8918,6 @@
 	"docgroups_created": "Group created. Sync it, then build its page.",
 	"docgroups_member_refused": "{path} cannot be added: it must exist under the document root, a directory must be a directory, and a file must be .md or .pdf. The group was not created.",
 	"docgroups_key_taken": "A group with this key already exists.",
-	"docgroups_key_invalid": "The key must not be empty or contain spaces or slashes."
+	"docgroups_key_invalid": "The key must not be empty or contain spaces or slashes.",
+	"document_review_supporting_documents_unavailable": "Supporting-document selection is currently unavailable. Selected documents cannot yet be included in the review evidence. Continue to review the primary document."
 }

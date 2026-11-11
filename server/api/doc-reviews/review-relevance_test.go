@@ -12,7 +12,7 @@ func TestRelevanceReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Lines 20-25 discuss supplier qualification, which is out of scope for a sterilization validation protocol",
+					"title": "Lines 20-25 discuss supplier qualification, which is out of scope for a sterilization validation protocol",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestRelevanceReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_RELEVANCE"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 92, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 92, 0, ReviewerConfig{
 		ModelName:  "relevance-model",
 		PromptText: "review relevance",
 		PromptRef:  "prompt-review-relevance.md",
@@ -31,6 +31,9 @@ func TestRelevanceReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 10,
 		endLine:   42,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

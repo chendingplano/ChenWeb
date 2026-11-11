@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -43,6 +44,9 @@ func NewDocReviewController() *DocReviewController {
 // AcceptRequest validates input, resolves requester, stores the request as "accepted"
 // and creates the first run row, returning both IDs.
 func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitRequestInput) (*SubmitResult, error) {
+	if err := validateSelectedReviewReferences(input.ReferenceDocs); err != nil {
+		return nil, err
+	}
 	if input.ReviewDepth == 0 {
 		input.ReviewDepth = 1
 	}
@@ -229,9 +233,13 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	}
 
 	// Mirror on the request row.
-	c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'running' WHERE id = $1`, requestID)
+	if _, err := c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'running' WHERE id = $1 AND status = 'accepted'`, requestID); err != nil {
+		return c.failReviewRun(ctx, requestID, runID, fmt.Errorf("mark request running: %w", err))
+	}
 
-	c.markAspectsRunning(ctx, runID)
+	if err := c.markAspectsRunning(ctx, runID); err != nil {
+		return c.failReviewRun(ctx, requestID, runID, err)
+	}
 	logger.Info("review run started", "request_id", requestID, "run_id", runID)
 
 	llmClient := &llmclients.OpenAIJSONClient{
@@ -251,30 +259,68 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	processor.RequestedAspects = append([]string(nil), req.Aspects...)
 	processor.ReviewLogsStore = reviewLogsStore
 	processor.StatusStore = statusStore
-	err = processor.PostProcessIndex(ctx, req.InputRecordID)
+	// Requests accepted before supporting-document selection was disabled must
+	// fail explicitly instead of silently reviewing only the primary document.
+	err = validateSelectedReviewReferences(req.ReferenceDocs)
+	if err == nil {
+		err = processor.PostProcessIndex(ctx, req.InputRecordID)
+	}
 	if err != nil {
-		errMsg := err.Error()
-		c.DB.ExecContext(ctx,
-			`UPDATE kb.doc_review_runs SET status = 'failed', end_time = NOW(), error_message = $1 WHERE id = $2`,
-			errMsg, runID,
-		)
-		c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'failed' WHERE id = $1`, requestID)
-		c.failOpenAspects(ctx, runID, errMsg)
-		logger.Info("review run failed", "request_id", requestID, "run_id", runID, "error", errMsg)
-		return fmt.Errorf("review failed for record %d: %w", req.InputRecordID, err)
+		return c.failReviewRun(ctx, requestID, runID, fmt.Errorf("review failed for record %d: %w", req.InputRecordID, err))
 	}
 
-	// If the request was stopped while running, do not override that terminal state.
-	if cur, _ := c.loadRequest(ctx, requestID, 0); cur != nil && cur.Status == "stopped" {
+	if err := c.completeReviewRun(ctx, requestID, runID, req.InputRecordID); err != nil {
+		return c.failReviewRun(ctx, requestID, runID, err)
+	}
+	return nil
+}
+
+func (c *DocReviewController) completeReviewRun(ctx context.Context, requestID, runID, recordID int64) error {
+	var status string
+	if err := c.DB.QueryRowContext(ctx, `SELECT status FROM kb.doc_review_requests WHERE id = $1`, requestID).Scan(&status); err != nil {
+		return fmt.Errorf("check request before completion: %w", err)
+	}
+	if status == "stopped" {
 		logger.Info("review request was stopped; skipping completion", "request_id", requestID)
 		return nil
 	}
-
-	c.finalizeAspectsSuccess(ctx, runID, req.InputRecordID)
-	c.DB.ExecContext(ctx, `UPDATE kb.doc_review_runs SET status = 'completed', end_time = NOW() WHERE id = $1`, runID)
-	c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'completed' WHERE id = $1`, requestID)
+	if status != "running" {
+		return fmt.Errorf("request %d is in status %q before completion", requestID, status)
+	}
+	if err := c.finalizeAspectsSuccess(ctx, runID, recordID); err != nil {
+		return err
+	}
+	// A concurrent stop must remain terminal even between these writes.
+	if _, err := c.DB.ExecContext(ctx, `UPDATE kb.doc_review_runs SET status = 'completed', end_time = NOW() WHERE id = $1 AND status = 'running'`, runID); err != nil {
+		return fmt.Errorf("complete review run %d: %w", runID, err)
+	}
+	if _, err := c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'completed' WHERE id = $1 AND status = 'running'`, requestID); err != nil {
+		return fmt.Errorf("complete review request %d: %w", requestID, err)
+	}
 	logger.Info("review run completed", "request_id", requestID, "run_id", runID)
 	return nil
+}
+
+// Failure accounting must survive a cancelled review context. Every cleanup
+// write is attempted, and persistence errors remain visible to the caller.
+func (c *DocReviewController) failReviewRun(ctx context.Context, requestID, runID int64, reviewErr error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	var persistenceErrs []error
+	if _, err := c.DB.ExecContext(cleanupCtx,
+		`UPDATE kb.doc_review_runs SET status = 'failed', end_time = NOW(), error_message = $1 WHERE id = $2 AND status <> 'stopped'`,
+		reviewErr.Error(), runID); err != nil {
+		persistenceErrs = append(persistenceErrs, fmt.Errorf("mark review run failed: %w", err))
+	}
+	if _, err := c.DB.ExecContext(cleanupCtx, `UPDATE kb.doc_review_requests SET status = 'failed' WHERE id = $1 AND status <> 'stopped'`, requestID); err != nil {
+		persistenceErrs = append(persistenceErrs, fmt.Errorf("mark review request failed: %w", err))
+	}
+	if err := c.failOpenAspects(cleanupCtx, runID, reviewErr.Error()); err != nil {
+		persistenceErrs = append(persistenceErrs, err)
+	}
+	err := errors.Join(append([]error{reviewErr}, persistenceErrs...)...)
+	logger.Error("review run failed", "request_id", requestID, "run_id", runID, "error", err)
+	return err
 }
 
 // RunReviewAndReport runs the review and, on success, builds + persists the report.
@@ -412,19 +458,29 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	if err != nil {
 		return fmt.Errorf("stop request %d: %w", requestID, err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check stopped request %d: %w", requestID, err)
+	}
 	if n == 0 {
 		return fmt.Errorf("request %d is not in a stoppable state (accepted or running)", requestID)
 	}
 	// Drive the active run and its aspects to a terminal state.
 	var runID int64
-	_ = c.DB.QueryRowContext(ctx,
+	err = c.DB.QueryRowContext(ctx,
 		`SELECT id FROM kb.doc_review_runs WHERE request_id = $1 AND status IN ('pending','running') ORDER BY id DESC LIMIT 1`,
 		requestID,
 	).Scan(&runID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("load active run while stopping request %d: %w", requestID, err)
+	}
 	if runID > 0 {
-		c.DB.ExecContext(ctx, `UPDATE kb.doc_review_runs SET status = 'stopped', end_time = NOW() WHERE id = $1`, runID)
-		c.failOpenAspects(ctx, runID, "stopped")
+		if _, err := c.DB.ExecContext(ctx, `UPDATE kb.doc_review_runs SET status = 'stopped', end_time = NOW() WHERE id = $1`, runID); err != nil {
+			return fmt.Errorf("stop review run %d: %w", runID, err)
+		}
+		if err := c.failOpenAspects(ctx, runID, "stopped"); err != nil {
+			return err
+		}
 	}
 	logger.Info("review request stopped", "request_id", requestID, "run_id", runID)
 	return nil
@@ -479,7 +535,9 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 		); err != nil {
 			return 0, fmt.Errorf("close superseded run %d: %w", previousRunID, err)
 		}
-		c.failOpenAspects(ctx, previousRunID, "stopped")
+		if err := c.failOpenAspects(ctx, previousRunID, "stopped"); err != nil {
+			return 0, err
+		}
 	}
 
 	if docprocessing.LLMUserIDFromContext(ctx) == "" {
@@ -712,19 +770,20 @@ func (c *DocReviewController) seedAspectStatuses(ctx context.Context, requestID,
 }
 
 // markAspectsRunning flips every pending aspect of a run to 'running'.
-func (c *DocReviewController) markAspectsRunning(ctx context.Context, runID int64) {
+func (c *DocReviewController) markAspectsRunning(ctx context.Context, runID int64) error {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status
 		SET status = 'running', start_time = NOW(), progress = 0, modify_time = NOW()
 		WHERE run_id = $1 AND status = 'pending'`, runID)
 	if err != nil {
-		logger.Warn("mark aspects running failed", "run_id", runID, "error", err)
+		return fmt.Errorf("mark aspects running for run %d: %w", runID, err)
 	}
+	return nil
 }
 
 // finalizeAspectsSuccess marks every non-finished aspect of a run 'success',
 // stamping each aspect's finding count from kb.doc_review_findings.
-func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, runID int64, recordID int64) {
+func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, runID int64, recordID int64) error {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status s
 		SET status = 'success',
@@ -738,13 +797,14 @@ func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, runID 
 		WHERE s.run_id = $1 AND s.status NOT IN ('success', 'failed')`,
 		runID, recordID)
 	if err != nil {
-		logger.Warn("finalize aspects success failed", "run_id", runID, "error", err)
+		return fmt.Errorf("finalize aspects success for run %d: %w", runID, err)
 	}
+	return nil
 }
 
 // failOpenAspects drives every non-finished aspect of a run to 'failed' with the
 // given message (used on whole-run failure and on stop).
-func (c *DocReviewController) failOpenAspects(ctx context.Context, runID int64, errMsg string) {
+func (c *DocReviewController) failOpenAspects(ctx context.Context, runID int64, errMsg string) error {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status
 		SET status = 'failed', error_message = $2, end_time = NOW(), modify_time = NOW()
@@ -752,7 +812,9 @@ func (c *DocReviewController) failOpenAspects(ctx context.Context, runID int64, 
 		runID, errMsg)
 	if err != nil {
 		logger.Warn("fail open aspects failed", "run_id", runID, "error", err)
+		return fmt.Errorf("fail open aspects for run %d: %w", runID, err)
 	}
+	return nil
 }
 
 // ListActiveJobs returns every review request that still has at least one
@@ -931,3 +993,16 @@ type RequestError struct {
 }
 
 func (e *RequestError) Error() string { return e.Message }
+
+// Selected references are retained on historical requests for reporting, but
+// existing reviewer inputs do not consume them. Refuse new selections until
+// their evidence and authorization boundary is implemented end to end.
+func validateSelectedReviewReferences(refs []ReferenceDoc) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	return &RequestError{
+		Status:  http.StatusUnprocessableEntity,
+		Message: "Supporting-document selection is currently unavailable: reviewers cannot include selected documents in their evidence. Remove reference_docs to review the primary document.",
+	}
+}

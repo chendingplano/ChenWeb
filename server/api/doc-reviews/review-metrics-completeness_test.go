@@ -117,11 +117,14 @@ func TestMetricsCompletenessReviewObjectPayloadShape(t *testing.T) {
 		totalPeerMetrics: 2,
 	}
 
-	findings := r.reviewObject(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewObject(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "m",
 		PromptText: "CHECK MISSING METRICS",
 		PromptRef:  "prompt-review-metrics-missing-v1.md",
 	}, ro)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))
@@ -163,11 +166,14 @@ func TestMetricsCompletenessReviewObjectPayloadShape(t *testing.T) {
 		client: &fakeJSONExtractor{out: map[string]any{"findings": []any{}}},
 		logger: loggerutil.CreateDefaultLogger("TEST_COMPLETENESS"),
 	}
-	findings2 := r2.reviewObject(context.Background(), 1, 0, ReviewerConfig{
+	findings2, err := r2.reviewObject(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "m",
 		PromptText: "CHECK MISSING METRICS",
 		PromptRef:  "prompt-review-metrics-missing-v1.md",
 	}, ro)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 	if len(findings2) != 0 {
 		t.Fatalf("empty-object findings = %d, want 0", len(findings2))
 	}

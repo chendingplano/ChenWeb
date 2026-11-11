@@ -95,8 +95,9 @@ func (r *metricsCompletenessReviewer) ReviewDocument(
 	// Each call carries the extraction chunk of the object's doc metrics.
 	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("metrics_completeness: extraction chunks unavailable; reviewing without source context",
+		r.logger.Warn("metrics_completeness: extraction chunks unavailable; aborting reviewer",
 			"record_id", recordID, "error", err)
+		return nil, fmt.Errorf("load review source chunks: %w", err)
 	}
 
 	r.logger.Info("metrics_completeness review running",
@@ -117,7 +118,7 @@ func (r *metricsCompletenessReviewer) ReviewDocument(
 		ro := rosters[i]
 		execUnits[i] = artifactReviewUnit{
 			chunkIdx: ro.chunkIdx,
-			run: func(workerCtx context.Context) []ReviewFinding {
+			run: func(workerCtx context.Context) ([]ReviewFinding, error) {
 				return r.reviewObject(workerCtx, recordID, i, cfg, ro)
 			},
 		}
@@ -133,7 +134,10 @@ func (r *metricsCompletenessReviewer) reviewObject(
 	index int,
 	cfg ReviewerConfig,
 	ro objectMetricRoster,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	start := time.Now()
 
 	payloadObj := map[string]any{
@@ -155,7 +159,7 @@ func (r *metricsCompletenessReviewer) reviewObject(
 	payloadJSON := marshalArtifactPayload(payloadObj)
 	if payloadJSON == "" {
 		r.logger.Warn("metrics_completeness: marshal payload failed", "record_id", recordID, "object_index", index)
-		return nil
+		return nil, fmt.Errorf("marshal review payload failed")
 	}
 
 	var findings []ReviewFinding
@@ -173,8 +177,9 @@ func (r *metricsCompletenessReviewer) reviewObject(
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("metrics_completeness tool-use loop failed; no findings for object",
+			r.logger.Warn("metrics_completeness tool-use loop failed; aborting reviewer at object",
 				"record_id", recordID, "object_index", index, "error", loopErr)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 	} else {
@@ -186,11 +191,14 @@ func (r *metricsCompletenessReviewer) reviewObject(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
 			"review_metrics_completeness", "MID-20260929-03"))
 		if err != nil {
-			r.logger.Warn("metrics_completeness object failed; skipping",
+			r.logger.Warn("metrics_completeness object failed; aborting reviewer",
 				"record_id", recordID, "object_index", index, "error", err)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(out, cfg.ModelName)
+		findings, err = validatedFindingsJSON(out, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
@@ -222,7 +230,7 @@ func (r *metricsCompletenessReviewer) reviewObject(
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }
 
 func (ro objectMetricRoster) peerDocsForPayload() []map[string]any {
@@ -560,16 +568,16 @@ ORDER BY target_id, source_record_id`
 		// query, then find comparable nodes.
 		primaries[objID] = objTypeName{id: objID}
 	}
-	compObjects = r.loadComparableObjects(ctx, objectIDs)
-	return edges, compObjects, nil
+	compObjects, err = r.loadComparableObjects(ctx, objectIDs)
+	return edges, compObjects, err
 }
 
 func (r *metricsCompletenessReviewer) loadComparableObjects(
 	ctx context.Context,
 	primaryIDs []string,
-) map[string][]string {
+) (map[string][]string, error) {
 	if len(primaryIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Load type + normalized_names for the primary objects.
@@ -580,8 +588,8 @@ WHERE object_id = ANY($1) AND reconcile_status <> 'rejected'`
 
 	rows, err := r.db.QueryContext(ctx, primaryQ, pq.Array(primaryIDs))
 	if err != nil {
-		r.logger.Warn("metrics_completeness: comparable objects query failed", "error", err)
-		return nil
+		r.logger.Error("metrics_completeness: comparable objects query failed", "error", err)
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -594,15 +602,15 @@ WHERE object_id = ANY($1) AND reconcile_status <> 'rejected'`
 		var id, objType string
 		var namesRaw []byte
 		if err := rows.Scan(&id, &objType, &namesRaw); err != nil {
-			continue
+			return nil, err
 		}
 		info[id] = primaryInfo{objType: objType, names: parseJSONStringArray(namesRaw)}
 	}
 	if err := rows.Err(); err != nil {
-		return nil
+		return nil, err
 	}
 	if len(info) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// For each primary, find comparable nodes.
@@ -620,21 +628,27 @@ WHERE reconcile_status <> 'rejected'
 LIMIT $4`
 		cRows, err := r.db.QueryContext(ctx, compQ, pi.objType, primaryID, pq.Array(pi.names), comparableObjectsMax)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		var comps []string
 		for cRows.Next() {
 			var cid string
-			if err := cRows.Scan(&cid); err == nil {
-				comps = append(comps, cid)
+			if err := cRows.Scan(&cid); err != nil {
+				_ = cRows.Close()
+				return nil, err
 			}
+			comps = append(comps, cid)
+		}
+		if err := cRows.Err(); err != nil {
+			_ = cRows.Close()
+			return nil, err
 		}
 		_ = cRows.Close()
 		if len(comps) > 0 {
 			out[primaryID] = comps
 		}
 	}
-	return out
+	return out, nil
 }
 
 // resolvedObjectMetric is one metric row resolved from kb.metrics with its

@@ -12,7 +12,7 @@ func TestEvidenceRationaleReviewerProcessWindowPropagatesPromptName(t *testing.T
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Section 3.4 selects AES-256 without citing any security requirement or threat model",
+					"title": "Section 3.4 selects AES-256 without citing any security requirement or threat model",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestEvidenceRationaleReviewerProcessWindowPropagatesPromptName(t *testing.T
 		logger: loggerutil.CreateDefaultLogger("TEST_EVIDENCE_RATIONALE"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 104, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 104, 0, ReviewerConfig{
 		ModelName:  "evidence-rationale-model",
 		PromptText: "review evidence rationale",
 		PromptRef:  "prompt-review-evidence-rationale.md",
@@ -31,6 +31,9 @@ func TestEvidenceRationaleReviewerProcessWindowPropagatesPromptName(t *testing.T
 		startLine: 50,
 		endLine:   90,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

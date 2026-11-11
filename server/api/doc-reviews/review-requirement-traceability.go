@@ -89,7 +89,7 @@ func (r *requirementTraceabilityReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i]), nil
+			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i])
 		},
 	)
 	if runErr != nil {
@@ -113,7 +113,10 @@ func (r *requirementTraceabilityReviewer) processBlock(
 	total int,
 	cfg ReviewerConfig,
 	b pageBlock,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	r.logger.Info("requirement_traceability review block start",
 		"record_id", recordID,
 		"block", fmt.Sprintf("%d/%d", index+1, total),
@@ -153,25 +156,29 @@ func (r *requirementTraceabilityReviewer) processBlock(
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("requirement_traceability tool-use loop failed; no findings for block",
+			r.logger.Warn("requirement_traceability tool-use loop failed; aborting reviewer at block",
 				"record_id", recordID,
 				"block", fmt.Sprintf("%d/%d", index+1, total),
 				"error", loopErr,
 			)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 	} else {
 		// One-shot path.
 		payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_requirement_traceability", "MID-CWB-REVIEW-REQ-TRACEABILITY"))
 		if err != nil {
-			r.logger.Warn("requirement_traceability review block failed; skipping",
+			r.logger.Warn("requirement_traceability review block failed; aborting reviewer",
 				"record_id", recordID,
 				"block", fmt.Sprintf("%d/%d", index+1, total),
 				"error", err,
 			)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(payload, cfg.ModelName)
+		findings, err = validatedFindingsJSON(payload, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
@@ -198,5 +205,5 @@ func (r *requirementTraceabilityReviewer) processBlock(
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }

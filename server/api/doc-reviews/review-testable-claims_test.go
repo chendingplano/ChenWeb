@@ -12,7 +12,7 @@ func TestTestableClaimsReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Section 5.2 states 'performance must be acceptable' with no measurable threshold",
+					"title": "Section 5.2 states 'performance must be acceptable' with no measurable threshold",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestTestableClaimsReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_TESTABLE_CLAIMS"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 103, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 103, 0, ReviewerConfig{
 		ModelName:  "testable-claims-model",
 		PromptText: "review testable claims",
 		PromptRef:  "prompt-review-testable-claims.md",
@@ -31,6 +31,9 @@ func TestTestableClaimsReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 40,
 		endLine:   80,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

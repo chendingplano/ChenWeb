@@ -210,8 +210,7 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 		t.Fatalf("finding count regressed: got %d", got.FindingCount)
 	}
 
-	// Reaching 100% flips the aspect to 'success' immediately, rather than
-	// lingering on 'running' until the whole run is finalized.
+	// Completing model calls is provisional until findings have been saved.
 	if err := store.UpdateAspectProgress(ctx, res.RunID, "grammar_spelling", 1.0, 5); err != nil {
 		t.Fatalf("update progress to 100%%: %v", err)
 	}
@@ -220,14 +219,17 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 		t.Fatalf("load statuses after completion: %v", err)
 	}
 	got = statuses[0]
-	if got.Status != "success" {
-		t.Fatalf("want success status at 100%%, got %q", got.Status)
+	if got.Status != "running" || got.EndTime != "" {
+		t.Fatalf("100%% progress prematurely completed aspect: %#v", got)
 	}
 	if math.Abs(got.Progress-1.0) > 1e-9 {
 		t.Fatalf("want progress 1, got %v", got.Progress)
 	}
 	if got.FindingCount != 5 {
 		t.Fatalf("want finding count 5, got %d", got.FindingCount)
+	}
+	if err := store.FinishAspect(ctx, res.RunID, "grammar_spelling", nil); err != nil {
+		t.Fatalf("finish aspect: %v", err)
 	}
 
 	// 'success' is terminal: a stray later progress report must not revert it.
@@ -241,5 +243,8 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 	got = statuses[0]
 	if got.Status != "success" {
 		t.Fatalf("success regressed to %q", got.Status)
+	}
+	if got.FindingCount != 0 {
+		t.Fatalf("finished aspect kept provisional count; no findings persisted, got %d", got.FindingCount)
 	}
 }

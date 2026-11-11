@@ -12,7 +12,7 @@ func TestReadabilityReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "70-word sentence",
+					"title": "70-word sentence",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestReadabilityReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_READABILITY"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
 		ModelName:  "readability-model",
 		PromptText: "review readability",
 		PromptRef:  "prompt-review-readability.md",
@@ -31,6 +31,9 @@ func TestReadabilityReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 10,
 		endLine:   42,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

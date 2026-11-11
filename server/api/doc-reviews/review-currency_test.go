@@ -12,7 +12,7 @@ func TestCurrencyReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Section 3.2 references ISO 9001:2008, which was superseded by ISO 9001:2015",
+					"title": "Section 3.2 references ISO 9001:2008, which was superseded by ISO 9001:2015",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestCurrencyReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_CURRENCY"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 93, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 93, 0, ReviewerConfig{
 		ModelName:  "currency-model",
 		PromptText: "review currency",
 		PromptRef:  "prompt-review-currency.md",
@@ -31,6 +31,9 @@ func TestCurrencyReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 15,
 		endLine:   55,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

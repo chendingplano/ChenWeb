@@ -60,92 +60,101 @@ func runReviewTasksForPromptCache(ctx context.Context, maxTasks int, tasks []rev
 	if len(tasks) == 0 {
 		return nil, nil
 	}
-
-	stagger := reviewCallStagger()
+	// Cancellation belongs to one aspect, so a failed reviewer cannot stop its
+	// independent siblings or publish results from only part of its document.
+	type aspectRun struct {
+		ctx    context.Context
+		cancel context.CancelCauseFunc
+		mu     sync.Mutex
+		err    error
+	}
+	aspects := make(map[string]*aspectRun)
+	for _, task := range tasks {
+		if aspects[task.aspect] == nil {
+			child, cancel := context.WithCancelCause(ctx)
+			aspects[task.aspect] = &aspectRun{ctx: child, cancel: cancel}
+			defer cancel(nil)
+		}
+	}
 	results := make([]reviewTaskResult, len(tasks))
-	concurrency := max(maxTasks, 1)
-	sem := make(chan struct{}, concurrency)
-
-	// Find the minimum reviewerIndex per batchID.
+	finish := func() ([]ReviewFinding, []error) {
+		var findings []ReviewFinding
+		var errs []error
+		reported := make(map[string]bool)
+		for i, task := range tasks {
+			state := aspects[task.aspect]
+			if state.err != nil {
+				if !reported[task.aspect] {
+					errs = append(errs, state.err)
+					reported[task.aspect] = true
+				}
+				continue
+			}
+			if results[i].err != nil {
+				errs = append(errs, results[i].err)
+				continue
+			}
+			findings = append(findings, results[i].findings...)
+		}
+		return findings, errs
+	}
+	run := func(i int) {
+		state := aspects[tasks[i].aspect]
+		result := runPromptCacheReviewTask(state.ctx, tasks[i])
+		if result.err != nil {
+			state.mu.Lock()
+			if state.err == nil {
+				state.err = result.err
+				state.cancel(result.err)
+				logger.Error("reviewer aborted", "aspect", tasks[i].aspect, "error", result.err)
+			}
+			state.mu.Unlock()
+		}
+		results[i] = result
+	}
+	stagger := reviewCallStagger()
+	sem := make(chan struct{}, max(maxTasks, 1))
 	minPerBatch := make(map[int]int)
-	for _, t := range tasks {
-		if cur, ok := minPerBatch[t.batchID]; !ok || t.reviewerIndex < cur {
-			minPerBatch[t.batchID] = t.reviewerIndex
+	for _, task := range tasks {
+		if cur, ok := minPerBatch[task.batchID]; !ok || task.reviewerIndex < cur {
+			minPerBatch[task.batchID] = task.reviewerIndex
 		}
 	}
-
-	// Partition into seeds (min reviewerIndex for their batch) and remaining.
-	var seedIdxs, remainIdxs []int
-	for i, t := range tasks {
-		if minIdx, ok := minPerBatch[t.batchID]; ok && t.reviewerIndex == minIdx {
-			seedIdxs = append(seedIdxs, i)
+	var seeds, remaining []int
+	for i, task := range tasks {
+		if task.reviewerIndex == minPerBatch[task.batchID] {
+			seeds = append(seeds, i)
 		} else {
-			remainIdxs = append(remainIdxs, i)
+			remaining = append(remaining, i)
 		}
 	}
-
-	var allWg sync.WaitGroup
-
-	// Phase 1: fire all seeds concurrently; do NOT wait for completion.
-	// Seeds keep running while the stagger timer counts down.
-	for _, i := range seedIdxs {
-		allWg.Add(1)
-		go func(idx int) {
-			defer allWg.Done()
-			results[idx] = runPromptCacheReviewTask(ctx, tasks[idx])
-		}(i)
+	var wg sync.WaitGroup
+	for _, i := range seeds {
+		wg.Add(1)
+		go func() { defer wg.Done(); run(i) }()
 	}
-
-	if len(remainIdxs) == 0 {
-		allWg.Wait()
-		return collectPromptCacheResults(results)
-	}
-
-	// Phase 2: wait LLM_CALL_STAGGER for DeepSeek to persist the cached prefixes.
-	// Seeds continue running concurrently during this sleep.
-	if stagger > 0 {
+	if len(remaining) > 0 && stagger > 0 {
 		select {
 		case <-time.After(stagger):
 		case <-ctx.Done():
-			for _, i := range remainIdxs {
-				results[i] = reviewTaskResult{err: ErrPipelineStopped}
-			}
-			allWg.Wait()
-			return collectPromptCacheResults(results)
 		}
 	}
-
-	if isCtxStopped(ctx) {
-		for _, i := range remainIdxs {
-			results[i] = reviewTaskResult{err: ErrPipelineStopped}
-		}
-		allWg.Wait()
-		return collectPromptCacheResults(results)
-	}
-
-	// Phase 3: fire all remaining (chunk + block) concurrently.
-	// Seeds may still be running; all goroutines complete before we return.
-	for _, i := range remainIdxs {
-		if isCtxStopped(ctx) {
-			results[i] = reviewTaskResult{err: ErrPipelineStopped}
-			continue
-		}
-		allWg.Add(1)
-		go func(idx int) {
-			defer allWg.Done()
+	for _, i := range remaining {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			state := aspects[tasks[i].aspect]
 			select {
 			case sem <- struct{}{}:
-			case <-ctx.Done():
-				results[idx] = reviewTaskResult{err: ErrPipelineStopped}
-				return
+				defer func() { <-sem }()
+				run(i)
+			case <-state.ctx.Done():
+				results[i] = reviewTaskResult{err: context.Cause(state.ctx)}
 			}
-			defer func() { <-sem }()
-			results[idx] = runPromptCacheReviewTask(ctx, tasks[idx])
-		}(i)
+		}()
 	}
-
-	allWg.Wait()
-	return collectPromptCacheResults(results)
+	wg.Wait()
+	return finish()
 }
 
 func collectPromptCacheResults(results []reviewTaskResult) ([]ReviewFinding, []error) {
@@ -177,15 +186,18 @@ func reviewCallStagger() time.Duration {
 }
 
 func runPromptCacheReviewTask(ctx context.Context, task reviewTask) reviewTaskResult {
-	if isCtxStopped(ctx) {
-		return reviewTaskResult{err: ErrPipelineStopped}
+	if ctx.Err() != nil {
+		return reviewTaskResult{err: context.Cause(ctx)}
 	}
 	if task.run == nil {
-		return reviewTaskResult{}
+		return reviewTaskResult{err: fmt.Errorf("%s: missing review task", task.aspect)}
 	}
 	findings, err := task.run(ctx)
+	if err == nil && ctx.Err() != nil {
+		err = context.Cause(ctx)
+	}
 	if err != nil {
-		return reviewTaskResult{err: fmt.Errorf("%s: %w", task.aspect, err)}
+		return reviewTaskResult{err: &reviewerExecutionError{Aspect: task.aspect, Err: err}}
 	}
 	return reviewTaskResult{findings: findings}
 }
@@ -216,7 +228,7 @@ func buildPromptCacheReviewTasks(
 		blocks      []pageBlock  // built once, shared across all per-block reviewers
 	)
 
-	addTask := func(aspect, inputKey string, batchID, reviewerIndex, inputOrder int, tracker *reviewerProgressTracker, run func(context.Context) []ReviewFinding) {
+	addTask := func(aspect, inputKey string, batchID, reviewerIndex, inputOrder int, tracker *reviewerProgressTracker, run func(context.Context) ([]ReviewFinding, error)) {
 		currentOrder := taskOrder
 		taskOrder++
 		tasks = append(tasks, reviewTask{
@@ -227,12 +239,14 @@ func buildPromptCacheReviewTasks(
 			inputOrder:    inputOrder,
 			taskOrder:     currentOrder,
 			run: func(taskCtx context.Context) ([]ReviewFinding, error) {
-				if isCtxStopped(taskCtx) {
-					return nil, ErrPipelineStopped
+				if taskCtx.Err() != nil {
+					return nil, context.Cause(taskCtx)
 				}
-				findings := run(taskCtx)
-				tracker.add(len(findings))
-				return findings, nil
+				findings, err := run(taskCtx)
+				if err == nil {
+					err = tracker.add(len(findings))
+				}
+				return findings, err
 			},
 		})
 	}
@@ -254,7 +268,9 @@ func buildPromptCacheReviewTasks(
 		case "per-chunk":
 			cr, ok := runner.reviewer.(chunkReviewer)
 			if !ok {
-				unsupported = append(unsupported, runner)
+				tasks = append(tasks, reviewTask{aspect: name, run: func(context.Context) ([]ReviewFinding, error) {
+					return nil, fmt.Errorf("%s: configured %s input is unsupported; no fallback", name, inputType)
+				}})
 				continue
 			}
 			if chunks == nil {
@@ -262,7 +278,7 @@ func buildPromptCacheReviewTasks(
 			}
 			tracker := newPromptCacheReviewTracker(progressFor, name, len(chunks))
 			for i, inp := range chunks {
-				addTask(name, inp.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(name, inp.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) ([]ReviewFinding, error) {
 					return cr.processChunk(taskCtx, recordID, i, runner.cfg, inp)
 				})
 			}
@@ -270,7 +286,9 @@ func buildPromptCacheReviewTasks(
 		case "per-block":
 			br, ok := runner.reviewer.(blockReviewer)
 			if !ok {
-				unsupported = append(unsupported, runner)
+				tasks = append(tasks, reviewTask{aspect: name, run: func(context.Context) ([]ReviewFinding, error) {
+					return nil, fmt.Errorf("%s: configured %s input is unsupported; no fallback", name, inputType)
+				}})
 				continue
 			}
 			if blocks == nil {
@@ -279,13 +297,23 @@ func buildPromptCacheReviewTasks(
 			total := len(blocks)
 			tracker := newPromptCacheReviewTracker(progressFor, name, total)
 			for i, b := range blocks {
-				addTask(name, b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(name, b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) ([]ReviewFinding, error) {
 					return br.processBlock(taskCtx, recordID, i, total, runner.cfg, b)
 				})
 			}
 
+		case "artifact", "document", "document-level", "":
+			if inputType == "" && runner.reviewer.Strategy() == StrategyChunk {
+				tasks = append(tasks, reviewTask{aspect: name, run: func(context.Context) ([]ReviewFinding, error) {
+					return nil, fmt.Errorf("%s: per-chunk input configuration is required; no fallback", name)
+				}})
+			} else {
+				unsupported = append(unsupported, runner)
+			}
 		default:
-			unsupported = append(unsupported, runner)
+			tasks = append(tasks, reviewTask{aspect: name, run: func(context.Context) ([]ReviewFinding, error) {
+				return nil, fmt.Errorf("%s: unknown input strategy %q", name, inputType)
+			}})
 		}
 	}
 	return tasks, unsupported
@@ -314,10 +342,13 @@ func (p *ReviewProcessor) runReviewersPromptCacheOptimized(
 ) ([]ReviewFinding, []error) {
 	lines, err := loadPromptCacheReviewLines(recordID, rec)
 	if err != nil {
+		p.Logger.Error("review input failed", "record_id", recordID, "error", err)
 		return nil, []error{err}
 	}
 	if len(lines) == 0 {
-		return nil, nil
+		err := fmt.Errorf("record %d: review input contains no lines", recordID)
+		p.Logger.Error("review input failed", "record_id", recordID, "error", err)
+		return nil, []error{err}
 	}
 
 	tasks, unsupported := buildPromptCacheReviewTasks(recordID, rec, lines, reviewers,
@@ -336,9 +367,9 @@ func (p *ReviewProcessor) runReviewersPromptCacheOptimized(
 
 	allFindings, errs := runReviewTasksForPromptCache(ctx, maxTasks, orderedTasks)
 	if len(unsupported) > 0 {
-		fallbackFindings, fallbackErrs := p.runReviewersLegacy(ctx, recordID, unsupported, runID)
-		allFindings = append(allFindings, fallbackFindings...)
-		errs = append(errs, fallbackErrs...)
+		documentFindings, documentErrs := p.runReviewersLegacy(ctx, recordID, unsupported, runID)
+		allFindings = append(allFindings, documentFindings...)
+		errs = append(errs, documentErrs...)
 	}
 	return allFindings, errs
 }
@@ -392,6 +423,9 @@ func (p *ReviewProcessor) runReviewersLegacy(
 			)
 
 			findings, err := reviewer.ReviewDocument(ctx, recordID, cfg)
+			if err == nil && ctx.Err() != nil {
+				err = context.Cause(ctx)
+			}
 			if err != nil {
 				p.Logger.Error("reviewer failed",
 					"record_id", recordID,
@@ -399,7 +433,7 @@ func (p *ReviewProcessor) runReviewersLegacy(
 					"error", err,
 				)
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", reviewer.Name(), err))
+				errs = append(errs, &reviewerExecutionError{Aspect: reviewer.Name(), Err: err})
 				mu.Unlock()
 				return
 			}

@@ -119,7 +119,7 @@ func (r *entitiesReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.reviewEntity(workerCtx, recordID, i, cfg, units[i].de, units[i].matches), nil
+			return r.reviewEntity(workerCtx, recordID, i, cfg, units[i].de, units[i].matches)
 		},
 	)
 	if runErr != nil {
@@ -144,7 +144,7 @@ func (r *entitiesReviewer) reviewEntity(
 	cfg ReviewerConfig,
 	de docEntity,
 	ms []matchedEntity,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
 	start := time.Now()
 
 	matchesSentToLLM := limitMatchesToLLM(ms)
@@ -155,19 +155,23 @@ func (r *entitiesReviewer) reviewEntity(
 	inputJSON, err := json.Marshal(payloadObj)
 	if err != nil {
 		r.logger.Warn("entities review: marshal payload failed", "record_id", recordID, "entity_index", index, "error", err)
-		return nil
+		return nil, err
 	}
 
 	out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
 		ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, string(inputJSON),
 		"review_entities", "MID-CWB-REVIEW-ENTITIES"))
 	if err != nil {
-		r.logger.Warn("entities review entity failed; skipping",
+		r.logger.Warn("entities review entity failed; aborting reviewer",
 			"record_id", recordID, "entity_index", index, "error", err)
-		return nil
+		return nil, err
 	}
 
-	findings := normalizeFindingsJSON(out, cfg.ModelName)
+	findings, err := validatedFindingsJSON(out, cfg.ModelName)
+
+	if err != nil {
+		return nil, err
+	}
 	loc := strings.Join(de.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
@@ -194,7 +198,7 @@ func (r *entitiesReviewer) reviewEntity(
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
 		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
-	return findings
+	return findings, nil
 }
 
 func matchedEntitiesPayload(ms []matchedEntity) []map[string]any {

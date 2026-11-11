@@ -100,7 +100,7 @@ func (r *modularityReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i]), nil
+			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i])
 		},
 	)
 	if runErr != nil {
@@ -124,7 +124,7 @@ func (r *modularityReviewer) processBlock(
 	total int,
 	cfg ReviewerConfig,
 	b pageBlock,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
 	r.logger.Info("modularity review block start",
 		"record_id", recordID,
 		"block", fmt.Sprintf("%d/%d", index+1, total),
@@ -136,15 +136,19 @@ func (r *modularityReviewer) processBlock(
 
 	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_modularity", "MID-CWB-REVIEW-MODULARITY"))
 	if err != nil {
-		r.logger.Warn("modularity review block failed; skipping",
+		r.logger.Warn("modularity review block failed; aborting reviewer",
 			"record_id", recordID,
 			"block", fmt.Sprintf("%d/%d", index+1, total),
 			"error", err,
 		)
-		return nil
+		return nil, err
 	}
 
-	findings := normalizeFindingsJSON(payload, cfg.ModelName)
+	findings, err := validatedFindingsJSON(payload, cfg.ModelName)
+
+	if err != nil {
+		return nil, err
+	}
 	for i := range findings {
 		findings[i].Pass = "P2"
 		findings[i].Aspect = "modularity"
@@ -168,5 +172,5 @@ func (r *modularityReviewer) processBlock(
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
 		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
-	return findings
+	return findings, nil
 }

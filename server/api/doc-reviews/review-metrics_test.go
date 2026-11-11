@@ -236,11 +236,14 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		}
 	}
 
-	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
 		PromptRef:  "prompt-review-metrics-v1.md",
 	}, doc, ms, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))
@@ -331,11 +334,14 @@ func TestReviewMetric_LogsNoIssue(t *testing.T) {
 		{view: metricView{MetricID: "2_m_4", Value: "90", Unit: "C"}, recordID: 2, filename: "other.pdf", via: "metric_category"},
 	}
 
-	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
 		PromptRef:  "prompt-review-metrics-v1.md",
 	}, doc, ms, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 0 {
 		t.Fatalf("findings = %d, want 0", len(findings))
@@ -379,11 +385,14 @@ func TestReviewMetric_ReturnsOneConsolidatedAnalysisFinding(t *testing.T) {
 		spans: []string{"20:24"},
 	}
 
-	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
 		PromptRef:  "prompt-review-metrics-v6.md",
 	}, doc, nil, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1 consolidated analysis finding for 2 candidates: %+v", len(findings), findings)
@@ -450,11 +459,14 @@ func TestReviewMetric_EmptyAnalysesProducesNoAnalysisFinding(t *testing.T) {
 	}
 	doc := docMetric{id: 7, view: metricView{MetricID: "1_m_1"}, spans: []string{"20:24"}}
 
-	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
 		PromptRef:  "prompt-review-metrics-v6.md",
 	}, doc, nil, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 0 {
 		t.Fatalf("findings = %d, want 0 when analyses is empty", len(findings))

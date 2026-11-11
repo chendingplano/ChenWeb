@@ -91,7 +91,7 @@ func (r *evidenceRationaleReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processWindow(workerCtx, recordID, i, cfg, windows[i]), nil
+			return r.processWindow(workerCtx, recordID, i, cfg, windows[i])
 		},
 	)
 	if runErr != nil {
@@ -134,7 +134,7 @@ func buildEvidenceRationaleWindows(lines []Line, docCtx string, size int) []evid
 	return windows
 }
 
-func (r *evidenceRationaleReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+func (r *evidenceRationaleReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) ([]ReviewFinding, error) {
 	return r.processWindow(ctx, recordID, index, cfg, evidenceRationaleWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
 }
 
@@ -144,7 +144,10 @@ func (r *evidenceRationaleReviewer) processWindow(
 	index int,
 	cfg ReviewerConfig,
 	w evidenceRationaleWindow,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	r.logger.Info("evidence_rationale review window start",
 		"record_id", recordID,
 		"window", index,
@@ -182,25 +185,29 @@ func (r *evidenceRationaleReviewer) processWindow(
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("evidence_rationale tool-use loop failed; no findings for window",
+			r.logger.Warn("evidence_rationale tool-use loop failed; aborting reviewer at window",
 				"record_id", recordID,
 				"window", index,
 				"error", loopErr,
 			)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 	} else {
 		// One-shot path (unchanged Phase I behavior).
 		payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_evidence_rationale", "MID-CWB-REVIEW-EVIDENCE-RATIONALE"))
 		if err != nil {
-			r.logger.Warn("evidence_rationale review window failed; skipping",
+			r.logger.Warn("evidence_rationale review window failed; aborting reviewer",
 				"record_id", recordID,
 				"window", index,
 				"error", err,
 			)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(payload, cfg.ModelName)
+		findings, err = validatedFindingsJSON(payload, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
@@ -228,5 +235,5 @@ func (r *evidenceRationaleReviewer) processWindow(
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }

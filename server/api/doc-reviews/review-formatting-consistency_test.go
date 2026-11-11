@@ -12,7 +12,7 @@ func TestFormattingConsistencyReviewerProcessWindowPropagatesPromptName(t *testi
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Mixed bullet markers",
+					"title": "Mixed bullet markers",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestFormattingConsistencyReviewerProcessWindowPropagatesPromptName(t *testi
 		logger: loggerutil.CreateDefaultLogger("TEST_FORMATTING"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 88, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 88, 0, ReviewerConfig{
 		ModelName:  "formatting-model",
 		PromptText: "review formatting consistency",
 		PromptRef:  "prompt-review-formatting-consistency.md",
@@ -31,6 +31,9 @@ func TestFormattingConsistencyReviewerProcessWindowPropagatesPromptName(t *testi
 		startLine: 10,
 		endLine:   42,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

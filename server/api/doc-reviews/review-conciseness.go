@@ -86,7 +86,7 @@ func (r *concisenessReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processWindow(workerCtx, recordID, i, cfg, windows[i]), nil
+			return r.processWindow(workerCtx, recordID, i, cfg, windows[i])
 		},
 	)
 	if runErr != nil {
@@ -129,7 +129,7 @@ func buildConcisenessWindows(lines []Line, docCtx string, size int) []concisenes
 	return windows
 }
 
-func (r *concisenessReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+func (r *concisenessReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) ([]ReviewFinding, error) {
 	return r.processWindow(ctx, recordID, index, cfg, concisenessWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
 }
 
@@ -139,7 +139,7 @@ func (r *concisenessReviewer) processWindow(
 	index int,
 	cfg ReviewerConfig,
 	w concisenessWindow,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
 	r.logger.Info("conciseness review window start",
 		"record_id", recordID,
 		"window", index,
@@ -150,15 +150,19 @@ func (r *concisenessReviewer) processWindow(
 
 	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_conciseness", "MID-CWB-REVIEW-CONCISENESS"))
 	if err != nil {
-		r.logger.Warn("conciseness review window failed; skipping",
+		r.logger.Warn("conciseness review window failed; aborting reviewer",
 			"record_id", recordID,
 			"window", index,
 			"error", err,
 		)
-		return nil
+		return nil, err
 	}
 
-	findings := normalizeFindingsJSON(payload, cfg.ModelName)
+	findings, err := validatedFindingsJSON(payload, cfg.ModelName)
+
+	if err != nil {
+		return nil, err
+	}
 	for i := range findings {
 		findings[i].Pass = "P3"
 		findings[i].Aspect = "conciseness"
@@ -181,5 +185,5 @@ func (r *concisenessReviewer) processWindow(
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
 		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
-	return findings
+	return findings, nil
 }

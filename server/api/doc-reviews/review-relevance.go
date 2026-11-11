@@ -84,7 +84,7 @@ func (r *relevanceReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processWindow(workerCtx, recordID, i, cfg, windows[i]), nil
+			return r.processWindow(workerCtx, recordID, i, cfg, windows[i])
 		},
 	)
 	if runErr != nil {
@@ -127,7 +127,7 @@ func buildRelevanceWindows(lines []Line, docCtx string, size int) []relevanceWin
 	return windows
 }
 
-func (r *relevanceReviewer) processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) []ReviewFinding {
+func (r *relevanceReviewer) processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) ([]ReviewFinding, error) {
 	return r.processWindow(ctx, recordID, index, cfg, relevanceWindow{inputJSON: b.inputJSON, startLine: b.lineStart, endLine: b.lineEnd})
 }
 
@@ -137,7 +137,7 @@ func (r *relevanceReviewer) processWindow(
 	index int,
 	cfg ReviewerConfig,
 	w relevanceWindow,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
 	r.logger.Info("relevance review window start",
 		"record_id", recordID,
 		"window", index,
@@ -148,15 +148,19 @@ func (r *relevanceReviewer) processWindow(
 
 	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_relevance", "MID-CWB-REVIEW-RELEVANCE"))
 	if err != nil {
-		r.logger.Warn("relevance review window failed; skipping",
+		r.logger.Warn("relevance review window failed; aborting reviewer",
 			"record_id", recordID,
 			"window", index,
 			"error", err,
 		)
-		return nil
+		return nil, err
 	}
 
-	findings := normalizeFindingsJSON(payload, cfg.ModelName)
+	findings, err := validatedFindingsJSON(payload, cfg.ModelName)
+
+	if err != nil {
+		return nil, err
+	}
 	for i := range findings {
 		findings[i].Pass = "P3"
 		findings[i].Aspect = "relevance"
@@ -179,5 +183,5 @@ func (r *relevanceReviewer) processWindow(
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
 		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
-	return findings
+	return findings, nil
 }

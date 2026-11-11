@@ -99,7 +99,9 @@ func (r *provisionsReviewer) ReviewDocument(
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26063022) build provision matches for record %d: %w", recordID, err)
 	}
-	r.hydrateMatchedProvisionContexts(ctx, matches)
+	if err := r.hydrateMatchedProvisionContexts(ctx, matches); err != nil {
+		return nil, err
+	}
 
 	units := buildProvisionReviewUnits(docProvs, matches)
 	if len(units) == 0 {
@@ -108,11 +110,12 @@ func (r *provisionsReviewer) ReviewDocument(
 	}
 
 	// Each call carries the provision's extraction chunk as its source passage.
-	// A load failure only drops the passage (units send the payload alone).
+	// Loading source evidence is required; a failure aborts the reviewer.
 	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("provisions review: extraction chunks unavailable; reviewing without source context",
+		r.logger.Warn("provisions review: extraction chunks unavailable; aborting reviewer",
 			"record_id", recordID, "error", err)
+		return nil, fmt.Errorf("load review source chunks: %w", err)
 	}
 
 	r.logger.Info("provisions review running",
@@ -130,7 +133,7 @@ func (r *provisionsReviewer) ReviewDocument(
 		cIdx, passage, truncated := sourceChunkFor(u.dp.spans, chunks)
 		execUnits[i] = artifactReviewUnit{
 			chunkIdx: cIdx,
-			run: func(workerCtx context.Context) []ReviewFinding {
+			run: func(workerCtx context.Context) ([]ReviewFinding, error) {
 				return r.reviewProvision(workerCtx, recordID, i, cfg, u.dp, u.matches, passage, truncated)
 			},
 		}
@@ -163,7 +166,10 @@ func (r *provisionsReviewer) reviewProvision(
 	ms []matchedProvision,
 	passage string,
 	truncated bool,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	start := time.Now()
 
 	matchesSentToLLM := limitMatchesToLLM(ms)
@@ -180,7 +186,7 @@ func (r *provisionsReviewer) reviewProvision(
 	payloadJSON := marshalArtifactPayload(payloadObj)
 	if payloadJSON == "" {
 		r.logger.Warn("provisions review: marshal payload failed", "record_id", recordID, "provision_index", index)
-		return nil
+		return nil, fmt.Errorf("marshal review payload failed")
 	}
 
 	var findings []ReviewFinding
@@ -206,8 +212,9 @@ func (r *provisionsReviewer) reviewProvision(
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("provisions review tool-use loop failed; no findings for provision",
+			r.logger.Warn("provisions review tool-use loop failed; aborting reviewer at provision",
 				"record_id", recordID, "provision_index", index, "error", loopErr)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 		payload = loopPayload
@@ -223,11 +230,14 @@ func (r *provisionsReviewer) reviewProvision(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
 			"review-provision", "MID-20260706-0001", provisionReviewCallMetadata(ctx, dp.view.ProvID)))
 		if err != nil {
-			r.logger.Warn("provisions review provision failed; skipping",
+			r.logger.Warn("provisions review provision failed; aborting reviewer",
 				"record_id", recordID, "provision_index", index, "error", err)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(out, cfg.ModelName)
+		findings, err = validatedFindingsJSON(out, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
@@ -237,6 +247,7 @@ func (r *provisionsReviewer) reviewProvision(
 		if err := r.saveProvisionAnalyses(ctx, recordID, dp.view.ProvID, analyses); err != nil {
 			r.logger.Warn("provisions review: save analyses failed",
 				"record_id", recordID, "provision_index", index, "prov_id", dp.view.ProvID, "error", err)
+			return nil, fmt.Errorf("persist provision analyses: %w", err)
 		}
 		findings = append(findings, provisionAnalysesAsFindings(dp, analyses)...)
 	}
@@ -281,7 +292,7 @@ func (r *provisionsReviewer) reviewProvision(
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }
 
 // noRelevantProvisionsSummary is the analysis text of a provision with no matches in other documents.
@@ -549,7 +560,7 @@ func (r *provisionsReviewer) buildMatches(
 }
 
 // findSimilarProvisions asks the search engine for provisions similar to one of the record's own
-// (own provisions excluded before ranking). A provision with no index row has no matches.
+// (own provisions excluded before ranking). A missing index row fails the reviewer.
 func (r *provisionsReviewer) findSimilarProvisions(ctx context.Context, recordID int64, provID string) ([]docprocessing.OnTheFlySemanticMatch, error) {
 	return findSimilarMatches(ctx, r.db, "provision", provID, recordID, r.maxMatches)
 }
@@ -691,12 +702,11 @@ WHERE p.prov_id = ANY($1)`
 	return out, rows.Err()
 }
 
-func (r *provisionsReviewer) hydrateMatchedProvisionContexts(ctx context.Context, matches map[int][]matchedProvision) {
+func (r *provisionsReviewer) hydrateMatchedProvisionContexts(ctx context.Context, matches map[int][]matchedProvision) error {
 	if len(matches) == 0 {
-		return
+		return nil
 	}
 	linesByRecord := make(map[int64][]Line)
-	failedRecords := make(map[int64]bool)
 	for idx, list := range matches {
 		for i := range list {
 			spans := list[i].view.SourceLineSpans
@@ -705,21 +715,11 @@ func (r *provisionsReviewer) hydrateMatchedProvisionContexts(ctx context.Context
 			}
 			lines, ok := linesByRecord[list[i].recordID]
 			if !ok {
-				if failedRecords[list[i].recordID] {
-					continue
-				}
 				var err error
 				lines, err = loadRecordLines(ctx, list[i].recordID)
 				if err != nil {
-					failedRecords[list[i].recordID] = true
-					if r.logger != nil {
-						r.logger.Warn("provisions review: matched provision context unavailable",
-							"source_record_id", list[i].recordID,
-							"prov_id", list[i].view.ProvID,
-							"error", err,
-						)
-					}
-					continue
+					r.logger.Error("provisions review: matched source unavailable", "source_record_id", list[i].recordID, "artifact_id", list[i].view.ProvID, "error", err)
+					return fmt.Errorf("load matched source record %d: %w", list[i].recordID, err)
 				}
 				linesByRecord[list[i].recordID] = lines
 			}
@@ -727,4 +727,5 @@ func (r *provisionsReviewer) hydrateMatchedProvisionContexts(ctx context.Context
 		}
 		matches[idx] = list
 	}
+	return nil
 }

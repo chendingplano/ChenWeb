@@ -104,7 +104,9 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26063062) build inventory item matches for record %d: %w", recordID, err)
 	}
-	r.hydrateMatchedInventoryItemContexts(ctx, matches)
+	if err := r.hydrateMatchedInventoryItemContexts(ctx, matches); err != nil {
+		return nil, err
+	}
 
 	// Only review items that have at least one cross-document match.
 	type reviewUnit struct {
@@ -123,11 +125,12 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 	}
 
 	// Each call carries the item's extraction chunk as its source passage.
-	// A load failure only drops the passage (units send the payload alone).
+	// Loading source evidence is required; a failure aborts the reviewer.
 	chunks, err := loadArtifactReviewChunks(ctx, recordID, r.logger)
 	if err != nil {
-		r.logger.Warn("inventory items review: extraction chunks unavailable; reviewing without source context",
+		r.logger.Warn("inventory items review: extraction chunks unavailable; aborting reviewer",
 			"record_id", recordID, "error", err)
+		return nil, fmt.Errorf("load review source chunks: %w", err)
 	}
 
 	r.logger.Info("inventory items review running",
@@ -145,7 +148,7 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 		cIdx, passage, truncated := sourceChunkFor(u.di.spans, chunks)
 		execUnits[i] = artifactReviewUnit{
 			chunkIdx: cIdx,
-			run: func(workerCtx context.Context) []ReviewFinding {
+			run: func(workerCtx context.Context) ([]ReviewFinding, error) {
 				return r.reviewItem(workerCtx, recordID, i, cfg, u.di, u.matches, passage, truncated)
 			},
 		}
@@ -165,7 +168,10 @@ func (r *inventoryItemsReviewer) reviewItem(
 	ms []matchedInventoryItem,
 	passage string,
 	truncated bool,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	start := time.Now()
 
 	matchesSentToLLM := limitMatchesToLLM(ms)
@@ -182,7 +188,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 	payloadJSON := marshalArtifactPayload(payloadObj)
 	if payloadJSON == "" {
 		r.logger.Warn("inventory items review: marshal payload failed", "record_id", recordID, "item_index", index)
-		return nil
+		return nil, fmt.Errorf("marshal review payload failed")
 	}
 
 	var findings []ReviewFinding
@@ -201,8 +207,9 @@ func (r *inventoryItemsReviewer) reviewItem(
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("inventory items review tool-use loop failed; no findings for item",
+			r.logger.Warn("inventory items review tool-use loop failed; aborting reviewer at item",
 				"record_id", recordID, "item_index", index, "error", loopErr)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 		payload = loopPayload
@@ -218,11 +225,14 @@ func (r *inventoryItemsReviewer) reviewItem(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
 			"review_inventory_items", "MID-CWB-REVIEW-INVENTORY-ITEMS"))
 		if err != nil {
-			r.logger.Warn("inventory items review item failed; skipping",
+			r.logger.Warn("inventory items review item failed; aborting reviewer",
 				"record_id", recordID, "item_index", index, "error", err)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(out, cfg.ModelName)
+		findings, err = validatedFindingsJSON(out, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
@@ -272,7 +282,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }
 
 // InventoryItemAnalysis is one entry of the inventory-items reviewer's
@@ -698,12 +708,11 @@ func rawJSONArrayOrNil(raw []byte) json.RawMessage {
 	return json.RawMessage(append([]byte(nil), s...))
 }
 
-func (r *inventoryItemsReviewer) hydrateMatchedInventoryItemContexts(ctx context.Context, matches map[int][]matchedInventoryItem) {
+func (r *inventoryItemsReviewer) hydrateMatchedInventoryItemContexts(ctx context.Context, matches map[int][]matchedInventoryItem) error {
 	if len(matches) == 0 {
-		return
+		return nil
 	}
 	linesByRecord := make(map[int64][]Line)
-	failedRecords := make(map[int64]bool)
 	for idx, list := range matches {
 		for i := range list {
 			spans := list[i].view.SourceLineSpans
@@ -712,21 +721,11 @@ func (r *inventoryItemsReviewer) hydrateMatchedInventoryItemContexts(ctx context
 			}
 			lines, ok := linesByRecord[list[i].recordID]
 			if !ok {
-				if failedRecords[list[i].recordID] {
-					continue
-				}
 				var err error
 				lines, err = loadRecordLines(ctx, list[i].recordID)
 				if err != nil {
-					failedRecords[list[i].recordID] = true
-					if r.logger != nil {
-						r.logger.Warn("inventory items review: matched item context unavailable",
-							"source_record_id", list[i].recordID,
-							"inventory_item_id", list[i].view.ItemID,
-							"error", err,
-						)
-					}
-					continue
+					r.logger.Error("inventory items review: matched source unavailable", "source_record_id", list[i].recordID, "artifact_id", list[i].view.ItemID, "error", err)
+					return fmt.Errorf("load matched source record %d: %w", list[i].recordID, err)
 				}
 				linesByRecord[list[i].recordID] = lines
 			}
@@ -734,4 +733,5 @@ func (r *inventoryItemsReviewer) hydrateMatchedInventoryItemContexts(ctx context
 		}
 		matches[idx] = list
 	}
+	return nil
 }

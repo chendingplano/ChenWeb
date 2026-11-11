@@ -12,7 +12,7 @@ func TestCorrectnessReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Sterilization temperature stated as 121°C in one step and 132°C in another",
+					"title": "Sterilization temperature stated as 121°C in one step and 132°C in another",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestCorrectnessReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_CORRECTNESS"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
 		ModelName:  "correctness-model",
 		PromptText: "review correctness",
 		PromptRef:  "prompt-review-correctness.md",
@@ -31,6 +31,9 @@ func TestCorrectnessReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 10,
 		endLine:   42,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

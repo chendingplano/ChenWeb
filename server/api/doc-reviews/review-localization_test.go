@@ -12,7 +12,7 @@ func TestLocalizationReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "ambiguous date format 03/04/2026",
+					"title": "ambiguous date format 03/04/2026",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestLocalizationReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_LOCALIZATION"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
 		ModelName:  "localization-model",
 		PromptText: "review localization",
 		PromptRef:  "prompt-review-localization.md",
@@ -31,6 +31,9 @@ func TestLocalizationReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 10,
 		endLine:   42,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

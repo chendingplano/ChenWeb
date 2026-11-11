@@ -98,7 +98,7 @@ func (r *sectionBalanceReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i]), nil
+			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i])
 		},
 	)
 	if runErr != nil {
@@ -122,7 +122,7 @@ func (r *sectionBalanceReviewer) processBlock(
 	total int,
 	cfg ReviewerConfig,
 	b pageBlock,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
 	r.logger.Info("section_balance review block start",
 		"record_id", recordID,
 		"block", fmt.Sprintf("%d/%d", index+1, total),
@@ -134,15 +134,19 @@ func (r *sectionBalanceReviewer) processBlock(
 
 	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_section_balance", "MID-CWB-REVIEW-SECTION-BALANCE"))
 	if err != nil {
-		r.logger.Warn("section_balance review block failed; skipping",
+		r.logger.Warn("section_balance review block failed; aborting reviewer",
 			"record_id", recordID,
 			"block", fmt.Sprintf("%d/%d", index+1, total),
 			"error", err,
 		)
-		return nil
+		return nil, err
 	}
 
-	findings := normalizeFindingsJSON(payload, cfg.ModelName)
+	findings, err := validatedFindingsJSON(payload, cfg.ModelName)
+
+	if err != nil {
+		return nil, err
+	}
 	for i := range findings {
 		findings[i].Pass = "P2"
 		findings[i].Aspect = "section_balance"
@@ -166,5 +170,5 @@ func (r *sectionBalanceReviewer) processBlock(
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
 		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
-	return findings
+	return findings, nil
 }

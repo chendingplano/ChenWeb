@@ -80,7 +80,7 @@ func (r *formattingConsistencyReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processWindow(workerCtx, recordID, i, cfg, windows[i]), nil
+			return r.processWindow(workerCtx, recordID, i, cfg, windows[i])
 		},
 	)
 	if runErr != nil {
@@ -130,7 +130,7 @@ func buildFormattingConsistencyWindows(lines []Line, docCtx string, size int) []
 	return windows
 }
 
-func (r *formattingConsistencyReviewer) processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) []ReviewFinding {
+func (r *formattingConsistencyReviewer) processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) ([]ReviewFinding, error) {
 	return r.processWindow(ctx, recordID, index, cfg, formattingConsistencyWindow{inputJSON: b.inputJSON, startLine: b.lineStart, endLine: b.lineEnd})
 }
 
@@ -140,7 +140,7 @@ func (r *formattingConsistencyReviewer) processWindow(
 	index int,
 	cfg ReviewerConfig,
 	w formattingConsistencyWindow,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
 	r.logger.Info("formatting_consistency review window start",
 		"record_id", recordID,
 		"window", index,
@@ -151,15 +151,19 @@ func (r *formattingConsistencyReviewer) processWindow(
 
 	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_formatting_consistency", "MID-CWB-REVIEW-FORMATTING-CONSISTENCY"))
 	if err != nil {
-		r.logger.Warn("formatting_consistency review window failed; skipping",
+		r.logger.Warn("formatting_consistency review window failed; aborting reviewer",
 			"record_id", recordID,
 			"window", index,
 			"error", err,
 		)
-		return nil
+		return nil, err
 	}
 
-	findings := normalizeFindingsJSON(payload, cfg.ModelName)
+	findings, err := validatedFindingsJSON(payload, cfg.ModelName)
+
+	if err != nil {
+		return nil, err
+	}
 	for i := range findings {
 		findings[i].Pass = "P1"
 		findings[i].Aspect = "formatting_consistency"
@@ -183,5 +187,5 @@ func (r *formattingConsistencyReviewer) processWindow(
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
 		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
-	return findings
+	return findings, nil
 }

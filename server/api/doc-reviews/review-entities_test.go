@@ -142,11 +142,14 @@ func TestReviewEntity_PayloadAndFindingTagging(t *testing.T) {
 		ms[i] = matchedEntity{view: entityView{EntityID: matchID, Name: "Sinopec", Type: "standards body"}, recordID: 2, filename: "other.pdf", via: "name", confidence: 0.9 - float64(i)/10}
 	}
 
-	findings := r.reviewEntity(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewEntity(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "ent-model",
 		PromptText: "compare entities",
 		PromptRef:  "prompt-review-entities-v1.md",
 	}, doc, ms)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))

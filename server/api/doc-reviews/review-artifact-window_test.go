@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -144,18 +145,18 @@ func TestRunArtifactUnitsChunkGroupedSeedPerChunk(t *testing.T) {
 	var seedStarts int32
 	remainderStarted := make(chan int, 3)
 
-	mkSeedRun := func() func(context.Context) []ReviewFinding {
-		return func(context.Context) []ReviewFinding {
+	mkSeedRun := func() func(context.Context) ([]ReviewFinding, error) {
+		return func(context.Context) ([]ReviewFinding, error) {
 			atomic.AddInt32(&seedStarts, 1)
 			seedStarted <- struct{}{}
 			<-seedsRelease
-			return []ReviewFinding{{Title: "seed"}}
+			return []ReviewFinding{{Title: "seed"}}, nil
 		}
 	}
-	mkRemainderRun := func(id int) func(context.Context) []ReviewFinding {
-		return func(context.Context) []ReviewFinding {
+	mkRemainderRun := func(id int) func(context.Context) ([]ReviewFinding, error) {
+		return func(context.Context) ([]ReviewFinding, error) {
 			remainderStarted <- id
-			return []ReviewFinding{{Title: "sibling"}}
+			return []ReviewFinding{{Title: "sibling"}}, nil
 		}
 	}
 
@@ -226,15 +227,16 @@ func TestRunArtifactUnitsChunkGroupedProgress(t *testing.T) {
 
 	var mu sync.Mutex
 	var snapshots []ReviewerProgress
-	onProgress := func(p ReviewerProgress) {
+	onProgress := func(p ReviewerProgress) error {
 		mu.Lock()
 		snapshots = append(snapshots, p)
 		mu.Unlock()
+		return nil
 	}
 
 	units := []artifactReviewUnit{
-		{chunkIdx: 0, run: func(context.Context) []ReviewFinding { return []ReviewFinding{{Title: "a"}} }},
-		{chunkIdx: 0, run: func(context.Context) []ReviewFinding { return nil }},
+		{chunkIdx: 0, run: func(context.Context) ([]ReviewFinding, error) { return []ReviewFinding{{Title: "a"}}, nil }},
+		{chunkIdx: 0, run: func(context.Context) ([]ReviewFinding, error) { return nil, nil }},
 	}
 	findings, err := runArtifactUnitsChunkGrouped(
 		context.Background(),
@@ -282,32 +284,32 @@ func TestRunArtifactUnitsChunkGroupedLimitSkipsRemainders(t *testing.T) {
 			[]artifactReviewUnit{
 				{
 					chunkIdx: 0,
-					run: func(context.Context) []ReviewFinding {
+					run: func(context.Context) ([]ReviewFinding, error) {
 						started <- 0
 						close(seed0Done)
-						return []ReviewFinding{{Title: "seed0", FindingType: "issue"}}
+						return []ReviewFinding{{Title: "seed0", FindingType: "issue"}}, nil
 					},
 				},
 				{
 					chunkIdx: 0,
-					run: func(context.Context) []ReviewFinding {
+					run: func(context.Context) ([]ReviewFinding, error) {
 						started <- 1
-						return []ReviewFinding{{Title: "remainder1"}}
+						return []ReviewFinding{{Title: "remainder1"}}, nil
 					},
 				},
 				{
 					chunkIdx: 1,
-					run: func(context.Context) []ReviewFinding {
+					run: func(context.Context) ([]ReviewFinding, error) {
 						started <- 2
 						<-seed2Release
-						return nil
+						return nil, nil
 					},
 				},
 				{
 					chunkIdx: 1,
-					run: func(context.Context) []ReviewFinding {
+					run: func(context.Context) ([]ReviewFinding, error) {
 						started <- 3
-						return []ReviewFinding{{Title: "remainder3"}}
+						return []ReviewFinding{{Title: "remainder3"}}, nil
 					},
 				},
 			},
@@ -315,10 +317,11 @@ func TestRunArtifactUnitsChunkGroupedLimitSkipsRemainders(t *testing.T) {
 			"metrics",
 			logger,
 			42,
-			func(p ReviewerProgress) {
+			func(p ReviewerProgress) error {
 				mu.Lock()
 				snapshots = append(snapshots, p)
 				mu.Unlock()
+				return nil
 			},
 		)
 		findingsCh <- findings
@@ -337,11 +340,11 @@ func TestRunArtifactUnitsChunkGroupedLimitSkipsRemainders(t *testing.T) {
 
 	findings := <-findingsCh
 	err := <-errCh
-	if err != nil {
-		t.Fatalf("runArtifactUnitsChunkGrouped err = %v, want nil", err)
+	if !errors.Is(err, ErrReviewOutputLimit) {
+		t.Fatalf("error=%v, want ErrReviewOutputLimit", err)
 	}
-	if len(findings) != 1 {
-		t.Fatalf("findings len = %d, want 1", len(findings))
+	if len(findings) != 0 {
+		t.Fatalf("partial findings published: %v", findings)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -349,8 +352,8 @@ func TestRunArtifactUnitsChunkGroupedLimitSkipsRemainders(t *testing.T) {
 		t.Fatal("expected progress snapshots")
 	}
 	last := snapshots[len(snapshots)-1]
-	if last.CompletedUnits != 4 || last.TotalUnits != 4 || last.FindingCount != 1 {
-		t.Fatalf("final progress = %+v, want completed=4 total=4 findings=1", last)
+	if last.CompletedUnits != 2 || last.TotalUnits != 4 || last.FindingCount != 1 {
+		t.Fatalf("final progress = %+v, want completed=2 total=4 findings=1", last)
 	}
 
 	entry := findLogEntry(logger.entries, "warn", outputLimitWarningMessage)

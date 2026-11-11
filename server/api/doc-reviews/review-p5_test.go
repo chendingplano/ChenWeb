@@ -14,11 +14,14 @@ func TestTechnicalAccuracyReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "wrong formula"}}},
 	}
 	r := &technicalAccuracyReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_TECH")}
-	findings := r.processWindow(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "m",
 		PromptText: "t",
 		PromptRef:  "prompt-review-technical-accuracy.md",
 	}, technicalAccuracyWindow{inputJSON: `{"lines":[]}`, startLine: 1, endLine: 50})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -62,9 +65,12 @@ func TestAssumptionsReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "hidden assumption"}}},
 	}
 	r := &assumptionsReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_ASSUMPTIONS")}
-	findings := r.processWindow(context.Background(), 2, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 2, 0, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-assumptions.md",
 	}, assumptionsWindow{inputJSON: `{"lines":[]}`, startLine: 10, endLine: 60})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -83,9 +89,12 @@ func TestPrerequisitesReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "missing dep"}}},
 	}
 	r := &prerequisitesReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_PREREQ")}
-	findings := r.processWindow(context.Background(), 3, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 3, 0, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-prerequisites.md",
 	}, prerequisitesWindow{inputJSON: `{"lines":[]}`, startLine: 5, endLine: 30})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -101,9 +110,12 @@ func TestSecurityReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "hardcoded key"}}},
 	}
 	r := &securityReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_SEC")}
-	findings := r.processWindow(context.Background(), 4, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 4, 0, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-security.md",
 	}, securityWindow{inputJSON: `{"lines":[]}`, startLine: 1, endLine: 200})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -122,9 +134,12 @@ func TestPerformanceReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "no latency target"}}},
 	}
 	r := &performanceReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_PERF")}
-	findings := r.processWindow(context.Background(), 5, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 5, 0, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-performance.md",
 	}, performanceWindow{inputJSON: `{"lines":[]}`, startLine: 20, endLine: 80})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -140,9 +155,12 @@ func TestErrorHandlingReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "no rollback"}}},
 	}
 	r := &errorHandlingReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_ERR")}
-	findings := r.processWindow(context.Background(), 6, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 6, 0, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-error-handling.md",
 	}, errorHandlingWindow{inputJSON: `{"lines":[]}`, startLine: 40, endLine: 120})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -158,9 +176,12 @@ func TestLimitationsReviewerProcessWindowDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "scope not stated"}}},
 	}
 	r := &limitationsReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_LIM")}
-	findings := r.processWindow(context.Background(), 7, 0, ReviewerConfig{
+	findings, err := r.processWindow(context.Background(), 7, 0, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-limitations.md",
 	}, limitationsWindow{inputJSON: `{"lines":[]}`, startLine: 100, endLine: 200})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -178,9 +199,12 @@ func TestStandardsComplianceReviewerProcessBlockDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "missing ISO clause"}}},
 	}
 	r := &standardsComplianceReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_STD")}
-	findings := r.processBlock(context.Background(), 10, 0, 1, ReviewerConfig{
+	findings, err := r.processBlock(context.Background(), 10, 0, 1, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-standards-compliance.md",
 	}, pageBlock{inputJSON: `{"lines":[]}`, lineStart: 1, lineEnd: 400})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -215,9 +239,12 @@ func TestLegalComplianceReviewerProcessBlockDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "no copyright notice"}}},
 	}
 	r := &legalComplianceReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_LEGAL")}
-	findings := r.processBlock(context.Background(), 11, 0, 1, ReviewerConfig{
+	findings, err := r.processBlock(context.Background(), 11, 0, 1, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-legal-compliance.md",
 	}, pageBlock{inputJSON: `{"lines":[]}`, lineStart: 5, lineEnd: 200})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -233,9 +260,12 @@ func TestRegulatoryComplianceReviewerProcessBlockDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "FDA clause missing"}}},
 	}
 	r := &regulatoryComplianceReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_REG")}
-	findings := r.processBlock(context.Background(), 12, 0, 1, ReviewerConfig{
+	findings, err := r.processBlock(context.Background(), 12, 0, 1, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-regulatory-compliance.md",
 	}, pageBlock{inputJSON: `{"lines":[]}`, lineStart: 100, lineEnd: 300})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))
@@ -251,9 +281,12 @@ func TestInternalPolicyReviewerProcessBlockDefaults(t *testing.T) {
 		out: map[string]any{"findings": []any{map[string]any{"title": "approval missing"}}},
 	}
 	r := &internalPolicyReviewer{client: fake, logger: loggerutil.CreateDefaultLogger("TEST_P5_POL")}
-	findings := r.processBlock(context.Background(), 13, 0, 1, ReviewerConfig{
+	findings, err := r.processBlock(context.Background(), 13, 0, 1, ReviewerConfig{
 		ModelName: "m", PromptText: "t", PromptRef: "prompt-review-internal-policy.md",
 	}, pageBlock{inputJSON: `{"lines":[]}`, lineStart: 1, lineEnd: 50})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("len=%d want 1", len(findings))

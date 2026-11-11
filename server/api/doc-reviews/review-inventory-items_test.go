@@ -150,11 +150,14 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		}
 	}
 
-	findings := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "inventory-model",
 		PromptText: "compare items",
 		PromptRef:  "prompt-review-inventory-items-v1.md",
 	}, doc, ms, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))
@@ -227,11 +230,14 @@ func TestReviewItem_ReturnsAnalysesAsFindings(t *testing.T) {
 		spans: []string{"20:24"},
 	}
 
-	findings := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
+	findings, err := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
 		ModelName:  "inventory-model",
 		PromptText: "compare items",
 		PromptRef:  "prompt-review-inventory-items-v3.md",
 	}, doc, nil, "", false)
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)

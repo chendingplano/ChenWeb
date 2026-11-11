@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/llm"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // defaultP3MaxToolTokens is the code-level token budget for a P3 tool-use
@@ -22,7 +21,10 @@ const defaultP3MaxToolTokens = 60000
 
 const docReviewToolUseSystemPrompt = "You are a document review engine. Return strict JSON findings only unless you need to call an available tool."
 
-var ErrToolUseFinalizeUnparseable = errors.New("tool-use finalize response was not parseable findings JSON")
+var (
+	ErrToolUseResponseUnparseable = errors.New("tool-use response was not parseable findings JSON")
+	ErrToolUseBudgetExhausted     = errors.New("tool-use review investigation budget exhausted")
+)
 
 // docReviewCallInfo builds the callInfo JSON string passed into runToolUseReview.
 // It merges the run_id from ctx (when present) with reviewer-supplied identifying
@@ -49,10 +51,8 @@ func docReviewCallInfo(ctx context.Context, fields map[string]any) string {
 // document input first (DR8a prefix-cache layout), calls the tool-capable model
 // with the bound tool definitions, executes any requested tool calls against the
 // record-scoped registry, and repeats until the model returns findings or the
-// turn/token budget is exhausted (then force-finalizes). A single model response
+// turn/token budget is exhausted (an error). A single model response
 // is treated as either findings or tool calls, never both.
-// runToolUseReview runs the bounded tool-use conversation loop and returns
-// only findings, matching the signature every existing P3/P5 reviewer calls.
 func runToolUseReview(
 	ctx context.Context,
 	client LLMChatClient,
@@ -101,9 +101,8 @@ func runToolUseReviewWithPayload(
 	var callMetadata map[string]any
 	if strings.TrimSpace(callInfo) != "" {
 		if err := json.Unmarshal([]byte(callInfo), &callMetadata); err != nil {
-			logger.Error("callInfo is not valid JSON; omitting from metadata_json",
-				"callInfo", callInfo, "error", err)
-			callMetadata = nil
+			logger.Error("tool-use call metadata is invalid", "record_id", recordID, "error", err)
+			return nil, nil, nil, fmt.Errorf("invalid tool-use call metadata: %w", err)
 		}
 	}
 
@@ -125,7 +124,12 @@ func runToolUseReviewWithPayload(
 	aggregateUsage := &LLMUsage{}
 	for turn := 0; turn < maxTurns; turn++ {
 		if isCtxStopped(ctx) {
+			logger.Error("tool-use review stopped", "record_id", recordID, "error", ErrPipelineStopped)
 			return nil, nil, aggregateUsage, ErrPipelineStopped
+		}
+		if err := ctx.Err(); err != nil {
+			logger.Error("tool-use review cancelled", "record_id", recordID, "error", err)
+			return nil, nil, aggregateUsage, err
 		}
 
 		turnMetadata := maps.Clone(callMetadata)
@@ -155,7 +159,13 @@ func runToolUseReviewWithPayload(
 			Metadata:   turnMetadata,
 		})
 		if err != nil {
+			logger.Error("tool-use LLM call failed", "record_id", recordID, "turn", turn, "error", err)
 			return nil, nil, aggregateUsage, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)
+		}
+		if resp == nil {
+			err := errors.New("tool-use LLM returned no response")
+			logger.Error("tool-use LLM call failed", "record_id", recordID, "turn", turn, "error", err)
+			return nil, nil, aggregateUsage, err
 		}
 		logLoopUsage(callReason, logger, modelName, turn, resp.Usage)
 		addUsage(aggregateUsage, resp.Usage)
@@ -169,328 +179,83 @@ func runToolUseReviewWithPayload(
 				Content:   resp.Content,
 				ToolCalls: resp.ToolCalls,
 			})
-			for _, tc := range resp.ToolCalls {
-				// logger.Info("tool-use call",
-				// 	"record_id", recordID,
-				// 	"turn", turn,
-				// 	"tool_call_id", tc.ID,
-				// 	"tool_name", tc.Name,
-				// 	"arguments", previewToolLogText(tc.Arguments),
-				// )
-				result := executeToolCall(ctx, tc, toolByName, recordID)
-				// logger.Info("tool-use result",
-				// 	"record_id", recordID,
-				// 	"turn", turn,
-				// 	"tool_call_id", tc.ID,
-				// 	"tool_name", tc.Name,
-				// 	"result", previewToolLogText(result),
-				// )
-				messages = append(messages, LLMMessage{
-					Role:       LLMRoleTool,
-					ToolCallID: tc.ID,
-					Content:    result,
-				})
+			if turn+1 >= maxTurns || tokensUsed >= maxTokens {
+				logger.Error("tool-use review budget exhausted", "record_id", recordID, "turns_used", turn+1, "max_turns", maxTurns, "tokens_used", tokensUsed, "max_tokens", maxTokens)
+				return nil, nil, aggregateUsage, fmt.Errorf("%w: record_id=%d turns=%d/%d tokens=%d/%d", ErrToolUseBudgetExhausted, recordID, turn+1, maxTurns, tokensUsed, maxTokens)
 			}
-			if maxTokens > 0 && tokensUsed >= maxTokens {
-				logger.Info("tool-use token budget exhausted; finalizing",
-					"record_id", recordID, "tokens_used", tokensUsed, "max_tokens", maxTokens)
-				break
+			for _, tc := range resp.ToolCalls {
+				if err := ctx.Err(); err != nil {
+					logger.Error("tool-use review cancelled", "record_id", recordID, "error", err)
+					return nil, nil, aggregateUsage, err
+				}
+				result, err := executeToolCall(ctx, tc, toolByName, recordID)
+				if err != nil {
+					logger.Error("tool-use tool call failed", "record_id", recordID, "turn", turn, "tool_name", tc.Name, "tool_call_id", tc.ID, "error", err)
+					return nil, nil, aggregateUsage, fmt.Errorf("tool-use tool %s failed: %w", tc.Name, err)
+				}
+				messages = append(messages, LLMMessage{Role: LLMRoleTool, ToolCallID: tc.ID, Content: result})
 			}
 			continue
 		}
 
 		// No tool calls: the model is producing its final findings.
-		if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content, modelName); ok {
+		findings, payload, ok, parseReason := parseFindingsContentDetailedWithPayload(resp.Content, modelName)
+		if ok {
 			logToolUseFindingsStatus(logger, "response", recordID, int(llmRunIDFromContext(ctx)), turn, findings)
 			return findings, payload, aggregateUsage, nil
 		}
-
-		// Degenerate response (neither tool calls nor parseable findings):
-		// one repair attempt asking for strict JSON, then give up for this unit.
-		messages = append(messages, LLMMessage{Role: LLMRoleAssistant, Content: resp.Content})
-		findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, cfg.PromptRef, recordID, messages, toolByName, callReason, logger)
-		addUsage(aggregateUsage, usage)
-		return findings, payload, aggregateUsage, err
+		logger.Error("tool-use response returned invalid findings format", "record_id", recordID, "turn", turn, "parse_failure_reason", parseReason, "response_preview", previewToolLogText(resp.Content))
+		return nil, nil, aggregateUsage, fmt.Errorf("%w: record_id=%d reason=%s", ErrToolUseResponseUnparseable, recordID, parseReason)
 	}
-
-	// Budget exhausted (turns or tokens): force the model to produce findings
-	// from the evidence collected so far, without tools (DR10b force-produce).
-	findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, cfg.PromptRef, recordID, messages, toolByName, callReason, logger)
-	addUsage(aggregateUsage, usage)
-	return findings, payload, aggregateUsage, err
+	return nil, nil, aggregateUsage, ErrToolUseBudgetExhausted
 }
 
-// finalizeFindings appends the force-produce instruction and makes one final
-// model call without tools, returning the parsed findings. A parseable
-// `{"findings":[]}` is a normal "no issues found" outcome; an unparseable
-// response is treated as an error because the model failed its output contract.
-func finalizeFindings(
-	ctx context.Context,
-	client LLMChatClient,
-	modelName string,
-	promptName string,
-	recordID int64,
-	messages []LLMMessage,
-	toolByName map[string]ReviewTool,
-	callReason string,
-	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, *LLMUsage, error) {
-	findings, _, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, promptName, recordID, messages, toolByName, callReason, logger)
-	return findings, usage, err
-}
-
-// finalizeFindingsWithPayload is finalizeFindings but also returns the raw
-// JSON payload of the response that produced the findings, for callers whose
-// prompt requires sibling top-level keys alongside `findings`.
-func finalizeFindingsWithPayload(
-	ctx context.Context,
-	client LLMChatClient,
-	modelName string,
-	promptName string,
-	recordID int64,
-	messages []LLMMessage,
-	toolByName map[string]ReviewTool,
-	callReason string,
-	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
-	if isCtxStopped(ctx) {
-		return nil, nil, nil, ErrPipelineStopped
-	}
-	messages = append(messages, LLMMessage{
-		Role: LLMRoleUser,
-		Content: "You have reached the maximum investigation budget. Based on the " +
-			"evidence collected so far, return your final findings now as strict JSON " +
-			`of the form {"findings": [...]}. Return {"findings": []} if there are no issues.`,
-	})
-	resp, err := client.Complete(ctx, LLMRequest{
-		Model:      modelName,
-		UserID:     llmUserIDFromContext(ctx),
-		PromptName: promptName,
-		Messages:   messages,
-		RecordID:   recordID,
-		RunID:      llmRunIDFromContext(ctx),
-		CallReason: "review_tool_use_finalize",
-		CallLoc:    "MID-20260712-01",
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
-	}
-	totalUsage := &LLMUsage{}
-	addUsage(totalUsage, resp.Usage)
-	logLoopUsage(callReason, logger, modelName, -1, resp.Usage)
-	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content, modelName); ok {
-		logToolUseFindingsStatus(logger, "finalize", recordID, int(llmRunIDFromContext(ctx)), -1, findings)
-		return findings, payload, totalUsage, nil
-	}
-	_, _, _, parseReason := parseFindingsContentDetailedWithPayload(resp.Content, modelName)
-	if shouldRepairFindingsJSON(parseReason) {
-		repairFindings, repairPayload, repairUsage, repairErr := repairFinalFindingsJSONWithPayload(
-			ctx, client, modelName, promptName, recordID, messages, toolByName, resp.Content, parseReason, logger,
-		)
-		addUsage(totalUsage, repairUsage)
-		if repairErr == nil {
-			return repairFindings, repairPayload, totalUsage, nil
-		}
-		logger.Error("tool-use finalize repair failed",
-			"record_id", recordID,
-			"parse_failure_reason", repairErr.Error(),
-			"response_preview", previewToolLogText(resp.Content),
-		)
-		return nil, nil, totalUsage, repairErr
-	}
-	logger.Error("tool-use finalize returned invalid findings format",
-		"record_id", recordID,
-		"parse_failure_reason", parseReason,
-		"response_preview", previewToolLogText(resp.Content),
-	)
-	return nil, nil, totalUsage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
-		ErrToolUseFinalizeUnparseable, recordID, parseReason, previewToolLogText(resp.Content))
-}
-
-func shouldRepairFindingsJSON(parseReason string) bool {
-	return strings.HasPrefix(parseReason, "json_unmarshal_failed:") || parseReason == "tool_calls_in_final_text"
-}
-
-func repairFinalFindingsJSONWithPayload(
-	ctx context.Context,
-	client LLMChatClient,
-	modelName string,
-	promptName string,
-	recordID int64,
-	messages []LLMMessage,
-	toolByName map[string]ReviewTool,
-	badContent string,
-	parseReason string,
-	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
-	if isCtxStopped(ctx) {
-		return nil, nil, nil, ErrPipelineStopped
-	}
-	repairMessages := append([]LLMMessage(nil), messages...)
-	if parseReason == "tool_calls_in_final_text" {
-		textCalls := parseTextToolCalls(badContent)
-		if len(textCalls) > 0 {
-			// The model emitted its tool calls as raw DSML text rather than
-			// structured tool_calls, so resp.ToolCalls was empty. Attach the
-			// re-parsed calls to the assistant message as structured ToolCalls so
-			// their IDs correlate with the role:"tool" results appended below.
-			// Without this, the OpenAI-compatible API rejects the repair request
-			// ("Messages with role 'tool' must be a response to a preceding message
-			// with 'tool_calls'", HTTP 400). The raw DSML text is dropped from the
-			// content to avoid the model re-emitting the same pseudo tool call.
-			repairMessages = append(repairMessages, LLMMessage{Role: LLMRoleAssistant, ToolCalls: textCalls})
-			for _, tc := range textCalls {
-				result := executeToolCall(ctx, tc, toolByName, recordID)
-				logger.Info("tool-use final text call executed",
-					"record_id", recordID,
-					"tool_call_id", tc.ID,
-					"tool_name", tc.Name,
-					"arguments", previewToolLogText(tc.Arguments),
-					"result", previewToolLogText(result),
-				)
-				repairMessages = append(repairMessages, LLMMessage{
-					Role:       LLMRoleTool,
-					ToolCallID: tc.ID,
-					Content:    result,
-				})
-			}
-			repairMessages = append(repairMessages, LLMMessage{
-				Role: LLMRoleUser,
-				Content: "Use the tool results above as the final additional evidence. " +
-					"Do not call tools again. Return strict JSON only with the exact shape " +
-					`{"findings":[...]}. Return {"findings":[]} if the evidence does not support any finding.`,
-			})
-			return callFinalFindingsRepairWithPayload(ctx, client, modelName, promptName, recordID, repairMessages, "review_tool_use_finalize_repair", logger)
-		}
-	}
-	repairMessages = append(repairMessages,
-		LLMMessage{Role: LLMRoleAssistant, Content: badContent},
-		LLMMessage{
-			Role:    LLMRoleUser,
-			Content: finalFindingsRepairPrompt(parseReason),
-		},
-	)
-	return callFinalFindingsRepairWithPayload(ctx, client, modelName, promptName, recordID, repairMessages, "repair-final-findings", logger)
-}
-
-func callFinalFindingsRepairWithPayload(
-	ctx context.Context,
-	client LLMChatClient,
-	modelName string,
-	promptName string,
-	recordID int64,
-	repairMessages []LLMMessage,
-	callReason string,
-	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
-	resp, err := client.Complete(ctx, LLMRequest{
-		Model:      modelName,
-		UserID:     llmUserIDFromContext(ctx),
-		PromptName: promptName,
-		Messages:   repairMessages,
-		RecordID:   recordID,
-		RunID:      llmRunIDFromContext(ctx),
-		CallReason: "review_tool_use_finalize_repair",
-		CallLoc:    "MID-20260718-01",
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
-	}
-	logLoopUsage(callReason, logger, modelName, -2, resp.Usage)
-	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content, modelName); ok {
-		logToolUseFindingsStatus(logger, "finalize_repair", recordID, int(llmRunIDFromContext(ctx)), -2, findings)
-		return findings, payload, resp.Usage, nil
-	}
-	_, _, _, repairReason := parseFindingsContentDetailedWithPayload(resp.Content, modelName)
-	return nil, nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
-		ErrToolUseFinalizeUnparseable, recordID, repairReason, previewToolLogText(resp.Content))
-}
-
-func parseTextToolCalls(content string) []LLMToolCall {
-	invokeRe := regexp.MustCompile(`(?s)<｜｜DSML｜｜invoke[[:space:]]+name="([^"]+)">(.*?)</｜｜DSML｜｜invoke>`)
-	paramRe := regexp.MustCompile(`(?s)<｜｜DSML｜｜parameter[[:space:]]+name="([^"]+)"[[:space:]]+string="([^"]+)">(.*?)</｜｜DSML｜｜parameter>`)
-	matches := invokeRe.FindAllStringSubmatch(content, -1)
-	calls := make([]LLMToolCall, 0, len(matches))
-	for i, m := range matches {
-		args := make(map[string]any)
-		for _, pm := range paramRe.FindAllStringSubmatch(m[2], -1) {
-			name := strings.TrimSpace(pm[1])
-			isString := strings.EqualFold(strings.TrimSpace(pm[2]), "true")
-			value := strings.TrimSpace(pm[3])
-			if isString {
-				args[name] = value
-				continue
-			}
-			if n, err := strconv.Atoi(value); err == nil {
-				args[name] = n
-				continue
-			}
-			if f, err := strconv.ParseFloat(value, 64); err == nil {
-				args[name] = f
-				continue
-			}
-			args[name] = value
-		}
-		b, _ := json.Marshal(args)
-		calls = append(calls, LLMToolCall{
-			ID:        fmt.Sprintf("final_text_tool_%d", i+1),
-			Name:      strings.TrimSpace(m[1]),
-			Arguments: string(b),
-		})
-	}
-	return calls
-}
-
-func finalFindingsRepairPrompt(parseReason string) string {
-	if parseReason == "tool_calls_in_final_text" {
-		return "The previous response attempted to call tools, but tool use is now closed. " +
-			"Do not request or mention tools. Based only on the evidence already available in this conversation, " +
-			"return strict JSON only with the exact shape " + `{"findings":[...]}. ` +
-			`Return {"findings":[]} if the available evidence does not support any finding.`
-	}
-	return "The previous response was not valid JSON: " + parseReason + ". " +
-		"Rewrite the same findings as strict JSON only, with the exact shape " +
-		`{"findings":[...]}. Preserve the finding text, escape quotes and newlines inside string values, ` +
-		"and return no markdown fences or prose."
-}
-
-// executeToolCall validates a tool call's arguments against the tool's schema
-// and runs it, returning a JSON string to feed back as the tool-role result. On
-// any error (unknown tool, bad args, execution failure) it returns an error
-// payload the model can read and retry from — it never aborts the loop.
-func executeToolCall(
-	ctx context.Context,
-	tc LLMToolCall,
-	toolByName map[string]ReviewTool,
-	recordID int64,
-) string {
+// executeToolCall validates arguments and executes one tool. Every error aborts
+// the affected reviewer rather than becoming tool content the model can retry.
+func executeToolCall(ctx context.Context, tc LLMToolCall, toolByName map[string]ReviewTool, recordID int64) (string, error) {
 	tool, ok := toolByName[tc.Name]
 	if !ok {
-		return toolErrorResult(fmt.Sprintf("unknown tool %q", tc.Name))
+		return "", fmt.Errorf("unknown tool %q", tc.Name)
 	}
-	var args map[string]any
+	args := map[string]any{}
 	if strings.TrimSpace(tc.Arguments) != "" {
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-			return toolErrorResult(fmt.Sprintf("arguments are not valid JSON: %v", err))
+			return "", fmt.Errorf("arguments are not valid JSON: %w", err)
+		}
+		if args == nil {
+			return "", errors.New("arguments must be a JSON object")
 		}
 	}
-	if missing := missingRequiredArgs(tool.Parameters, args); len(missing) > 0 {
-		return toolErrorResult(fmt.Sprintf("missing required argument(s): %s", strings.Join(missing, ", ")))
+	if len(tool.Parameters) > 0 {
+		var schemaDoc any
+		if err := json.Unmarshal(tool.Parameters, &schemaDoc); err != nil {
+			return "", fmt.Errorf("invalid tool schema: %w", err)
+		}
+		compiler := jsonschema.NewCompiler()
+		const schemaURL = "mem://review-tool.schema.json"
+		if err := compiler.AddResource(schemaURL, schemaDoc); err != nil {
+			return "", fmt.Errorf("invalid tool schema: %w", err)
+		}
+		schema, err := compiler.Compile(schemaURL)
+		if err != nil {
+			return "", fmt.Errorf("compile tool schema: %w", err)
+		}
+		if err := schema.Validate(args); err != nil {
+			return "", fmt.Errorf("tool arguments fail schema validation: %w", err)
+		}
+	}
+	if tool.Execute == nil {
+		return "", errors.New("tool execution is not configured")
 	}
 	result, err := tool.Execute(ctx, recordID, args)
 	if err != nil {
-		return toolErrorResult(err.Error())
+		return "", err
 	}
 	b, err := json.Marshal(result)
 	if err != nil {
-		return toolErrorResult(fmt.Sprintf("failed to encode result: %v", err))
+		return "", fmt.Errorf("failed to encode tool result: %w", err)
 	}
-	return string(b)
-}
-
-func toolErrorResult(msg string) string {
-	b, _ := json.Marshal(map[string]any{"error": msg})
-	return string(b)
+	return string(b), nil
 }
 
 func previewToolLogText(s string) string {
@@ -528,26 +293,6 @@ func logToolUseFindingsStatus(
 		"turn", turn,
 		"findings", len(findings),
 	)
-}
-
-// missingRequiredArgs returns the schema-required argument names absent from args.
-func missingRequiredArgs(schema json.RawMessage, args map[string]any) []string {
-	if len(schema) == 0 {
-		return nil
-	}
-	var s struct {
-		Required []string `json:"required"`
-	}
-	if err := json.Unmarshal(schema, &s); err != nil {
-		return nil
-	}
-	var missing []string
-	for _, r := range s.Required {
-		if _, ok := args[r]; !ok {
-			missing = append(missing, r)
-		}
-	}
-	return missing
 }
 
 // toolDefsFor adapts the review tools to the shared llm tool-definition shape.
@@ -601,8 +346,23 @@ func parseFindingsContentDetailedWithPayload(content string, modelName string) (
 		return nil, nil, false, "json_unmarshal_failed: " + err.Error()
 	}
 checkFindingsKey:
-	if _, ok := payload["findings"]; !ok {
+	rawFindings, ok := payload["findings"]
+	if !ok {
 		return nil, nil, false, "missing_findings_key"
+	}
+	findingList, ok := rawFindings.([]any)
+	if !ok {
+		return nil, nil, false, "findings_must_be_array"
+	}
+	for _, rawFinding := range findingList {
+		finding, ok := rawFinding.(map[string]any)
+		if !ok {
+			return nil, nil, false, "finding_must_be_object"
+		}
+		title, ok := finding["title"].(string)
+		if !ok || strings.TrimSpace(title) == "" {
+			return nil, nil, false, "finding_missing_title"
+		}
 	}
 	return normalizeFindingsJSON(payload, modelName), payload, true, ""
 }

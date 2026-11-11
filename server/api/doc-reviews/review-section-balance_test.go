@@ -12,7 +12,7 @@ func TestSectionBalanceReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "'Validation' section is one sentence while 'Introduction' runs three pages",
+					"title": "'Validation' section is one sentence while 'Introduction' runs three pages",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestSectionBalanceReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_SECTION_BALANCE"),
 	}
 
-	findings := reviewer.processBlock(context.Background(), 92, 0, 1, ReviewerConfig{
+	findings, err := reviewer.processBlock(context.Background(), 92, 0, 1, ReviewerConfig{
 		ModelName:  "section-balance-model",
 		PromptText: "review section balance",
 		PromptRef:  "prompt-review-section-balance.md",
@@ -33,6 +33,9 @@ func TestSectionBalanceReviewerProcessBlockPropagatesPromptName(t *testing.T) {
 		lineStart: 10,
 		lineEnd:   420,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

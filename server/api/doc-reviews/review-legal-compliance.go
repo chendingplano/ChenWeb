@@ -81,7 +81,7 @@ func (r *legalComplianceReviewer) ReviewDocument(
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped
 			}
-			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i]), nil
+			return r.processBlock(workerCtx, recordID, i, len(blocks), cfg, blocks[i])
 		},
 	)
 	if runErr != nil {
@@ -98,7 +98,10 @@ func (r *legalComplianceReviewer) ReviewDocument(
 	return allFindings, nil
 }
 
-func (r *legalComplianceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+func (r *legalComplianceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	r.logger.Info("legal_compliance review chunk start",
 		"record_id", recordID,
 		"chunk", index,
@@ -126,18 +129,22 @@ func (r *legalComplianceReviewer) processChunk(ctx context.Context, recordID int
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("legal_compliance tool-use loop failed; no findings for chunk",
+			r.logger.Warn("legal_compliance tool-use loop failed; aborting reviewer at chunk",
 				"record_id", recordID, "chunk", index, "error", loopErr)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 	} else {
 		payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, input.inputJSON, "review_legal_compliance", "MID-CWB-REVIEW-LEGAL-COMPLIANCE"))
 		if err != nil {
-			r.logger.Warn("legal_compliance review chunk failed; skipping",
+			r.logger.Warn("legal_compliance review chunk failed; aborting reviewer",
 				"record_id", recordID, "chunk", index, "error", err)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(payload, cfg.ModelName)
+		findings, err = validatedFindingsJSON(payload, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
@@ -164,7 +171,7 @@ func (r *legalComplianceReviewer) processChunk(ctx context.Context, recordID int
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }
 
 func (r *legalComplianceReviewer) processBlock(
@@ -174,7 +181,10 @@ func (r *legalComplianceReviewer) processBlock(
 	total int,
 	cfg ReviewerConfig,
 	b pageBlock,
-) []ReviewFinding {
+) ([]ReviewFinding, error) {
+	if cfg.MaxToolTurns > 0 && r.toolClient == nil {
+		return nil, fmt.Errorf("tool review requested but tool client is unavailable")
+	}
 	r.logger.Info("legal_compliance review block start",
 		"record_id", recordID,
 		"block", fmt.Sprintf("%d/%d", index+1, total),
@@ -204,22 +214,26 @@ func (r *legalComplianceReviewer) processBlock(
 			cacheMissTokens = loopUsage.PromptCacheMissTokens
 		}
 		if loopErr != nil {
-			r.logger.Warn("legal_compliance tool-use loop failed; no findings for block",
+			r.logger.Warn("legal_compliance tool-use loop failed; aborting reviewer at block",
 				"record_id", recordID,
 				"block", fmt.Sprintf("%d/%d", index+1, total),
 				"error", loopErr)
+			return loopFindings, loopErr
 		}
 		findings = loopFindings
 	} else {
 		payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_legal_compliance", "MID-CWB-REVIEW-LEGAL-COMPLIANCE"))
 		if err != nil {
-			r.logger.Warn("legal_compliance review block failed; skipping",
+			r.logger.Warn("legal_compliance review block failed; aborting reviewer",
 				"record_id", recordID,
 				"block", fmt.Sprintf("%d/%d", index+1, total),
 				"error", err)
-			return nil
+			return nil, err
 		}
-		findings = normalizeFindingsJSON(payload, cfg.ModelName)
+		findings, err = validatedFindingsJSON(payload, cfg.ModelName)
+		if err != nil {
+			return nil, err
+		}
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
@@ -246,5 +260,5 @@ func (r *legalComplianceReviewer) processBlock(
 		"cache_hit_tokens", cacheHitTokens,
 		"cache_miss_tokens", cacheMissTokens,
 	)
-	return findings
+	return findings, nil
 }

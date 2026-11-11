@@ -12,7 +12,7 @@ func TestConcisenessReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "'In order to' on line 15 can be shortened to 'to'",
+					"title": "'In order to' on line 15 can be shortened to 'to'",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestConcisenessReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_CONCISENESS"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 91, 0, ReviewerConfig{
 		ModelName:  "conciseness-model",
 		PromptText: "review conciseness",
 		PromptRef:  "prompt-review-conciseness.md",
@@ -31,6 +31,9 @@ func TestConcisenessReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 10,
 		endLine:   42,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

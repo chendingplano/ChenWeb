@@ -12,7 +12,7 @@ func TestDiagramsReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "Section 3.2 describes the authentication flow but provides no sequence diagram",
+					"title": "Section 3.2 describes the authentication flow but provides no sequence diagram",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestDiagramsReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		logger: loggerutil.CreateDefaultLogger("TEST_DIAGRAMS"),
 	}
 
-	findings := reviewer.processWindow(context.Background(), 102, 0, ReviewerConfig{
+	findings, err := reviewer.processWindow(context.Background(), 102, 0, ReviewerConfig{
 		ModelName:  "diagrams-model",
 		PromptText: "review diagrams",
 		PromptRef:  "prompt-review-diagrams.md",
@@ -31,6 +31,9 @@ func TestDiagramsReviewerProcessWindowPropagatesPromptName(t *testing.T) {
 		startLine: 30,
 		endLine:   70,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))

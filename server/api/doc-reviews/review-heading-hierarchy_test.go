@@ -12,7 +12,7 @@ func TestHeadingHierarchyReviewerProcessBlockPropagatesPromptName(t *testing.T) 
 		out: map[string]any{
 			"findings": []any{
 				map[string]any{
-					"message": "section 2.1 is followed by 2.1.1.1, skipping the H3 level",
+					"title": "section 2.1 is followed by 2.1.1.1, skipping the H3 level",
 				},
 			},
 		},
@@ -22,7 +22,7 @@ func TestHeadingHierarchyReviewerProcessBlockPropagatesPromptName(t *testing.T) 
 		logger: loggerutil.CreateDefaultLogger("TEST_HEADING_HIERARCHY"),
 	}
 
-	findings := reviewer.processBlock(context.Background(), 91, 0, 1, ReviewerConfig{
+	findings, err := reviewer.processBlock(context.Background(), 91, 0, 1, ReviewerConfig{
 		ModelName:  "heading-hierarchy-model",
 		PromptText: "review heading hierarchy",
 		PromptRef:  "prompt-review-heading-hierarchy.md",
@@ -33,6 +33,9 @@ func TestHeadingHierarchyReviewerProcessBlockPropagatesPromptName(t *testing.T) 
 		lineStart: 10,
 		lineEnd:   420,
 	})
+	if err != nil {
+		t.Fatalf("review unit failed: %v", err)
+	}
 
 	if len(findings) != 1 {
 		t.Fatalf("findings len=%d, want 1", len(findings))
