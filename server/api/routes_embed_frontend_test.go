@@ -12,6 +12,9 @@ import (
 func TestRegisterRoutes_EmbeddedFrontendServesLoginPage(t *testing.T) {
 	t.Setenv("USE_EMBED_FRONTEND", "true")
 	t.Setenv("APP_ENV", "production")
+	// Route registration loads the Pi profiles, which need an explicit (here synthetic) model each.
+	t.Setenv("PI_KNOWLEDGE_GUIDE_MODEL", "synthetic-pi-model")
+	t.Setenv("PI_PROBLEM_DIAGNOSTICS_MODEL", "synthetic-pi-model")
 
 	e := echo.New()
 	if err := RegisterRoutes(e); err != nil {

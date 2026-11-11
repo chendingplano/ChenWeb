@@ -79,6 +79,7 @@ func TestEnsureProfileDrawingGeneratesWhenMissing(t *testing.T) {
 	t.Setenv("PRODUCT_DRAWINGS_DIR", t.TempDir())
 	t.Setenv("IMAGE_GEN_BASE_URL", server.URL)
 	t.Setenv("IMAGE_GEN_API_KEY", "test-key")
+	t.Setenv("QWEN_IMAGE_GEN_MODEL", "synthetic-image-model") // the provider needs an explicit model
 
 	mock.ExpectQuery(rx("WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))")).
 		WithArgs("Ventilator").

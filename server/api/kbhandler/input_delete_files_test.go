@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,18 +23,30 @@ func writeTestFile(t *testing.T, path string) {
 	}
 }
 
-func TestPlanInputDeletePathsRefusesFolderNotNamedAfterRecord(t *testing.T) {
+func TestPlanInputDeletePathsSkipsResultFileInSharedFolder(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("DATA_HOME_DIR", dataHome)
 	t.Setenv("ARTIFACT_DIR", filepath.Join(dataHome, "Artifacts"))
 
-	// The result file sits directly in the data home, so its folder is the data home itself.
-	_, err := planInputDeletePaths(656, inputDeleteAssets{
+	// The result file sits directly in the data home, so its folder is the data home itself: a
+	// duplicate row can copy it from another record. The file and its folder are kept, and the
+	// record's own artifact folder is still removed.
+	plan, err := planInputDeletePaths(656, inputDeleteAssets{
 		FileName:       "Artifacts/0/656/a.pdf",
 		ResultFileName: "result.json",
 	})
-	if err == nil || !strings.Contains(err.Error(), "refusing to remove folder") {
-		t.Fatalf("expected refusal for a shared folder, got %v", err)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	shared := filepath.Join(dataHome, "result.json")
+	if !slices.Contains(plan.SkippedFiles, shared) {
+		t.Fatalf("shared result file not skipped: skipped=%v", plan.SkippedFiles)
+	}
+	if slices.Contains(plan.Files, shared) || slices.Contains(plan.Dirs, dataHome) {
+		t.Fatalf("shared file or folder scheduled for removal: files=%v dirs=%v", plan.Files, plan.Dirs)
+	}
+	if len(plan.Dirs) == 0 {
+		t.Fatalf("the record's own artifact folder is not scheduled: %+v", plan)
 	}
 }
 

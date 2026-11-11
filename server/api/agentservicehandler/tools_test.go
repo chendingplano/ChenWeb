@@ -210,15 +210,21 @@ func TestActiveKnowledgeAccessCheckerRequiresCurrentUserGrant(t *testing.T) {
 func TestSQLKnowledgeBackendSearchShapesBoundedEvidence(t *testing.T) {
 	t.Setenv("SEARCH_LEXICAL_BACKEND", "postgres")
 	t.Setenv("SEARCH_SEMANTIC_ENABLED", "false")
+	t.Setenv("SEARCH_QUERY_KEYWORDS", "off") // no LLM keyword step: the query text is the keyword list
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	searchColumns := []string{"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet"}
-	mock.ExpectQuery(`(?s)FROM kb\.search_artifacts sa.*agent_store\.id::text=\$2.*agent_input\.type=\$3.*LIMIT \$4 OFFSET \$5`).
-		WithArgs("pump", "7", "manual", 2, 0).
-		WillReturnRows(sqlmock.NewRows(searchColumns).AddRow("metric", "metric-7", int64(42), "Flow", "Nominal", "Pump guide", "pump.pdf", []byte(`[{"page":3,"line_start":10,"line_end":12}]`), []byte(`{"validation_status":"reviewed"}`), "{pump,flow}", 1.0, "Pump flow"))
+	// The search engine runs the keyword list (scope filters inside it), then loads the display fields
+	// of the kept artifacts; the agent backend then reads the source details of each hit.
+	mock.ExpectQuery(`(?s)SELECT sa\.artifact_type, sa\.artifact_id, .*FROM kb\.search_artifacts sa WHERE .*agent_store\.id::text=\$2.*agent_input\.type=\$3`).
+		WithArgs("pump", "7", "manual").
+		WillReturnRows(sqlmock.NewRows([]string{"artifact_type", "artifact_id", "score"}).AddRow("metric", "metric-7", 1.0))
+	mock.ExpectQuery(`(?s)JOIN unnest\(\$1::text\[\], \$2::text\[\]\)`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "pump").
+		WillReturnRows(sqlmock.NewRows([]string{"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "snippet"}).
+			AddRow("metric", "metric-7", int64(42), "Flow", "Nominal", "Pump guide", "pump.pdf", []byte(`[{"page":3,"line_start":10,"line_end":12}]`), []byte(`{"validation_status":"reviewed"}`), "{pump,flow}", "Pump flow"))
 	mock.ExpectQuery(`(?s)FROM kb\.search_artifacts sa.*sa\.artifact_type=\$1.*ks\.id::text=\$4`).
 		WithArgs("metric", "metric-7", int64(42), "7", "manual").
 		WillReturnRows(sqlmock.NewRows([]string{"ks_id", "type", "source_title", "source_version", "source_fingerprint", "validation_status"}).

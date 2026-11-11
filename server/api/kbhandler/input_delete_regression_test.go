@@ -13,15 +13,23 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestPlanInputDeletePathsRefusesUnrelatedRecordFolder(t *testing.T) {
+func TestPlanInputDeletePathsSkipsUnrelatedRecordFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DATA_HOME_DIR", home)
 	t.Setenv("ARTIFACT_DIR", filepath.Join(home, "Artifacts"))
-	_, err := planInputDeletePaths(656, inputDeleteAssets{
-		ResultFileName: filepath.Join(t.TempDir(), "656", "result.json"),
-	})
-	if err == nil {
-		t.Fatal("accepted an unrelated folder merely because it was named 656")
+	foreign := filepath.Join(t.TempDir(), "656", "result.json")
+	plan, err := planInputDeletePaths(656, inputDeleteAssets{ResultFileName: foreign})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	// A folder merely named 656, outside this record's artifact folders, is never removed.
+	for _, dir := range plan.Dirs {
+		if dir == filepath.Dir(foreign) {
+			t.Fatalf("accepted an unrelated folder merely because it was named 656: %v", plan.Dirs)
+		}
+	}
+	if !slices.Contains(plan.SkippedFiles, foreign) || slices.Contains(plan.Files, foreign) {
+		t.Fatalf("foreign result file not skipped: files=%v skipped=%v", plan.Files, plan.SkippedFiles)
 	}
 }
 

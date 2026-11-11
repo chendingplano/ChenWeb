@@ -77,9 +77,9 @@
 > through the engine on both backends. Not done: the `search-query-keywords` scenarios on the
 > engine path as separate tests, and a benchmark-page run (the golden comparison stands in).
 
-- [ ] 4.1 Unit tests for each scenario in `specs/hybrid-search-engine/spec.md` and the modified
+- [x] 4.1 Unit tests for each scenario in `specs/hybrid-search-engine/spec.md` and the modified
       scenarios in `specs/search-query-keywords/spec.md`
-- [ ] 4.2 Integration test on a disposable PostgreSQL with `pg_search` and `vector` (pattern of
+- [x] 4.2 Integration test on a disposable PostgreSQL with `pg_search` and `vector` (pattern of
       `chunk_search_integration_test.go`): exclusion before ranking, required keyword removing a
       vector-only result, cosine floor on a lexical-only result
 - [ ] 4.3 Live benchmark page run before and after; scores within run-to-run variance
@@ -95,3 +95,11 @@
 > Docs 2026-11-11: capsule rewritten (§2, §8, §9, §11, §13.2); Artifact Search row and
 > `module-artifact-search.md` at 1.1.0 (`modules.py check`: in sync); devdoc
 > `KnowledgeStore/doc-repo/devdocs/202611/2026111104-devdoc-search-engine-api.md`.
+
+> Archived 2026-11-11 with 4.3 open. 4.1 and 4.2 are covered by tests committed just before the archive
+> (jj `vqxy`): `TestKeywordExtractionFallbackAndClause` and `TestKeywordClauseCombinesWholeTermsAndWeights` in
+> `searchengine/engine_test.go`, and `TestDisposableCriteria` in `searchengine/criteria_disposable_test.go`
+> (needs `SEARCHENGINE_DISPOSABLE_INTEGRATION=1` and an empty database with `pg_search` and `vector`; passed on a
+> throwaway database that was then dropped). Their boxes were not ticked by whoever wrote the tests. 4.3, a
+> benchmark-page run before and after, is not done; the golden comparison (2.4) stands in for it. See the hand-off
+> `KnowledgeStore/doc-repo/hand-offs/202611/2026111101-hand-offs-search-engine-and-provisions-reviewer.md`.

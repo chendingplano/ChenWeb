@@ -131,7 +131,7 @@ func metricSourceAvailable(metric metricReviewInputMetric, index map[int]string)
 
 func readQuestionMetricEnglishNames(ctx context.Context, db *sql.DB, recordID int64) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT metric_id, COALESCE(metric_name_en, '') FROM kb.metrics
- WHERE input_record_id = $1 AND metric_id IS NOT NULL AND COALESCE(metric_name_en, '') <> ''`, recordID)
+ WHERE input_record_id = $1 AND ref_mention_id IS NULL AND metric_id IS NOT NULL AND COALESCE(metric_name_en, '') <> ''`, recordID)
 	if err != nil {
 		return nil, err
 	}

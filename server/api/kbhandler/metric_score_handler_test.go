@@ -196,8 +196,17 @@ func TestMetricScoreScorerParityAndInvalidMatches(t *testing.T) {
 	}
 	root := t.TempDir()
 	frozen, hashes, err := freezeMetricScoreTools(root, script)
-	if err != nil || len(hashes) != 2 {
-		t.Fatalf("freeze: %v %v", hashes, err)
+	if err != nil {
+		t.Fatalf("freeze: %v", err)
+	}
+	// The scorer, its weights, the benchmark helper and every rules file are frozen with a digest.
+	for _, name := range []string{
+		"score-extract-metrics/scripts/score_io.py", "score-extract-metrics/weights.json",
+		"extract-metrics-benchmark/scripts/benchmark_io.py", "extract-metrics-benchmark/rules/versions.json",
+	} {
+		if hashes[name] == "" {
+			t.Fatalf("%s not frozen: %v", name, hashes)
+		}
 	}
 	input := `{"record_id":416,"gold_run":{"skill_version":"3.0.0","model_name":"gold-model","benchmark_run_id":"20261007_120000","stand_in":false},"extraction":{"prompts_models_events":[],"created_at":["2026-10-07","2026-10-07"],"log_run_id":null,"exclusion_log":[]},"source":{"lines_comparable":true},"warnings":[],"gold_ledger":[],"gold":[{"metric_id":"g1","metric_name":"Temperature","metric_value":"20","value_range_type":"exact","kind":"requirement_with_criterion","metric_unit":"C","source_line_spans":["12"]}],"predictions":[{"metric_id":"p1","metric_name":"Temperature","metric_value":"30","value_range_type":"exact","kind":"requirement_with_criterion","metric_unit":"C","source_line_spans":["12"]}]}`
 	if err = os.WriteFile(filepath.Join(root, "input.json"), []byte(input), 0600); err != nil {
@@ -361,6 +370,37 @@ func testMetricScoreRunnerEndToEnd(t *testing.T, incompleteResponses int, invali
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(helperPath, helper, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The frozen tool set also holds the scorer's weights and every benchmark rules file.
+	realSkills := filepath.Dir(filepath.Dir(filepath.Dir(realScript)))
+	weights, err := os.ReadFile(filepath.Join(realSkills, "score-extract-metrics", "weights.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(tmp, "skills", "score-extract-metrics", "weights.json"), weights, 0600); err != nil {
+		t.Fatal(err)
+	}
+	realRules := filepath.Join(realSkills, "extract-metrics-benchmark", "rules")
+	err = filepath.WalkDir(realRules, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(realRules, path)
+		if relErr != nil {
+			return relErr
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		target := filepath.Join(tmp, "skills", "extract-metrics-benchmark", "rules", rel)
+		if mkErr := os.MkdirAll(filepath.Dir(target), 0700); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(target, raw, 0600)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	stub := `import os,sys,pathlib

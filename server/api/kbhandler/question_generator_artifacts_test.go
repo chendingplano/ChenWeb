@@ -337,10 +337,12 @@ func TestArtifactQuestionDocumentWithoutTargets(t *testing.T) {
 	requested := installArtifactQuestionFixture(t, []questionArtifactRow{artifactRow("summary", "416_sum_1", `["900"]`)})
 	logger := loggerutil.CreateDefaultLogger("20261111-915")
 	defer logger.Close()
-	for purpose, want := range map[string]string{
-		"search_knowledge": "document has no knowledge artifacts",
-		"search_summaries": "document has no summary artifacts linked to usable source lines",
+	// A slice, not a map: the test asserts the order of the requested types below.
+	for _, tc := range []struct{ purpose, want string }{
+		{"search_knowledge", "document has no knowledge artifacts"},
+		{"search_summaries", "document has no summary artifacts linked to usable source lines"},
 	} {
+		purpose, want := tc.purpose, tc.want
 		req := questionRequest(t, fmt.Sprintf(`{"input_record_id":416,"purpose":%q,"metrics_per_document":1}`, purpose))
 		if err := req.normalize(); err != nil {
 			t.Fatal(err)
