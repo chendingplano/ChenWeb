@@ -82,7 +82,7 @@ func IndexInventoryItemsForRecord(
 	objectEdges := indexArtifactObjectConnections(ctx, db, recordID, inventoryItemObjectConnectionConfig, logger)
 	// Semantic item<->item similarity is no longer materialized as
 	// hybrid_search/semantically_related edges: the inventory reviewer discovers it live via
-	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
+	// searchengine.Similar (always fresh, no directional edge bookkeeping). The
 	// hydration above still runs so kb.search_artifacts carries the embeddings the read-time
 	// hybrid search (and the inventory-item search path) rely on.
 

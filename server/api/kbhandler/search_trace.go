@@ -1,12 +1,13 @@
 package kbhandler
 
 import (
-	"database/sql"
-	"time"
+	"sort"
+
+	"github.com/chendingplano/deepdoc/server/api/searchengine"
 )
 
-// Hybrid search traces (openspec hybrid-search-benchmark-trace): the candidate lists a hybrid query
-// builds, read from the same CTEs in the same snapshot as the search. Only benchmark runs set a
+// Hybrid search traces (openspec hybrid-search-benchmark-trace): the candidate lists a hybrid search
+// builds, taken from the engine's own lists. Only benchmark runs set a
 // sink; live search never runs the trace statement.
 const (
 	searchTraceStageLexicalPartition = "lexical_partition" // each partition's BM25 list (ParadeDB)
@@ -52,92 +53,68 @@ type searchTraceCandidate struct {
 	SemanticRank  *int // fused rows
 }
 
-// hybridTraceQuery is the trace statement of one hybrid search: its CTEs plus hybridTraceSelect,
-// with the search's arguments minus page size and offset.
-type hybridTraceQuery struct {
-	sink     *searchTraceSink
-	sql      string
-	args     []any
-	offset   int
-	query    string
-	keywords []string
-}
-
-// hybridTraceSelect follows a hybrid query's CTEs and returns one row per candidate per stage. With
-// partitions (ParadeDB) it ranks lexical_partitions within each partition and gives each merged
-// lexical row its partition rank; tsvector has no per-partition lists.
-func hybridTraceSelect(partitions bool) string {
-	if !partitions {
-		return `
-SELECT 'lexical' AS stage, l.artifact_type, l.artifact_id, l.rnk AS stage_rank, l.score::float8 AS score,
-	NULL::bigint AS partition_rank, NULL::bigint AS lexical_rank, NULL::bigint AS semantic_rank
-FROM lexical l` + hybridTraceSemanticFused
-	}
-	return `,
-lexical_partition_ranks AS (
-	SELECT lp.artifact_type, lp.artifact_id, lp.score,
-		ROW_NUMBER() OVER (PARTITION BY lp.artifact_type ORDER BY lp.score DESC, lp.artifact_id ASC) AS rnk
-	FROM lexical_partitions lp
-)
-SELECT 'lexical_partition' AS stage, p.artifact_type, p.artifact_id, p.rnk AS stage_rank, p.score::float8 AS score,
-	NULL::bigint AS partition_rank, NULL::bigint AS lexical_rank, NULL::bigint AS semantic_rank
-FROM lexical_partition_ranks p
-UNION ALL
-SELECT 'lexical', l.artifact_type, l.artifact_id, l.rnk, l.score::float8, p.rnk, NULL, NULL
-FROM lexical l
-JOIN lexical_partition_ranks p ON p.artifact_type = l.artifact_type AND p.artifact_id = l.artifact_id` + hybridTraceSemanticFused
-}
-
-// The fused rank uses the production final ORDER BY (score, then artifact ID).
-const hybridTraceSemanticFused = `
-UNION ALL
-SELECT 'semantic', s.artifact_type, s.artifact_id, s.rnk, (1 - s.distance)::float8, NULL, NULL, NULL
-FROM semantic s
-UNION ALL
-SELECT 'fused', f.artifact_type, f.artifact_id, ROW_NUMBER() OVER (ORDER BY f.score DESC, f.artifact_id ASC), f.score, NULL, f.lexical_rnk, f.semantic_rnk
-FROM fused f`
-
-// run executes the trace statement in the search's transaction and appends its entry. It returns
-// false when the statement failed, which leaves the transaction unusable.
-func (q *hybridTraceQuery) run(tx *sql.Tx, results []artifactSearchResult) bool {
-	entry := searchTrace{Query: q.query, Keywords: q.keywords, Candidates: []searchTraceCandidate{}}
+// add records one search's candidate lists from the engine's trace: each partition's own list (ParadeDB
+// only), the merged keyword list the fusion used, the vector list and the fused list. The fused order is
+// checked against the returned page.
+func (s *searchTraceSink) add(query string, resp *searchengine.Response, results []artifactSearchResult, offset int) {
+	entry := searchTrace{Query: query, Keywords: resp.Keywords, Candidates: searchTraceCandidates(resp.Trace)}
 	if entry.Keywords == nil {
 		entry.Keywords = []string{}
 	}
-	start := time.Now()
-	candidates, err := scanSearchTrace(tx, q.sql, q.args)
-	entry.Ms = int(time.Since(start).Milliseconds())
-	ok := err == nil
-	switch {
-	case !ok:
-		entry.Error = "trace failed: " + err.Error()
-	case !traceMatchesResults(candidates, results, q.offset):
-		entry.Candidates, entry.Error = candidates, searchTraceErrMismatch
-	default:
-		entry.Candidates = candidates
+	if !traceMatchesResults(entry.Candidates, results, offset) {
+		entry.Error = searchTraceErrMismatch
 	}
-	q.sink.entries = append(q.sink.entries, entry)
-	return ok
+	s.entries = append(s.entries, entry)
 }
 
-func scanSearchTrace(tx *sql.Tx, sqlText string, args []any) ([]searchTraceCandidate, error) {
-	rows, err := tx.Query(sqlText, args...)
-	if err != nil {
-		return nil, err
+func searchTraceCandidates(t *searchengine.Trace) []searchTraceCandidate {
+	out := []searchTraceCandidate{}
+	// Rank within each partition: score descending, then artifact ID, as the partition's own list.
+	byPartition := map[string][]searchengine.TraceHit{}
+	for _, h := range t.LexicalPartitions {
+		byPartition[h.ArtifactType] = append(byPartition[h.ArtifactType], h)
 	}
-	defer rows.Close()
-	candidates := []searchTraceCandidate{}
-	for rows.Next() {
-		var c searchTraceCandidate
-		var partitionRank, lexicalRank, semanticRank sql.NullInt64
-		if err := rows.Scan(&c.Stage, &c.ArtifactType, &c.ArtifactID, &c.Rank, &c.Score, &partitionRank, &lexicalRank, &semanticRank); err != nil {
-			return nil, err
+	partitionRank := map[string]int{}
+	for typ, hits := range byPartition {
+		sort.SliceStable(hits, func(i, j int) bool {
+			if hits[i].Score != hits[j].Score {
+				return hits[i].Score > hits[j].Score
+			}
+			return hits[i].ArtifactID < hits[j].ArtifactID
+		})
+		for i, h := range hits {
+			rank := i + 1
+			partitionRank[typ+"/"+h.ArtifactID] = rank
+			out = append(out, searchTraceCandidate{
+				Stage: searchTraceStageLexicalPartition, PartitionName: searchArtifactPartition(typ),
+				ArtifactType: typ, ArtifactID: h.ArtifactID, Rank: rank, Score: h.Score,
+			})
 		}
-		c.PartitionName = searchArtifactPartition(c.ArtifactType)
-		c.PartitionRank, c.LexicalRank, c.SemanticRank = nullRank(partitionRank), nullRank(lexicalRank), nullRank(semanticRank)
-		candidates = append(candidates, c)
 	}
-	return candidates, rows.Err()
+	for i, h := range t.Lexical {
+		c := searchTraceCandidate{
+			Stage: searchTraceStageLexical, PartitionName: searchArtifactPartition(h.ArtifactType),
+			ArtifactType: h.ArtifactType, ArtifactID: h.ArtifactID, Rank: i + 1, Score: h.Score,
+		}
+		if r, ok := partitionRank[h.ArtifactType+"/"+h.ArtifactID]; ok {
+			c.PartitionRank = &r
+		}
+		out = append(out, c)
+	}
+	for i, h := range t.Vector {
+		out = append(out, searchTraceCandidate{
+			Stage: searchTraceStageSemantic, PartitionName: searchArtifactPartition(h.ArtifactType),
+			ArtifactType: h.ArtifactType, ArtifactID: h.ArtifactID, Rank: i + 1, Score: h.Score,
+		})
+	}
+	for i, f := range t.Fused {
+		out = append(out, searchTraceCandidate{
+			Stage: searchTraceStageFused, PartitionName: searchArtifactPartition(f.ArtifactType),
+			ArtifactType: f.ArtifactType, ArtifactID: f.ArtifactID, Rank: i + 1, Score: f.Score,
+			LexicalRank: f.LexicalRank, SemanticRank: f.VectorRank,
+		})
+	}
+	return out
 }
 
 // traceMatchesResults reports whether the results are the fused list from rank offset+1 on.

@@ -115,7 +115,7 @@ func IndexMetricsForRecord(
 	objectEdges := indexArtifactObjectConnections(ctx, db, recordID, metricObjectConnectionConfig, logger)
 	// Semantic metric<->metric similarity is no longer materialized as
 	// hybrid_search/semantically_related edges: the metrics reviewer discovers it live via
-	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
+	// searchengine.Similar (always fresh, no directional edge bookkeeping). The
 	// hydration above still runs so kb.search_artifacts carries the embeddings the
 	// read-time hybrid search (and the /kb/metrics/search path) rely on.
 

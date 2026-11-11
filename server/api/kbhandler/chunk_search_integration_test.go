@@ -130,14 +130,11 @@ func TestChunkSearchPostgresIntegration(t *testing.T) {
 	cfg := registrySearchConfig{dictionary: "simple", previewMaxWords: 20, lexicalWeight: 1, semanticWeight: 1, candidateLimit: 20}
 	for _, backend := range []string{"postgres", "paradedb"} {
 		t.Run(backend, func(t *testing.T) {
-			var got []artifactSearchResult
-			var err error
+			t.Setenv("SEARCH_LEXICAL_BACKEND", backend)
+			// The query vector is the tail window's, handed over so the test model is not called.
+			vctx := withPrecomputedEmbedding(context.Background(), "semantic-only-query", tail)
 			filters := artifactSearchFilters{ArtifactTypes: []string{"chunk"}, InputRecordID: func() *int64 { v := int64(42); return &v }()}
-			if backend == "postgres" {
-				got, err = queryHybridSearchResults(db, "all", "semantic-only-query", tail, filters, 1, 20, cfg)
-			} else {
-				got, err = queryHybridSearchResultsParadeDB(db, "all", "semantic-only-query", tail, filters, 1, 20, cfg)
-			}
+			got, err := queryRegistrySearchResultsCtx(vctx, db, "all", "semantic-only-query", filters, 1, 20, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,18 +142,20 @@ func TestChunkSearchPostgresIntegration(t *testing.T) {
 				t.Fatalf("tail match not first or duplicate chunks: %+v", got)
 			}
 			filters.InputRecordID = func() *int64 { v := int64(99); return &v }()
-			got, err = queryHybridSearchResults(db, "all", "semantic-only-query", tail, filters, 1, 20, cfg)
+			got, err = queryRegistrySearchResultsCtx(vctx, db, "all", "semantic-only-query", filters, 1, 20, cfg)
 			if err != nil || len(got) != 0 {
 				t.Fatalf("window filter leaked: %+v %v", got, err)
 			}
 		})
 	}
-	// Exact lexical tail retrieval and global chunk selection use real BM25.
+	// Exact lexical tail retrieval and global chunk selection use real BM25 (keyword list only).
 	t.Setenv("SEARCH_LEXICAL_BACKEND", "paradedb")
-	got, err := queryRegistrySearchResultsParadeDB(db, "chunk", "tailneedle", artifactSearchFilters{}, 1, 10, cfg)
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "false")
+	got, err := queryRegistrySearchResults(db, "chunk", "tailneedle", artifactSearchFilters{}, 1, 10, cfg)
 	if err != nil || len(got) != 1 || got[0].ArtifactID != "42_chk_2" {
 		t.Fatalf("lexical tail: %+v %v", got, err)
 	}
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "true")
 
 	// A failed later window is retained as text and recovered by ordinary embedding backfill.
 	fail.Store(true)

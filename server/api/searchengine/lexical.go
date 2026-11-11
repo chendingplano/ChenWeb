@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // paradeDBFields are the text fields of the kb.search_artifacts BM25 index (Jieba tokenizer).
@@ -72,10 +73,11 @@ func truncateRunes(s string, n int) string {
 }
 
 // lexicalParadeDB runs one BM25 query per partition (UNION ALL, each limited) and merges by score.
-func lexicalParadeDB(ctx context.Context, db *sql.DB, s lexSpec, f Filters, self *ArtifactRef) ([]lexHit, error) {
+// It also returns every partition's own rows before merging, for traces.
+func lexicalParadeDB(ctx context.Context, db *sql.DB, s lexSpec, f Filters, self *ArtifactRef, limit int) (merged, perPartition []lexHit, err error) {
 	tables, err := partitionsFor(f.ArtifactTypes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var a argList
 	where := andJoin(append([]string{paradeDBClause(&a, s)}, filterClauses(&a, f, self, false)...))
@@ -83,9 +85,26 @@ func lexicalParadeDB(ctx context.Context, db *sql.DB, s lexSpec, f Filters, self
 	for _, t := range tables {
 		branches = append(branches, fmt.Sprintf(
 			"(SELECT sa.artifact_type, sa.artifact_id, pdb.score(sa.artifact_id)::float8 AS score FROM %s sa WHERE %s ORDER BY pdb.score(sa.artifact_id) DESC LIMIT %d)",
-			t, where, candidateLimit))
+			t, where, limit))
 	}
-	return scanLexical(ctx, db, strings.Join(branches, "\nUNION ALL\n"), a.vals)
+	return scanLexical(ctx, db, strings.Join(branches, "\nUNION ALL\n"), a.vals, limit)
+}
+
+// countParadeDB counts the artifacts the keyword clause matches (no candidate limit).
+func countParadeDB(ctx context.Context, db *sql.DB, s lexSpec, f Filters) (int64, error) {
+	tables, err := partitionsFor(f.ArtifactTypes)
+	if err != nil {
+		return 0, err
+	}
+	var a argList
+	where := andJoin(append([]string{paradeDBClause(&a, s)}, filterClauses(&a, f, nil, false)...))
+	branches := make([]string, 0, len(tables))
+	for _, t := range tables {
+		branches = append(branches, fmt.Sprintf("(SELECT 1 FROM %s sa WHERE %s)", t, where))
+	}
+	var n int64
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM ("+strings.Join(branches, "\nUNION ALL\n")+") matched", a.vals...).Scan(&n)
+	return n, err
 }
 
 func pgVector(dict string) string {
@@ -93,10 +112,38 @@ func pgVector(dict string) string {
 }
 
 // lexicalPostgres ranks with full text: keywords are OR-ed, each keyword's ts_rank_cd times its weight.
-func lexicalPostgres(ctx context.Context, db *sql.DB, dict string, s lexSpec, f Filters, self *ArtifactRef) ([]lexHit, error) {
+func lexicalPostgres(ctx context.Context, db *sql.DB, cfg Config, s lexSpec, f Filters, self *ArtifactRef) ([]lexHit, error) {
 	var a argList
+	match, score, err := postgresMatch(&a, cfg, s)
+	if err != nil {
+		return nil, err
+	}
+	where := andJoin(append([]string{match}, filterClauses(&a, f, self, true)...))
+	q := fmt.Sprintf("SELECT sa.artifact_type, sa.artifact_id, (%s)::float8 AS score FROM kb.search_artifacts sa WHERE %s ORDER BY score DESC, sa.artifact_id ASC LIMIT %d",
+		score, where, cfg.candidates())
+	merged, _, err := scanLexical(ctx, db, q, a.vals, cfg.candidates())
+	return merged, err
+}
+
+// countPostgres counts the artifacts the full-text condition matches (no candidate limit).
+func countPostgres(ctx context.Context, db *sql.DB, cfg Config, s lexSpec, f Filters) (int64, error) {
+	var a argList
+	match, _, err := postgresMatch(&a, cfg, s)
+	if err != nil {
+		return 0, err
+	}
+	where := andJoin(append([]string{match}, filterClauses(&a, f, nil, true)...))
+	var n int64
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM kb.search_artifacts sa WHERE "+where, a.vals...).Scan(&n)
+	return n, err
+}
+
+// postgresMatch renders the full-text match condition and score of a lexSpec. A raw query containing
+// Chinese, Japanese or Korean text also matches by substring in the labels and document (the
+// tsvector dictionary does not segment those scripts) and scores label hits higher.
+func postgresMatch(a *argList, cfg Config, s lexSpec) (match, score string, err error) {
+	dict := cfg.Dictionary
 	vec := pgVector(dict)
-	var match, score string
 	switch {
 	case len(s.keywords) > 0:
 		var queries, scores []string
@@ -108,44 +155,62 @@ func lexicalPostgres(ctx context.Context, db *sql.DB, dict string, s lexSpec, f 
 		match = vec + " @@ (" + strings.Join(queries, " || ") + ")"
 		score = strings.Join(scores, " + ")
 	case s.raw != "":
-		q := fmt.Sprintf("plainto_tsquery('%s', %s)", dict, a.add(s.raw))
+		p := a.add(s.raw)
+		fn := "plainto_tsquery"
+		if cfg.PhraseFriendly {
+			fn = "websearch_to_tsquery"
+		}
+		q := fmt.Sprintf("%s('%s', %s)", fn, dict, p)
 		match, score = vec+" @@ "+q, fmt.Sprintf("ts_rank_cd(%s, %s)", vec, q)
+		if containsCJK(s.raw) {
+			like := func(col string) string { return fmt.Sprintf("coalesce(sa.%s, '') ILIKE '%%' || %s || '%%'", col, p) }
+			match = fmt.Sprintf("(%s OR %s OR %s OR %s OR %s)", match, like("primary_label"), like("secondary_label"), like("snippet_basis"), like("search_document"))
+			score += fmt.Sprintf(" + CASE WHEN %s THEN 1.25 ELSE 0 END + CASE WHEN %s THEN 0.50 ELSE 0 END + CASE WHEN %s THEN 0.40 ELSE 0 END + CASE WHEN %s THEN 0.20 ELSE 0 END",
+				like("primary_label"), like("secondary_label"), like("snippet_basis"), like("search_document"))
+		}
 	default:
-		return nil, fmt.Errorf("searchengine: the Postgres keyword list needs keywords or a query text")
+		return "", "", fmt.Errorf("searchengine: the Postgres keyword list needs keywords or a query text")
 	}
-	where := andJoin(append([]string{match}, filterClauses(&a, f, self, true)...))
-	q := fmt.Sprintf("SELECT sa.artifact_type, sa.artifact_id, (%s)::float8 AS score FROM kb.search_artifacts sa WHERE %s ORDER BY score DESC, sa.artifact_id ASC LIMIT %d",
-		score, where, candidateLimit)
-	return scanLexical(ctx, db, q, a.vals)
+	return match, score, nil
 }
 
-func scanLexical(ctx context.Context, db *sql.DB, query string, args []any) ([]lexHit, error) {
+func containsCJK(s string) bool {
+	for _, r := range s {
+		if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
+			return true
+		}
+	}
+	return false
+}
+
+func scanLexical(ctx context.Context, db *sql.DB, query string, args []any, limit int) (merged, raw []lexHit, err error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var hits []lexHit
 	for rows.Next() {
 		var h lexHit
 		if err := rows.Scan(&h.typ, &h.id, &h.score); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		hits = append(hits, h)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	raw = append([]lexHit(nil), hits...)
 	sort.SliceStable(hits, func(i, j int) bool {
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}
 		return hits[i].id < hits[j].id
 	})
-	if len(hits) > candidateLimit {
-		hits = hits[:candidateLimit]
+	if len(hits) > limit {
+		hits = hits[:limit]
 	}
-	return hits, nil
+	return hits, raw, nil
 }
 
 // keywordMatches reports, per keyword, which of the candidates match it: every token of the keyword

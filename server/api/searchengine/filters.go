@@ -24,6 +24,9 @@ var partitionTypes = []string{
 	"relation", "scene_block", "semantic_projection", "summary", "topic",
 }
 
+// PartitionTypes lists the artifact types that have a kb.search_artifacts_<type> partition.
+func PartitionTypes() []string { return slices.Clone(partitionTypes) }
+
 // partitionsFor returns the partition tables a BM25 query reads. An unknown type is an error: names
 // are rendered into SQL, so they must come from partitionTypes.
 func partitionsFor(types []string) ([]string, error) {

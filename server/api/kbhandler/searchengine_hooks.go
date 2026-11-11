@@ -10,7 +10,7 @@ import (
 // here are registered with it once, when the package loads: the query embedder (configured embedding
 // model) and the query-keyword extractor (prompt loading, model, cache, timeout).
 func init() {
-	searchengine.SetEmbedder(computeQueryEmbedding)
+	searchengine.SetEmbedder(searchQueryEmbedding)
 	searchengine.SetKeywordExtractor(func(ctx context.Context, query string, force bool) []string {
 		if force {
 			on := true

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,9 +23,10 @@ func Search(ctx context.Context, db *sql.DB, cfg Config, req Request) (*Response
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	if limit > maxLimit {
-		limit = maxLimit
+	if ceiling := max(maxLimit, cfg.candidates()); limit > ceiling {
+		limit = ceiling
 	}
+	offset := max(0, req.Options.Offset)
 
 	var ref *refRow
 	if req.Query.Ref != nil {
@@ -45,18 +47,27 @@ func Search(ctx context.Context, db *sql.DB, cfg Config, req Request) (*Response
 		resp.Keywords = append(resp.Keywords, k.Term)
 	}
 
-	var lexical []lexHit
+	var lexical, lexicalRaw []lexHit
 	if !spec.empty() {
 		var err error
-		lexical, err = lexicalList(ctx, db, cfg, spec, req.Filters, req.Query.Ref)
+		lexical, lexicalRaw, err = lexicalList(ctx, db, cfg, spec, req.Filters, req.Query.Ref)
 		if err != nil {
 			return nil, fmt.Errorf("searchengine: keyword list: %w", err)
+		}
+		if vecLiteral == "" && cfg.MinLexicalScore > 0 {
+			kept := lexical[:0:0]
+			for _, h := range lexical {
+				if h.score >= cfg.MinLexicalScore {
+					kept = append(kept, h)
+				}
+			}
+			lexical = kept
 		}
 	}
 	var vector []vecHit
 	if vecLiteral != "" {
 		var err error
-		vector, err = vectorList(ctx, db, vecLiteral, req.Filters, req.Query.Ref)
+		vector, err = vectorList(ctx, db, vecLiteral, req.Filters, req.Query.Ref, cfg.candidates())
 		if err != nil {
 			return nil, fmt.Errorf("searchengine: vector list: %w", err)
 		}
@@ -64,6 +75,9 @@ func Search(ctx context.Context, db *sql.DB, cfg Config, req Request) (*Response
 
 	fused := fuse(cfg, lexical, vector)
 	resp.Candidates = len(fused)
+	if req.Options.Trace {
+		resp.Trace = buildTrace(lexical, lexicalRaw, vector, fused)
+	}
 	if err := applyCriteria(ctx, db, cfg, vecLiteral, req.Criteria, fused, resp); err != nil {
 		return nil, err
 	}
@@ -73,10 +87,18 @@ func Search(ctx context.Context, db *sql.DB, cfg Config, req Request) (*Response
 			kept = append(kept, c)
 		}
 	}
+	if offset > len(kept) {
+		offset = len(kept)
+	}
+	kept = kept[offset:]
 	if len(kept) > limit {
 		kept = kept[:limit]
 	}
-	results, err := loadResults(ctx, db, kept)
+	headline := ""
+	if cfg.Backend == BackendPostgres {
+		headline = strings.TrimSpace(req.Query.Text)
+	}
+	results, err := loadResults(ctx, db, cfg, headline, kept, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -86,17 +108,58 @@ func Search(ctx context.Context, db *sql.DB, cfg Config, req Request) (*Response
 
 // lexicalList runs the keyword list on the configured backend. A ParadeDB failure falls back to
 // Postgres full text, as the HTTP search does.
-func lexicalList(ctx context.Context, db *sql.DB, cfg Config, s lexSpec, f Filters, self *ArtifactRef) ([]lexHit, error) {
+func lexicalList(ctx context.Context, db *sql.DB, cfg Config, s lexSpec, f Filters, self *ArtifactRef) (merged, perPartition []lexHit, err error) {
 	if cfg.Backend != BackendPostgres {
-		hits, err := lexicalParadeDB(ctx, db, s, f, self)
+		hits, raw, err := lexicalParadeDB(ctx, db, s, f, self, cfg.candidates())
 		if err == nil {
-			return hits, nil
+			return hits, raw, nil
 		}
 		if s.mlt != "" || s.raw == "" && len(s.keywords) == 0 {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return lexicalPostgres(ctx, db, cfg.Dictionary, s, f, self)
+	hits, err := lexicalPostgres(ctx, db, cfg, s, f, self)
+	return hits, nil, err
+}
+
+// Count returns how many artifacts the keyword list matches, ignoring the candidate limit: the total
+// the HTTP search reports. It uses the same keywords as Search, and the same ParadeDB-to-Postgres
+// fallback. A request with a reference counts nothing useful and is rejected.
+func Count(ctx context.Context, db *sql.DB, cfg Config, req Request) (int64, error) {
+	if err := req.validate(); err != nil {
+		return 0, err
+	}
+	if req.Query.Ref != nil {
+		return 0, errors.New("searchengine: Count takes a text query")
+	}
+	spec := resolveKeywordList(ctx, cfg, req, nil)
+	if spec.empty() {
+		return 0, nil
+	}
+	if cfg.Backend != BackendPostgres {
+		if n, err := countParadeDB(ctx, db, spec, req.Filters); err == nil {
+			return n, nil
+		}
+	}
+	return countPostgres(ctx, db, cfg, spec, req.Filters)
+}
+
+// buildTrace copies the search's lists for Response.Trace.
+func buildTrace(lexical, lexicalRaw []lexHit, vector []vecHit, fused []*fusedCand) *Trace {
+	t := &Trace{}
+	for _, h := range lexicalRaw {
+		t.LexicalPartitions = append(t.LexicalPartitions, TraceHit{h.typ, h.id, h.score})
+	}
+	for _, h := range lexical {
+		t.Lexical = append(t.Lexical, TraceHit{h.typ, h.id, h.score})
+	}
+	for _, h := range vector {
+		t.Vector = append(t.Vector, TraceHit{h.typ, h.id, 1 - h.distance})
+	}
+	for _, c := range fused {
+		t.Fused = append(t.Fused, TraceFused{c.typ, c.id, c.score, c.diag.LexicalRank, c.diag.VectorRank})
+	}
+	return t
 }
 
 // refRow is the stored data of a referenced artifact.
@@ -308,7 +371,8 @@ func applyCriteria(ctx context.Context, db *sql.DB, cfg Config, vecLiteral strin
 }
 
 // loadResults loads the display fields of the kept candidates and assigns ranks.
-func loadResults(ctx context.Context, db *sql.DB, kept []*fusedCand) ([]Result, error) {
+// A non-empty headline (Postgres backend) highlights the snippet against that query text.
+func loadResults(ctx context.Context, db *sql.DB, cfg Config, headline string, kept []*fusedCand, offset int) ([]Result, error) {
 	if len(kept) == 0 {
 		return nil, nil
 	}
@@ -317,15 +381,30 @@ func loadResults(ctx context.Context, db *sql.DB, kept []*fusedCand) ([]Result, 
 	for i, c := range kept {
 		types[i], ids[i] = c.typ, c.id
 	}
+	snippet := "COALESCE(NULLIF(sa.snippet_basis, ''), NULLIF(sa.search_document, ''), COALESCE(sa.primary_label, ''))"
+	args := []any{pq.Array(types), pq.Array(ids)}
+	if headline != "" {
+		fn := "plainto_tsquery"
+		if cfg.PhraseFriendly {
+			fn = "websearch_to_tsquery"
+		}
+		words := cfg.PreviewWords
+		if words <= 0 {
+			words = 30
+		}
+		opts := fmt.Sprintf("MaxWords=%d, MinWords=%d, ShortWord=2, HighlightAll=false, MaxFragments=1, FragmentDelimiter=' ... '", words, max(6, words/2))
+		snippet = fmt.Sprintf("ts_headline('%s', %s, %s('%s', $3), '%s')", cfg.Dictionary, snippet, fn, cfg.Dictionary, strings.ReplaceAll(opts, "'", "''"))
+		args = append(args, headline)
+	}
 	rows, err := db.QueryContext(ctx, `
 SELECT sa.artifact_type, sa.artifact_id, sa.input_record_id,
 	COALESCE(sa.primary_label, ''), COALESCE(sa.secondary_label, ''),
 	COALESCE(sa.source_title, ''), COALESCE(sa.source_filename, ''),
 	COALESCE(sa.source_line_spans, '[]'::jsonb), COALESCE(sa.semantic_payload, '{}'::jsonb), COALESCE(sa.keywords, '{}'),
-	COALESCE(NULLIF(sa.snippet_basis, ''), NULLIF(sa.search_document, ''), COALESCE(sa.primary_label, ''))
+	`+snippet+`
 FROM kb.search_artifacts sa
 JOIN unnest($1::text[], $2::text[]) u(t, i) ON sa.artifact_type = u.t AND sa.artifact_id = u.i`,
-		pq.Array(types), pq.Array(ids))
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("searchengine: load results: %w", err)
 	}
@@ -350,7 +429,7 @@ JOIN unnest($1::text[], $2::text[]) u(t, i) ON sa.artifact_type = u.t AND sa.art
 		if !ok {
 			continue // the row vanished between the lists and this read
 		}
-		r.Rank, r.Score, r.Diag = len(out)+1, c.score, c.diag
+		r.Rank, r.Score, r.Diag = offset+len(out)+1, c.score, c.diag
 		out = append(out, r)
 	}
 	return out, nil

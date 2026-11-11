@@ -192,3 +192,34 @@ func TestCleanKeywordsAndFrequentTerms(t *testing.T) {
 		t.Errorf("frequentTerms = %v", ft)
 	}
 }
+
+func TestConfigCandidatesDefaultsAndOverride(t *testing.T) {
+	if got := (Config{}).candidates(); got != candidateLimit {
+		t.Fatalf("default candidates = %d", got)
+	}
+	if got := (Config{CandidateLimit: 37}).candidates(); got != 37 {
+		t.Fatalf("override candidates = %d", got)
+	}
+}
+
+func TestBuildTraceCopiesTheLists(t *testing.T) {
+	one, two := 1, 2
+	fused := []*fusedCand{{candKey: candKey{"metric", "a"}, score: 0.03, diag: Diagnostics{LexicalRank: &one, VectorRank: &two}}}
+	tr := buildTrace(
+		[]lexHit{{"metric", "a", 9.5}},
+		[]lexHit{{"metric", "a", 9.5}, {"metric", "b", 3}},
+		[]vecHit{{candKey{"metric", "a"}, 0.25}},
+		fused)
+	if len(tr.Lexical) != 1 || len(tr.LexicalPartitions) != 2 || tr.Vector[0].Score != 0.75 ||
+		tr.Fused[0].LexicalRank != &one || tr.Fused[0].VectorRank != &two {
+		t.Fatalf("trace = %+v", tr)
+	}
+}
+
+func TestContainsCJK(t *testing.T) {
+	for in, want := range map[string]bool{"safety": false, "安全 valve": true, "セーフティ": true, "": false} {
+		if got := containsCJK(in); got != want {
+			t.Errorf("containsCJK(%q) = %v", in, got)
+		}
+	}
+}

@@ -108,7 +108,7 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		return searchRegistryArtifactsWithEffort(c, logger, artifactType, queryText, filters, page, pageSize, cfg, effort)
 	}
 
-	total, err := countRegistrySearchResults(ApiTypes.ProjectDBHandle, artifactType, queryText, filters, cfg)
+	total, err := registrySearchCount(ApiTypes.ProjectDBHandle, artifactType, queryText, filters, cfg)
 	if err != nil {
 		logger.Error("count registry search failed", "artifact_type", artifactType, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -117,7 +117,7 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		})
 	}
 
-	results, err := queryRegistrySearchResults(ApiTypes.ProjectDBHandle, artifactType, queryText, filters, page, pageSize, cfg)
+	results, err := registrySearchQuery(ApiTypes.ProjectDBHandle, artifactType, queryText, filters, page, pageSize, cfg)
 	if err != nil {
 		logger.Error("query registry search failed", "artifact_type", artifactType, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{

@@ -76,7 +76,10 @@ const (
 
 type Options struct {
 	Limit             int // results returned; 0 = DefaultLimit
+	Offset            int // results skipped before Limit (paging over the fused list)
 	KeywordExtraction KeywordExtraction
+	// Trace asks for the candidate lists of the search in Response.Trace (benchmarks).
+	Trace bool
 }
 
 type Request struct {
@@ -102,7 +105,7 @@ type Result struct {
 	ArtifactType    string
 	ArtifactID      string
 	InputRecordID   int64
-	Rank            int // 1-based position in this response
+	Rank            int // 1-based position in the fused list (Options.Offset+1 for the first result)
 	Score           float64
 	Diag            Diagnostics
 	PrimaryLabel    string
@@ -123,17 +126,44 @@ type Removed struct {
 	MinCosine  int `json:"min_cosine"`
 }
 
+// TraceHit is one entry of a candidate list.
+type TraceHit struct {
+	ArtifactType string
+	ArtifactID   string
+	Score        float64 // BM25 / ts_rank_cd for the keyword lists; cosine similarity for the vector list
+}
+
+// TraceFused is one fused candidate before criteria and paging.
+type TraceFused struct {
+	ArtifactType string
+	ArtifactID   string
+	Score        float64
+	LexicalRank  *int
+	VectorRank   *int
+}
+
+// Trace holds the candidate lists a search built, in rank order.
+type Trace struct {
+	// LexicalPartitions are each partition's own list before merging (ParadeDB only), unsorted
+	// across partitions.
+	LexicalPartitions []TraceHit
+	Lexical           []TraceHit // the merged keyword list the fusion used
+	Vector            []TraceHit
+	Fused             []TraceFused
+}
+
 type Response struct {
 	Results    []Result
 	Candidates int // fused candidates before criteria and the limit
 	Removed    Removed
 	// Keywords are the terms the keyword list used; empty when it used the raw query text.
 	Keywords []string
+	Trace    *Trace // set when Options.Trace is on
 }
 
 const (
 	DefaultLimit   = 20
-	maxLimit       = 200
+	maxLimit       = 200 // raised to the candidate limit when that is larger
 	rrfK           = 60
 	candidateLimit = 200
 )

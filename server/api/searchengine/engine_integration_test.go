@@ -196,3 +196,79 @@ func TestIntegrationWeightedKeywordsRankHigher(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegrationOffsetPagesTheFusedList(t *testing.T) {
+	db, _, _ := integrationDB(t)
+	for _, backend := range []Backend{BackendParadeDB, BackendPostgres} {
+		cfg := integrationConfig(backend)
+		search := func(limit, offset int) *Response {
+			resp, err := Search(context.Background(), db, cfg, Request{
+				Query:   Query{Text: "安全"},
+				Filters: Filters{ArtifactTypes: []string{"provision"}},
+				Options: Options{Limit: limit, Offset: offset, KeywordExtraction: KeywordExtractionOff},
+			})
+			if err != nil {
+				t.Fatalf("%s: %v", backend, err)
+			}
+			return resp
+		}
+		whole, first, second := search(10, 0), search(5, 0), search(5, 5)
+		if len(whole.Results) < 10 {
+			t.Skipf("%s: only %d results for the paging query", backend, len(whole.Results))
+		}
+		got := append(append([]Result{}, first.Results...), second.Results...)
+		for i, r := range got {
+			if r.ArtifactID != whole.Results[i].ArtifactID || r.Rank != i+1 {
+				t.Fatalf("%s: page entry %d is %s rank %d, whole list has %s", backend, i, r.ArtifactID, r.Rank, whole.Results[i].ArtifactID)
+			}
+		}
+	}
+}
+
+func TestIntegrationCountAndTrace(t *testing.T) {
+	db, _, _ := integrationDB(t)
+	for _, backend := range []Backend{BackendParadeDB, BackendPostgres} {
+		cfg := integrationConfig(backend)
+		req := Request{
+			Query:   Query{Text: "安全"},
+			Filters: Filters{ArtifactTypes: []string{"provision"}},
+			Options: Options{Limit: 5, KeywordExtraction: KeywordExtractionOff, Trace: true},
+		}
+		resp, err := Search(context.Background(), db, cfg, req)
+		if err != nil {
+			t.Fatalf("%s: %v", backend, err)
+		}
+		total, err := Count(context.Background(), db, cfg, req)
+		if err != nil || total < int64(len(resp.Results)) {
+			t.Fatalf("%s: count=%d results=%d err=%v", backend, total, len(resp.Results), err)
+		}
+		if resp.Trace == nil || len(resp.Trace.Fused) != resp.Candidates || len(resp.Trace.Lexical) == 0 {
+			t.Fatalf("%s: trace=%+v candidates=%d", backend, resp.Trace, resp.Candidates)
+		}
+		if len(resp.Results) > 0 && resp.Trace.Fused[0].ArtifactID != resp.Results[0].ArtifactID {
+			t.Fatalf("%s: fused list starts with %s, results with %s", backend, resp.Trace.Fused[0].ArtifactID, resp.Results[0].ArtifactID)
+		}
+		if backend == BackendParadeDB && len(resp.Trace.LexicalPartitions) < len(resp.Trace.Lexical) {
+			t.Fatalf("%s: partition rows %d < merged rows %d", backend, len(resp.Trace.LexicalPartitions), len(resp.Trace.Lexical))
+		}
+		if backend == BackendPostgres && len(resp.Trace.LexicalPartitions) != 0 {
+			t.Fatalf("%s: Postgres has no partition lists", backend)
+		}
+	}
+}
+
+func TestIntegrationPostgresMatchesChineseBySubstring(t *testing.T) {
+	db, _, _ := integrationDB(t)
+	cfg := integrationConfig(BackendPostgres)
+	resp, err := Search(context.Background(), db, cfg, Request{
+		Query:   Query{Text: "安全"},
+		Filters: Filters{ArtifactTypes: []string{"provision"}},
+		Options: Options{Limit: 5, KeywordExtraction: KeywordExtractionOff},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatal("no provision matched 安全 by substring")
+	}
+}

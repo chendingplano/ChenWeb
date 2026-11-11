@@ -63,6 +63,29 @@ func computeQueryEmbedding(ctx context.Context, queryText string) ([]float64, bo
 	return vec, true
 }
 
+type precomputedEmbeddingKey struct{}
+
+type precomputedEmbedding struct {
+	text string
+	vec  []float64
+}
+
+// withPrecomputedEmbedding lets a caller that already embedded a query (the benchmark times the embedding
+// call itself) hand the vector to the searches that follow, so the model is not called again. It applies
+// to that exact text only.
+func withPrecomputedEmbedding(ctx context.Context, text string, vec []float64) context.Context {
+	return context.WithValue(ctx, precomputedEmbeddingKey{}, precomputedEmbedding{text: strings.TrimSpace(text), vec: vec})
+}
+
+// searchQueryEmbedding is the query embedder the search engine calls: a precomputed vector for the
+// text when the context carries one, else the configured model.
+func searchQueryEmbedding(ctx context.Context, queryText string) ([]float64, bool) {
+	if pre, ok := ctx.Value(precomputedEmbeddingKey{}).(precomputedEmbedding); ok && pre.text == strings.TrimSpace(queryText) {
+		return pre.vec, len(pre.vec) > 0
+	}
+	return computeQueryEmbedding(ctx, queryText)
+}
+
 func truncateRunesForEmbedding(s string, max int) string {
 	if max <= 0 {
 		return s

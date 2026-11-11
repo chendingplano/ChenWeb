@@ -15,7 +15,7 @@ import (
 )
 
 // Replaced in tests; production uses the live query embedding, keyword extraction and the
-// backend's hybrid query, so the benchmark measures exactly what the search API runs.
+// search engine's hybrid query, so the benchmark measures exactly what the search API runs.
 var (
 	hybridBenchEmbed    = computeQueryEmbedding
 	hybridBenchKeywords = searchQueryKeywords
@@ -23,10 +23,8 @@ var (
 		return searchWithEffort(ctx, db, searchType, query, artifactSearchFilters{}, cfg.candidates(), cfg, effort)
 	}
 	hybridBenchSearch = func(db *sql.DB, searchType, query string, vec []float64, cfg registrySearchConfig) ([]artifactSearchResult, error) {
-		if registryLexicalBackend() == lexicalBackendParadeDB {
-			return queryHybridSearchResultsParadeDB(db, searchType, query, vec, artifactSearchFilters{}, 1, cfg.candidates(), cfg)
-		}
-		return queryHybridSearchResults(db, searchType, query, vec, artifactSearchFilters{}, 1, cfg.candidates(), cfg)
+		ctx := withPrecomputedEmbedding(withSearchCall(context.Background(), cfg.call), query, vec)
+		return queryRegistrySearchResultsCtx(ctx, db, searchType, query, artifactSearchFilters{}, 1, cfg.candidates(), cfg)
 	}
 )
 

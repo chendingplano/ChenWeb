@@ -22,7 +22,7 @@ func pqStrings(s []string) any { return pq.Array(s) }
 //
 // The candidates come from a plain ORDER BY distance LIMIT, the only shape pgvector serves from its
 // index. Iterative scans keep an HNSW scan going until the LIMIT is met even when filters drop rows.
-func vectorList(ctx context.Context, db *sql.DB, vecLiteral string, f Filters, self *ArtifactRef) ([]vecHit, error) {
+func vectorList(ctx context.Context, db *sql.DB, vecLiteral string, f Filters, self *ArtifactRef, limit int) ([]vecHit, error) {
 	a := argList{}
 	v := a.add(vecLiteral)
 	filter := ""
@@ -40,7 +40,7 @@ SELECT artifact_type, artifact_id, MIN(distance) AS distance FROM (
 	 JOIN kb.search_artifacts sa ON sa.artifact_type = 'chunk' AND sa.artifact_id = cw.artifact_id
 	 WHERE cw.embedding IS NOT NULL%[2]s
 	 ORDER BY cw.embedding <=> %[1]s::vector LIMIT %[3]d)
-) w GROUP BY artifact_type, artifact_id ORDER BY distance, artifact_id LIMIT %[3]d`, v, filter, candidateLimit)
+) w GROUP BY artifact_type, artifact_id ORDER BY distance, artifact_id LIMIT %[3]d`, v, filter, limit)
 
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
