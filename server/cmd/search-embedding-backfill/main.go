@@ -82,6 +82,13 @@ func main() {
 					failed++
 					continue
 				}
+				if r.ArtifactType == "chunk" {
+					if err := kbsearch.UpdateChunkEmbeddings(ctx, db, r); err != nil {
+						log.Fatalf("update chunk embeddings: %v", err)
+					}
+					embedded++
+					continue
+				}
 				if _, err := db.ExecContext(ctx, updateSQL, kbsearch.FormatVectorLiteral(r.Embedding), r.EmbeddingText, r.ArtifactType, r.ArtifactID); err != nil {
 					log.Fatalf("[%s] update %s: %v", at, r.ArtifactID, err)
 				}
@@ -105,7 +112,7 @@ func main() {
 }
 
 func selectCandidates(ctx context.Context, db *sql.DB, artifactType, afterID string, reembed bool, limit int) ([]kbsearch.RegistryRow, error) {
-	q := `SELECT artifact_id, COALESCE(NULLIF(embedding_text, ''), search_document)
+	q := `SELECT artifact_id, CASE WHEN artifact_type = 'chunk' THEN search_document ELSE COALESCE(NULLIF(embedding_text, ''), search_document) END, input_record_id, COALESCE((SELECT generation FROM kb.chunk_search_state cs WHERE cs.input_record_id = kb.search_artifacts.input_record_id),0)
 FROM kb.search_artifacts
 WHERE artifact_type = $1 AND artifact_id > $2
   AND COALESCE(NULLIF(embedding_text, ''), NULLIF(search_document, '')) IS NOT NULL`
@@ -121,7 +128,7 @@ WHERE artifact_type = $1 AND artifact_id > $2
 	var out []kbsearch.RegistryRow
 	for rs.Next() {
 		r := kbsearch.RegistryRow{ArtifactType: artifactType}
-		if err := rs.Scan(&r.ArtifactID, &r.EmbeddingText); err != nil {
+		if err := rs.Scan(&r.ArtifactID, &r.EmbeddingText, &r.InputRecordID, &r.SourceGeneration); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

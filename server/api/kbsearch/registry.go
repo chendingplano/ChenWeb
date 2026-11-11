@@ -28,8 +28,14 @@ type RegistryRow struct {
 	// EmbeddingText is the exact text that was embedded (stored for re-embedding /
 	// debugging). Embedding is the pgvector value; nil when no embedding was
 	// computed, in which case a NULL vector is stored and the row is lexical-only.
-	EmbeddingText string
-	Embedding     []float64
+	EmbeddingText    string
+	Embedding        []float64
+	EmbeddingWindows []EmbeddingWindow // additional windows after the first, for chunks only
+	SourceGeneration int64             // chunk snapshot version, used by embedding backfill
+}
+
+type registryExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 func DeleteSearchRegistryRowsForRecord(ctx context.Context, db *sql.DB, artifactType string, recordID int64) (int64, error) {
@@ -43,7 +49,7 @@ func DeleteSearchRegistryRowsForRecord(ctx context.Context, db *sql.DB, artifact
 	return res.RowsAffected()
 }
 
-// insertStmtLexical is the original lexical-only upsert (13 positional args). Used
+// insertStmtLexical is the lexical-only upsert (14 positional args). Used
 // when semantic search is disabled or before the pgvector migration is applied, so
 // it never references the embedding_text / embedding columns.
 const insertStmtLexical = `
@@ -83,7 +89,7 @@ ON CONFLICT (artifact_type, artifact_id) DO UPDATE SET
 	keywords = EXCLUDED.keywords,
 	updated_at = NOW()`
 
-// insertStmtSemantic adds embedding_text ($14) and embedding ($15::vector). Used
+// insertStmtSemantic adds embedding_text ($15) and embedding ($16::vector). Used
 // only when semantic search is enabled (env SEARCH_SEMANTIC_ENABLED=true), which
 // requires the pgvector migration (20260603000001) to have been applied.
 const insertStmtSemantic = `
@@ -131,6 +137,10 @@ func InsertSearchRegistryRows(ctx context.Context, db *sql.DB, rows []RegistryRo
 	if db == nil {
 		return 0, fmt.Errorf("db is nil")
 	}
+	return insertSearchRegistryRows(ctx, db, rows)
+}
+
+func insertSearchRegistryRows(ctx context.Context, db registryExecutor, rows []RegistryRow) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}

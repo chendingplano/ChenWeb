@@ -205,6 +205,11 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
+	ctx, unlock, err := lockChunkSearchSource(ctx, ApiTypes.ProjectDBHandle, evt.RecordID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if !p.OverrideOrigin && strings.TrimSpace(p.ArtifactDir) == "" {
 		return errors.New("(MID_26050814) missing ARTIFACT_DIR")
 	}
@@ -360,6 +365,12 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 		b.WriteString(strings.Join(row, "\t"))
 		if i < len(out.Lines)-1 {
 			b.WriteByte('\n')
+		}
+	}
+	if p.OverrideOrigin && ApiTypes.ProjectDBHandle != nil {
+		p.deleteStaleChunkArtifacts(inputPath, recordID)
+		if err := invalidateChunkSearchForRecord(context.Background(), recordID); err != nil {
+			return err
 		}
 	}
 	if err := writeAtomicFile(filePath, []byte(b.String()), 0o644); err != nil {

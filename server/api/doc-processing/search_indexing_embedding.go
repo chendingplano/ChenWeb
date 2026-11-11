@@ -186,6 +186,10 @@ func EmbedSearchQuery(ctx context.Context, text string) ([]float64, bool) {
 // It uses the same batched, concurrent, rate-limited path as indexing; rows that
 // fail keep a nil Embedding.
 func EmbedRegistryRows(ctx context.Context, rows []kbsearch.RegistryRow, logger ApiTypes.JimoLogger, callReason, callLoc string) {
+	if len(rows) > 0 && rows[0].ArtifactType == "chunk" {
+		embedChunkRegistryRows(ctx, rows, logger, callReason, callLoc)
+		return
+	}
 	embedRegistryRows(ctx, rows, logger, callReason, callLoc)
 }
 

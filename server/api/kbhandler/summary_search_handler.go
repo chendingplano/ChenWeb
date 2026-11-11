@@ -19,6 +19,8 @@ func SearchTopics(c echo.Context) error {
 	return searchRegistryArtifacts(c, "topic")
 }
 
+func SearchChunks(c echo.Context) error { return searchRegistryArtifacts(c, "chunk") }
+
 func SearchSceneBlocks(c echo.Context) error {
 	return searchRegistryArtifacts(c, "scene_block")
 }

@@ -122,6 +122,20 @@ func docProcSummaryExtraInfoJSON(service any, fallback []byte) string {
 }
 
 func runChunkingServiceEvent(ctx context.Context, payload []byte, inputStore DocMetadataStore, service chunkingHandler, logger ApiTypes.JimoLogger) error {
+	// Only fixed-size chunking rewrites the saved .chunks boundaries. Topic-only
+	// services routed through this adapter do not mutate the chunk search source.
+	if _, fixed := service.(*FixedSizeChunkingService); fixed {
+		evt, err := ParseLineFileGeneratedEvent(payload)
+		if err != nil {
+			return err
+		}
+		locked, unlock, err := lockChunkSearchSource(ctx, ApiTypes.ProjectDBHandle, evt.RecordID)
+		if err != nil {
+			return err
+		}
+		ctx = locked
+		defer unlock()
+	}
 	return runInputServiceEvent(
 		ctx,
 		payload,

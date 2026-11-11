@@ -125,7 +125,7 @@ func countRegistrySearchResultsPostgres(db *sql.DB, artifactType string, queryTe
 // pg_search accepts BM25 operators only on these partitions (each has its own BM25 index), never on
 // the partitioned parent kb.search_artifacts.
 var searchArtifactPartitionTypes = []string{
-	"entity", "inventory_item", "knowledge", "metric", "product", "provision",
+	"chunk", "entity", "inventory_item", "knowledge", "metric", "product", "provision",
 	"relation", "scene_block", "semantic_projection", "summary", "topic",
 }
 
@@ -661,10 +661,27 @@ func hybridSemanticAndFusedCTEs(structuralSQL string, cfg registrySearchConfig) 
 	SELECT nn.artifact_type, nn.artifact_id, nn.distance,
 		ROW_NUMBER() OVER (ORDER BY nn.distance ASC, nn.artifact_id ASC) AS rnk
 	FROM (
+		SELECT artifact_type, artifact_id, MIN(distance) AS distance
+		FROM (
+		(
 		SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id, sa.embedding <=> $2::vector AS distance
 		FROM kb.search_artifacts sa
 		WHERE sa.embedding IS NOT NULL%s
 		ORDER BY sa.embedding <=> $2::vector
+		LIMIT %d
+		)
+		UNION ALL
+		(
+		SELECT sa.artifact_type, sa.artifact_id, cw.embedding <=> $2::vector AS distance
+		FROM kb.chunk_search_windows cw
+		JOIN kb.search_artifacts sa ON sa.artifact_type = 'chunk' AND sa.artifact_id = cw.artifact_id
+		WHERE cw.embedding IS NOT NULL%s
+		ORDER BY cw.embedding <=> $2::vector
+		LIMIT %d
+		)
+		) window_candidates
+		GROUP BY artifact_type, artifact_id
+		ORDER BY distance, artifact_id
 		LIMIT %d
 	) nn
 ),
@@ -680,6 +697,9 @@ fused AS (
 		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
 )`,
 		structuralSQL,
+		cfg.candidates(),
+		structuralSQL,
+		cfg.candidates(),
 		cfg.candidates(),
 		sqlFloat(cfg.lexicalWeight), rrfK, sqlFloat(cfg.semanticWeight), rrfK,
 	)

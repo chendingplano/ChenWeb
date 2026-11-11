@@ -351,6 +351,11 @@ func (s *FixedSizeChunkingService) setDocProcSummaryExtraInfo(extra map[string]a
 }
 
 func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
+	ctx, unlock, lockErr := lockChunkSearchSource(ctx, ApiTypes.ProjectDBHandle, recordID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	ctx = withLLMRecordID(ctx, recordID)
 	if s.Store == nil {
 		return errors.New("(MID_26042012) store is nil")
@@ -394,6 +399,11 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 // ParseBlockBufferLines to obtain the document lines from an in-memory
 // BlockBuffer produced by the BlockingProcessor, skipping the file-read step.
 func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
+	ctx, unlock, lockErr := lockChunkSearchSource(ctx, ApiTypes.ProjectDBHandle, recordID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	if buf == nil {
 		return errors.New("(MID_26050601) block buffer is nil")
 	}
@@ -626,6 +636,18 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesBlockInput(ctx context
 // handleChunkLines runs the fixed-size chunking phase and persists the chunk
 // artifact plus chunk status for a pre-parsed set of lines.
 func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
+	var generation int64
+	if ApiTypes.ProjectDBHandle != nil {
+		snapshot, ok := ctx.Value(chunkSearchLockKey{}).(chunkSearchSnapshot)
+		if !ok || snapshot.recordID != rec.ID {
+			return fmt.Errorf("chunk source lock is missing for record %d", rec.ID)
+		}
+		generation = snapshot.generation
+		if err := verifyChunkSearchSource(rec, lines); err != nil {
+			s.failAndPersist(ctx, rec, inputFilename, uniquePages(lines), len(lines), 0, start, err)
+			return err
+		}
+	}
 	numPages := uniquePages(lines)
 	numLines := len(lines)
 	fileType := detectChunkStatusFileType(rec, inputFilename)
@@ -671,6 +693,12 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		return err
 	}
 
+	if ApiTypes.ProjectDBHandle != nil {
+		if err := indexChunkSearch(ctx, ApiTypes.ProjectDBHandle, rec, chunks, generation, s.Logger); err != nil {
+			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+			return err
+		}
+	}
 	statusRaw, err := appendChunkedStatus(rec.StatusRaw, chunkStatusParams{
 		RecordID:        rec.ID,
 		FileType:        fileType,
@@ -3124,9 +3152,6 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 	for scanner.Scan() {
 		raw := strings.TrimSpace(scanner.Text())
 		if raw == "" {
-			if err := appendChunk(); err != nil {
-				return nil, err
-			}
 			continue
 		}
 		switch {
@@ -3142,6 +3167,9 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 				return nil, fmt.Errorf("(MID_26052335) parse line ranges: %w", err)
 			}
 			regular = values
+			if err := appendChunk(); err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("(MID_26052336) invalid chunk artifact line: %s", raw)
 		}

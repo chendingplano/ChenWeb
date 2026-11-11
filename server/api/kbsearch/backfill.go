@@ -54,7 +54,7 @@ func BackfillEmbeddings(ctx context.Context, db *sql.DB, embed EmbedFunc, artifa
 		return res, fmt.Errorf("count backfill candidates: %w", err)
 	}
 
-	selectSQL := "SELECT artifact_type, artifact_id, COALESCE(NULLIF(embedding_text, ''), search_document) AS txt " +
+	selectSQL := "SELECT artifact_type, artifact_id, CASE WHEN artifact_type = 'chunk' THEN search_document ELSE COALESCE(NULLIF(embedding_text, ''), search_document) END AS txt, input_record_id, COALESCE((SELECT generation FROM kb.chunk_search_state cs WHERE cs.input_record_id = kb.search_artifacts.input_record_id), 0) AS generation " +
 		"FROM kb.search_artifacts WHERE " + whereSQL + " ORDER BY artifact_type, artifact_id"
 	selArgs := append([]any{}, args...)
 	if limit > 0 {
@@ -66,6 +66,8 @@ func BackfillEmbeddings(ctx context.Context, db *sql.DB, embed EmbedFunc, artifa
 		artifactType string
 		artifactID   string
 		text         string
+		recordID     int64
+		generation   int64
 	}
 	rows, err := db.QueryContext(ctx, selectSQL, selArgs...)
 	if err != nil {
@@ -74,7 +76,7 @@ func BackfillEmbeddings(ctx context.Context, db *sql.DB, embed EmbedFunc, artifa
 	candidates := make([]candidate, 0, 256)
 	for rows.Next() {
 		var cnd candidate
-		if err := rows.Scan(&cnd.artifactType, &cnd.artifactID, &cnd.text); err != nil {
+		if err := rows.Scan(&cnd.artifactType, &cnd.artifactID, &cnd.text, &cnd.recordID, &cnd.generation); err != nil {
 			rows.Close()
 			return res, fmt.Errorf("scan backfill candidate: %w", err)
 		}
@@ -98,6 +100,32 @@ WHERE artifact_type = $3 AND artifact_id = $4`
 		text := strings.TrimSpace(cnd.text)
 		if text == "" {
 			res.Skipped++
+			continue
+		}
+		if cnd.artifactType == "chunk" {
+			row := RegistryRow{ArtifactType: "chunk", ArtifactID: cnd.artifactID, InputRecordID: cnd.recordID, SourceGeneration: cnd.generation}
+			complete := true
+			for i, window := range ChunkEmbeddingTexts(text) {
+				vec, ok := embed(ctx, window)
+				if !ok || len(vec) != ConfiguredEmbeddingDim() {
+					complete = false
+					break
+				}
+				if i == 0 {
+					row.EmbeddingText = window
+					row.Embedding = vec
+				} else {
+					row.EmbeddingWindows = append(row.EmbeddingWindows, EmbeddingWindow{Text: window, Embedding: vec})
+				}
+			}
+			if !complete {
+				res.Failed++
+				continue
+			}
+			if err := UpdateChunkEmbeddings(ctx, db, row); err != nil {
+				return res, err
+			}
+			res.Embedded++
 			continue
 		}
 		vec, ok := embed(ctx, text)
