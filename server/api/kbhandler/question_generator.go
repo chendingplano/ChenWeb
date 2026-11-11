@@ -18,13 +18,41 @@ const (
 	questionGenerationTimeout       = 10 * time.Minute
 	questionGenerationBatchTimeout  = time.Hour
 	questionGenerationPrompt        = "prompt-question-generator-search-metrics-v3.md"
+	questionArtifactPrompt          = "prompt-question-generator-search-artifacts-v1.md"
+	questionPurposeMetrics          = "search_metrics"
+	questionPurposeMixed            = "search_mixed"
 )
+
+// questionPurposes binds each purpose to the search artifact type of its targets (openspec
+// question-generator-artifact-types). search_metrics reads kb.metrics; every other purpose reads
+// kb.search_artifacts. search_mixed has no single type: each target draws one (makeArtifactQuestionSets).
+var questionPurposes = []struct{ Purpose, ArtifactType string }{
+	{questionPurposeMetrics, "metric"}, {"search_chunks", "chunk"}, {"search_summaries", "summary"},
+	{"search_topics", "topic"}, {"search_scene_blocks", "scene_block"}, {"search_provisions", "provision"},
+	{"search_products", "product"}, {"search_inventory_items", "inventory_item"},
+	{"search_semantic_projections", "semantic_projection"}, {"search_knowledge", "knowledge"},
+	{"search_entities", "entity"}, {"search_relations", "relation"}, {questionPurposeMixed, ""},
+}
+
+// questionPurposeArtifactTypes returns the registry types a purpose draws targets from.
+func questionPurposeArtifactTypes(purpose string) ([]string, bool) {
+	if purpose == questionPurposeMixed {
+		return searchArtifactPartitionTypes, true
+	}
+	for _, p := range questionPurposes {
+		if p.Purpose == purpose {
+			return []string{p.ArtifactType}, true
+		}
+	}
+	return nil, false
+}
 
 type questionGenerationRequest struct {
 	NumQuestionsToGenerate      *int `json:"num_questions_to_generate"`
 	ConfirmedAvailableQuestions *int `json:"confirmed_available_questions"`
 	// A single-document preflight keeps the exact eligible pool and source for the worker.
 	preparedMetrics    []metricReviewInputMetric
+	preparedArtifacts  []questionArtifactRow
 	preparedLines      []docprocessing.Line
 	MetricsPerDocument *int   `json:"metrics_per_document"`
 	TotalMetrics       *int   `json:"total_metrics"`
@@ -112,12 +140,13 @@ func (r *questionGenerationRequest) normalize() error {
 }
 
 func questionPurposePrompt(purpose string) (string, error) {
-	switch purpose {
-	case "search_metrics":
-		return envOrDefault("PROMPT_GENERATE_METRIC_QUESTIONS", questionGenerationPrompt), nil
-	default:
-		return "", fmt.Errorf("unsupported purpose: select Search Metrics")
+	if _, ok := questionPurposeArtifactTypes(purpose); !ok {
+		return "", fmt.Errorf("unsupported purpose %q", purpose)
 	}
+	if purpose == questionPurposeMetrics {
+		return envOrDefault("PROMPT_GENERATE_METRIC_QUESTIONS", questionGenerationPrompt), nil
+	}
+	return envOrDefault("PROMPT_GENERATE_ARTIFACT_QUESTIONS", questionArtifactPrompt), nil
 }
 
 type questionGenerationRun struct {
@@ -170,6 +199,10 @@ type generatedQuestion struct {
 	MetricID       string             `json:"metric_id"`
 	MetricSnapshot json.RawMessage    `json:"metric_snapshot,omitempty"`
 	SourceSHA256   string             `json:"source_sha256"`
+	// The target as a search registry artifact; metric questions use ("metric", MetricID).
+	ArtifactType     string          `json:"artifact_type"`
+	ArtifactID       string          `json:"artifact_id"`
+	ArtifactSnapshot json.RawMessage `json:"artifact_snapshot,omitempty"`
 }
 
 // buildQuestionGenerationSource uses the entire canonical file and preserves its

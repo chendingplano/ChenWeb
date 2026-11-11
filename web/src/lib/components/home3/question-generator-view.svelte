@@ -15,8 +15,11 @@
 		type QuestionRequest,
 		type GeneratedQuestion,
 		type QuestionFilters,
-		type QuestionFilterOptions
+		type QuestionFilterOptions,
+		type QuestionPurpose,
+		QUESTION_PURPOSES
 	} from '$lib/services/questionGeneratorService';
+	import { questionPurposeLabel } from './question-generator-labels';
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 	const emptyFilters = (): QuestionFilters => ({
 		purpose: '',
@@ -55,7 +58,7 @@
 	let loadError = $state(false);
 	let filtersError = $state(false);
 	let recordID = $state<number | undefined>();
-	let purpose = $state<'search_metrics'>('search_metrics');
+	let purpose = $state<QuestionPurpose>('search_metrics');
 	let description = $state('');
 	let metricsPerDocument = $state(10);
 	let numQuestionsToGenerate = $state(30);
@@ -93,8 +96,9 @@
 	let validDates = $derived(
 		!draft.created_from || !draft.created_to || draft.created_from <= draft.created_to
 	);
-	const purposeLabel = (value: string) =>
-		value === 'search_metrics' ? m.qg_search_metrics() : value;
+	const purposeLabel = questionPurposeLabel;
+	// Every current purpose, plus historical purposes found in saved questions.
+	let filterPurposes = $derived([...new Set<string>([...QUESTION_PURPOSES, ...options.purposes])]);
 	const languageLabel = (lang: string | undefined) =>
 		lang === 'en' ? m.qg_english() : lang === 'zh-cn' ? m.qg_chinese() : lang || m.qg_mixed();
 	const statusLabel = (status: QuestionRun['status']) =>
@@ -280,7 +284,7 @@
 						!confirm(
 							m.qg_capacity_confirm({
 								requested: payload.num_questions_to_generate ?? 0,
-								metrics: error.availableMetrics,
+								targets: error.availableTargets,
 								questions: error.availableQuestions
 							})
 						)
@@ -329,7 +333,7 @@
 			<label for="qg-filter-purpose">{m.qg_filter_purpose()}</label><select
 				id="qg-filter-purpose"
 				bind:value={draft.purpose}
-				><option value="">{m.qg_all()}</option>{#each options.purposes as value}<option {value}
+				><option value="">{m.qg_all()}</option>{#each filterPurposes as value}<option {value}
 						>{purposeLabel(value)}</option
 					>{/each}</select
 			>
@@ -652,8 +656,10 @@
 			<p class="hint">{m.qg_record_hint()}</p>
 			<label for="qg-purpose">{m.qg_purpose()}</label>
 			<select id="qg-purpose" bind:value={purpose}
-				><option value="search_metrics">{m.qg_search_metrics()}</option></select
+				>{#each QUESTION_PURPOSES as value}<option {value}>{purposeLabel(value)}</option
+					>{/each}</select
 			>
+			{#if purpose === 'search_mixed'}<p class="hint">{m.qg_mix_hint()}</p>{/if}
 			<label for="qg-description">{m.qg_description()}</label>
 			<textarea
 				id="qg-description"
@@ -678,7 +684,7 @@
 				{#if valid}
 					<p class="hint">
 						{m.qg_question_plan({
-							metrics: Math.ceil(numQuestionsToGenerate / 3),
+							targets: Math.ceil(numQuestionsToGenerate / 3),
 							questions: Math.ceil(numQuestionsToGenerate / 3) * 3
 						})}
 					</p>
@@ -686,7 +692,7 @@
 			{:else}
 				<div class="counts">
 					<div class="metric-count">
-						<label for="qg-metrics-per-document">{m.qg_metrics_per_document()}</label><input
+						<label for="qg-metrics-per-document">{m.qg_targets_per_document()}</label><input
 							id="qg-metrics-per-document"
 							type="number"
 							min="1"
@@ -695,10 +701,10 @@
 							required
 							bind:value={metricsPerDocument}
 						/>
-						<p class="hint">{m.qg_metrics_per_document_hint()}</p>
+						<p class="hint">{m.qg_targets_per_document_hint()}</p>
 					</div>
 					<div class="metric-count">
-						<label for="qg-total-metrics">{m.qg_total_metrics()}</label><input
+						<label for="qg-total-metrics">{m.qg_total_targets()}</label><input
 							id="qg-total-metrics"
 							type="number"
 							min="1"
@@ -708,18 +714,20 @@
 							disabled={singleDocument}
 							bind:value={totalMetrics}
 						/>
-						<p class="hint">{singleDocument ? m.qg_totals_ignored() : m.qg_total_metrics_hint()}</p>
+						<p class="hint">{singleDocument ? m.qg_totals_ignored() : m.qg_total_targets_hint()}</p>
 					</div>
 				</div>
 			{/if}
-			<p class="hint">{m.qg_metric_triplet_hint()}</p>
+			<p class="hint">{m.qg_target_triplet_hint()}</p>
 			<p class="hint">{m.qg_language_hint()}</p>
 			<button class="primary" type="submit" disabled={!valid || saving}
 				>{saving ? m.qg_starting() : m.qg_generate()}</button
 			>
 		</form>
 		{#if createError}<p role="alert" class="error">{m.qg_create_error()}</p>{/if}
-		{#if capacityError}<p role="alert" class="error">{m.qg_no_usable_metrics()}</p>{/if}
+		{#if capacityError}<p role="alert" class="error">
+				{m.qg_no_usable_targets({ purpose: purposeLabel(purpose) })}
+			</p>{/if}
 	</dialog>
 </div>
 

@@ -4,6 +4,7 @@
 	import NameValueVisualizer from '$lib/components/shared-ui/name-value/name-value-visualizer.svelte';
 	import type { NameValueInput } from '$lib/components/shared-ui/name-value/name-value';
 	import type { GeneratedQuestion } from '$lib/services/questionGeneratorService';
+	import { artifactTypeLabel, questionPurposeLabel } from './question-generator-labels';
 
 	let {
 		question,
@@ -33,7 +34,7 @@
 		{
 			key: 'purpose',
 			label: m.qg_filter_purpose(),
-			values: [question.purpose === 'search_metrics' ? m.qg_search_metrics() : question.purpose]
+			values: [questionPurposeLabel(question.purpose)]
 		},
 		{
 			key: 'run',
@@ -68,9 +69,17 @@
 			]
 		},
 		{
-			key: 'metric',
-			label: m.qg_field_metric(),
-			values: [{ text: question.metric_id, mono: true }]
+			key: 'target',
+			label: m.qg_field_target(),
+			values: [
+				{
+					text: m.qg_target_value({
+						type: artifactTypeLabel(question.artifact_type || 'metric'),
+						id: question.artifact_id || question.metric_id
+					}),
+					mono: true
+				}
+			]
 		},
 		{ key: 'model', label: m.qg_field_model(), values: [question.model_name] },
 		{ key: 'prompt', label: m.qg_field_prompt(), values: [question.prompt_name] },

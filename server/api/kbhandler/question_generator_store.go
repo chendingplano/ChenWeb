@@ -15,12 +15,12 @@ const questionRunColumns = `id, input_record_id, purpose, description,
 
 const generatedQuestionColumns = `id, run_id, input_record_id, hop_type, question, answer,
  reasoning_steps, step_line_ids, evidence, metric_id, metric_snapshot, set_no, lang, source_sha256, purpose,
- prompt_name, model_name, created_at`
+ prompt_name, model_name, created_at, artifact_type, artifact_id, artifact_snapshot`
 
 func scanGeneratedQuestion(row interface{ Scan(...any) error }) (generatedQuestion, error) {
 	var q generatedQuestion
-	var steps, stepLines, evidence, metricSnapshot []byte
-	if err := row.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256, &q.Purpose, &q.PromptName, &q.ModelName, &q.CreatedAt); err != nil {
+	var steps, stepLines, evidence, metricSnapshot, artifactSnapshot []byte
+	if err := row.Scan(&q.ID, &q.RunID, &q.InputRecordID, &q.HopType, &q.Question, &q.Answer, &steps, &stepLines, &evidence, &q.MetricID, &metricSnapshot, &q.SetNo, &q.Lang, &q.SourceSHA256, &q.Purpose, &q.PromptName, &q.ModelName, &q.CreatedAt, &q.ArtifactType, &q.ArtifactID, &artifactSnapshot); err != nil {
 		return q, err
 	}
 	for _, v := range []struct {
@@ -32,6 +32,7 @@ func scanGeneratedQuestion(row interface{ Scan(...any) error }) (generatedQuesti
 		}
 	}
 	q.MetricSnapshot = json.RawMessage(metricSnapshot)
+	q.ArtifactSnapshot = json.RawMessage(artifactSnapshot)
 	return q, nil
 }
 
@@ -141,17 +142,22 @@ func saveGeneratedQuestionBatch(ctx context.Context, db *sql.DB, runID, recordID
 		if err != nil {
 			return err
 		}
-		metricSnapshot := q.MetricSnapshot
+		metricSnapshot, artifactSnapshot := q.MetricSnapshot, q.ArtifactSnapshot
 		if len(metricSnapshot) == 0 {
 			metricSnapshot = json.RawMessage(`{}`)
 		}
+		if len(artifactSnapshot) == 0 {
+			artifactSnapshot = json.RawMessage(`{}`)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.generated_questions
    (run_id, input_record_id, hop_type, question, answer, reasoning_steps, step_line_ids, evidence,
-    metric_id, metric_snapshot, set_no, lang, source_sha256, purpose, prompt_name, model_name)
+    metric_id, metric_snapshot, set_no, lang, source_sha256, purpose, prompt_name, model_name,
+    artifact_type, artifact_id, artifact_snapshot)
    SELECT $1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10::jsonb,$11,$12,$13,
-    r.purpose, r.prompt_name, r.model_name FROM testbed.generated_question_runs r WHERE r.id = $1`,
+    r.purpose, r.prompt_name, r.model_name, $14, $15, $16::jsonb FROM testbed.generated_question_runs r WHERE r.id = $1`,
 			runID, recordID, q.HopType, q.Question, q.Answer, string(steps), string(stepLines), string(evidence),
-			q.MetricID, string(metricSnapshot), q.SetNo, q.Lang, q.SourceSHA256); err != nil {
+			q.MetricID, string(metricSnapshot), q.SetNo, q.Lang, q.SourceSHA256,
+			q.ArtifactType, q.ArtifactID, string(artifactSnapshot)); err != nil {
 			return err
 		}
 	}

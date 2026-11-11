@@ -145,7 +145,7 @@ func TestMetricQuestionPartialValidationReportsAllRejectedQuestions(t *testing.T
 	}
 	payload := partialQuestionPayload()
 	payload["questions"].([]any)[0].(map[string]any)["answer"] = ""
-	sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", MetricName: "保温层长度", SourceLineSpans: json.RawMessage(`["101"]`)}, ContextLineIDs: []int{101}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "en"}, {HopType: "two_hop", Lang: "en"}, {HopType: "multi_hop", Lang: "en"}}}}
+	sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", MetricName: "保温层长度", SourceLineSpans: json.RawMessage(`["101"]`)}, ContextLineIDs: []int{101}}, Questions: []questionSlot{{HopType: "one_hop", Lang: "en"}, {HopType: "two_hop", Lang: "en"}, {HopType: "multi_hop", Lang: "en"}}}}
 	questions, err := collectMetricQuestions(payload, req, map[int]string{101: "1 m"}, sets, "fixture-hash", nil)
 	if len(questions) != 1 || questions[0].HopType != "two_hop" || err == nil || !strings.Contains(err.Error(), "question 1 has no answer") || !strings.Contains(err.Error(), "question 3 (multi_hop) contains its target metric name") {
 		t.Fatalf("questions=%+v error=%v", questions, err)
@@ -236,7 +236,7 @@ func TestQuestionGenerationBatchPreservesPartialAndLaterDocuments(t *testing.T) 
 	installPartialQuestionFixture(t)
 	oldClient, oldCandidates := newQuestionGenerationClient, questionGenerationCandidates
 	t.Cleanup(func() { newQuestionGenerationClient, questionGenerationCandidates = oldClient, oldCandidates })
-	questionGenerationCandidates = func(context.Context, *sql.DB) ([]int64, error) { return []int64{753, 754}, nil }
+	questionGenerationCandidates = func(context.Context, *sql.DB, string) ([]int64, error) { return []int64{753, 754}, nil }
 	dir, err := filepath.Abs("../../../prompts")
 	if err != nil {
 		t.Fatal(err)

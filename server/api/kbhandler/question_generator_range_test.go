@@ -19,7 +19,7 @@ func TestMetricContextLineRanges(t *testing.T) {
 		{[]int{1, 3, 5}, []string{"1", "3", "5"}},
 		{[]int{42}, []string{"42"}},
 	} {
-		if got := metricContextLineRanges(tc.ids); !reflect.DeepEqual(got, tc.want) {
+		if got := questionContextLineRanges(tc.ids); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("ids=%v ranges=%v want=%v", tc.ids, got, tc.want)
 		}
 	}

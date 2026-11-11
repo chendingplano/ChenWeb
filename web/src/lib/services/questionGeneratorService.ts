@@ -1,5 +1,23 @@
 const BASE = '/api/v1/kb/question-generator/runs';
 
+// One purpose per search artifact type, plus search_mixed (Mix); mirrors questionPurposes on the server.
+export const QUESTION_PURPOSES = [
+	'search_metrics',
+	'search_chunks',
+	'search_summaries',
+	'search_topics',
+	'search_scene_blocks',
+	'search_provisions',
+	'search_products',
+	'search_inventory_items',
+	'search_semantic_projections',
+	'search_knowledge',
+	'search_entities',
+	'search_relations',
+	'search_mixed'
+] as const;
+export type QuestionPurpose = (typeof QUESTION_PURPOSES)[number];
+
 export type QuestionRun = {
 	id: number;
 	input_record_id: number;
@@ -35,6 +53,9 @@ export type GeneratedQuestion = {
 	lang: 'en' | 'zh-cn';
 	metric_id: string;
 	metric_snapshot: Record<string, unknown>;
+	artifact_type: string;
+	artifact_id: string;
+	artifact_snapshot?: Record<string, unknown>;
 	set_no: number;
 	source_sha256: string;
 	hop_type: 'one_hop' | 'two_hop' | 'multi_hop';
@@ -46,7 +67,7 @@ export type GeneratedQuestion = {
 };
 export type QuestionRequest = {
 	input_record_id: number;
-	purpose: 'search_metrics';
+	purpose: QuestionPurpose;
 	description: string;
 	metrics_per_document?: number;
 	total_metrics?: number;
@@ -56,7 +77,7 @@ export type QuestionRequest = {
 
 export class QuestionCapacityError extends Error {
 	constructor(
-		public availableMetrics: number,
+		public availableTargets: number,
 		public availableQuestions: number,
 		public confirmationRequired: boolean
 	) {
@@ -69,7 +90,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 	if (response.status === 409) {
 		const capacity = await response.json();
 		throw new QuestionCapacityError(
-			capacity.available_metrics,
+			capacity.available_targets,
 			capacity.available_questions,
 			capacity.confirmation_required
 		);

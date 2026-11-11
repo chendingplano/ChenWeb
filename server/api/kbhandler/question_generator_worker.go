@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/lib/pq"
 )
 
 var (
@@ -148,10 +148,19 @@ func readQuestionMetricEnglishNames(ctx context.Context, db *sql.DB, recordID in
 }
 
 // Sampling eligible inputs directly is equivalent to repeatedly drawing kb.inputs
-// and skipping metric-free documents, without wasting a round trip per empty draw.
-func randomQuestionDocumentIDs(ctx context.Context, db *sql.DB) ([]int64, error) {
-	rows, err := db.QueryContext(ctx, `SELECT i.id FROM kb.inputs i WHERE EXISTS
+// and skipping documents without targets, without wasting a round trip per empty draw.
+// Metrics come from kb.metrics; other purposes from their types' search registry rows.
+func randomQuestionDocumentIDs(ctx context.Context, db *sql.DB, purpose string) ([]int64, error) {
+	var rows *sql.Rows
+	var err error
+	if purpose == questionPurposeMetrics {
+		rows, err = db.QueryContext(ctx, `SELECT i.id FROM kb.inputs i WHERE EXISTS
   (SELECT 1 FROM kb.metrics m WHERE m.input_record_id = i.id AND m.ref_mention_id IS NULL) ORDER BY random()`)
+	} else {
+		types, _ := questionPurposeArtifactTypes(purpose)
+		rows, err = db.QueryContext(ctx, `SELECT i.id FROM kb.inputs i WHERE EXISTS
+  (SELECT 1 FROM kb.search_artifacts a WHERE a.input_record_id = i.id AND a.artifact_type = ANY($1)) ORDER BY random()`, pq.Array(types))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -184,11 +193,17 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 	}
 	prompt, _, _, err := docprocessing.LoadPromptByRef(promptName)
 	if err != nil {
-		logger.Error("load metric question prompt failed", "run_id", runID, "error", err)
+		logger.Error("load question prompt failed", "run_id", runID, "purpose", req.Purpose, "error", err)
 		return fmt.Errorf("cannot load purpose-specific question generation prompt")
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE testbed.generated_question_runs SET model_name = $2 WHERE id = $1 AND status = 'running' AND expires_at > NOW()`, runID, cfg.ModelName); err != nil {
 		return fmt.Errorf("cannot save question model provenance")
+	}
+	generateDocument := generateMetricQuestionDocument
+	noTargets := "no documents with metrics are available"
+	if req.Purpose != questionPurposeMetrics {
+		generateDocument = generateArtifactQuestionDocument
+		noTargets = fmt.Sprintf("no documents with %s artifacts are available", questionPurposeNoun(req.Purpose))
 	}
 	generated := questionCounts{}
 	previousQuestions := []string{}
@@ -201,7 +216,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 		}
 		ids := []int64{req.InputRecordID}
 		if req.InputRecordID == 0 {
-			ids, err = questionGenerationCandidates(ctx, db)
+			ids, err = questionGenerationCandidates(ctx, db, req.Purpose)
 			if err != nil {
 				logger.Error("sample question documents failed", "run_id", runID, "error", err)
 				return fmt.Errorf("cannot sample input documents")
@@ -209,7 +224,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 		}
 		documentsDone := 0
 		sawDuplicate := false
-		lastFailure := "no documents with metrics are available"
+		lastFailure := noTargets
 		for _, recordID := range ids {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -247,7 +262,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 				logger.Info("valid questions saved before correction", "run_id", runID, "record_id", recordID, "saved_questions", len(pending))
 				return nil
 			}
-			questions, documentErr := generateMetricQuestionDocument(ctx, db, runID, docReq, cfg, client, promptName, prompt, userID, previousQuestions, logger, savePartial)
+			questions, documentErr := generateDocument(ctx, db, runID, docReq, cfg, client, promptName, prompt, userID, previousQuestions, logger, savePartial)
 			if partialSaveErr != nil {
 				logger.Error("save valid questions before correction failed", "run_id", runID, "record_id", recordID, "error", partialSaveErr)
 				return fmt.Errorf("cannot save questions: run expired or database write failed")
@@ -275,7 +290,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 			if len(questions) == 0 && !documentSaved {
 				sawDuplicate = true
 				lastFailure = "model repeated a previously generated question"
-				logger.Warn("duplicate metric question document retried", "run_id", runID, "record_id", recordID)
+				logger.Warn("duplicate question document retried", "run_id", runID, "record_id", recordID, "purpose", req.Purpose)
 				continue
 			}
 			if documentErr != nil {
@@ -297,7 +312,7 @@ func generateQuestionsForRun(ctx context.Context, db *sql.DB, runID int64, req q
 				seenQuestions[strings.ToLower(strings.Join(strings.Fields(q.Question), " "))] = true
 			}
 			documentsDone++
-			logger.Info("metric question document saved", "run_id", runID, "record_id", recordID, "saved_questions", len(persistedQuestions)+len(questions), "requested_questions", counts.total())
+			logger.Info("question document saved", "run_id", runID, "record_id", recordID, "purpose", req.Purpose, "saved_questions", len(persistedQuestions)+len(questions), "requested_questions", counts.total())
 			if finished {
 				return errors.Join(documentErrors...)
 			}
@@ -386,74 +401,16 @@ func generateMetricQuestionDocument(ctx context.Context, db *sql.DB, runID int64
 		logger.Error("load question document metadata failed", "record_id", req.InputRecordID, "error", err)
 		return nil, fmt.Errorf("cannot load document metadata")
 	}
-	// Struct field order keeps document metadata ahead of the metric listing in
-	// both the model input and the archived LLM request body.
-	request := struct {
-		DocumentMetadata  questionDocumentMetadata `json:"document_metadata"`
-		RunID             int64                    `json:"run_id"`
-		InputRecordID     int64                    `json:"input_record_id"`
-		Purpose           string                   `json:"purpose"`
-		Description       string                   `json:"description"`
-		Sets              []metricQuestionSet      `json:"sets"`
-		PreviousQuestions []string                 `json:"previous_questions"`
-		ValidationError   string                   `json:"validation_error,omitempty"`
-		PreviousResponse  map[string]any           `json:"previous_response,omitempty"`
-	}{DocumentMetadata: metadata, RunID: runID, InputRecordID: req.InputRecordID,
+	request := questionModelRequest{DocumentMetadata: metadata, RunID: runID, InputRecordID: req.InputRecordID,
 		Purpose: req.Purpose, Description: req.Description, Sets: sets, PreviousQuestions: previousQuestions}
-	accepted := []generatedQuestion{}
-	acceptedSlots := map[string]bool{}
-	acceptedText := map[string]bool{}
 	wanted := 0
 	for _, set := range sets {
 		wanted += len(set.Questions)
 	}
-	var lastValidationErr error
-	for attempt := 0; ; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return accepted, errors.Join(lastValidationErr, err)
-		}
-		input, err := json.Marshal(request)
-		if err != nil {
-			return accepted, fmt.Errorf("cannot format metric question input")
-		}
-		if utf8.RuneCount(input) > questionGenerationMaxInputChars {
-			return accepted, fmt.Errorf("document and metric context too large after formatting")
-		}
-		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{UserID: userID, RunID: docprocessing.LLMRunIDFromContext(ctx), RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, InputText: string(input), CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"})
-		if err != nil {
-			logger.Error("metric question model call failed", "run_id", runID, "record_id", req.InputRecordID, "error", err)
-			return accepted, errors.Join(lastValidationErr, fmt.Errorf("question generation model request failed or timed out"))
-		}
-		questions, validationErr := collectMetricQuestions(payload, req, source, sets, hash, acceptedSlots)
-		for _, q := range questions {
-			key := fmt.Sprintf("%d/%s", q.SetNo, q.HopType)
-			if acceptedSlots[key] {
-				continue
-			}
-			text := strings.ToLower(strings.Join(strings.Fields(q.Question), " "))
-			if acceptedText[text] {
-				validationErr = errors.Join(validationErr, fmt.Errorf("question for set %d (%s) duplicates an accepted question", q.SetNo, q.HopType))
-				continue
-			}
-			accepted = append(accepted, q)
-			acceptedSlots[key], acceptedText[text] = true, true
-		}
-		if len(accepted) == wanted {
-			return accepted, nil
-		}
-		lastValidationErr = validationErr
-		// Commit successful rows before a correction call can fail, time out, or be interrupted.
-		if attempt == 0 && len(accepted) > 0 && len(persistPartial) > 0 {
-			if err := persistPartial[0](accepted); err != nil {
-				return accepted, err
-			}
-		}
-		// Give malformed model output one correction attempt without changing its
-		// sampled metrics, language targets, or source evidence. Never relax validation.
-		if attempt == 1 {
-			return accepted, validationErr
-		}
-		logger.Warn("metric question output invalid; requesting correction", "run_id", runID, "record_id", req.InputRecordID, "accepted_questions", len(accepted), "error", validationErr)
-		request.ValidationError, request.PreviousResponse = validationErr.Error(), payload
-	}
+	return runQuestionModel(ctx, client, request, questionModelCall{RunID: runID, Noun: "metric", Wanted: wanted,
+		Collect: func(payload map[string]any, retained map[string]bool) ([]generatedQuestion, error) {
+			return collectMetricQuestions(payload, req, source, sets, hash, retained)
+		},
+		Extraction: llmclients.JSONExtractionInput{UserID: userID, RunID: docprocessing.LLMRunIDFromContext(ctx), RecordID: req.InputRecordID, PromptName: promptName, PromptText: prompt, ModelName: cfg.ModelName, CallReason: "question_generation_search_metrics", CallLoc: "20261024-741"},
+	}, logger, persistPartial...)
 }

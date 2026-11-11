@@ -121,7 +121,7 @@ func TestMetricQuestionContextsClampAndRejectMissingEvidence(t *testing.T) {
 
 func TestMetricQuestionRejectsAnotherMetricsContext(t *testing.T) {
 	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
-	set := metricQuestionSet{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m", SourceLineSpans: json.RawMessage(`["2"]`)}, Context: "20 kg", ContextLineIDs: []int{2}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "en"}}}
+	set := metricQuestionSet{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m", SourceLineSpans: json.RawMessage(`["2"]`)}, Context: "20 kg", ContextLineIDs: []int{2}}, Questions: []questionSlot{{HopType: "one_hop", Lang: "en"}}}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(`{"questions":[{"set_no":1,"lang":"en","hop_type":"one_hop","question":"What is the weight?","answer":"20 kg","reasoning_steps":["Read both lines."],"step_line_ids":[[2,8]],"line_ids":[2,8]}]}`), &payload); err != nil {
 		t.Fatal(err)

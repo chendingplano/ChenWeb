@@ -117,7 +117,7 @@ func TestQuestionGeneratorBatchSkipsAndHitsExactTargets(t *testing.T) {
 	}
 	t.Setenv("PROMPT_DIR", promptDir)
 	rounds, calls := 0, 0
-	questionGenerationCandidates = func(context.Context, *sql.DB) ([]int64, error) { rounds++; return []int64{11, 22, 33}, nil }
+	questionGenerationCandidates = func(context.Context, *sql.DB, string) ([]int64, error) { rounds++; return []int64{11, 22, 33}, nil }
 	loadQuestionGenerationMetrics = func(_ context.Context, _ *sql.DB, id int64) ([]metricReviewInputMetric, error) {
 		if id == 11 {
 			return nil, nil
@@ -212,7 +212,7 @@ func TestQuestionGeneratorBatchStopsWithoutMetrics(t *testing.T) {
 	}
 	t.Setenv("PROMPT_DIR", promptDir)
 	rounds := 0
-	questionGenerationCandidates = func(context.Context, *sql.DB) ([]int64, error) { rounds++; return []int64{11}, nil }
+	questionGenerationCandidates = func(context.Context, *sql.DB, string) ([]int64, error) { rounds++; return []int64{11}, nil }
 	loadQuestionGenerationMetrics = func(context.Context, *sql.DB, int64) ([]metricReviewInputMetric, error) { return nil, nil }
 	newQuestionGenerationClient = func(string, ApiTypes.JimoLogger) (ApiTypes.LLMModelDef, metricJSONExtractor, error) {
 		return ApiTypes.LLMModelDef{ModelName: "fixture"}, questionExtractorFunc(func(context.Context, llmclients.JSONExtractionInput) (map[string]any, error) {
@@ -282,7 +282,7 @@ func TestQuestionGeneratorBatchRetriesDuplicateOutput(t *testing.T) {
 			}
 			t.Setenv("PROMPT_DIR", promptDir)
 			questionGenerationRandomInt = func(int) int { return 0 }
-			questionGenerationCandidates = func(context.Context, *sql.DB) ([]int64, error) { return []int64{33}, nil }
+			questionGenerationCandidates = func(context.Context, *sql.DB, string) ([]int64, error) { return []int64{33}, nil }
 			loadQuestionGenerationLines = func(context.Context, *sql.DB, int64) ([]docprocessing.Line, error) {
 				return []docprocessing.Line{{LineNo: 7, Content: "Limit 20 kg"}}, nil
 			}
@@ -394,7 +394,7 @@ func TestMetricQuestionSetsAndLanguages(t *testing.T) {
 
 func TestMetricQuestionValidationBindsAnchorAndLanguage(t *testing.T) {
 	req := questionRequest(t, `{"input_record_id":416,"purpose":"search_metrics","one_hop_count":1,"two_hop_count":0,"multi_hop_count":0}`)
-	sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", SourceLineSpans: json.RawMessage(`["2"]`)}, ContextLineIDs: []int{2}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "zh-cn"}}}}
+	sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", SourceLineSpans: json.RawMessage(`["2"]`)}, ContextLineIDs: []int{2}}, Questions: []questionSlot{{HopType: "one_hop", Lang: "zh-cn"}}}}
 	valid := `{"questions":[{"set_no":1,"lang":"zh-cn","hop_type":"one_hop","question":"限重是多少？","answer":"20公斤","reasoning_steps":["读取限重。"],"step_line_ids":[[2]],"line_ids":[2]}]}`
 	decode := func(body string) map[string]any {
 		var p map[string]any

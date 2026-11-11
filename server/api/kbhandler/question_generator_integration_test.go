@@ -58,7 +58,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql", "20261025000003_archive_generated_questions.sql"} {
+	for _, filename := range []string{"20261024000001_create_generated_questions.sql", "20261024000011_question_generator_metric_batches.sql", "20261024000012_add_generated_questions_purpose.sql", "20261024000013_add_generated_questions_model_prompt.sql", "20261025000003_archive_generated_questions.sql", "20261111000010_generated_questions_artifact_target.sql"} {
 		raw, err := os.ReadFile(filepath.Join("../../../project_migrations", filename))
 		if err != nil {
 			t.Fatal(err)
@@ -131,6 +131,10 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 			t.Fatalf("%s prompt=%q model=%q error=%v", action.name, prompt, model, err)
 		}
 	}
+	// API reads need every current column (archive and artifact-target migrations included).
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("current schema up: %v", err)
+	}
 	legacy, legacyQuestions, err := loadQuestionRun(ctx, db, legacyID)
 	if err != nil || legacy.Lang != "zh-cn" || legacy.GeneratedOneHopCount != 1 || legacy.DocumentsProcessed != 1 || len(legacyQuestions) != 1 {
 		t.Fatalf("legacy run: %+v questions=%+v error=%v", legacy, legacyQuestions, err)
@@ -196,7 +200,8 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	question := func(hop, text, lang, metricID, hash string) generatedQuestion {
 		return generatedQuestion{HopType: hop, Question: text, Answer: "A is defined", ReasoningSteps: []string{"Read A"},
 			StepLineIDs: [][]int{{2}}, Evidence: []questionEvidence{{LineID: 2, Text: "A is defined"}},
-			MetricID: metricID, MetricSnapshot: json.RawMessage(`{"name":"temperature","value":42}`), SetNo: 2, Lang: lang, SourceSHA256: hash}
+			MetricID: metricID, MetricSnapshot: json.RawMessage(`{"name":"temperature","value":42}`), SetNo: 2, Lang: lang, SourceSHA256: hash,
+			ArtifactType: "metric", ArtifactID: metricID, ArtifactSnapshot: json.RawMessage(`{}`)}
 	}
 	batchID := insertRun(nil, 2, 1, 1, "1 hour")
 	// Batch runs retain their hour deadline after the old ten-minute cutoff.
@@ -324,6 +329,9 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		t.Fatal("failed batch accepted late output")
 	}
 
+	if _, err := provider.DownTo(ctx, 20261024000013); err != nil {
+		t.Fatalf("down to metadata: %v", err)
+	}
 	if _, err := provider.Down(ctx); err != nil {
 		t.Fatalf("metadata down: %v", err)
 	}
@@ -336,7 +344,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 	if _, err := provider.Down(ctx); err == nil || !strings.Contains(err.Error(), "while batch runs exist") {
 		t.Fatalf("unsafe batch downgrade was not refused: %v", err)
 	}
-	if _, err := provider.UpTo(ctx, 20261024000013); err != nil {
+	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("purpose re-up: %v", err)
 	}
 	run, questions, err = loadQuestionRun(ctx, db, batchID)
@@ -403,15 +411,16 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		if n, err := archiveGeneratedQuestions(ctx, db, ids, "archive-admin"); err != nil || n != 0 {
 			t.Fatalf("repeat archive count=%d error=%v", n, err)
 		}
-		if _, err := provider.Down(ctx); err != nil {
+		// Roll back the artifact-target and archive migrations, then read with the current schema.
+		if _, err := provider.DownTo(ctx, 20261024000013); err != nil {
 			t.Fatalf("archive rollback: %v", err)
+		}
+		if _, err := provider.Up(ctx); err != nil {
+			t.Fatalf("archive re-up: %v", err)
 		}
 		restored, err := loadGeneratedQuestions(ctx, db, questionBrowserFilters{Page: 1, PageSize: 100})
 		if err != nil || !reflect.DeepEqual(before, restored) {
 			t.Fatalf("rollback lost questions: %v", err)
-		}
-		if _, err := provider.Up(ctx); err != nil {
-			t.Fatalf("archive re-up: %v", err)
 		}
 	})
 	// Exercise the count migration independently of the archive lifecycle above.
@@ -477,7 +486,7 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		if err := req.normalize(); err != nil {
 			t.Fatal(err)
 		}
-		sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", MetricName: "保温层长度", SourceLineSpans: json.RawMessage(`["101"]`)}, ContextLineIDs: []int{101}}, Questions: []metricQuestionTarget{{HopType: "one_hop", Lang: "en"}, {HopType: "two_hop", Lang: "en"}, {HopType: "multi_hop", Lang: "en"}}}}
+		sets := []metricQuestionSet{{SetNo: 1, Metric: questionGenerationMetric{metricReviewInputMetric: metricReviewInputMetric{MetricID: "m1", MetricName: "保温层长度", SourceLineSpans: json.RawMessage(`["101"]`)}, ContextLineIDs: []int{101}}, Questions: []questionSlot{{HopType: "one_hop", Lang: "en"}, {HopType: "two_hop", Lang: "en"}, {HopType: "multi_hop", Lang: "en"}}}}
 		questions, rejection := collectMetricQuestions(partialQuestionPayload(), req, map[int]string{101: "Protective material extends 1 m."}, sets, "fixture-hash", nil)
 		if rejection == nil || len(questions) != 2 {
 			t.Fatalf("questions=%d rejection=%v", len(questions), rejection)
@@ -522,6 +531,33 @@ func TestQuestionGeneratorDatabaseLifecycle(t *testing.T) {
 		run, saved, err = loadQuestionRun(ctx, db, id)
 		if err != nil || run.Status != "done" || len(saved) != 3 || run.DocumentsProcessed != 1 || run.GeneratedMultiHopCount != 1 {
 			t.Fatalf("corrected run=%+v saved=%d error=%v", run, len(saved), err)
+		}
+	})
+	t.Run("artifact targets are stored, archived and guard rollback", func(t *testing.T) {
+		id := insertRun(416, 1, 1, 1, "1 hour")
+		q := question("one_hop", "Which provision covers residual waste?", "en", "", "h")
+		q.MetricSnapshot, q.ArtifactType, q.ArtifactID = nil, "provision", "416_prv_40"
+		q.ArtifactSnapshot = json.RawMessage(`{"artifact_id":"416_prv_40","primary_label":"其他垃圾无害化处理"}`)
+		if err := saveGeneratedQuestionBatch(ctx, db, id, 416, []generatedQuestion{q}, false, true); err != nil {
+			t.Fatal(err)
+		}
+		_, saved, err := loadQuestionRun(ctx, db, id)
+		if err != nil || len(saved) != 1 || saved[0].ArtifactType != "provision" || saved[0].ArtifactID != "416_prv_40" ||
+			saved[0].MetricID != "" || string(saved[0].MetricSnapshot) != "{}" || !strings.Contains(string(saved[0].ArtifactSnapshot), "416_prv_40") {
+			t.Fatalf("artifact target not stored: %+v error=%v", saved, err)
+		}
+		if _, err := provider.Down(ctx); err == nil || !strings.Contains(err.Error(), "non-metric questions exist") {
+			t.Fatalf("rollback with a non-metric question was not refused: %v", err)
+		}
+		if _, err := archiveGeneratedQuestions(ctx, db, []int64{saved[0].ID}, "archive-admin"); err != nil {
+			t.Fatal(err)
+		}
+		archived, err := scanGeneratedQuestion(db.QueryRowContext(ctx, `SELECT `+generatedQuestionColumns+` FROM testbed.generated_questions_archive WHERE id=$1`, saved[0].ID))
+		if err != nil || !reflect.DeepEqual(saved[0], archived) {
+			t.Fatalf("archive lost the target: %+v error=%v", archived, err)
+		}
+		if _, err := provider.Down(ctx); err == nil || !strings.Contains(err.Error(), "non-metric questions exist") {
+			t.Fatalf("rollback with an archived non-metric question was not refused: %v", err)
 		}
 	})
 }

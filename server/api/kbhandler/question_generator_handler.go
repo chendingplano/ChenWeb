@@ -81,19 +81,27 @@ func StartQuestionGeneration(c echo.Context) error {
 			return questionGenerationError(c, http.StatusNotFound, "input record not found")
 		}
 		if req.NumQuestionsToGenerate != nil {
-			metrics, lines, err := loadGroundedQuestionMetrics(ctx, db, req.InputRecordID, logger)
+			// Count the purpose's eligible targets: metrics, or search registry rows of its types.
+			var available int
+			var err error
+			if req.Purpose == questionPurposeMetrics {
+				req.preparedMetrics, req.preparedLines, err = loadGroundedQuestionMetrics(ctx, db, req.InputRecordID, logger)
+				available = len(req.preparedMetrics)
+			} else {
+				req.preparedArtifacts, req.preparedLines, err = loadGroundedQuestionArtifacts(ctx, db, req.InputRecordID, req.Purpose, logger)
+				available = len(req.preparedArtifacts)
+			}
 			if err != nil {
-				logger.Error("question generation capacity check failed", "record_id", req.InputRecordID, "error", err)
+				logger.Error("question generation capacity check failed", "record_id", req.InputRecordID, "purpose", req.Purpose, "error", err)
 				return questionGenerationError(c, http.StatusInternalServerError, err.Error())
 			}
-			available := len(metrics)
 			plannedQuestions := min(available, *req.OneHopCount) * 3
 			staleConfirmation := req.ConfirmedAvailableQuestions != nil && *req.ConfirmedAvailableQuestions != plannedQuestions
 			if available < *req.OneHopCount || staleConfirmation {
 				if available == 0 || req.ConfirmedAvailableQuestions == nil || staleConfirmation {
 					logger.Info("question generation needs capacity confirmation", "record_id", req.InputRecordID, "requested_questions", *req.NumQuestionsToGenerate, "available_questions", plannedQuestions)
 					return c.JSON(http.StatusConflict, map[string]any{
-						"confirmation_required": available > 0, "available_metrics": available,
+						"confirmation_required": available > 0, "available_targets": available,
 						"available_questions": plannedQuestions, "requested_questions": *req.NumQuestionsToGenerate,
 					})
 				}
@@ -102,7 +110,6 @@ func StartQuestionGeneration(c echo.Context) error {
 					*field = &n
 				}
 			}
-			req.preparedMetrics, req.preparedLines = metrics, lines
 		}
 	}
 	modelRef := strings.TrimSpace(os.Getenv("QUESTION_GEN_MODEL_NAME"))
