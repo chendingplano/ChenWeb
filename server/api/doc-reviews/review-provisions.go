@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/searchengine"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/lib/pq"
 )
@@ -186,7 +190,14 @@ func (r *provisionsReviewer) reviewProvision(
 	var findings []ReviewFinding
 	var payload map[string]any
 	var cacheHitTokens, cacheMissTokens int
-	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
+	if len(ms) == 0 {
+		// Nothing to compare against: no model call. The analysis records why the
+		// provision has no findings (devdoc 2026111002 §2.9).
+		payload = map[string]any{"analyses": []any{map[string]any{
+			"relationship": "unrelated",
+			"summary":      noRelevantProvisionsSummary,
+		}}}
+	} else if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := artifactReviewToolUserContext(passage, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := provisionToolReviewCallInfo(ctx, dp.view.ProvID)
@@ -276,6 +287,9 @@ func (r *provisionsReviewer) reviewProvision(
 	)
 	return findings
 }
+
+// noRelevantProvisionsSummary is the analysis text of a provision with no matches in other documents.
+const noRelevantProvisionsSummary = "未在其他文档中找到相关条款（No relevant provisions found in other documents）。"
 
 func provisionAnalysesAsFindings(dp docProvision, analyses []ProvisionAnalysis) []ReviewFinding {
 	if len(analyses) == 0 {
@@ -488,7 +502,7 @@ func (r *provisionsReviewer) buildMatches(
 		if dp.view.ProvID == "" {
 			continue
 		}
-		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "provision", dp.view.ProvID, "provision", r.maxMatches)
+		hits, err := r.findSimilarProvisions(ctx, recordID, dp.view.ProvID)
 		if err != nil {
 			return nil, err
 		}
@@ -536,6 +550,47 @@ func (r *provisionsReviewer) buildMatches(
 	}
 
 	return assembleProvisionMatches(recordID, hybridMatches, objectMatches, resolved, r.maxMatches), nil
+}
+
+// findSimilarProvisions asks the search engine for provisions similar to one of the record's own,
+// leaving out the record's provisions before the engine ranks, so they cannot take the slots of other
+// documents. A provision with no index row is an engine error ("not in kb.search_artifacts"); the
+// reviewer treats it as having no matches, as before.
+func (r *provisionsReviewer) findSimilarProvisions(ctx context.Context, recordID int64, provID string) ([]docprocessing.OnTheFlySemanticMatch, error) {
+	resp, err := searchengine.Search(ctx, r.db, searchengine.LoadConfig(), searchengine.Request{
+		Query: searchengine.Query{Ref: &searchengine.ArtifactRef{Type: "provision", ID: provID}},
+		Filters: searchengine.Filters{
+			ArtifactTypes:    []string{"provision"},
+			ExcludeRecordIDs: []int64{recordID},
+		},
+		Criteria: searchengine.Criteria{MinCosine: provisionMinCosine()},
+		Options:  searchengine.Options{Limit: r.maxMatches},
+	})
+	if err != nil {
+		if errors.Is(err, searchengine.ErrReferenceNotIndexed) {
+			if r.logger != nil {
+				r.logger.Warn("provisions review: provision has no search index row; no similarity matches", "prov_id", provID)
+			}
+			return nil, nil
+		}
+		return nil, err
+	}
+	hits := make([]docprocessing.OnTheFlySemanticMatch, 0, len(resp.Results))
+	for _, res := range resp.Results {
+		hits = append(hits, docprocessing.OnTheFlySemanticMatch{
+			ArtifactType: res.ArtifactType, ArtifactID: res.ArtifactID, RecordID: res.InputRecordID, RRFScore: res.Score,
+		})
+	}
+	return hits, nil
+}
+
+// provisionMinCosine is the semantic acceptance threshold, ARTIFACT_CONNECT_MIN_COSINE (default 0.75).
+// A result below it is dropped whichever list found it.
+func provisionMinCosine() float64 {
+	if v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv("ARTIFACT_CONNECT_MIN_COSINE")), 64); err == nil && v > 0 {
+		return v
+	}
+	return 0.75
 }
 
 // assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.

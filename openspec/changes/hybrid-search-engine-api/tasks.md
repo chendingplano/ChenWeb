@@ -9,34 +9,45 @@
 
 ## 2. Engine package
 
-- [ ] 2.1 Create `server/api/searchengine` with the request (`Query`, `Filters`, `Criteria`,
+> Status 2026-11-11: the package exists and is the new code path (written beside, not moved out of,
+> `kbhandler`). 2.2 and 2.4 (move `kbhandler`'s routes onto it, then delete the duplicate code)
+> are open: `kbhandler/hybrid_search_benchmark*.go` was being edited in the same working copy, and
+> the move needs the golden set of 1.2 first. Until then `kbhandler` and the engine carry two
+> copies of the SQL. The provisions reviewer already uses the engine (`review-provisions.go`).
+
+- [x] 2.1 Create `server/api/searchengine` with the request (`Query`, `Filters`, `Criteria`,
       `Options`) and response (`Result`, `Diagnostics`, removed-candidate counts) types of
       design §2–6; check with `go list` that it imports neither `kbhandler` nor `doc-processing`
 - [ ] 2.2 Move the lexical (ParadeDB and Postgres), vector (registry rows and chunk windows) and
       fusion queries, the query embedding and the keyword clause from `kbhandler` into the
       package, unchanged
-- [ ] 2.3 Add `SetKeywordExtractor`; register today's extractor (model, prompt, cache, timeout)
+- [x] 2.3 Add `SetKeywordExtractor`; register today's extractor (model, prompt, cache, timeout)
       from `kbhandler` at startup; make extraction unavailable when no extractor is registered
 - [ ] 2.4 Switch the HTTP routes, `SearchAgentKnowledge`, the effort loop and the benchmark
       worker and trace to the engine; the golden set from 1.2 must match exactly
 
 ## 3. New capabilities
 
-- [ ] 3.1 Reference queries: stored embedding (or embed the stored text), stored keywords (or
+- [x] 3.1 Reference queries: stored embedding (or embed the stored text), stored keywords (or
       more-like-this / most frequent terms), self-exclusion, error for an unknown reference,
       rejection of both or neither query form
-- [ ] 3.2 Exclusion filters (records, artifact ids) applied in every BM25 partition branch, the
+- [x] 3.2 Exclusion filters (records, artifact ids) applied in every BM25 partition branch, the
       full-text query, the registry vector scan and the chunk-window scan
-- [ ] 3.3 Keyword weights: `pdb.boost` per keyword (ParadeDB), weighted sum of per-keyword
+- [x] 3.3 Keyword weights: `pdb.boost` per keyword (ParadeDB), weighted sum of per-keyword
       `ts_rank_cd` (Postgres)
-- [ ] 3.4 Required, excluded and minimum-matched keywords, and minimum cosine, evaluated on the
+- [x] 3.4 Required, excluded and minimum-matched keywords, and minimum cosine, evaluated on the
       fused candidates; cosine for lexical-only candidates and best chunk window; counts of
       removed candidates per criterion
-- [ ] 3.5 Per-request keyword extraction switch; supplied keywords skip extraction
-- [ ] 3.6 Diagnostics on every result: lexical rank and score, vector rank, cosine, matched
+- [x] 3.5 Per-request keyword extraction switch; supplied keywords skip extraction
+- [x] 3.6 Diagnostics on every result: lexical rank and score, vector rank, cosine, matched
       keywords
 
 ## 4. Tests
+
+> Status 2026-11-11: `searchengine/engine_test.go` (unit) and `engine_integration_test.go`
+> (read-only, needs `SEARCHENGINE_TEST_DATABASE_URL`; run against the dev database `miner`, both
+> backends) pass. Not done: the `search-query-keywords` scenarios on the engine path, a disposable
+> database, and the benchmark runs.
 
 - [ ] 4.1 Unit tests for each scenario in `specs/hybrid-search-engine/spec.md` and the modified
       scenarios in `specs/search-query-keywords/spec.md`

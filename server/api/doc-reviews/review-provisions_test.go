@@ -222,7 +222,7 @@ func TestReviewProvision_ReturnsAnalysesAsFindings(t *testing.T) {
 		ModelName:  "prov-model",
 		PromptText: "compare provisions",
 		PromptRef:  "prompt-review-provisions-v4.md",
-	}, doc, nil, "", false)
+	}, doc, oneProvisionMatch(), "", false)
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)
@@ -266,7 +266,7 @@ func TestReviewProvision_SetsCallLocCallReasonAndMetadata(t *testing.T) {
 		ModelName:  "prov-model",
 		PromptText: "compare provisions",
 		PromptRef:  "prompt-review-provisions-v1.md",
-	}, doc, nil, "", false)
+	}, doc, oneProvisionMatch(), "", false)
 
 	if len(fake.callReasons) != 1 || fake.callReasons[0] != "review-provision" {
 		t.Fatalf("callReasons = %v, want [review-provision]", fake.callReasons)
@@ -378,7 +378,7 @@ func TestReviewProvision_SavesAnalyses(t *testing.T) {
 		ModelName:  "prov-model",
 		PromptText: "compare provisions",
 		PromptRef:  "prompt-review-provisions-v4.md",
-	}, doc, nil, "", false)
+	}, doc, oneProvisionMatch(), "", false)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("mock: %v", err)
@@ -425,5 +425,37 @@ func TestLoadProvisionAnalysesByRun_NilDB(t *testing.T) {
 	got, err := loadProvisionAnalysesByRun(context.Background(), nil, &RequestStatus{InputRecordID: 88, LatestRunID: 99})
 	if err != nil || got != nil {
 		t.Fatalf("got=%+v err=%v, want (nil, nil) for nil db", got, err)
+	}
+}
+
+func oneProvisionMatch() []matchedProvision {
+	return []matchedProvision{{view: provisionView{ProvID: "2_prv_9"}, recordID: 2, via: "hybrid_search"}}
+}
+
+func TestReviewProvision_NoMatchesSkipsModelAndRecordsAnalysis(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectExec("INSERT INTO kb.doc_review_provision_analyses").
+		WithArgs(int64(1), int64(123), "1_prv_1", nil, nil, "unrelated", noRelevantProvisionsSummary).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	fake := &fakeJSONExtractor{out: map[string]any{"findings": []any{}}}
+	r := &provisionsReviewer{client: fake, db: db, logger: loggerutil.CreateDefaultLogger("TEST_PROVISIONS")}
+	doc := docProvision{view: provisionView{ProvID: "1_prv_1"}, spans: []string{"20:24"}}
+
+	ctx := withLLMRunID(context.Background(), 123)
+	findings := r.reviewProvision(ctx, 1, 0, ReviewerConfig{ModelName: "m", PromptText: "p", PromptRef: "r.md"}, doc, nil, "", false)
+
+	if len(fake.inputTexts) != 0 {
+		t.Errorf("model calls = %d, want 0 when a provision has no matches", len(fake.inputTexts))
+	}
+	if len(findings) != 1 || findings[0].FindingType != "analysis" || findings[0].Description != noRelevantProvisionsSummary {
+		t.Errorf("findings = %+v, want one analysis finding with the no-match summary", findings)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock: %v", err)
 	}
 }
