@@ -223,3 +223,39 @@ func TestContainsCJK(t *testing.T) {
 		}
 	}
 }
+
+func TestKeywordExtractionFallbackAndClause(t *testing.T) {
+	defer SetKeywordExtractor(nil)
+	ctx := context.Background()
+	cfg := Config{Backend: BackendParadeDB}
+	req := Request{Query: Query{Text: "how much adrenaline for a child"}, Options: Options{KeywordExtraction: KeywordExtractionOn}}
+	calls := 0
+	SetKeywordExtractor(func(_ context.Context, query string, force bool) []string {
+		calls++
+		if query != req.Query.Text || !force {
+			t.Errorf("extractor received %q, force=%v", query, force)
+		}
+		return []string{"adrenaline", "儿童"}
+	})
+	spec := resolveKeywordList(ctx, cfg, req, nil)
+	var args argList
+	clause := paradeDBClause(&args, spec)
+	if calls != 1 || len(args.vals) != 2 || args.vals[0] != "adrenaline" || args.vals[1] != "儿童" || !strings.Contains(clause, "&&&") || strings.Contains(clause, "|||") {
+		t.Fatalf("extraction: calls=%d args=%v clause=%s", calls, args.vals, clause)
+	}
+	SetKeywordExtractor(func(context.Context, string, bool) []string { return []string{"", "!!!"} })
+	spec = resolveKeywordList(ctx, cfg, req, nil)
+	args = argList{}
+	clause = paradeDBClause(&args, spec)
+	if len(args.vals) != 1 || args.vals[0] != req.Query.Text || !strings.Contains(clause, "|||") {
+		t.Fatalf("empty extraction fallback: args=%v clause=%s", args.vals, clause)
+	}
+}
+
+func TestKeywordClauseCombinesWholeTermsAndWeights(t *testing.T) {
+	var args argList
+	clause := paradeDBClause(&args, lexSpec{keywords: []Keyword{{Term: "blood pressure", Weight: 3}, {Term: "cuff", Weight: 1}}})
+	if len(args.vals) != 2 || args.vals[0] != "blood pressure" || args.vals[1] != "cuff" || strings.Count(clause, "&&&") != 2*len(paradeDBFields) || strings.Count(clause, "pdb.boost(3)") != len(paradeDBFields) || !strings.Contains(clause, "OR (") {
+		t.Fatalf("args=%v clause=%s", args.vals, clause)
+	}
+}
