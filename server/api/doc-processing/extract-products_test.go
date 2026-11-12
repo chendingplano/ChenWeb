@@ -661,6 +661,32 @@ func TestLoadProductPromptFromEnvKeys_PrefersFirstConfiguredKey(t *testing.T) {
 	}
 }
 
+func TestNewProductsProcessor_TranslationSetting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.toml")
+	if err := os.WriteFile(path, []byte("[test]\nhost = \"cloud\"\nmodel_name = \"test\"\napi_key = \"test\"\nbase_url = \"https://example.com\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MODEL_DEF_FILE", path)
+	t.Setenv("TRANSLATION_MODEL_NAME", "test")
+	prompt := filepath.Join(t.TempDir(), "translate.md")
+	if err := os.WriteFile(prompt, []byte("translate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TRANSLATE_PRODUCTS_PROMPT", prompt)
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"", true}, {"on", true}, {"off", false}} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("EXTRACT_PRODUCT_TRANSLATION", tc.value)
+			p := NewProductsProcessor(nil, nil, &fakeJSONExtractor{}, nil)
+			if p.TranslateEnabled != tc.want {
+				t.Fatalf("TranslateEnabled=%v, want %v (prompt error: %v)", p.TranslateEnabled, tc.want, p.TranslatePromptErr)
+			}
+		})
+	}
+}
+
 func TestLoadModelConfigFromEnvKeys_PrefersFirstConfiguredKey(t *testing.T) {
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, ".models.toml")

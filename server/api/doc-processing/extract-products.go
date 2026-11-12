@@ -220,7 +220,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
-	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
+	translateEnabled := !strings.EqualFold(strings.TrimSpace(os.Getenv("EXTRACT_PRODUCT_TRANSLATION")), "off") && translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
 	proc := &ProductsProcessor{
 		InputStore:           inputStore,
 		Store:                store,
