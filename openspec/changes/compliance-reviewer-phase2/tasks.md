@@ -8,9 +8,9 @@
 
 ## 2. Evaluation snapshot
 
-- [ ] 2.1 Before writing, run the `find-reusable-module` skill for a snapshot or manifest mechanism and for the benchmark layout; report what was searched.
-- [ ] 2.2 Project migration (see `db-migration` skill): `testbed.compliance_eval_snapshots` and `testbed.compliance_eval_snapshot_records` (record id, md5, chunk-index generation, chunk and provision counts), with down migration. Apply to the dev database and confirm the columns.
-- [ ] 2.3 A command that records a snapshot from a named list of records, and a check that compares current state with a manifest and names every member that differs.
+- [x] 2.1 Before writing, run the `find-reusable-module` skill for a snapshot or manifest mechanism and for the benchmark layout; report what was searched. *Searched 2026-11-12 (catalogue: snapshot, manifest, benchmark, gold, scorer, freeze, generation; code and devdocs for snapshot/manifest): no snapshot module exists. Reused: Artifact Search (`searchengine`) and `kb.chunk_search_state.generation`; built new: `server/api/compliance-eval` (small, evaluation-only, not registered).*
+- [x] 2.2 Project migration (see `db-migration` skill): `testbed.compliance_eval_snapshots` and `testbed.compliance_eval_snapshot_records` (record id, md5, chunk-index generation, chunk and provision counts), with down migration. Apply to the dev database and confirm the columns.
+- [x] 2.3 A command that records a snapshot from a named list of records, and a check that compares current state with a manifest and names every member that differs.
 
 ## 3. Gold set and scorer (.agents skills, pattern of `extract-provisions-benchmark` / `score-extract-provisions`)
 
