@@ -30,6 +30,6 @@
 
 ## 5. Close out
 
-- [ ] 5.1 Update research 2026111103 §12 status and devdoc 2026111201; answer the coding-practice questions (what knowledge changed, which docs are stale).
-- [ ] 5.2 Register any reusable module built here with the `create-reusable-module` skill.
-- [ ] 5.3 `go build ./server/...` and `go test` for `doc-reviews` and any new package; commit with explicit paths via `jj`.
+- [x] 5.1 Update research 2026111103 §12 status and devdoc 2026111201; answer the coding-practice questions (what knowledge changed, which docs are stale).
+- [x] 5.2 Register any reusable module built here with the `create-reusable-module` skill. *None registered: `compliance-eval` is evaluation-only and used by one feature; the reviewer's md5 lookup is exported for the gold pooling and stays in `doc-reviews`.*
+- [x] 5.3 `go build ./server/...` and `go test` for `doc-reviews` and any new package; commit with explicit paths via `jj`.
