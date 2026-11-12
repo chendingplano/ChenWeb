@@ -184,3 +184,83 @@ func TestComplianceDerivedEvidenceFromBareCompactInput(t *testing.T) {
 		t.Fatalf("derived evidence = %+v, err %v", acts, err)
 	}
 }
+
+func TestComplianceExcludesByteIdenticalCopies(t *testing.T) {
+	fake := &fakeJSONExtractor{out: activityPayload("a", "text")}
+	var got []int64
+	r := newTestComplianceReviewer(fake, func(_ context.Context, req searchengine.Request) (*searchengine.Response, error) {
+		got = req.Filters.ExcludeRecordIDs
+		return &searchengine.Response{}, nil
+	})
+	lookups := 0
+	r.duplicateIDs = func(_ context.Context, id int64) ([]int64, error) { lookups++; return []int64{id, 198}, nil }
+	if _, err := r.processChunk(context.Background(), 416, 2, complianceTestCfg, chunkInput{inputJSON: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != 416 || got[1] != 198 {
+		t.Errorf("exclude = %v want [416 198]", got)
+	}
+	if _, err := r.processChunk(context.Background(), 416, 3, complianceTestCfg, chunkInput{inputJSON: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	if lookups != 1 {
+		t.Errorf("duplicate lookups = %d want 1 per reviewed record", lookups)
+	}
+}
+
+func TestComplianceDuplicateLookupErrorAbortsChunk(t *testing.T) {
+	fake := &fakeJSONExtractor{out: activityPayload("a", "text")}
+	r := newTestComplianceReviewer(fake, func(context.Context, searchengine.Request) (*searchengine.Response, error) {
+		t.Fatal("search must not run when the duplicate lookup failed")
+		return nil, nil
+	})
+	boom := errors.New("db down")
+	r.duplicateIDs = func(context.Context, int64) ([]int64, error) { return nil, boom }
+	if _, err := r.processChunk(context.Background(), 7, 2, complianceTestCfg, chunkInput{inputJSON: "{}"}); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the lookup error", err)
+	}
+}
+
+func TestComplianceFloorIsPassedToSearchAndCosineShown(t *testing.T) {
+	fake := &fakeJSONExtractor{out: activityPayload("a", "text")}
+	cos := 0.8125
+	var floor float64
+	r := newTestComplianceReviewer(fake, func(_ context.Context, req searchengine.Request) (*searchengine.Response, error) {
+		floor = req.Criteria.MinCosine
+		return &searchengine.Response{Results: []searchengine.Result{
+			{ArtifactType: "chunk", ArtifactID: "c1", InputRecordID: 9, SourceTitle: "T", Snippet: "s", Diag: searchengine.Diagnostics{Cosine: &cos}},
+		}}, nil
+	})
+	r.minCosine = 0.55
+	fs, err := r.processChunk(context.Background(), 7, 2, complianceTestCfg, chunkInput{inputJSON: "{}"})
+	if err != nil || floor != 0.55 {
+		t.Fatalf("err=%v floor=%v", err, floor)
+	}
+	if !strings.Contains(fs[0].Description, "[chunk c1] (cosine 0.812)") && !strings.Contains(fs[0].Description, "[chunk c1] (cosine 0.813)") {
+		t.Errorf("cosine missing from %q", fs[0].Description)
+	}
+}
+
+func TestComplianceAllBelowFloorGivesNoGroundingRow(t *testing.T) {
+	fake := &fakeJSONExtractor{out: activityPayload("a", "text")}
+	r := newTestComplianceReviewer(fake, func(context.Context, searchengine.Request) (*searchengine.Response, error) {
+		return &searchengine.Response{Removed: searchengine.Removed{MinCosine: 10}}, nil // the engine dropped every result
+	})
+	r.minCosine = 0.9
+	fs, err := r.processChunk(context.Background(), 7, 2, complianceTestCfg, chunkInput{inputJSON: "{}"})
+	if err != nil || len(fs) != 1 || fs[0].FindingType != "compliance_no_grounding" {
+		t.Fatalf("err=%v findings=%+v", err, fs)
+	}
+}
+
+func TestParseDocReviewConfigMinCosine(t *testing.T) {
+	for _, tc := range []struct {
+		val string
+		ok  bool
+	}{{"0.55", true}, {"0", true}, {"1", true}, {"-0.1", false}, {"1.5", false}} {
+		_, err := parseDocReviewConfig([]byte("[reviewers.compliance]\nmin_cosine = " + tc.val + "\n"))
+		if (err == nil) != tc.ok {
+			t.Errorf("min_cosine=%s err=%v want ok=%v", tc.val, err, tc.ok)
+		}
+	}
+}

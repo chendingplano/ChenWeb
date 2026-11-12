@@ -815,3 +815,4 @@ model = "deepseek-flash-processor"
 prompt = "prompt-review-compliance-v2.md"
 doc_activity_prompt = "prompt-review-compliance-document-activity-v2.md"
 thinking_type = "disabled"   # no reasoning: the output is a plain activity list
+# min_cosine = 0.55   # relevance floor 0..1 for candidates; unset = no floor. Do not set before the gold set shows a value (openspec compliance-reviewer-phase2).

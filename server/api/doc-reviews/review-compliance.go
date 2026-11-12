@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/searchengine"
@@ -18,7 +19,8 @@ import (
 //  1. detects activities from the chunk alone (never reads the knowledge base; the first
 //     chunk also yields the document-level activity),
 //  2. searches the knowledge base for each activity through searchengine.Search
-//     (provisions and original chunks, reviewed record excluded, no MinCosine),
+//     (provisions and original chunks; the reviewed record and its byte-identical copies are
+//     excluded; [reviewers.compliance].min_cosine, when set, is the relevance floor),
 //  3. reports one informational row per activity: grounding candidates, or "none found".
 //
 // Not yet built (later phases): applicability, requirement comparison, omission gaps and the
@@ -42,16 +44,29 @@ type complianceReviewer struct {
 	// docActivityPromptRef is [reviewers.compliance].doc_activity_prompt in doc-review.local.toml.
 	docActivityPromptRef string
 	maxTasks             int
+	// minCosine is [reviewers.compliance].min_cosine; 0 means no relevance floor.
+	minCosine float64
+	// duplicateIDs returns the reviewed record and every record with the same md5 (a field so
+	// tests need no database). Nil means the record alone.
+	duplicateIDs func(ctx context.Context, recordID int64) ([]int64, error)
+	excluded     sync.Map // recordID -> []int64, one lookup per review
 }
 
 func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, db *sql.DB, maxTasks int) *complianceReviewer {
 	cfg := searchengine.LoadConfig()
 	docPrompt := ""
+	minCosine := 0.0
 	if dc, _ := GetDocReviewConfig(); dc != nil {
-		docPrompt = strings.TrimSpace(dc.Reviewers["compliance"].DocActivityPrompt)
+		rc := dc.Reviewers["compliance"]
+		docPrompt = strings.TrimSpace(rc.DocActivityPrompt)
+		if rc.MinCosine != nil {
+			minCosine = *rc.MinCosine
+		}
 	}
 	return &complianceReviewer{
 		docActivityPromptRef: docPrompt,
+		minCosine:            minCosine,
+		duplicateIDs:         func(ctx context.Context, id int64) ([]int64, error) { return sameMD5RecordIDs(ctx, db, id) },
 		client:               client,
 		logger:               logger,
 		maxTasks:             maxTasks,
@@ -313,19 +328,60 @@ type complianceCandidate struct {
 	title        string
 	snippet      string
 	rank         int
+	cosine       *float64
+}
+
+// sameMD5RecordIDs returns recordID plus every other record with the same non-empty md5 (a
+// re-uploaded copy of the reviewed file must not ground it).
+func sameMD5RecordIDs(ctx context.Context, db *sql.DB, recordID int64) ([]int64, error) {
+	ids := []int64{recordID}
+	rows, err := db.QueryContext(ctx, `SELECT id FROM kb.inputs
+		WHERE id <> $1 AND COALESCE(md5, '') <> '' AND md5 = (SELECT md5 FROM kb.inputs WHERE id = $1)
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, fmt.Errorf("compliance duplicate lookup for record %d: %w", recordID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *complianceReviewer) excludeIDs(ctx context.Context, recordID int64) ([]int64, error) {
+	if v, ok := r.excluded.Load(recordID); ok {
+		return v.([]int64), nil
+	}
+	ids := []int64{recordID}
+	if r.duplicateIDs != nil {
+		var err error
+		if ids, err = r.duplicateIDs(ctx, recordID); err != nil {
+			return nil, err
+		}
+	}
+	r.excluded.Store(recordID, ids)
+	return ids, nil
 }
 
 // ground searches the knowledge base for one activity and builds its report row.
 func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a complianceActivity, input chunkInput) (ReviewFinding, error) {
+	exclude, err := r.excludeIDs(ctx, recordID)
+	if err != nil {
+		return ReviewFinding{}, err
+	}
 	seen := map[string]bool{}
 	var cands []complianceCandidate
 	for _, q := range a.Queries {
 		resp, err := r.search(ctx, searchengine.Request{
 			Query:    searchengine.Query{Text: q.Text},
-			Criteria: searchengine.Criteria{Keywords: q.Keywords},
+			Criteria: searchengine.Criteria{Keywords: q.Keywords, MinCosine: r.minCosine},
 			Filters: searchengine.Filters{
 				ArtifactTypes:    []string{"provision", "chunk"},
-				ExcludeRecordIDs: []int64{recordID},
+				ExcludeRecordIDs: exclude,
 			},
 			Options: searchengine.Options{Limit: complianceSearchLimit},
 		})
@@ -342,7 +398,7 @@ func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a compl
 			if title == "" {
 				title = res.SourceFilename
 			}
-			cands = append(cands, complianceCandidate{res.ArtifactType, res.ArtifactID, res.InputRecordID, title, res.Snippet, len(cands) + 1})
+			cands = append(cands, complianceCandidate{res.ArtifactType, res.ArtifactID, res.InputRecordID, title, res.Snippet, len(cands) + 1, res.Diag.Cosine})
 		}
 	}
 
@@ -371,7 +427,11 @@ func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a compl
 	fmt.Fprintf(&b, "Retrieved %d candidate artifact(s) from the knowledge base that may govern this activity. "+
 		"Candidates are search results; applicability and requirement comparison are not assessed.\n", len(cands))
 	for _, c := range cands {
-		fmt.Fprintf(&b, "- [%s %s] record %d %s: %s\n", c.artifactType, c.artifactID, c.recordID, c.title, strings.TrimSpace(c.snippet))
+		cos := ""
+		if c.cosine != nil {
+			cos = fmt.Sprintf(" (cosine %.3f)", *c.cosine)
+		}
+		fmt.Fprintf(&b, "- [%s %s]%s record %d %s: %s\n", c.artifactType, c.artifactID, cos, c.recordID, c.title, strings.TrimSpace(c.snippet))
 	}
 	f.FindingType = "compliance_grounding_candidates"
 	f.Title = "Grounding candidates found: " + label

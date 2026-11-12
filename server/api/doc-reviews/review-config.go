@@ -61,7 +61,9 @@ type ReviewAspectConfig struct {
 	DocActivityPrompt string `toml:"doc_activity_prompt"`
 	// ThinkingType overrides the model profile's thinking_type for this reviewer
 	// (e.g. "disabled"). Empty keeps the profile's setting.
-	ThinkingType  string   `toml:"thinking_type"`
+	ThinkingType string `toml:"thinking_type"`
+	// MinCosine is the compliance reviewer's relevance floor (0..1). Unset or 0 means no floor.
+	MinCosine     *float64 `toml:"min_cosine"`
 	MaxToolTurns  *int     `toml:"max_tool_turns"`
 	MaxToolTokens *int     `toml:"max_tool_tokens"`
 	MaxFindings   []int    `toml:"max_findings"`
@@ -180,6 +182,9 @@ func parseDocReviewConfig(raw []byte) (*DocReviewConfig, error) {
 		}
 		if err := validateOutputLimitArray(scope, "max_analyses", reviewer.MaxAnalyses); err != nil {
 			return nil, err
+		}
+		if reviewer.MinCosine != nil && (*reviewer.MinCosine < 0 || *reviewer.MinCosine > 1) {
+			return nil, fmt.Errorf("%s min_cosine must be between 0 and 1", scope)
 		}
 	}
 	return &cfg, nil
