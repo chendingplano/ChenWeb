@@ -172,3 +172,15 @@ func TestComplianceDerivedEvidenceFromCompactInput(t *testing.T) {
 		t.Fatalf("derived evidence = %+v, err %v", acts, err)
 	}
 }
+
+// A chunk input without the {"lines":...} envelope (a bare [header, row, ...] table) must still
+// yield the evidence quote; live record 799 aborted the reviewer when it did not.
+func TestComplianceDerivedEvidenceFromBareCompactInput(t *testing.T) {
+	in := `[["flag","line_number","page_number","line_type","content"],["n",402,44,"paragraph","A"],["n",403,44,"paragraph","B"]]`
+	acts, err := parseComplianceActivities(map[string]any{"activities": []any{
+		map[string]any{"activity": "x", "line_start": 402.0, "line_end": 403.0},
+	}}, false, chunkInput{inputJSON: in})
+	if err != nil || len(acts) != 1 || acts[0].SourceText != "A\nB" {
+		t.Fatalf("derived evidence = %+v, err %v", acts, err)
+	}
+}

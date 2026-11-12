@@ -171,7 +171,11 @@ func parseComplianceActivities(payload map[string]any, docLevel bool, input chun
 			a.SourceText = complianceLinesText(input.inputJSON, a.LineStart, a.LineEnd)
 		}
 		if a.Activity == "" || a.SourceText == "" {
-			return nil, fmt.Errorf("compliance model response: activity %d needs activity and source_text", i)
+			entry, _ := json.Marshal(m)
+			if len(entry) > 300 {
+				entry = entry[:300]
+			}
+			return nil, fmt.Errorf("compliance model response: activity %d needs activity and source_text (chunk lines %d-%d, entry %s)", i, input.startLine, input.endLine, entry)
 		}
 		if qs, ok := m["search_queries"].([]any); ok {
 			for _, q := range qs {
@@ -198,12 +202,20 @@ type complianceInputLine struct {
 
 // parseComplianceInput reads the shared compact chunk input: {"doc_context":..,"lines":[header,
 // row,...]} where the header row names the columns of the rows after it (see
-// docprocessing.RawLinesToCompactJSON). Input without that shape reports ok=false.
+// docprocessing.RawLinesToCompactJSON), or the bare [header, row, ...] table. Other input reports ok=false.
 func parseComplianceInput(inputJSON string) (lines []complianceInputLine, ok bool) {
 	var env struct {
 		Lines [][]any `json:"lines"`
 	}
-	if err := json.Unmarshal([]byte(inputJSON), &env); err != nil || len(env.Lines) < 2 {
+	if err := json.Unmarshal([]byte(inputJSON), &env); err != nil {
+		// The compact table may also arrive bare, as [header, row, ...] without the envelope.
+		var bare [][]any
+		if json.Unmarshal([]byte(inputJSON), &bare) != nil {
+			return nil, false
+		}
+		env.Lines = bare
+	}
+	if len(env.Lines) < 2 {
 		return nil, false
 	}
 	numCol, contentCol := -1, -1
