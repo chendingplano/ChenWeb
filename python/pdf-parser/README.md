@@ -252,7 +252,10 @@ MinerU phase progress records each started tqdm phase in order. A phase name may
 appear more than once (for example, separate VLM Predict passes); each new pass
 with an incomplete progress update is shown separately. Duplicate completed tqdm
 updates are ignored. A repeated pass observed only at completion cannot be
-distinguished from a duplicate completion.
+distinguished from a duplicate completion within the same window. When MinerU
+reports processing windows, each phase also carries the window number and its
+page range, so the dashboard can group the phases by window. Phase percentages
+describe individual operations and are not overall document progress.
 
 ### Status Format
 

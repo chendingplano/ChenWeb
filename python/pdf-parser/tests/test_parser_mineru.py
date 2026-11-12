@@ -63,6 +63,18 @@ def test_phase_tracker_tracks_repeated_phase_after_completion(monkeypatch):
     assert phases[-1]["progress"] == 50
 
 
+def test_phase_tracker_attributes_repeated_phases_to_processing_windows(monkeypatch):
+    monkeypatch.setattr("parser_mineru.time.monotonic", lambda: 10.0)
+    tracker = PhaseTracker()
+    tracker.update("Hybrid processing window 1/4: pages 1-64/242 (64 pages)")
+    tracker.update("Layout Predict: 100%|█| 64/64")
+    tracker.update("Hybrid processing window 2/4: pages 65-128/242 (64 pages)")
+    phases, _ = tracker.update("Layout Predict: 0%| | 0/64")
+    assert phases[0]["window"] == {"index": 1, "total": 4, "start_page": 1, "end_page": 64, "total_pages": 242}
+    assert phases[1]["window"] == {"index": 2, "total": 4, "start_page": 65, "end_page": 128, "total_pages": 242}
+    assert phases[1]["status"] == "active"
+
+
 def test_only_processing_pages_counter_is_a_page_count():
     assert _processing_pages("Predict: 100%|████| 303/303 [03:58<00:00]") is None
     assert _processing_pages("Processing pages: 100%|████| 16/16 [00:00<00:00]") == (16, 16)

@@ -27,6 +27,7 @@ _PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
 # picks for the platform (Linux VLM: Layout Predict, VLM Predict; pipeline: MFR Predict,
 # OCR-det, ...), so no fixed list can name them.
 _PHASE_PROGRESS_RE = re.compile(r'([A-Za-z][\w /.-]*?):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)')
+_WINDOW_RE = re.compile(r'Hybrid processing window (\d+)/(\d+): pages (\d+)-(\d+)/(\d+)')
 
 
 def _processing_pages(line: str) -> tuple[int, int] | None:
@@ -66,8 +67,14 @@ class PhaseTracker:
         """The legacy system argument is ignored."""
         self.phases: list[dict] = []
         self.started: dict[str, float] = {}
+        self.window: dict[str, int] | None = None
 
     def update(self, line: str) -> tuple[list[dict], bool] | None:
+        window_match = _WINDOW_RE.search(line)
+        if window_match:
+            self.window = dict(zip(("index", "total", "start_page", "end_page", "total_pages"),
+                                   map(int, window_match.groups())))
+            return None
         match = _PHASE_PROGRESS_RE.search(line)
         if not match:
             return None
@@ -78,10 +85,13 @@ class PhaseTracker:
         progress = min(100, int(done * 100 / total))
         complete = done >= total
         status = "complete" if complete else "active"
-        phase = next((item for item in reversed(self.phases) if item["name"] == name), None)
+        phase = next((item for item in reversed(self.phases)
+                      if item["name"] == name and item.get("window") == self.window), None)
         if phase is None or (phase["status"] == "complete" and not complete):
             self.started[name] = now
             phase = {"name": name}
+            if self.window is not None:
+                phase["window"] = self.window.copy()
             self.phases.append(phase)
         elif phase["status"] == "complete":
             return None

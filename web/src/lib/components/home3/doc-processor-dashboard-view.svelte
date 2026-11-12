@@ -181,6 +181,7 @@
 		progress: number;
 		status: 'pending' | 'active' | 'complete';
 		elapsed_seconds?: number;
+		window?: { index: number; total: number; start_page: number; end_page: number; total_pages: number };
 	};
 	type ParseEntry = KbInputRecord['status'][number] & { phases?: ParsePhase[]; num_pages?: number };
 
@@ -1627,6 +1628,11 @@
 												: phase.status === 'active'
 													? accent
 													: textMuted}
+										{#if phase.window && (index === 0 || phases[index - 1].window?.index !== phase.window.index)}
+											<div style="grid-column:1 / -1; color:{textMuted}; font-size:12px; font-weight:600;">
+												{m.doc_processor_dashboard_pdf_window({ index: phase.window.index, total: phase.window.total, start: phase.window.start_page, end: phase.window.end_page, pages: phase.window.total_pages })}
+											</div>
+										{/if}
 										<div
 											class="pdf-phase"
 											style="background:{surface2}; border:1px solid {phase.status === 'active'

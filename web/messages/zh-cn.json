@@ -1,4 +1,5 @@
 {
+	"doc_processor_dashboard_pdf_window": "第 {index} / {total} 窗口 · 第 {start}–{end} 页，共 {pages} 页",
 	"context_shelf_provision_details": "条款详情",
 	"context_shelf_product_details": "产品详情",
 	"products_relation_summary": "关系摘要",
