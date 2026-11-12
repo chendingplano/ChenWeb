@@ -24,9 +24,8 @@ import (
 // verifier. Candidates are therefore retrieval results, NOT analysis-accepted grounding, and
 // "no grounding" means a completed search returned nothing, never "unregulated".
 const (
-	complianceDocActivityPromptRef = "prompt-review-compliance-document-activity-v1.md"
-	complianceSearchLimit          = 10
-	complianceMaxQueries           = 3
+	complianceSearchLimit = 10
+	complianceMaxQueries  = 3
 )
 
 type complianceSearchFunc func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error)
@@ -37,15 +36,22 @@ type complianceReviewer struct {
 	search complianceSearchFunc
 	// loadPrompt resolves the document-level activity prompt (a field so tests need no prompts dir).
 	loadPrompt func(ref string) (text, ref2 string, err error)
-	maxTasks   int
+	// docActivityPromptRef is [reviewers.compliance].doc_activity_prompt in doc-review.local.toml.
+	docActivityPromptRef string
+	maxTasks             int
 }
 
 func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, db *sql.DB, maxTasks int) *complianceReviewer {
 	cfg := searchengine.LoadConfig()
+	docPrompt := ""
+	if dc, _ := GetDocReviewConfig(); dc != nil {
+		docPrompt = strings.TrimSpace(dc.Reviewers["compliance"].DocActivityPrompt)
+	}
 	return &complianceReviewer{
-		client:   client,
-		logger:   logger,
-		maxTasks: maxTasks,
+		docActivityPromptRef: docPrompt,
+		client:               client,
+		logger:               logger,
+		maxTasks:             maxTasks,
 		loadPrompt: func(ref string) (string, string, error) {
 			text, out, _, err := loadPromptByRef(ref)
 			return text, out, err
@@ -86,9 +92,12 @@ func (r *complianceReviewer) processChunk(ctx context.Context, recordID int64, i
 		return nil, err
 	}
 	if index == 0 {
-		text, ref, perr := r.loadPrompt(complianceDocActivityPromptRef)
+		if r.docActivityPromptRef == "" {
+			return nil, fmt.Errorf("compliance: doc_activity_prompt is not set in [reviewers.compliance] of doc-review.local.toml")
+		}
+		text, ref, perr := r.loadPrompt(r.docActivityPromptRef)
 		if perr != nil {
-			return nil, fmt.Errorf("compliance: load %s: %w", complianceDocActivityPromptRef, perr)
+			return nil, fmt.Errorf("compliance: load %s: %w", r.docActivityPromptRef, perr)
 		}
 		docActs, derr := r.detect(ctx, ref, text, cfg.ModelName, input, true)
 		if derr != nil {

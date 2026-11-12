@@ -129,12 +129,20 @@ func TestComplianceFirstChunkAddsDocumentLevelActivity(t *testing.T) {
 	r := newTestComplianceReviewer(fake, func(context.Context, searchengine.Request) (*searchengine.Response, error) {
 		return &searchengine.Response{}, nil
 	})
+	r.docActivityPromptRef = "prompt-doc.md"
 	r.loadPrompt = func(ref string) (string, string, error) { return "doc prompt", ref, nil }
 	fs, err := r.processChunk(context.Background(), 1, 0, complianceTestCfg, chunkInput{inputJSON: "{}"})
 	if err != nil || len(fs) != 1 {
 		t.Fatalf("err=%v findings=%d", err, len(fs))
 	}
-	if fake.calledCount != 2 || fake.promptNames[1] != complianceDocActivityPromptRef {
+	if fake.calledCount != 2 || fake.promptNames[1] != "prompt-doc.md" {
 		t.Errorf("calls=%d prompts=%v", fake.calledCount, fake.promptNames)
+	}
+}
+
+func TestComplianceFirstChunkNeedsConfiguredDocPrompt(t *testing.T) {
+	r := newTestComplianceReviewer(&fakeJSONExtractor{out: map[string]any{"activities": []any{}}}, nil)
+	if _, err := r.processChunk(context.Background(), 1, 0, complianceTestCfg, chunkInput{}); err == nil {
+		t.Fatal("want error when doc_activity_prompt is unset")
 	}
 }

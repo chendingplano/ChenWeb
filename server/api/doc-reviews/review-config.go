@@ -47,21 +47,23 @@ func (p ReviewPackageConfig) LocalizedDesc(locale string) string {
 // Pointer fields distinguish "unset" (inherit the group default) from a zero
 // value that was explicitly configured.
 type ReviewAspectConfig struct {
-	Enabled       *bool    `toml:"enabled"`
-	Checked       *bool    `toml:"checked"`
-	Group         string   `toml:"group"`
-	NameEN        string   `toml:"name_en"`
-	NameZhCN      string   `toml:"name_zh_cn"`
-	DescEN        string   `toml:"desc_en"`
-	DescZhCN      string   `toml:"desc_zh_cn"`
-	Input         string   `toml:"input"` // "per-chunk" or "per-block"
-	Model         string   `toml:"model"`
-	Prompt        string   `toml:"prompt"`
-	MaxToolTurns  *int     `toml:"max_tool_turns"`
-	MaxToolTokens *int     `toml:"max_tool_tokens"`
-	MaxFindings   []int    `toml:"max_findings"`
-	MaxAnalyses   []int    `toml:"max_analyses"`
-	Tools         []string `toml:"tools"`
+	Enabled  *bool  `toml:"enabled"`
+	Checked  *bool  `toml:"checked"`
+	Group    string `toml:"group"`
+	NameEN   string `toml:"name_en"`
+	NameZhCN string `toml:"name_zh_cn"`
+	DescEN   string `toml:"desc_en"`
+	DescZhCN string `toml:"desc_zh_cn"`
+	Input    string `toml:"input"` // "per-chunk" or "per-block"
+	Model    string `toml:"model"`
+	Prompt   string `toml:"prompt"`
+	// DocActivityPrompt is the compliance reviewer's document-level activity prompt.
+	DocActivityPrompt string   `toml:"doc_activity_prompt"`
+	MaxToolTurns      *int     `toml:"max_tool_turns"`
+	MaxToolTokens     *int     `toml:"max_tool_tokens"`
+	MaxFindings       []int    `toml:"max_findings"`
+	MaxAnalyses       []int    `toml:"max_analyses"`
+	Tools             []string `toml:"tools"`
 }
 
 // LocalizedName returns the aspect (reviewer) label for locale, falling back to
