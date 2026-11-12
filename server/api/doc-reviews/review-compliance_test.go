@@ -146,3 +146,29 @@ func TestComplianceFirstChunkNeedsConfiguredDocPrompt(t *testing.T) {
 		t.Fatal("want error when doc_activity_prompt is unset")
 	}
 }
+
+func TestParseComplianceQueryBilingualKeywords(t *testing.T) {
+	q, ok := parseComplianceQuery([]any{
+		map[string]any{"en": "audit log", "zh": "审计日志"},
+		map[string]any{"en": "audit log", "zh": "留存"},
+	})
+	if !ok || len(q.Keywords) != 3 || q.Keywords[1].Term != "审计日志" || q.Text != "audit log 审计日志 留存" {
+		t.Fatalf("query = %+v ok=%v", q, ok)
+	}
+	if s, ok := parseComplianceQuery("plain"); !ok || s.Text != "plain" || len(s.Keywords) != 0 {
+		t.Fatalf("string query = %+v", s)
+	}
+	if _, ok := parseComplianceQuery([]any{}); ok {
+		t.Fatal("empty keyword list must be rejected")
+	}
+}
+
+func TestComplianceDerivedEvidenceFromCompactInput(t *testing.T) {
+	in := `{"doc_context":"D","lines":[["flag","line_number","page_number","line_type","content"],["n",5,2,"paragraph","A"],["n",6,2,"paragraph","B"]]}`
+	acts, err := parseComplianceActivities(map[string]any{"activities": []any{
+		map[string]any{"activity": "x", "line_start": 5.0, "line_end": 6.0},
+	}}, false, chunkInput{inputJSON: in})
+	if err != nil || len(acts) != 1 || acts[0].SourceText != "A\nB" {
+		t.Fatalf("derived evidence = %+v, err %v", acts, err)
+	}
+}

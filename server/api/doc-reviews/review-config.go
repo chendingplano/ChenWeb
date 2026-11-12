@@ -58,12 +58,15 @@ type ReviewAspectConfig struct {
 	Model    string `toml:"model"`
 	Prompt   string `toml:"prompt"`
 	// DocActivityPrompt is the compliance reviewer's document-level activity prompt.
-	DocActivityPrompt string   `toml:"doc_activity_prompt"`
-	MaxToolTurns      *int     `toml:"max_tool_turns"`
-	MaxToolTokens     *int     `toml:"max_tool_tokens"`
-	MaxFindings       []int    `toml:"max_findings"`
-	MaxAnalyses       []int    `toml:"max_analyses"`
-	Tools             []string `toml:"tools"`
+	DocActivityPrompt string `toml:"doc_activity_prompt"`
+	// ThinkingType overrides the model profile's thinking_type for this reviewer
+	// (e.g. "disabled"). Empty keeps the profile's setting.
+	ThinkingType  string   `toml:"thinking_type"`
+	MaxToolTurns  *int     `toml:"max_tool_turns"`
+	MaxToolTokens *int     `toml:"max_tool_tokens"`
+	MaxFindings   []int    `toml:"max_findings"`
+	MaxAnalyses   []int    `toml:"max_analyses"`
+	Tools         []string `toml:"tools"`
 }
 
 // LocalizedName returns the aspect (reviewer) label for locale, falling back to

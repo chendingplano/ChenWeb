@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ import (
 const (
 	complianceSearchLimit = 10
 	complianceMaxQueries  = 3
+	// complianceEvidenceMax caps the evidence quote derived from the document lines.
+	complianceEvidenceMax = 400
 )
 
 type complianceSearchFunc func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error)
@@ -81,7 +84,7 @@ type complianceActivity struct {
 	Object        string
 	Purpose       string
 	DocumentLevel bool
-	Queries       []string
+	Queries       []complianceQuery
 }
 
 func (r *complianceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) ([]ReviewFinding, error) {
@@ -124,7 +127,7 @@ func (r *complianceReviewer) processChunk(ctx context.Context, recordID int64, i
 
 func (r *complianceReviewer) detect(ctx context.Context, promptRef, promptText, model string, input chunkInput, docLevel bool) ([]complianceActivity, error) {
 	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, promptRef, promptText, model, input.inputJSON,
-		"review_compliance", "MID-CWB-REVIEW-COMPLIANCE"))
+		"review_compliance", "MID-20261112-01"))
 	if err != nil {
 		return nil, err
 	}
@@ -164,22 +167,131 @@ func parseComplianceActivities(payload map[string]any, docLevel bool, input chun
 			Purpose:       str(m, "purpose"),
 			DocumentLevel: docLevel,
 		}
+		if a.SourceText == "" && a.Activity != "" {
+			a.SourceText = complianceLinesText(input.inputJSON, a.LineStart, a.LineEnd)
+		}
 		if a.Activity == "" || a.SourceText == "" {
 			return nil, fmt.Errorf("compliance model response: activity %d needs activity and source_text", i)
 		}
 		if qs, ok := m["search_queries"].([]any); ok {
 			for _, q := range qs {
-				if s, ok := q.(string); ok && strings.TrimSpace(s) != "" && len(a.Queries) < complianceMaxQueries {
-					a.Queries = append(a.Queries, strings.TrimSpace(s))
+				if len(a.Queries) >= complianceMaxQueries {
+					break
+				}
+				if cq, ok := parseComplianceQuery(q); ok {
+					a.Queries = append(a.Queries, cq)
 				}
 			}
 		}
 		if len(a.Queries) == 0 {
-			a.Queries = []string{a.SourceText}
+			a.Queries = []complianceQuery{{Text: a.SourceText}}
 		}
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+type complianceInputLine struct {
+	LineNumber int
+	Content    string
+}
+
+// parseComplianceInput reads the shared compact chunk input: {"doc_context":..,"lines":[header,
+// row,...]} where the header row names the columns of the rows after it (see
+// docprocessing.RawLinesToCompactJSON). Input without that shape reports ok=false.
+func parseComplianceInput(inputJSON string) (lines []complianceInputLine, ok bool) {
+	var env struct {
+		Lines [][]any `json:"lines"`
+	}
+	if err := json.Unmarshal([]byte(inputJSON), &env); err != nil || len(env.Lines) < 2 {
+		return nil, false
+	}
+	numCol, contentCol := -1, -1
+	for i, h := range env.Lines[0] {
+		switch h {
+		case "line_number":
+			numCol = i
+		case "content":
+			contentCol = i
+		}
+	}
+	if numCol < 0 || contentCol < 0 {
+		return nil, false
+	}
+	for _, row := range env.Lines[1:] {
+		if len(row) <= numCol || len(row) <= contentCol {
+			continue
+		}
+		n, _ := row[numCol].(float64)
+		c, _ := row[contentCol].(string)
+		lines = append(lines, complianceInputLine{LineNumber: int(n), Content: c})
+	}
+	return lines, len(lines) > 0
+}
+
+// complianceLinesText returns the content of lines start..end of the chunk input (the evidence
+// quote, derived from the document so the model need not repeat it), capped in length.
+func complianceLinesText(inputJSON string, start, end int) string {
+	lines, ok := parseComplianceInput(inputJSON)
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, l := range lines {
+		if l.LineNumber >= start && l.LineNumber <= end {
+			parts = append(parts, strings.TrimSpace(l.Content))
+		}
+	}
+	text := strings.Join(parts, "\n")
+	if r := []rune(text); len(r) > complianceEvidenceMax {
+		text = string(r[:complianceEvidenceMax]) + "…"
+	}
+	return text
+}
+
+// complianceQuery is one knowledge-base search for an activity. The model gives it as bilingual
+// keywords, which go to the engine as the keyword list, so the engine's keyword LLM call is skipped;
+// Text (the keywords joined) feeds the vector side. A plain-string query has no Keywords and takes
+// the engine's default keyword handling.
+type complianceQuery struct {
+	Text     string
+	Keywords []searchengine.Keyword
+}
+
+// parseComplianceQuery reads a search_queries element: a string, or a list of {"en","zh"} keywords
+// (plain strings inside the list are accepted too).
+func parseComplianceQuery(raw any) (complianceQuery, bool) {
+	if s, ok := raw.(string); ok {
+		s = strings.TrimSpace(s)
+		return complianceQuery{Text: s}, s != ""
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return complianceQuery{}, false
+	}
+	var q complianceQuery
+	var terms []string
+	seen := map[string]bool{}
+	add := func(v any) {
+		t, _ := v.(string)
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			return
+		}
+		seen[t] = true
+		terms = append(terms, t)
+		q.Keywords = append(q.Keywords, searchengine.Keyword{Term: t})
+	}
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			add(m["en"])
+			add(m["zh"])
+		} else {
+			add(it)
+		}
+	}
+	q.Text = strings.Join(terms, " ")
+	return q, len(terms) > 0
 }
 
 type complianceCandidate struct {
@@ -197,7 +309,8 @@ func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a compl
 	var cands []complianceCandidate
 	for _, q := range a.Queries {
 		resp, err := r.search(ctx, searchengine.Request{
-			Query: searchengine.Query{Text: q},
+			Query:    searchengine.Query{Text: q.Text},
+			Criteria: searchengine.Criteria{Keywords: q.Keywords},
 			Filters: searchengine.Filters{
 				ArtifactTypes:    []string{"provision", "chunk"},
 				ExcludeRecordIDs: []int64{recordID},
@@ -205,7 +318,7 @@ func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a compl
 			Options: searchengine.Options{Limit: complianceSearchLimit},
 		})
 		if err != nil {
-			return ReviewFinding{}, fmt.Errorf("compliance search %q: %w", q, err)
+			return ReviewFinding{}, fmt.Errorf("compliance search %q: %w", q.Text, err)
 		}
 		for _, res := range resp.Results {
 			key := res.ArtifactType + "/" + res.ArtifactID
@@ -242,6 +355,7 @@ func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a compl
 		return f, nil
 	}
 	var b strings.Builder
+	fmt.Fprintf(&b, "Activity: %s\n\n", label)
 	fmt.Fprintf(&b, "Retrieved %d candidate artifact(s) from the knowledge base that may govern this activity. "+
 		"Candidates are search results; applicability and requirement comparison are not assessed.\n", len(cands))
 	for _, c := range cands {

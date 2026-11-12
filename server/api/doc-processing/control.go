@@ -225,6 +225,27 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 		}
 		return err
 	}
+	// The start command is the user's run: refuse it up front when it carries no
+	// user_id, so nothing (record resolution, routing, LLM calls) runs unattributed.
+	// Tag ctx so the calls made here are attributed to the same user.
+	userID := strings.TrimSpace(cmd.UserID)
+	if userID == "" {
+		if s.RoutingAlarms != nil {
+			alarmErr := s.RoutingAlarms.WriteAlarm(ctx, RoutingAlarm{
+				Kind:     RoutingAlarmKindMissingUserID,
+				Severity: RoutingAlarmSeverityError,
+				Message:  "start doc-processing event carries no user_id; refusing to run (billing attribution would be lost)",
+			})
+			if alarmErr != nil && s.Logger != nil {
+				s.Logger.Warn("failed writing missing-user-id alarm", "error", alarmErr)
+			}
+		}
+		if s.Logger != nil {
+			s.Logger.Error("doc processor refusing start command: event carries no user_id")
+		}
+		return errors.New("(MID_26111201) start doc-processing event carries no user_id; refusing to run")
+	}
+	ctx = withLLMUserID(ctx, userID)
 	records, err := s.resolveStartDocProcessingRecords(ctx, cmd)
 	if err != nil {
 		return err

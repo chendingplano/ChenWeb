@@ -58,6 +58,9 @@ func BuildDocContextLine(rec DocMetadataInputRecord) string { return buildDocCon
 // RawLinesToJSON serializes lines to the reviewer input JSON shape.
 func RawLinesToJSON(lines []Line) string { return rawLinesToJSON(lines) }
 
+// RawLinesToCompactJSON is the compact line input used by the document reviewers.
+func RawLinesToCompactJSON(lines []Line) string { return rawLinesToCompactJSON(lines) }
+
 // WrapLinesWithDocContext wraps a lines JSON payload in the doc_context envelope.
 func WrapLinesWithDocContext(linesJSON, docCtx string) string {
 	return wrapLinesWithDocContext(linesJSON, docCtx)
@@ -128,9 +131,18 @@ func RunReviewConcurrent[T any](
 // JSON-extraction client for a reviewer. It encapsulates the (unexported)
 // model-config type so callers in other packages never need to see it.
 func BuildReviewerLLMClient(modelRef string) (client LLMJSONExtractor, modelName string, err error) {
+	return BuildReviewerLLMClientWithThinking(modelRef, "")
+}
+
+// BuildReviewerLLMClientWithThinking is BuildReviewerLLMClient with an optional
+// thinking_type override ("disabled" turns reasoning off); empty keeps the profile's.
+func BuildReviewerLLMClientWithThinking(modelRef, thinkingType string) (client LLMJSONExtractor, modelName string, err error) {
 	_, _, cfg, err := loadModelConfigByRef(modelRef, "MODEL_DEF_FILE")
 	if err != nil {
 		return nil, "", err
+	}
+	if t := strings.TrimSpace(thinkingType); t != "" {
+		cfg.ThinkingType = t
 	}
 	timeoutSec := cfg.TimeoutSec
 	if timeoutSec <= 0 {

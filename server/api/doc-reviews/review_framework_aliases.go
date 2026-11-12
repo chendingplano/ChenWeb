@@ -49,7 +49,7 @@ var (
 	llmRunIDFromContext     = docprocessing.LLMRunIDFromContext
 	llmUserIDFromContext    = docprocessing.LLMUserIDFromContext
 	buildDocContextLine     = docprocessing.BuildDocContextLine
-	rawLinesToJSON          = docprocessing.RawLinesToJSON
+	rawLinesToJSON          = docprocessing.RawLinesToCompactJSON
 	wrapLinesWithDocContext = docprocessing.WrapLinesWithDocContext
 	loadPromptByRef         = docprocessing.LoadPromptByRef
 	parseTOMLMap            = docprocessing.ParseTOMLMap

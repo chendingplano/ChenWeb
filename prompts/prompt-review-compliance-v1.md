@@ -27,11 +27,12 @@ Return one JSON object:
     "line_start": 42,
     "line_end": 43,
     "actor": "", "action": "", "object": "", "purpose": "",
-    "search_queries": ["2-3 short queries naming the activity and the neighbouring concerns (integrity, retention, personal data, ...) in the document's language"]
+    "search_queries": [[{"en": "...", "zh": "..."}]]
   }
 ] }
 ```
 
 - `source_text` must be copied exactly from the lines. Use `""` for fields the text does not establish; do not guess.
+- `search_queries` holds 2-3 searches. Each search is a list of 2-6 keywords, given in both English and Chinese (`en` and `zh`), taken from the activity and the neighbouring concerns (integrity, retention, personal data, ...). Keep technical terms, codes and abbreviations exactly as written; drop filler words.
 - Return `{ "activities": [] }` when the passage describes none.
 - Queries are search hypotheses only; never cite a rule.

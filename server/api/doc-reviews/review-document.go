@@ -787,7 +787,7 @@ func resolveReviewerRuntime(logger ApiTypes.JimoLogger, aspect, group string) (
 		logger.Warn("reviewer model not set in doc-review config; disabled", "aspect", aspect)
 		return nil, "", "", "", false
 	}
-	client, modelName, err = docprocessing.BuildReviewerLLMClient(resolved.ModelRef)
+	client, modelName, err = docprocessing.BuildReviewerLLMClientWithThinking(resolved.ModelRef, cfg.Reviewers[aspect].ThinkingType)
 	if err != nil {
 		logger.Warn("reviewer model/client unavailable; disabled", "aspect", aspect, "error", err)
 		return nil, "", "", "", false

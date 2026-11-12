@@ -1,6 +1,7 @@
 package docprocessing
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -133,6 +134,34 @@ func compactLineTag(lineType string) string {
 
 // rawLinesToJSON serialises []Line as a JSON array for LLM input, using flag "n".
 // Image lines are skipped.
+// compactLinesHeader is the first row of compact line input; it names the columns of every
+// following row, so prompts can keep referring to the fields by name.
+var compactLinesHeader = []string{"flag", "line_number", "page_number", "line_type", "content"}
+
+// rawLinesToCompactJSON is rawLinesToJSON for reviewers: the same lines and fields, but as a
+// JSON array whose first row names the columns and whose other rows are bare value arrays,
+// which drops the per-line keys (about half the input tokens). Topic extraction and the other
+// processors keep rawLinesToJSON.
+func rawLinesToCompactJSON(lines []Line) string {
+	rows := make([][]any, 0, len(lines)+1)
+	header := make([]any, len(compactLinesHeader))
+	for i, h := range compactLinesHeader {
+		header[i] = h
+	}
+	rows = append(rows, header)
+	for _, l := range lines {
+		if l.LineType == "image" {
+			continue
+		}
+		rows = append(rows, []any{"n", l.LineNo, l.PageNo, l.LineType, llmLineContent(l.LineType, l.LineNo, l.Content)})
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(rows)
+	return strings.TrimSpace(buf.String())
+}
+
 func rawLinesToJSON(lines []Line) string {
 	out := make([]lineForLLM, 0, len(lines))
 	for _, l := range lines {

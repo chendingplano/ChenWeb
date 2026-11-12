@@ -1870,3 +1870,28 @@ func TestBoundedDocumentSampleReturnsEmptyOnMissingFile(t *testing.T) {
 		t.Fatalf("sample = %q, want empty on read failure", sample)
 	}
 }
+
+type recordingAlarmWriter struct{ alarms []RoutingAlarm }
+
+func (w *recordingAlarmWriter) WriteAlarm(_ context.Context, a RoutingAlarm) error {
+	w.alarms = append(w.alarms, a)
+	return nil
+}
+
+// A start command with no user_id is refused before any record is resolved and raises a
+// missing-user-id alarm.
+func TestHandleStartDocProcessingEventRefusesMissingUserID(t *testing.T) {
+	alarms := &recordingAlarmWriter{}
+	svc := &ControlService{RoutingAlarms: alarms}
+
+	err := svc.HandleStartDocProcessingEvent(context.Background(), []byte(`{
+		"all": "parsed",
+		"doc-processors": ["extract_metrics"]
+	}`))
+	if err == nil {
+		t.Fatal("expected refusal for start event without user_id")
+	}
+	if len(alarms.alarms) != 1 || alarms.alarms[0].Kind != RoutingAlarmKindMissingUserID {
+		t.Fatalf("expected one missing-user-id alarm, got %+v", alarms.alarms)
+	}
+}
