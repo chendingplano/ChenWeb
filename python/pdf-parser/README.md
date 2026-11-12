@@ -248,6 +248,12 @@ Docling writes a UTF-8 JSON export to:
 5. **Write results** to `{PDF_REPO_DIR}/pdf_parser/{record_id}/`
 6. **Publish parsed event** to `PDF_PARSED_EVENT_SUBJECT` for downstream converters
 
+MinerU phase progress records each started tqdm phase in order. A phase name may
+appear more than once (for example, separate VLM Predict passes); each new pass
+with an incomplete progress update is shown separately. Duplicate completed tqdm
+updates are ignored. A repeated pass observed only at completion cannot be
+distinguished from a duplicate completion.
+
 ### Status Format
 
 While parsing:

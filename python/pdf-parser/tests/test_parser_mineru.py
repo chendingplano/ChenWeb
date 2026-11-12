@@ -45,6 +45,24 @@ def test_phase_tracker_lists_only_the_phases_mineru_has_started(monkeypatch):
         {"name": "VLM Predict", "progress": 1, "status": "active"},
     ]
 
+def test_phase_tracker_tracks_repeated_phase_after_completion(monkeypatch):
+    ticks = iter([1.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    monkeypatch.setattr("parser_mineru.time.monotonic", lambda: next(ticks))
+    tracker = PhaseTracker()
+    tracker.update("VLM Predict: 0%| | 0/605")
+    tracker.update("VLM Predict: 100%|█| 605/605")
+    assert tracker.update("VLM Predict: 100%|█| 605/605") is None
+    tracker.update("OCR-det: 100%|█| 404/404")
+    phases, force = tracker.update("VLM Predict: 0%| | 0/260")
+    assert force is True
+    assert [(p["name"], p["status"], p["progress"]) for p in phases] == [
+        ("VLM Predict", "complete", 100), ("OCR-det", "complete", 100),
+        ("VLM Predict", "active", 0),
+    ]
+    phases, _ = tracker.update("VLM Predict: 50%|█| 130/260")
+    assert phases[-1]["progress"] == 50
+
+
 def test_only_processing_pages_counter_is_a_page_count():
     assert _processing_pages("Predict: 100%|████| 303/303 [03:58<00:00]") is None
     assert _processing_pages("Processing pages: 100%|████| 16/16 [00:00<00:00]") == (16, 16)

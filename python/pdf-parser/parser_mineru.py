@@ -75,13 +75,12 @@ class PhaseTracker:
         if total <= 0:
             return None
         now = time.monotonic()
-        if name not in self.started:
-            self.started[name] = now
         progress = min(100, int(done * 100 / total))
         complete = done >= total
         status = "complete" if complete else "active"
-        phase = next((item for item in self.phases if item["name"] == name), None)
-        if phase is None:
+        phase = next((item for item in reversed(self.phases) if item["name"] == name), None)
+        if phase is None or (phase["status"] == "complete" and not complete):
+            self.started[name] = now
             phase = {"name": name}
             self.phases.append(phase)
         elif phase["status"] == "complete":
