@@ -603,6 +603,10 @@ type ReviewProcessor struct {
 	StandardsCompliancePromptRef  string
 	StandardsCompliancePromptText string
 
+	ComplianceModelName       string
+	CompliancePromptRef       string
+	CompliancePromptText      string
+
 	LegalComplianceModelName  string
 	LegalCompliancePromptRef  string
 	LegalCompliancePromptText string
@@ -680,6 +684,7 @@ type ReviewProcessor struct {
 	AssumptionsClient          LLMJSONExtractor
 	PrerequisitesClient        LLMJSONExtractor
 	StandardsComplianceClient  LLMJSONExtractor
+	ComplianceClient           LLMJSONExtractor
 	LegalComplianceClient      LLMJSONExtractor
 	RegulatoryComplianceClient LLMJSONExtractor
 	InternalPolicyClient       LLMJSONExtractor
@@ -902,6 +907,7 @@ func NewReviewProcessor(
 	assumptionsClient, assumptionsModel, assumptionsPrompt, assumptionsRef, _ := resolveReviewerRuntime(logger, "assumptions", "P5")
 	prerequisitesClient, prerequisitesModel, prerequisitesPrompt, prerequisitesRef, _ := resolveReviewerRuntime(logger, "prerequisites", "P5")
 	standardsComplianceClient, standardsComplianceModel, standardsCompliancePrompt, standardsComplianceRef, _ := resolveReviewerRuntime(logger, "standards_compliance", "P5")
+	complianceClient, complianceModel, compliancePrompt, complianceRef, _ := resolveReviewerRuntime(logger, "compliance", "P5")
 	legalComplianceClient, legalComplianceModel, legalCompliancePrompt, legalComplianceRef, _ := resolveReviewerRuntime(logger, "legal_compliance", "P5")
 	regulatoryComplianceClient, regulatoryComplianceModel, regulatoryCompliancePrompt, regulatoryComplianceRef, _ := resolveReviewerRuntime(logger, "regulatory_compliance", "P5")
 	internalPolicyClient, internalPolicyModel, internalPolicyPrompt, internalPolicyRef, _ := resolveReviewerRuntime(logger, "internal_policy", "P5")
@@ -1131,6 +1137,10 @@ func NewReviewProcessor(
 		StandardsCompliancePromptRef:  standardsComplianceRef,
 		StandardsCompliancePromptText: standardsCompliancePrompt,
 
+		ComplianceClient:          complianceClient,
+		ComplianceModelName:       complianceModel,
+		CompliancePromptRef:       complianceRef,
+		CompliancePromptText:      compliancePrompt,
 		LegalComplianceClient:     legalComplianceClient,
 		LegalComplianceModelName:  legalComplianceModel,
 		LegalCompliancePromptRef:  legalComplianceRef,
@@ -1763,6 +1773,13 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxTasks:     p.MaxConcurrent,
 			},
 			cfg: p.toolReviewerConfig("standards_compliance", p.StandardsComplianceModelName, p.StandardsCompliancePromptText, p.StandardsCompliancePromptRef, p.StandardsComplianceMaxToolTurns, p.StandardsComplianceMaxToolTokens, p.StandardsComplianceTools),
+		})
+	}
+
+	if p.ComplianceClient != nil && p.CompliancePromptText != "" && p.ComplianceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: newComplianceReviewer(p.ComplianceClient, p.Logger, ApiTypes.ProjectDBHandle, p.MaxConcurrent),
+			cfg:      p.reviewerConfig("compliance", p.ComplianceModelName, p.CompliancePromptText, p.CompliancePromptRef),
 		})
 	}
 

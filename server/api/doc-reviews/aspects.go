@@ -92,6 +92,7 @@ func listAspectsBase() []AspectInfo {
 		{Name: "assumptions", Group: "P5", Label: "Assumptions", Priority: "Must Review", Description: "Identifies unstated or invalid assumptions.", IsToolUse: true},
 		{Name: "prerequisites", Group: "P5", Label: "Prerequisites", Priority: "Should Review", Description: "Checks if prerequisites are documented.", IsToolUse: true},
 		{Name: "standards_compliance", Group: "P5", Label: "Standards Compliance", Priority: "Must Review", Description: "Checks compliance with relevant standards (ISO, IEC, GB).", IsToolUse: true},
+		{Name: "compliance", Group: "P5", Label: "Compliance Review", Priority: "Review for Regulated", Description: "Detects the activities the document describes (including what the document itself is) and searches the knowledge base for artifacts that could govern each one. Reports grounding candidates per activity; \"none found\" is relative to the searched knowledge base, not a compliance verdict."},
 		{Name: "legal_compliance", Group: "P5", Label: "Legal Compliance", Priority: "Review for Regulated", Description: "Checks compliance with legal requirements.", IsToolUse: true},
 		{Name: "regulatory_compliance", Group: "P5", Label: "Regulatory Compliance", Priority: "Review for Regulated", Description: "Checks compliance with regulatory requirements.", IsToolUse: true},
 		{Name: "internal_policy", Group: "P5", Label: "Internal Policy", Priority: "Review for Regulated", Description: "Checks adherence to internal policies.", IsToolUse: true},

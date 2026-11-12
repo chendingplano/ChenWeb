@@ -801,3 +801,15 @@ input = "per-chunk"
 model = "deepseek-flash-processor"
 prompt = "prompt-review-license-ip.md"
 max_tool_turns = 0
+
+[reviewers.compliance]
+name_en = "Compliance Review"
+name_zh_cn = "合规审查"
+desc_en = "Detects the activities the document describes and searches the knowledge base for artifacts that could govern each."
+desc_zh_cn = "识别文档描述的活动，并在知识库中检索可能约束这些活动的文件。"
+enabled = true
+checked = false
+group = "P5"
+input = "per-chunk"
+model = "deepseek-flash-processor"
+prompt = "prompt-review-compliance-v1.md"
