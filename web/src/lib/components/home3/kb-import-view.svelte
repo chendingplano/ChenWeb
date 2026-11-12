@@ -160,6 +160,7 @@
 	let uploadKsDesc = $state('');
 	let uploadParserName = $state<(typeof uploadParserOptions)[number]>('docling');
 	let uploadProcessingMode = $state<'auto_offpeak' | 'auto' | 'upload_only' | 'pdf_parsing'>('auto_offpeak');
+ let uploadModeChanged = false;
 	let selectedFiles = $state<File[]>([]);
 	let filePicker = $state<HTMLInputElement | null>(null);
 	let dirPicker = $state<HTMLInputElement | null>(null);
@@ -1037,6 +1038,8 @@
 		getKbFrontendConfig()
 			.then((cfg) => {
 				requiredProcessors = cfg.required_processors ?? [];
+                if (!uploadModeChanged) uploadProcessingMode = cfg.default_processing_mode ?? 'auto_offpeak';
+                pendingFilesProcessingMode = cfg.default_processing_mode ?? 'auto_offpeak';
 			})
 			.catch(() => {
 				// Keep defaults on failure
@@ -1247,6 +1250,7 @@
 				</select>
 				<select
 					bind:value={uploadProcessingMode}
+                    onchange={() => { uploadModeChanged = true; }}
 					aria-label={m.kb_import_auto_process()}
 					title={m.kb_import_auto_process()}
 					style="height:38px; padding:0 10px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer;"

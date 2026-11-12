@@ -101,3 +101,17 @@ func TestLoadKbFrontendConfigMergesSiblingLocalConfig(t *testing.T) {
 		t.Fatalf("ProcessorPackages[Default] = %#v, want %v", got, want)
 	}
 }
+
+func TestDefaultUploadProcessingModeUsesSavedSetting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KB_CONFIG_FILE", filepath.Join(dir, "config.toml"))
+	if got := defaultUploadProcessingMode(); got != "auto" {
+		t.Fatalf("fallback = %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "doc-pipeline-defaults.json"), []byte(`{"processors":["extract_metrics"],"mode":"upload_only"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultUploadProcessingMode(); got != "upload_only" {
+		t.Fatalf("saved mode = %q", got)
+	}
+}

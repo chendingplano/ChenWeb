@@ -440,6 +440,9 @@ func configuredNames() []string {
 }
 
 func configuredDefaultNames() []string {
+	if cfg, err := LoadPipelineDefaults(PipelineDefaultsPath()); err == nil && len(cfg.Processors) > 0 {
+		return cfg.Processors
+	}
 	if names := viper.GetStringSlice("doc-processing.default_processors"); len(names) > 0 {
 		return names
 	}

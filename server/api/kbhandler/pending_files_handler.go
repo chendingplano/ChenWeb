@@ -207,7 +207,7 @@ func ClaimPendingFiles(c echo.Context) error {
 	userID := strings.TrimSpace(rc.IsAuthenticated().UserId)
 	processingMode := strings.ToLower(strings.TrimSpace(req.ProcessingMode))
 	if processingMode == "" {
-		processingMode = "auto"
+		processingMode = defaultUploadProcessingMode()
 	}
 	if _, ok := allowedProcessingModes[processingMode]; !ok {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid processing_mode (CWB_KB_PF_015)"})

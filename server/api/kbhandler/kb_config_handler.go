@@ -12,6 +12,7 @@ import (
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
@@ -22,6 +23,7 @@ type kbFrontendConfig struct {
 	MandatoryProcessors    []string            `json:"mandatory_processors"`
 	RequiredProcessors     []string            `json:"required_processors"`
 	DefaultProcessors      []string            `json:"default_processors"`
+	DefaultProcessingMode  string              `json:"default_processing_mode"`
 	ProcessorPackages      map[string][]string `json:"processor_packages"`
 	MaxDocProcessPipelines int                 `json:"max_doc_process_pipelines"`
 	ImageGenerationModels  []string            `json:"image_generation_models"`
@@ -55,6 +57,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 				MandatoryProcessors:    mandatoryProcessorIDs,
 				RequiredProcessors:     []string{},
 				DefaultProcessors:      []string{},
+				DefaultProcessingMode:  "auto_offpeak",
 				ProcessorPackages:      map[string][]string{},
 				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 				ImageGenerationModels:  appconfig.GetImageGenerationModels(),
@@ -125,7 +128,15 @@ func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 	if packages == nil {
 		packages = map[string][]string{}
 	}
+	mode := "auto_offpeak"
+	if defaults, err := docprocessing.LoadPipelineDefaults(docprocessing.PipelineDefaultsPath()); err == nil {
+		if len(defaults.Processors) > 0 {
+			defaultProcs = defaults.Processors
+		}
+		mode = defaults.Mode
+	}
 	return kbFrontendConfig{
+		DefaultProcessingMode:  mode,
 		TopicTypes:             types,
 		SupportedLanguages:     supportedLanguages,
 		DefaultLanguage:        defaultLanguage,
@@ -176,4 +187,36 @@ func resolveKbConfigFilePath() string {
 		cur = parent
 	}
 	return "./config.toml"
+}
+
+// PutPipelineDefaults saves the administrator's defaults for future runs.
+func PutPipelineDefaults(c echo.Context) error {
+	rc, err := requirePendingFilesAdmin(c, "CWB_PIPE_CFG_001")
+	defer rc.Close()
+	if err != nil {
+		return err
+	}
+	var defaults docprocessing.PipelineDefaults
+	if err := c.Bind(&defaults); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid configuration"})
+	}
+	cfg, err := LoadKbFrontendConfig()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "cannot read configuration"})
+	}
+	if err := docprocessing.SavePipelineDefaults(docprocessing.PipelineDefaultsPath(), defaults, cfg.RequiredProcessors); err != nil {
+		rc.GetLogger().Warn("save pipeline defaults failed", "err", err)
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true})
+}
+
+func defaultUploadProcessingMode() string {
+	cfg, err := docprocessing.LoadPipelineDefaults(docprocessing.PipelineDefaultsPath())
+	if err == nil {
+		if _, ok := allowedProcessingModes[cfg.Mode]; ok {
+			return cfg.Mode
+		}
+	}
+	return "auto"
 }

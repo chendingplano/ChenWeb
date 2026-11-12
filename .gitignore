@@ -57,3 +57,6 @@ config.local.toml
 ontology-compiler
 doc-benchmark
 semantic-baseline
+
+# Operator-managed document processing defaults
+doc-pipeline-defaults.json

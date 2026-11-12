@@ -172,7 +172,7 @@ func UploadInputs(c echo.Context) error {
 	requestedPipeline := normalizeOptionalString(c.FormValue("requested_pipeline"))
 	processingMode := strings.ToLower(strings.TrimSpace(c.FormValue("processing_mode")))
 	if processingMode == "" {
-		processingMode = "auto"
+		processingMode = defaultUploadProcessingMode()
 	}
 	if _, ok := allowedProcessingModes[processingMode]; !ok {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid processing_mode (CWB_KB_U_025)"})

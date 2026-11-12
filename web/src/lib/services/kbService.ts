@@ -1625,6 +1625,7 @@ export type KbFrontendConfig = {
 	mandatory_processors: string[];
 	required_processors: string[];
 	default_processors: string[];
+	default_processing_mode: 'auto_offpeak' | 'auto' | 'upload_only' | 'pdf_parsing';
 	processor_packages: Record<string, string[]>;
 	max_doc_process_pipelines: number;
 	image_generation_models: string[];
@@ -2351,4 +2352,11 @@ export async function getWikiOverview(): Promise<WikiOverviewResponse> {
 		throw new Error(msg);
 	}
 	return response.json();
+}
+
+export async function savePipelineDefaults(processors: string[], mode: KbFrontendConfig['default_processing_mode']): Promise<void> {
+ const response = await fetch(`${BASE}/pipeline-defaults`, {
+  method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ processors, mode })
+ });
+ if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }
