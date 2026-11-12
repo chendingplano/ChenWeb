@@ -982,7 +982,7 @@ func (p *EntityRelationProcessor) acquireLLMPermit(ctx context.Context, modelNam
 	}
 	permit, err := controller.Acquire(ctx, modelName)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26061801) acquire llm permit for model %q: %w", strings.TrimSpace(modelName), err)
+		return nil, fmt.Errorf("(MID-20260618-02) acquire llm permit for model %q: %w", strings.TrimSpace(modelName), err)
 	}
 	if permit == nil {
 		return &acquiredLLMPermit{}, nil

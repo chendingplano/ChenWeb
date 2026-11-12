@@ -309,7 +309,7 @@
 	function levelColor(level: string) { return level === 'ERROR' ? danger : warning; }
 	onMount(() => {
 		loadSettings();
-		try { const saved = Number(localStorage.getItem('alertLogsPageSize')); if ([20, 50, 100, 200].includes(saved)) pageSize = saved; } catch { /* storage unavailable */ }
+		try { const saved = Number(localStorage.getItem('alertLogsPageSize')); if ([20, 50, 100, 200, 500, 1000].includes(saved)) pageSize = saved; } catch { /* storage unavailable */ }
 		void (async () => { await loadUserNames(); await Promise.all([load(), loadFilterOptions()]); })();
 	});
 </script>
@@ -363,7 +363,7 @@
 		<div class="px-5 py-3 flex justify-between flex-shrink-0" style="border-bottom:1px solid {borderColor}">
 			<div class="flex items-center gap-3"><span style="font-size:13px;color:{textMuted}">{m.alert_logs_total({ total })}{#if total} · {m.alert_logs_page_of({ page, totalPages })}{/if}</span><button onclick={openBulkResolve} disabled={!checkedIds.length || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{accent};color:white">{m.alert_logs_resolve_all({ count: checkedIds.length })}</button>{#if checkedIds.length}<button onclick={() => (checkedIds = [])} class="rounded px-2 py-1 text-sm" style="color:{textSecondary};background:{surface2}">{m.alert_logs_clear_selection()}</button>{/if}</div>
 			<div class="flex gap-2">
-				<label class="flex items-center gap-2" style="color:{textSecondary};font-size:12px">{m.alert_logs_page_size()}<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:4px">{#each [20, 50, 100, 200] as size}<option value={size}>{size}</option>{/each}</select></label>
+				<label class="flex items-center gap-2" style="color:{textSecondary};font-size:12px">{m.alert_logs_page_size()}<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading} style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:4px">{#each [20, 50, 100, 200, 500, 1000] as size}<option value={size}>{size}</option>{/each}</select></label>
 				<button onclick={() => { if (page > 1) { page--; load(); } }} disabled={page <= 1 || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_prev()}</button>
 				<button onclick={() => { if (page < totalPages) { page++; load(); } }} disabled={page >= totalPages || loading} class="rounded px-3 py-1 text-sm disabled:opacity-40" style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}">{m.alert_logs_next()}</button>
 			</div>

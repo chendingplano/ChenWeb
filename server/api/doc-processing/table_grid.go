@@ -193,6 +193,11 @@ func ParseTableGrid(content string) (*TableGrid, error) {
 		if !raws[i].hasColspan || i+1 >= len(raws) {
 			return false
 		}
+		// With no plain cell to test, blank-ness proves nothing: a θ/π group row over a
+		// numeric data row would otherwise pull that data row into the header.
+		if len(raws[i].plainCols) == 0 && mostlyNumericCells(raws[i+1].cells) {
+			return false
+		}
 		for _, c := range raws[i].plainCols {
 			if c < len(raws[i+1].cells) && raws[i+1].cells[c] != "" {
 				return false
@@ -232,6 +237,23 @@ func ParseTableGrid(content string) (*TableGrid, error) {
 		}
 	}
 	return g, nil
+}
+
+// mostlyNumericCells reports whether at least half of the non-empty cells are numbers
+// (internal spaces allowed: "-0.065 5", as MinerU groups digits).
+func mostlyNumericCells(cells []string) bool {
+	total, numeric := 0, 0
+	for _, c := range cells {
+		c = strings.ReplaceAll(strings.TrimSpace(c), " ", "")
+		if c == "" {
+			continue
+		}
+		total++
+		if _, err := strconv.ParseFloat(c, 64); err == nil {
+			numeric++
+		}
+	}
+	return total > 0 && numeric*2 >= total
 }
 
 // Row returns the header or data row with the given ID.

@@ -42,7 +42,7 @@ var provisionIndexConfig = artifactIndexConfig{
 	IDColumn:                   "prov_id",
 	CategoryTreeFilename:       "provisions.txt",
 	LogPrefix:                  "provision indexing",
-	WarnOnMissingCategoryPaths: true,
+	WarnOnMissingCategoryPaths: false,
 }
 
 var provisionObjectConnectionConfig = artifactObjectConnectionConfig{

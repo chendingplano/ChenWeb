@@ -238,3 +238,26 @@ func TestParseTableGrid_ColspanGroupWithBlankPlainCells(t *testing.T) {
 		t.Fatalf("headers = %d, rows = %+v", len(g.Headers), g.Rows)
 	}
 }
+
+// Record 314 表G.2: a/B has rowspan 2 and the second header row is all colspan θ/π
+// groups (no plain cell), so the first data row (a/B 0.10) must stay a data row, not h2.
+func TestParseTableGrid_ColspanGroupRowOverNumericData(t *testing.T) {
+	h := `<table><tr><td rowspan="2">a/B</td><td>k1</td><td>k2</td><td>k1</td><td>k2</td></tr>` +
+		`<tr><td colspan="2">θ/π=0.10</td><td colspan="2">θ/π=0.15</td></tr>` +
+		`<tr><td>0.10</td><td>0.922 0</td><td>-0.495 3</td><td>0.918 8</td><td>-0.491 8</td></tr>` +
+		`<tr><td>0.15</td><td>0.924 4</td><td>-0.612 4</td><td>0.924 1</td><td>-0.611 5</td></tr></table>`
+	g, err := ParseTableGrid(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Headers) != 2 || len(g.Rows) != 2 {
+		t.Fatalf("headers = %d, rows = %d, want 2 and 2", len(g.Headers), len(g.Rows))
+	}
+	if r, _ := g.Row("r1"); r.Cells[0] != "0.10" || r.Cells[4] != "-0.491 8" {
+		t.Fatalf("r1 = %v, want the a/B 0.10 row", r.Cells)
+	}
+	rows, outcome := selectTableRows(g, TableRowRef{}, []string{"-0.4918"})
+	if outcome != tableRowsFromEvidence || len(rows) != 1 || rows[0].ID != "r1" {
+		t.Fatalf("outcome = %s rows = %+v, want evidence match on r1", outcome, rows)
+	}
+}

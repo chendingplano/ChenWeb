@@ -858,7 +858,7 @@ func NewReviewProcessor(
 	extractor LLMJSONExtractor,
 	_ ApiTypes.JimoLogger,
 ) *ReviewProcessor {
-	logger := loggerutil.CreateDefaultLogger("MID_26061801")
+	logger := loggerutil.CreateDefaultLogger("MID-20260618-01")
 
 	grammarClient, grammarModel, grammarPrompt, grammarRef, _ := resolveReviewerRuntime(logger, "grammar_spelling", "P1")
 	toneClient, toneModel, tonePrompt, toneRef, _ := resolveReviewerRuntime(logger, "tone_voice", "P1")
