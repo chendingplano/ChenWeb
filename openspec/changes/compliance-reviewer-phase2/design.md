@@ -49,15 +49,26 @@ on. A gold run refuses to start when a member's current generation or md5 differ
 the manifest, and says which. *Alternative:* a separate database copy; rejected, since it
 duplicates large data and the project keeps data in the database, not in files.
 
-**D4. Gold set and scorer follow the existing benchmark pattern.** Rules are frozen per version
-in a rules file; a gold run is saved with its model and rules version; a scorer produces a
-1–100 score with per-group detail, as `extract-provisions-benchmark` and
-`extract-references-benchmark` do (reuse their layout; the tasks list the exact modules to
-inspect first). Gold content: per document, the activity spans and the document-level activity;
-per activity, the snapshot records that govern it (target: obligation-level source spans where
-the annotator can name them, otherwise record level) or an explicit "no grounding expected".
-Two annotators label independently; disagreements are adjudicated and genuine ambiguity is
-recorded, not forced (research §11.1).
+**D4. Gold set and scorer are Go commands, not agent skills (revised during apply).** The
+existing benchmarks (`extract-provisions-benchmark`) are skills that the invoking agent follows by
+hand, with the agent as the single labeller. Here the labellers are the model profiles of D7, so
+the labelling must be a program that calls them: `server/api/compliance-eval` plus two commands,
+`compliance-gold` (label and save) and `compliance-score`. What is kept from the existing pattern:
+rules frozen per version (a rules file in `prompts/`, its SHA-256 stored with the run), a saved
+run identified by snapshot, rules version and models, and a 1–100 score with per-group detail.
+Gold content: per document, the activity spans (including the document-level activity); per
+activity, a judgement for each pooled candidate (D10), and "no grounding expected" when none is
+judged to govern.
+
+**D10. Grounding labels come from a judged pool, not from the whole corpus.** An annotator cannot
+read the corpus, so for each gold activity the system builds a candidate pool by a deep search
+(limit 50, no floor, byte-identical copies excluded) over the snapshot, and each annotator judges
+every pooled candidate as `governs`, `topical` or `unrelated`, with a reason. The adjudicator
+resolves disagreements. This is standard pooled evaluation and has a known bias: a governing
+record that the pooling search misses is never judged, so recall measured against the pool is an
+upper bound. The scorer reports it as "recall within the pool" and the gold run stores the
+pooling parameters. The judged pool is also what gives the cosine distribution for choosing
+`min_cosine` (task 4.5): governing versus topical versus unrelated.
 
 **D5. Baseline = same cases through current reviewers.** The phase 1 compliance reviewer (with
 D1 and D2 off, then on) and the existing legal, regulatory and standards compliance reviewers are
@@ -102,7 +113,7 @@ reasons and the source text and decides, recording a rationale, or marks the cas
 Every label carries its source (`llm:<profile>`). *Caveat:* research §6.6 and §13 say model
 agreement is not independent legal validation and that interpretation needs qualified owners.
 So scores from this gold set are reported as LLM-adjudicated, never as release-gate evidence, and
-a human review of a sample is listed as a follow-up, not silently skipped.
+a human review of a sample (including a check for governing records the pool missed) is listed as a follow-up, not silently skipped.
 
 **D8. Gold documents are listed in `ChenWeb/doc-review.local.toml`.** Two tables,
 `[compliance-review.covered-docs]` (documents with activities the snapshot is expected to cover)
