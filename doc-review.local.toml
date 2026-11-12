@@ -816,3 +816,23 @@ prompt = "prompt-review-compliance-v2.md"
 doc_activity_prompt = "prompt-review-compliance-document-activity-v2.md"
 thinking_type = "disabled"   # no reasoning: the output is a plain activity list
 # min_cosine = 0.55   # relevance floor 0..1 for candidates; unset = no floor. Do not set before the gold set shows a value (openspec compliance-reviewer-phase2).
+
+# ---------------------------------------------------------------------------
+# Compliance Review gold set (openspec compliance-reviewer-phase2), read by the compliance-gold command.
+# Models come from COMPLIANCE_REVIEWER_ANNOTATOR_1, COMPLIANCE_REVIEWER_ANNOTATOR_2 and
+# COMPLIANCE_ADJUDICATOR (profile names in MODEL_DEF_FILE); labels are LLM-adjudicated.
+#
+# Documents to label: the key is a kb.inputs record id, the value a one-line reason. A record may not
+# be in both tables and must be a member of the evaluation snapshot (compliance-snapshot record).
+[compliance-review.covered-docs]      # activities the snapshot is expected to cover
+# 416 = "rural waste sorting standard"
+
+[compliance-review.uncovered-docs]    # activities the snapshot is expected not to cover
+# 799 = "AI agent research paper"
+
+# Organization facts (research 2026111103 section 6.1). status is asserted | inferred | disputed |
+# unknown; an absent fact is unknown. Recorded with each gold run; the reviewer does not use them yet.
+# [compliance-review.organization.operating_territories]
+# value = ["CN"]
+# status = "asserted"
+# source = "who said so"

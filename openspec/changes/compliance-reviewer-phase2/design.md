@@ -60,6 +60,14 @@ Gold content: per document, the activity spans (including the document-level act
 activity, a judgement for each pooled candidate (D10), and "no grounding expected" when none is
 judged to govern.
 
+**D6a. Activities are matched by coverage, not one-to-one (found during apply).** On record 416 the
+reviewer merged neighbouring lines into 11 activities while two annotators labelled 62 clause-level
+ones, so one-to-one matching would cap recall at 11/62 whatever the quality. A gold activity counts as
+found when a reviewer row overlaps its span by at least half of the shorter span; a reviewer row counts
+as supported when it overlaps some gold activity; grounding for a found activity is judged on all rows
+covering it. The cost is that coarse rows are never penalised for being coarse; granularity is
+reported through the two counts instead.
+
 **D10. Grounding labels come from a judged pool, not from the whole corpus.** An annotator cannot
 read the corpus, so for each gold activity the system builds a candidate pool by a deep search
 (limit 50, no floor, byte-identical copies excluded) over the snapshot, and each annotator judges
@@ -131,6 +139,13 @@ with. Phase 2 does not read it to decide anything; applicability is phase 3. The
 user's to supply: this change ships every fact as `unknown`.
 
 ## Open Questions
+
+0. The scope-stability metric needs the *reviewer* to run against a narrowed scope (the snapshot,
+   or the snapshot minus the governing records). The reviewer still searches the whole knowledge
+   base. Pooling is already restricted to the snapshot (D10); restricting the reviewer needs a
+   scope setting (record ids or a document group passed to its search) that this change has not
+   built. Until then `compliance-score -compare` can compare two runs only if the operator produced
+   them under different scopes by other means.
 
 1. The organization facts (D9) have no values yet; they need the user.
 2. The first covered and uncovered documents (D8) need choosing by the user, 10–15 in all.

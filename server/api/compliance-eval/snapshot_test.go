@@ -55,3 +55,10 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestDocsOutsideSnapshot(t *testing.T) {
+	got := DocsOutsideSnapshot([]GoldDoc{{RecordID: 1}, {RecordID: 2}, {RecordID: 3}}, []Member{{RecordID: 1}, {RecordID: 3}})
+	if len(got) != 1 || got[0] != 2 {
+		t.Fatalf("outside = %v", got)
+	}
+}

@@ -149,25 +149,13 @@ func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingM
 		}
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT input_record_id, md5, generation, chunk_count, provision_count
-		FROM testbed.compliance_eval_snapshot_records WHERE snapshot_id = $1`, snapshotID)
+	manifest, err := SnapshotMembers(ctx, db, snapshotID)
 	if err != nil {
 		return nil, err
 	}
-	var manifest []Member
-	var ids []int64
-	for rows.Next() {
-		var m Member
-		if err := rows.Scan(&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		manifest = append(manifest, m)
-		ids = append(ids, m.RecordID)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
+	ids := make([]int64, len(manifest))
+	for i, m := range manifest {
+		ids[i] = m.RecordID
 	}
 	cur, err := CurrentMembers(ctx, db, ids)
 	if err != nil {
@@ -178,4 +166,38 @@ func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingM
 		out = append([]Difference{{0, fmt.Sprintf("embedding model %q -> %q", model, currentEmbeddingModel)}}, out...)
 	}
 	return out, nil
+}
+
+// SnapshotMembers returns the manifest rows of a snapshot.
+func SnapshotMembers(ctx context.Context, db *sql.DB, snapshotID int64) ([]Member, error) {
+	rows, err := db.QueryContext(ctx, `SELECT input_record_id, md5, generation, chunk_count, provision_count
+		FROM testbed.compliance_eval_snapshot_records WHERE snapshot_id = $1 ORDER BY input_record_id`, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Member
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// DocsOutsideSnapshot names every listed document that is not a member of the snapshot.
+func DocsOutsideSnapshot(docs []GoldDoc, members []Member) []int64 {
+	in := map[int64]bool{}
+	for _, m := range members {
+		in[m.RecordID] = true
+	}
+	var out []int64
+	for _, d := range docs {
+		if !in[d.RecordID] {
+			out = append(out, d.RecordID)
+		}
+	}
+	return out
 }

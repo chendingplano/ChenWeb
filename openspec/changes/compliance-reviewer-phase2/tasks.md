@@ -14,16 +14,16 @@
 
 ## 3. Gold set and scorer (Go; see design D4, D10)
 
-- [ ] 3.1 Project migration for `testbed` gold tables: runs (snapshot id, rules version and SHA-256, annotator and adjudicator profiles, pooling parameters, organization-context copy), activities (document, line spans, document-level flag, label sources), and pooled judgements (activity, candidate artifact, cosine, each annotator's label, final label, rationale, ambiguity mark). Down migration.
-- [ ] 3.2 Rules file (`prompts/`, versioned and hashed): what counts as an activity, the document-level activity, `governs` versus `topical` versus `unrelated`, when "no grounding expected" applies, recording ambiguity.
-- [ ] 3.3 `compliance-gold` command (package `server/api/compliance-eval`): for each listed document, two independent activity extractions and adjudicated merge by span overlap; deep-search pool per activity; two independent judgements per pooled candidate and adjudication; save in one transaction. Fake-model tests for each step and for the refusals (unset variable, equal annotators, snapshot drift).
-- [ ] 3.4 `compliance-score` command: activity span precision and recall, record-level grounding recall within the pool, precision of "no grounding" and the missed-by-search share, scope stability, counts behind each figure; a reviewer's findings are read from its saved run.
-- [ ] 3.5 Tests: one refusal or scoring case per spec scenario.
+- [x] 3.1 Project migration for `testbed` gold tables: runs (snapshot id, rules version and SHA-256, annotator and adjudicator profiles, pooling parameters, organization-context copy), activities (document, line spans, document-level flag, label sources), and pooled judgements (activity, candidate artifact, cosine, each annotator's label, final label, rationale, ambiguity mark). Down migration.
+- [x] 3.2 Rules file (`prompts/`, versioned and hashed): what counts as an activity, the document-level activity, `governs` versus `topical` versus `unrelated`, when "no grounding expected" applies, recording ambiguity.
+- [x] 3.3 `compliance-gold` command (package `server/api/compliance-eval`): for each listed document, two independent activity extractions and adjudicated merge by span overlap; deep-search pool per activity; two independent judgements per pooled candidate and adjudication; save in one transaction. Fake-model tests for each step and for the refusals (unset variable, equal annotators, snapshot drift).
+- [x] 3.4 `compliance-score` command: activity span precision and recall, record-level grounding recall within the pool, precision of "no grounding" and the missed-by-search share, scope stability, counts behind each figure; a reviewer's findings are read from its saved run.
+- [x] 3.5 Tests: one refusal or scoring case per spec scenario.
 
 ## 4. Configuration, annotation and baseline
 
-- [ ] 4.1 Read `[compliance-review.covered-docs]`, `[compliance-review.uncovered-docs]` and `[compliance-review.organization]` from `doc-review.local.toml`; validate as in the spec (both-tables, missing record, outside snapshot, status vocabulary). Ship the organization table with every fact `unknown` and both document tables empty, with comments.
-- [ ] 4.2 Labelling configuration (feeds 3.3): resolve `COMPLIANCE_REVIEWER_ANNOTATOR_1`, `_2` and `COMPLIANCE_ADJUDICATOR` through `MODEL_DEF_FILE`; fail naming an unset variable; refuse equal annotators; store label source and adjudication rationale. Prompts in `prompts/`, versioned.
+- [x] 4.1 Read `[compliance-review.covered-docs]`, `[compliance-review.uncovered-docs]` and `[compliance-review.organization]` from `doc-review.local.toml`; validate as in the spec (both-tables, missing record, outside snapshot, status vocabulary). Ship the organization table with every fact `unknown` and both document tables empty, with comments.
+- [x] 4.2 Labelling configuration (feeds 3.3): resolve `COMPLIANCE_REVIEWER_ANNOTATOR_1`, `_2` and `COMPLIANCE_ADJUDICATOR` through `MODEL_DEF_FILE`; fail naming an unset variable; refuse equal annotators; store label source and adjudication rationale. Prompts in `prompts/`, versioned.
 - [ ] 4.3 With the user's chosen documents and organization facts: record the snapshot, run the labelling, save the gold run with a copy of the organization context.
 - [ ] 4.4 Run the baseline (current legal, regulatory and standards reviewers; Compliance Review with exclusion and floor off, then on) on the same snapshot and store the scores with the gold run, marked LLM-adjudicated.
 - [ ] 4.5 From the gold set's cosine distribution for governing versus non-governing candidates, propose a `min_cosine` and report the misses it would cause. Set it only with the user's agreement.
