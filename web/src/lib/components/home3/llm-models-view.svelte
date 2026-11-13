@@ -45,7 +45,7 @@
 
 	let draft = $state<ModelDraft>(emptyDraft());
 	let editDraft = $state<ModelDraft>(emptyDraft());
-	let editDialog: HTMLDialogElement;
+	let editDialog = $state<HTMLDialogElement>();
 	let drag: { id: number; x: number; y: number } | null = null;
 	let restored = $state(false);
 	const stateKey = 'llm-models-editor';
