@@ -49,8 +49,9 @@ type TableSyncItem struct {
 	// must NOT include a database-local surrogate key (e.g. a BIGSERIAL id),
 	// since source and target databases generate those independently.
 	NaturalKey []string
-	// Columns is the full set of columns to transfer, excluding any
-	// surrogate primary key. Must include every column in NaturalKey and CursorCol.
+	// Columns is the full set of columns to transfer, excluding surrogate
+	// primary-key columns unless they are also part of the explicit NaturalKey.
+	// Must include every column in NaturalKey and CursorCol.
 	Columns []string
 	// JSONColumns is the subset of Columns that are JSONB in Postgres, so
 	// they can be passed through as raw JSON instead of a JSON-encoded string.

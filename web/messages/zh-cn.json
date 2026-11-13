@@ -4745,7 +4745,7 @@
 	"sync_data_no_eligible_unique_constraint_on": "此表没有符合条件的唯一约束",
 	"sync_data_select": "选择…",
 	"sync_data_this_table_has_no_unique": "此表除主键外没有唯一约束 — 请先通过迁移添加一个。",
-	"sync_data_required_auto_selected_when_there": "必填。只有一个选项时会自动选中。不能是主键 — 因为目标库自己的 ID 与源库不一致，引擎靠它来区分“我已经有这一行”和“这是新的一行”。",
+	"sync_data_required_auto_selected_when_there": "必填。只有一个选项时会自动选中。所选键列也会包含在复制的数据中。",
 	"sync_data_file_column": "文件列",
 	"sync_data_required_for_this_kind_the": "此类型必填。存放每行文件路径的列。",
 	"sync_data_file_dir_env_var": "文件目录环境变量",

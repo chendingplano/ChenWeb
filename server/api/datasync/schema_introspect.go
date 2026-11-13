@@ -33,8 +33,8 @@ type columnInfo struct {
 	DataType string `json:"data_type"`
 }
 
-// naturalKeyCandidate is one UNIQUE constraint's column set, excluding the
-// primary key -- what the Natural Key picker offers.
+// naturalKeyCandidate is one UNIQUE constraint's column set. Primary-key
+// constraints are not returned by the UNIQUE-only query below.
 type naturalKeyCandidate struct {
 	Columns []string `json:"columns"`
 }
@@ -91,7 +91,7 @@ func HandleGetTableSchema(c echo.Context) error {
 		adminLogger.Error("failed to introspect primary key", "schema", schema, "table", table, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to introspect table"})
 	}
-	candidates, err := tableNaturalKeyCandidates(ctx, db, schema, table, pk)
+	candidates, err := tableNaturalKeyCandidates(ctx, db, schema, table)
 	if err != nil {
 		adminLogger.Error("failed to introspect unique constraints", "schema", schema, "table", table, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to introspect table"})
@@ -182,11 +182,9 @@ func tablePrimaryKey(ctx context.Context, db *sql.DB, schema, table string) ([]s
 }
 
 // tableNaturalKeyCandidates returns every UNIQUE constraint's column set,
-// grouped by constraint, excluding any constraint whose columns exactly
-// match the primary key (a table's PK already shows up as a UNIQUE
-// constraint in information_schema, and it must never be offered as a
-// natural key -- see this file's top comment).
-func tableNaturalKeyCandidates(ctx context.Context, db *sql.DB, schema, table string, primaryKey []string) ([]naturalKeyCandidate, error) {
+// grouped by constraint. The query excludes primary-key constraints by type,
+// but keeps a separate UNIQUE constraint even when it covers the same columns.
+func tableNaturalKeyCandidates(ctx context.Context, db *sql.DB, schema, table string) ([]naturalKeyCandidate, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT tc.constraint_name, kcu.column_name
 		FROM information_schema.table_constraints tc
@@ -217,23 +215,7 @@ func tableNaturalKeyCandidates(ctx context.Context, db *sql.DB, schema, table st
 
 	candidates := []naturalKeyCandidate{}
 	for _, name := range order {
-		cols := byConstraint[name]
-		if stringSliceEqual(cols, primaryKey) {
-			continue
-		}
-		candidates = append(candidates, naturalKeyCandidate{Columns: cols})
+		candidates = append(candidates, naturalKeyCandidate{Columns: byConstraint[name]})
 	}
 	return candidates, nil
-}
-
-func stringSliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

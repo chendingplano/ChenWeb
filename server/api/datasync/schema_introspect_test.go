@@ -97,11 +97,7 @@ func TestTableNaturalKeyCandidatesExcludesPrimaryKey(t *testing.T) {
 	name := scratchTableName("nk")
 	scratchIntrospectTable(t, db, "public."+name)
 
-	pk, err := tablePrimaryKey(ctx, db, "public", name)
-	if err != nil {
-		t.Fatalf("tablePrimaryKey() error = %v", err)
-	}
-	candidates, err := tableNaturalKeyCandidates(ctx, db, "public", name, pk)
+	candidates, err := tableNaturalKeyCandidates(ctx, db, "public", name)
 	if err != nil {
 		t.Fatalf("tableNaturalKeyCandidates() error = %v", err)
 	}
@@ -139,11 +135,7 @@ func TestTableNaturalKeyCandidatesNoCandidatesMarshalsAsEmptyArray(t *testing.T)
 		}
 	})
 
-	pk, err := tablePrimaryKey(ctx, db, "public", name)
-	if err != nil {
-		t.Fatalf("tablePrimaryKey() error = %v", err)
-	}
-	candidates, err := tableNaturalKeyCandidates(ctx, db, "public", name, pk)
+	candidates, err := tableNaturalKeyCandidates(ctx, db, "public", name)
 	if err != nil {
 		t.Fatalf("tableNaturalKeyCandidates() error = %v", err)
 	}

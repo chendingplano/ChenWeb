@@ -4745,7 +4745,7 @@
 	"sync_data_no_eligible_unique_constraint_on": "No eligible unique constraint on this table",
 	"sync_data_select": "Select…",
 	"sync_data_this_table_has_no_unique": "This table has no unique constraint other than its primary key — add one via a migration first.",
-	"sync_data_required_auto_selected_when_there": "Required. Auto-selected when there's exactly one option. Never the primary key — since the target's own id won't match the source's, this is how the engine recognizes \"I already have this row\" vs. \"this is new.\"",
+	"sync_data_required_auto_selected_when_there": "Required. Auto-selected when there's exactly one option. Selected key columns are included in the copied data.",
 	"sync_data_file_column": "File Column",
 	"sync_data_required_for_this_kind_the": "Required for this kind. The column holding each row's file path.",
 	"sync_data_file_dir_env_var": "File Dir Env Var",

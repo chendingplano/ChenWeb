@@ -171,7 +171,7 @@
 		formDraft.file_column = '';
 		await fetchTableInfo(formDraft.schema, formDraft.table);
 		// Auto-select the natural key when it's unambiguous -- never the
-		// primary key, since natural_key_candidates excludes it server-side.
+		// primary key itself; the server lists explicit UNIQUE constraints.
 		if (naturalKeyCandidates.length === 1) {
 			formDraft.natural_key = naturalKeyCandidates[0].columns.join(',');
 		}
@@ -617,6 +617,8 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+		user-select: text;
+		-webkit-user-select: text;
 		background: var(--page);
 		min-height: 100%;
 		padding: 16px 20px 32px;

@@ -77,7 +77,7 @@ func resolveItemShape(ctx context.Context, db *sql.DB, id string, req syncItemRe
 	if err != nil {
 		return TableSyncItem{}, fmt.Errorf("introspect primary key: %w", err)
 	}
-	candidates, err := tableNaturalKeyCandidates(ctx, db, schema, table, pk)
+	candidates, err := tableNaturalKeyCandidates(ctx, db, schema, table)
 	if err != nil {
 		return TableSyncItem{}, fmt.Errorf("introspect unique constraints: %w", err)
 	}
@@ -87,9 +87,15 @@ func resolveItemShape(ctx context.Context, db *sql.DB, id string, req syncItemRe
 	for _, col := range pk {
 		pkSet[col] = true
 	}
+	naturalKeySet := make(map[string]bool, len(item.NaturalKey))
+	for _, col := range item.NaturalKey {
+		naturalKeySet[col] = true
+	}
 	for _, col := range columns {
 		byName[col.Name] = col
-		if !pkSet[col.Name] {
+		// Primary-key columns are usually deployment-local and omitted, but
+		// an explicitly declared UNIQUE natural key must also be transferred.
+		if !pkSet[col.Name] || naturalKeySet[col.Name] {
 			item.Columns = append(item.Columns, col.Name)
 			if col.DataType == "jsonb" {
 				item.JSONColumns = append(item.JSONColumns, col.Name)
