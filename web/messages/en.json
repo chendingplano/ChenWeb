@@ -8960,7 +8960,7 @@
 	"products_config_translation_model": "Translation model",
 	"products_config_translation_prompt": "Translation prompt",
 	"products_config_batch": "Translation batch size",
-	"products_config_thinking": "Translation thinking setting",
+	"products_config_thinking": "Translation reasoning",
 	"products_config_inherit": "Use environment or default",
 	"products_config_on": "On",
 	"products_config_off": "Off",

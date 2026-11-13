@@ -27,7 +27,7 @@
    {key:'TRANSLATION_MODEL_NAME', label:m.products_config_translation_model(), type:'model'},
    {key:'TRANSLATE_PRODUCTS_PROMPT', label:m.products_config_translation_prompt(), type:'prompt'},
    {key:'TRANSLATE_PRODUCTS_BATCH_SIZE', label:m.products_config_batch(), type:'number'},
-   {key:'TRANSLATE_PRODUCTS_THINKING', label:m.products_config_thinking(), type:'text'} ] }
+   {key:'TRANSLATE_PRODUCTS_THINKING', label:m.products_config_thinking(), type:'thinking'} ] }
  ]);
  function remember() { saved = false; try { sessionStorage.setItem(draftKey, JSON.stringify(values)); } catch { /* optional storage */ } }
  onMount(() => {
@@ -55,8 +55,10 @@
  <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
  {#each groups as group}<section><h2>{group.title}</h2><div class="fields">
   {#each group.fields as field}<div class="field"><label for={field.key}>{field.label}</label>
-   {#if field.type === 'bool' || field.type === 'translation'}
-    <div class="switch-row"><input id={field.key} class="switch" type="checkbox" role="switch" checked={(values[field.key] || inherited[field.key]) === (field.type === 'bool' ? 'true' : 'on')} onchange={(e) => { values[field.key] = e.currentTarget.checked ? (field.type === 'bool' ? 'true' : 'on') : (field.type === 'bool' ? 'false' : 'off'); remember(); }} /><span>{(values[field.key] || inherited[field.key]) === (field.type === 'bool' ? 'true' : 'on') ? m.products_config_on() : m.products_config_off()}</span></div>
+   {#if field.type === 'bool' || field.type === 'translation' || field.type === 'thinking'}
+    {@const onValue = field.type === 'bool' ? 'true' : field.type === 'thinking' ? 'enabled' : 'on'}
+    {@const offValue = field.type === 'bool' ? 'false' : field.type === 'thinking' ? 'disabled' : 'off'}
+    <div class="switch-row"><input id={field.key} class="switch" type="checkbox" role="switch" checked={(values[field.key] || inherited[field.key])?.toLowerCase() === onValue} onchange={(e) => { values[field.key] = e.currentTarget.checked ? onValue : offValue; remember(); }} /><span>{(values[field.key] || inherited[field.key])?.toLowerCase() === onValue ? m.products_config_on() : m.products_config_off()}</span></div>
     {#if values[field.key]}<button type="button" class="inherit" onclick={(e) => { e.preventDefault(); values[field.key] = ''; remember(); }}>{m.products_config_reset_inherit()}</button>{/if}
    {:else if field.type === 'model' || field.type === 'prompt' || field.type === 'tasks'}
     {@const options = field.type === 'model' ? models : field.type === 'prompt' ? (prompts[field.key] ?? []) : ['10','20','30','40','50']}
@@ -69,7 +71,7 @@
      {#if current && !options.includes(current)}<option value={current}>{current}</option>{/if}
      {#each options as option}<option value={option}>{option}</option>{/each}
     </select>
-   {:else}<input id={field.key} type={field.type} min={field.type === 'number' ? 1 : undefined} step={field.type === 'number' ? 1 : undefined} value={values[field.key] ?? ''} oninput={(e) => { values[field.key] = e.currentTarget.value; remember(); }} placeholder={m.products_config_inherit()} />{/if}
+   {:else}<input id={field.key} type={field.type} min={field.type === 'number' ? 1 : undefined} step={field.type === 'number' ? 1 : undefined} value={values[field.key] ?? ''} oninput={(e) => { values[field.key] = e.currentTarget.value; remember(); }} placeholder={inherited[field.key] || m.products_config_inherit()} />{/if}
   </div>{/each}
  </div>{#if group.title === m.products_config_workflow()}<p class="hint">{m.products_config_testing_hint()}</p>{/if}</section>{/each}
  <footer><button disabled={saving}>{saving ? m.pipeline_config_saving() : m.pipeline_config_save()}</button></footer></form>

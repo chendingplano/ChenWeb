@@ -8960,7 +8960,7 @@
 	"products_config_translation_model": "翻译模型",
 	"products_config_translation_prompt": "翻译提示词",
 	"products_config_batch": "翻译批次大小",
-	"products_config_thinking": "翻译推理设置",
+	"products_config_thinking": "翻译推理",
 	"products_config_inherit": "使用环境或默认值",
 	"products_config_on": "开启",
 	"products_config_off": "关闭",
