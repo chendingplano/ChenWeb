@@ -35,6 +35,7 @@
 #
 # Env overrides:
 #   CHENWEB_DIR   (default /home/gui/Workspace/ChenWeb)
+#   PROJECT_WORKSPACE_DIR  required when the payload contains document-workspace
 #   RUN_USER      (default gui)          owner of the installed binaries
 #   PORT          (default 8090)         chenweb health-check port
 #   KEEP_BAKS     (default 3)            how many .bak-<ts> copies to retain
@@ -90,6 +91,12 @@ fi
 [ -d "$SRC_DIR" ] || die "source dir not found: $SRC_DIR"
 [ "$DRY_RUN" = 1 ] || [ -d "$CHENWEB_DIR" ] || die "ChenWeb dir not found: $CHENWEB_DIR"
 
+# Check the destination before changing anything when this payload has documents.
+if [ -d "$SRC_DIR/document-workspace" ]; then
+  [ -n "${PROJECT_WORKSPACE_DIR:-}" ] && [ -d "$PROJECT_WORKSPACE_DIR" ] ||
+    die "PROJECT_WORKSPACE_DIR must name an existing workspace directory"
+fi
+
 if [ ${#NAMES[@]} -eq 0 ]; then
   shopt -s nullglob
   for f in "$SRC_DIR"/*-linux; do NAMES+=("$(basename "$f" -linux)"); done
@@ -109,6 +116,19 @@ for n in "${NAMES[@]}"; do
   s=$(svc_for "$n"); printf '  %-26s -> %s\n' "$n-linux" "${s:-<install only>}"
 done
 echo
+
+# The archive carries these paths relative to the workspace. Do not delete
+# destination files: other document groups or local files may also live there.
+if [ -d "$SRC_DIR/document-workspace" ]; then
+  echo "== Document Builder files =="
+  echo "  installing into $PROJECT_WORKSPACE_DIR"
+  if [ "$IS_ROOT" = 1 ]; then
+    run rsync -a --chown="$RUN_USER:$RUN_USER" "$SRC_DIR/document-workspace/" "$PROJECT_WORKSPACE_DIR/"
+  else
+    run rsync -a --no-owner --no-group "$SRC_DIR/document-workspace/" "$PROJECT_WORKSPACE_DIR/"
+  fi
+  echo
+fi
 
 # --- migrations -------------------------------------------------------------
 # Must land BEFORE any unit starts: config.RunMigrations runs at every binary's

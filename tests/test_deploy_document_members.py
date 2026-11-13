@@ -33,3 +33,28 @@ class StageMembersTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class DeployMembersTest(unittest.TestCase):
+    def test_packaged_installer_requires_workspace_and_plans_copy(self):
+        installer = SCRIPT.parents[1] / 'scripts' / 'deploy-server-china.sh'
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = base / 'payload'
+            (source / 'document-workspace' / 'KnowledgeStore').mkdir(parents=True)
+            (source / 'create-admin-linux').write_text('binary')
+            (source / 'create-admin-linux.sha256').write_text('checksum')
+            for name, output in [('sha256sum', 'ok'), ('file', 'ELF 64-bit x86-64')]:
+                command = base / name
+                command.write_text('#!/bin/sh\necho "' + output + '"\n')
+                command.chmod(0o755)
+            env = dict(os.environ, PATH=tmp + os.pathsep + os.environ['PATH'], DRY_RUN='1')
+            env.pop('PROJECT_WORKSPACE_DIR', None)
+            cmd = ['bash', str(installer), str(source), 'create-admin']
+            missing = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn('PROJECT_WORKSPACE_DIR', missing.stderr)
+            env['PROJECT_WORKSPACE_DIR'] = tmp
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Document Builder files', result.stdout)
+            self.assertIn('document-workspace/', result.stdout)
