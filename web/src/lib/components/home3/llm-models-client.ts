@@ -3,6 +3,7 @@ export type LLMModelEntry = {
 	host: string;
 	model_type: string;
 	model_name: string;
+	description: string;
 	dimension: number;
 	max_chars: number;
 	base_url: string;
@@ -48,7 +49,7 @@ export function getModelsTOML(): Promise<GetModelsTOMLResponse> {
 	return req<GetModelsTOMLResponse>('/api/v1/llm/models-toml');
 }
 
-export function upsertModelTOML(key: string, entry: Omit<LLMModelEntry, 'key'>): Promise<{ ok: boolean; key: string }> {
+export function upsertModelTOML(key: string, entry: Partial<Omit<LLMModelEntry, 'key'>>): Promise<{ ok: boolean; key: string }> {
 	return req<{ ok: boolean; key: string }>(`/api/v1/llm/models-toml/${encodeURIComponent(key)}`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },

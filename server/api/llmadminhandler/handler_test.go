@@ -116,6 +116,37 @@ func TestModelTOMLCreateStoresAPIKey(t *testing.T) {
 	}
 }
 
+func TestModelTOMLDescriptionSurvivesOtherModelDeletion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	t.Setenv("CHENWEB_MODELS_TOML", path)
+	if err := os.WriteFile(path, []byte("[alpha]\nmodel_name='alpha'\n[beta]\nmodel_name='beta'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	put := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(`{"description":"Useful model"}`))
+	put.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	ctx := e.NewContext(put, httptest.NewRecorder())
+	ctx.SetParamNames("key")
+	ctx.SetParamValues("alpha")
+	if err := UpsertModelTOML(ctx); err != nil {
+		t.Fatal(err)
+	}
+	del := httptest.NewRecorder()
+	ctx = e.NewContext(httptest.NewRequest(http.MethodDelete, "/", nil), del)
+	ctx.SetParamNames("key")
+	ctx.SetParamValues("beta")
+	if err := DeleteModelTOML(ctx); err != nil || del.Code != http.StatusOK {
+		t.Fatalf("delete: %v, %d", err, del.Code)
+	}
+	get := httptest.NewRecorder()
+	if err := GetModelsTOML(e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), get)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(get.Body.String(), `"description":"Useful model"`) {
+		t.Fatalf("description not returned: %s", get.Body.String())
+	}
+}
+
 func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
 	return s.listAccountsResult, s.listAccountsErr
 }

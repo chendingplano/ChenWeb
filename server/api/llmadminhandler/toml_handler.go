@@ -18,6 +18,7 @@ type modelTOMLEntry struct {
 	Host                 string `json:"host"`
 	ModelType            string `json:"model_type"`
 	ModelName            string `json:"model_name"`
+	Description          string `json:"description"`
 	Dimension            int    `json:"dimension"`
 	MaxChars             int    `json:"max_chars"`
 	BaseURL              string `json:"base_url"`
@@ -99,9 +100,28 @@ func writeModelsTOML(path string, models ApiTypes.LLMModelsFile) error {
 	if err != nil {
 		return err
 	}
+	existing := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := toml.Unmarshal(data, &existing); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	out := make(map[string]any, len(models)+len(reserved))
 	for k, v := range models {
-		out[k] = v
+		fields, _ := existing[k].(map[string]any)
+		if fields == nil {
+			fields = map[string]any{}
+		}
+		encoded, err := toml.Marshal(v)
+		if err != nil {
+			return err
+		}
+		if err := toml.Unmarshal(encoded, &fields); err != nil {
+			return err
+		}
+		out[k] = fields
 	}
 	for k, v := range reserved {
 		out[k] = v
@@ -136,6 +156,14 @@ func GetModelsTOML(c echo.Context) error {
 			"error":   err.Error(),
 		})
 	}
+	var raw map[string]any
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		if err := toml.Unmarshal(data, &raw); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(readErr) {
+		return readErr
+	}
 
 	keys := make([]string, 0, len(models))
 	for k := range models {
@@ -146,11 +174,14 @@ func GetModelsTOML(c echo.Context) error {
 	entries := make([]modelTOMLEntry, 0, len(keys))
 	for _, k := range keys {
 		m := models[k]
+		fields, _ := raw[k].(map[string]any)
+		description, _ := fields["description"].(string)
 		entries = append(entries, modelTOMLEntry{
 			Key:                  k,
 			Host:                 m.Host,
 			ModelType:            m.ModelType,
 			ModelName:            m.ModelName,
+			Description:          description,
 			Dimension:            m.Dimension,
 			MaxChars:             m.MaxChars,
 			BaseURL:              m.BaseURL,
@@ -226,7 +257,7 @@ func updateModelTOMLFields(path, key string, fields map[string]json.RawMessage) 
 	}
 	for name, raw := range fields {
 		switch name {
-		case "host", "model_type", "model_name", "base_url", "thinking_type", "api_key":
+		case "host", "model_type", "model_name", "description", "base_url", "thinking_type", "api_key":
 			var value string
 			if err := json.Unmarshal(raw, &value); err != nil {
 				return err

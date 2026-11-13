@@ -31,6 +31,7 @@
 	host: 'cloud',
 	model_type: 'llm',
 	model_name: '',
+	description: '',
 	dimension: 0,
 	max_chars: 0,
 		base_url: '',
@@ -141,7 +142,7 @@
 		error = null;
 		info = null;
 		try {
-			const { key, ...entry } = editDraft;
+			const { key, dimension: _dimension, ...entry } = editDraft;
 			await upsertModelTOML(key, entry);
 			editingKey = null;
 			info = msg.llm_models_model_updated({ key });
@@ -238,12 +239,23 @@
 					<input bind:value={draft.model_name} placeholder={msg.llm_models_deepseek_chat()} />
 				</label>
 				<label>
+					<span>{msg.llm_models_description()}</span>
+					<input bind:value={draft.description} />
+				</label>
+				<label>
 					<span>{msg.llm_models_model_type()}</span>
-					<input bind:value={draft.model_type} placeholder={msg.llm_models_llm()} />
+					<select bind:value={draft.model_type}>
+						{#if !['llm', 'embedding', 'decision-model'].includes(draft.model_type)}
+							<option value={draft.model_type}>{draft.model_type || '—'}</option>
+						{/if}
+						<option value="llm">{msg.llm_models_llm()}</option>
+						<option value="embedding">{msg.llm_models_embedding_type()}</option>
+						<option value="decision-model">{msg.llm_models_decision_type()}</option>
+					</select>
 				</label>
 				<label>
 					<span>{msg.llm_models_embedding_dimension()}</span>
-					<input type="number" bind:value={draft.dimension} min="0" step="1" />
+					<input type="number" value={draft.dimension} readonly />
 				</label>
 				<label>
 					<span>{msg.llm_models_maximum_characters()}</span>
@@ -267,7 +279,13 @@
 			<div class="row two">
 				<label>
 					<span>{msg.llm_models_thinking_type()}</span>
-					<input bind:value={draft.thinking_type} placeholder={msg.llm_models_disabled()} />
+					<select bind:value={draft.thinking_type}>
+						{#if !['enabled', 'disabled'].includes(draft.thinking_type)}
+							<option value={draft.thinking_type}>{draft.thinking_type || '—'}</option>
+						{/if}
+						<option value="enabled">{msg.llm_models_enabled()}</option>
+						<option value="disabled">{msg.llm_models_disabled()}</option>
+					</select>
 				</label>
 				<label>
 					<span>{msg.llm_models_timeout_sec()}</span>
@@ -395,12 +413,23 @@
 													<input bind:value={editDraft.model_name} />
 												</label>
 												<label>
+													<span>{msg.llm_models_description()}</span>
+													<input bind:value={editDraft.description} />
+												</label>
+												<label>
 													<span>{msg.llm_models_model_type()}</span>
-													<input bind:value={editDraft.model_type} placeholder={msg.llm_models_llm()} />
+													<select bind:value={editDraft.model_type}>
+														{#if !['llm', 'embedding', 'decision-model'].includes(editDraft.model_type)}
+															<option value={editDraft.model_type}>{editDraft.model_type || '—'}</option>
+														{/if}
+														<option value="llm">{msg.llm_models_llm()}</option>
+														<option value="embedding">{msg.llm_models_embedding_type()}</option>
+														<option value="decision-model">{msg.llm_models_decision_type()}</option>
+													</select>
 												</label>
 												<label>
 													<span>{msg.llm_models_embedding_dimension()}</span>
-													<input type="number" bind:value={editDraft.dimension} min="0" step="1" />
+													<input type="number" value={editDraft.dimension} readonly />
 												</label>
 												<label>
 													<span>{msg.llm_models_maximum_characters()}</span>
@@ -420,7 +449,13 @@
 											<div class="row two">
 												<label>
 													<span>{msg.llm_models_thinking_type()}</span>
-													<input bind:value={editDraft.thinking_type} />
+													<select bind:value={editDraft.thinking_type}>
+														{#if !['enabled', 'disabled'].includes(editDraft.thinking_type)}
+															<option value={editDraft.thinking_type}>{editDraft.thinking_type || '—'}</option>
+														{/if}
+														<option value="enabled">{msg.llm_models_enabled()}</option>
+														<option value="disabled">{msg.llm_models_disabled()}</option>
+													</select>
 												</label>
 												<label>
 													<span>{msg.llm_models_timeout_sec()}</span>
@@ -517,7 +552,7 @@
 	.row.two { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 	.row.three { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 	label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--sub); }
-	input {
+	input, select {
 		background: var(--input-bg);
 		color: var(--heading);
 		border: 1px solid var(--border);
@@ -526,6 +561,7 @@
 		font-size: 13px;
 		font-family: inherit;
 	}
+	input[readonly] { opacity: 0.75; }
 	.form-foot { justify-content: flex-end; }
 	.error, .info { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
 	.error { background: rgba(248, 113, 113, 0.12); color: #f87171; }
