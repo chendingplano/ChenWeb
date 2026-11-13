@@ -238,9 +238,9 @@
 					<span>{msg.llm_models_model_name()}</span>
 					<input bind:value={draft.model_name} placeholder={msg.llm_models_deepseek_chat()} />
 				</label>
-				<label>
+				<label class="description-field">
 					<span>{msg.llm_models_description()}</span>
-					<input bind:value={draft.description} />
+					<textarea bind:value={draft.description} rows="3"></textarea>
 				</label>
 				<label>
 					<span>{msg.llm_models_model_type()}</span>
@@ -412,9 +412,9 @@
 													<span>{msg.llm_models_model_name()}</span>
 													<input bind:value={editDraft.model_name} />
 												</label>
-												<label>
+												<label class="description-field">
 													<span>{msg.llm_models_description()}</span>
-													<input bind:value={editDraft.description} />
+													<textarea bind:value={editDraft.description} rows="3"></textarea>
 												</label>
 												<label>
 													<span>{msg.llm_models_model_type()}</span>
@@ -551,8 +551,9 @@
 	.row { display: grid; gap: 10px; }
 	.row.two { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 	.row.three { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+	.description-field { grid-column: 1 / -1; }
 	label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--sub); }
-	input, select {
+	input, select, textarea {
 		background: var(--input-bg);
 		color: var(--heading);
 		border: 1px solid var(--border);
@@ -561,6 +562,7 @@
 		font-size: 13px;
 		font-family: inherit;
 	}
+	textarea { resize: vertical; }
 	input[readonly] { opacity: 0.75; }
 	.form-foot { justify-content: flex-end; }
 	.error, .info { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
