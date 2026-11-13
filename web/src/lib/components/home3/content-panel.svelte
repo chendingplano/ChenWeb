@@ -315,6 +315,7 @@
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
 			activeMenu?.childId !== 'sysadmin-alert-logs' &&
+			activeMenu?.childId !== 'sysadmin-doc-process-config-products' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-decision-candidates' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-assertions' &&
 			activeMenu?.childId !== 'cdm-editor' &&
