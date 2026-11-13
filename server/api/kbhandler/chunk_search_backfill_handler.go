@@ -42,10 +42,12 @@ func BackfillChunkSearch(c echo.Context) error {
 		}
 	}
 	ctx := c.Request().Context()
+	userID := ""
 	if user := rc.IsAuthenticated(); user != nil {
+		userID = user.UserId
 		ctx = docprocessing.WithLLMUserID(ctx, user.UserId)
 	}
-	call := newSearchCall(ctx, ApiTypes.ProjectDBHandle, "")
+	call := newSearchCall(ctx, ApiTypes.ProjectDBHandle, userID)
 	ctx = docprocessing.WithLLMRunID(ctx, call.runID)
 	result, err := docprocessing.BackfillChunkSearch(ctx, ApiTypes.ProjectDBHandle, after, recordID, limit, rc.GetLogger())
 	if err != nil {

@@ -376,29 +376,14 @@
 		if (f) void structureView?.focusFindingTarget(`finding:${f.id}`);
 	}
 
-	// The set of findings that should stay highlighted when a single row is clicked,
-	// per the current view: the row's reviewer folder (packages), severity folder
-	// (severity), or every visible finding (all).
-	function findingSetForCurrentView(f: FindingItem): FindingItem[] {
-		if (viewMode === 'severity') {
-			const g = severityGroups.find((sg) => sg.findings.some((x) => x.id === f.id));
-			return g ? g.findings : [f];
-		}
-		if (viewMode === 'all') return flatFindings;
-		const rv = livePassGroups
-			.flatMap((g) => g.reviewers)
-			.find((r) => r.items.some((x) => x.id === f.id));
-		return rv ? rv.items : [f];
-	}
-
+	// Clicking a single finding row highlights only that finding: one FINDING box
+	// in the PDF, and its detail (with all grounding candidates) in the right
+	// panel via activeKey → findingShelf.finding. Folder / "Show All" clicks are
+	// the ones that highlight several findings at once. Reassign only when the set
+	// actually changes so re-resolving doesn't reset the box's drag position.
 	function onFocusFinding(f: FindingItem) {
 		activeKey = String(f.id);
-		// Keep every finding in f's folder (or the whole "all" list) highlighted —
-		// clicking a row must not collapse the highlight set to one. Only move the
-		// PDF to f's highlight and open its detail in the right panel (via activeKey
-		// → findingShelf.finding). Reassign only when the set actually changes so
-		// re-resolving doesn't reset the boxes' drag positions.
-		const desired = findingSetForCurrentView(f);
+		const desired = [f];
 		if (!sameFindingIds(activeFindings, desired)) activeFindings = desired;
 		void structureView?.focusFindingTarget(`finding:${f.id}`);
 	}

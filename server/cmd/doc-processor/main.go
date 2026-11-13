@@ -191,7 +191,7 @@ func main() {
 	_ = godotenv.Load("./.env")
 	_ = godotenv.Load()
 
-	logger := loggerutil.CreateDefaultLogger("CWB_DOCPROC_001")
+	logger := loggerutil.CreateDefaultLogger("MID-20261112-01")
 	defer logger.Close()
 	ApiUtils.LoadLibConfig("CWB_DOCPROC_002")
 
@@ -367,8 +367,9 @@ func main() {
 	wg.Go(func() {
 		if err := drNS.Subscribe(ctx, docReviewSubject, docReviewDurable, func(msgCtx context.Context, payload []byte) error {
 			var evt struct {
-				RequestID int64 `json:"request_id"`
-				RunID     int64 `json:"run_id"`
+				RequestID int64  `json:"request_id"`
+				RunID     int64  `json:"run_id"`
+				UserID    string `json:"user_id"`
 			}
 			if err := json.Unmarshal(payload, &evt); err != nil {
 				return fmt.Errorf("unmarshal doc-review event: %w", err)
@@ -376,9 +377,14 @@ func main() {
 			if evt.RequestID <= 0 || evt.RunID <= 0 {
 				return fmt.Errorf("invalid doc-review event: request_id=%d run_id=%d", evt.RequestID, evt.RunID)
 			}
+			userID := strings.TrimSpace(evt.UserID)
+			if userID == "" {
+				logger.Error("refusing doc-review event: no user_id", "request_id", evt.RequestID, "run_id", evt.RunID)
+				return fmt.Errorf("(DR16_08) request_id=%d run_id=%d: doc-review event carries no user_id; refusing to run", evt.RequestID, evt.RunID)
+			}
 			logger.Info("doc-review event received", "request_id", evt.RequestID, "run_id", evt.RunID)
 			ctrl := docreviews.NewDocReviewController()
-			ctrl.RunReviewAndReport(msgCtx, evt.RequestID, evt.RunID)
+			ctrl.RunReviewAndReport(docprocessing.WithLLMUserID(msgCtx, userID), evt.RequestID, evt.RunID)
 			return nil
 		}); err != nil && ctx.Err() == nil {
 			logger.Error("doc-review subscription exited with error", "error", err)

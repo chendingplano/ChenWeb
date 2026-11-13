@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/llmrun"
 )
 
@@ -25,8 +26,17 @@ func withSearchCall(ctx context.Context, call searchCall) context.Context {
 	return context.WithValue(ctx, searchCallKey{}, call)
 }
 
+// searchCallFrom returns the search's call identity. A search started by a pipeline (doc
+// processing or doc review) sets no searchCall, so its user comes from the LLM user already on
+// the context; without this fallback its keyword and embedding calls were recorded with no user_id.
 func searchCallFrom(ctx context.Context) searchCall {
 	call, _ := ctx.Value(searchCallKey{}).(searchCall)
+	if call.userID == "" {
+		call.userID = docprocessing.LLMUserIDFromContext(ctx)
+	}
+	if call.runID == 0 {
+		call.runID = docprocessing.LLMRunIDFromContext(ctx)
+	}
 	return call
 }
 

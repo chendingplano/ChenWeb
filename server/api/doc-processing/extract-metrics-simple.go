@@ -55,7 +55,7 @@ func NewMetricsSimpleProcessor(inputStore DocMetadataStore, store MetricsStore, 
 	p.name = metricsSimpleProcessorName
 	p.simple = true
 	p.simpleWarmupWait = metricSimpleWarmupWait
-	p.Logger = loggerutil.CreateDefaultLogger("20261101-317")
+	p.Logger = loggerutil.CreateDefaultLogger("MID-20261101-01")
 	p.setSimplePrompt(loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRICS_SIMPLE_PROMPT"},
 		"prompt-extract-metric-simple-v1.md",
@@ -282,7 +282,7 @@ func (p *MetricsProcessor) extractMetricSimplePayload(ctx context.Context, input
 	} else {
 		var err error
 		if payload, err = p.Extractor.ExtractJSON(ctx, in); err != nil {
-			return nil, fmt.Errorf("(MID-20261101-02) extract metrics simple: %w", err)
+			return nil, fmt.Errorf("(MID-20261101-12) extract metrics simple: %w", err)
 		}
 	}
 	if _, ok := payload["m"].([]any); !ok {

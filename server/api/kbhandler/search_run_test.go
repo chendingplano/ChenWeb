@@ -3,6 +3,8 @@ package kbhandler
 import (
 	"context"
 	"testing"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 func TestSearchCallContext(t *testing.T) {
@@ -44,5 +46,35 @@ func TestSearchQueryKeywordsRunOverrideAndFresh(t *testing.T) {
 	t.Setenv(envSearchKeywords, "on")
 	if kws := searchQueryKeywords(withSearchCall(context.Background(), searchCall{keywords: &off}), "cuff pressure"); kws != nil {
 		t.Fatalf("override off: keywords=%v", kws)
+	}
+}
+
+// A search started by a pipeline has no searchCall on its context; its keyword and embedding
+// calls must still carry the pipeline's user, not an empty user_id.
+func TestSearchCallFromFallsBackToPipelineUser(t *testing.T) {
+	ctx := docprocessing.WithLLMUserID(context.Background(), "user-pipeline")
+	if got := searchCallFrom(ctx).userID; got != "user-pipeline" {
+		t.Fatalf("pipeline search userID = %q, want %q", got, "user-pipeline")
+	}
+}
+
+// An explicit searchCall user (request handlers) wins over the pipeline user.
+func TestSearchCallFromPrefersExplicitUser(t *testing.T) {
+	ctx := withSearchCall(docprocessing.WithLLMUserID(context.Background(), "user-pipeline"), searchCall{userID: "user-request"})
+	if got := searchCallFrom(ctx).userID; got != "user-request" {
+		t.Fatalf("request search userID = %q, want %q", got, "user-request")
+	}
+}
+
+// A search started by a pipeline (doc review) sets no searchCall; its keyword and embedding calls
+// must carry the pipeline's run ID instead of run 0.
+func TestSearchCallFromInheritsPipelineRunID(t *testing.T) {
+	ctx := docprocessing.WithLLMRunID(context.Background(), 4774)
+	if got := searchCallFrom(ctx); got.runID != 4774 {
+		t.Fatalf("runID = %d, want 4774", got.runID)
+	}
+	ctx = withSearchCall(ctx, searchCall{runID: 42})
+	if got := searchCallFrom(ctx); got.runID != 42 {
+		t.Fatalf("explicit runID = %d, want 42", got.runID)
 	}
 }

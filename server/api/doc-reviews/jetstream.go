@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/nats-io/nats.go"
 )
@@ -20,6 +21,8 @@ var jsLogger = loggerutil.CreateDefaultLogger("DR16")
 type docReviewEvent struct {
 	RequestID int64 `json:"request_id"`
 	RunID     int64 `json:"run_id"`
+	// UserID attributes the run's LLM usage for billing; the consumer refuses an event without it.
+	UserID string `json:"user_id"`
 }
 
 // ReviewPublisher publishes doc-review start events to JetStream.
@@ -101,7 +104,11 @@ func PublishReviewEvent(ctx context.Context, requestID, runID int64) error {
 	if globalPublisher == nil {
 		return fmt.Errorf("(DR16_04) doc-review publisher not initialised")
 	}
-	payload, err := json.Marshal(docReviewEvent{RequestID: requestID, RunID: runID})
+	userID := strings.TrimSpace(docprocessing.LLMUserIDFromContext(ctx))
+	if userID == "" {
+		return fmt.Errorf("(DR16_07) request_id=%d run_id=%d: no user_id on request; refusing to publish unattributed review", requestID, runID)
+	}
+	payload, err := json.Marshal(docReviewEvent{RequestID: requestID, RunID: runID, UserID: userID})
 	if err != nil {
 		return fmt.Errorf("(DR16_05) marshal event: %w", err)
 	}

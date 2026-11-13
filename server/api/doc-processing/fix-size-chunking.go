@@ -200,7 +200,7 @@ type protectedBlock struct {
 // and the extractor itself implements Embedder, the extractor is used as a
 // fallback. A default logger is created when none is provided.
 func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *FixedSizeChunkingService {
-	logger := loggerutil.CreateDefaultLogger("MID_26041901")
+	logger := loggerutil.CreateDefaultLogger("MID-20260419-01")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadFixedSizeTopicModelFromEnv()
 	promptText, promptRef, promptPath, promptErr := loadFixedSizeTopicPromptFromEnv()
 	summaryModelRef, summaryModelCfgPath, summaryModelCfg, summaryModelErr := loadFixedSizeSummaryModelFromEnv()
@@ -226,7 +226,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 	embedder, embeddingModelName := resolveChunkingEmbedder(extractor, "EMBEDDING_MODEL_NAME")
 	summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
 	if summaryEmbeddingModelRef == "" {
-		logger.Error("EMBEDDING_MODEL_NAME is not defined")
+		logger.Error("EMBEDDING_MODEL_NAME is not defined (MID-20261112-20)")
 		panic("EMBEDDING_MODEL_NAME is not defined")
 	}
 	categorySimilarityMinScore := envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0)
@@ -358,13 +358,13 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 	defer unlock()
 	ctx = withLLMRecordID(ctx, recordID)
 	if s.Store == nil {
-		return errors.New("(MID_26042012) store is nil")
+		return errors.New("(MID-20260420-12) store is nil")
 	}
 	if s.Extractor == nil {
-		return errors.New("(MID_26042013) fixed-size chunking extractor is nil")
+		return errors.New("(MID-20260420-13) fixed-size chunking extractor is nil")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26042002) invalid record_id: %d", recordID)
+		return fmt.Errorf("(MID-20260420-02) invalid record_id: %d", recordID)
 	}
 
 	start := s.Now()
@@ -373,17 +373,17 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26042003) missing ARTIFACT_DIR")
+		procErr := errors.New("(MID-20260420-03) missing ARTIFACT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(s.ArtifactWebDir) == "" {
-		procErr := errors.New("(MID_26042901) missing ARTIFACT_WEB_DIR")
+		procErr := errors.New("(MID-20260429-01) missing ARTIFACT_WEB_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
-		procErr := errors.New("(MID_26042004) missing input filename")
+		procErr := errors.New("(MID-20260420-04) missing input filename")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -405,16 +405,16 @@ func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordI
 	}
 	defer unlock()
 	if buf == nil {
-		return errors.New("(MID_26050601) block buffer is nil")
+		return errors.New("(MID-20260506-01) block buffer is nil")
 	}
 	if s.Store == nil {
-		return errors.New("(MID_26050602) store is nil")
+		return errors.New("(MID-20260506-02) store is nil")
 	}
 	if s.Extractor == nil {
-		return errors.New("(MID_26050603) fixed-size chunking extractor is nil")
+		return errors.New("(MID-20260506-03) fixed-size chunking extractor is nil")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26050604) invalid record_id: %d", recordID)
+		return fmt.Errorf("(MID-20260506-04) invalid record_id: %d", recordID)
 	}
 
 	start := s.Now()
@@ -423,17 +423,17 @@ func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordI
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26050605) missing ARTIFACT_DIR")
+		procErr := errors.New("(MID-20260506-05) missing ARTIFACT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(s.ArtifactWebDir) == "" {
-		procErr := errors.New("(MID_26050607) missing ARTIFACT_WEB_DIR")
+		procErr := errors.New("(MID-20260506-07) missing ARTIFACT_WEB_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
-		procErr := errors.New("(MID_26050608) missing input filename")
+		procErr := errors.New("(MID-20260506-08) missing input filename")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -443,13 +443,13 @@ func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordI
 
 func (s *FixedSizeChunkingService) HandleGenerateTopicsInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
 	if s.Store == nil {
-		return errors.New("(MID_26052301) store is nil")
+		return errors.New("(MID-20260523-01) store is nil")
 	}
 	if s.Extractor == nil {
-		return errors.New("(MID_26052302) fixed-size topic extractor is nil")
+		return errors.New("(MID-20260523-02) fixed-size topic extractor is nil")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26052303) invalid record_id: %d", recordID)
+		return fmt.Errorf("(MID-20260523-03) invalid record_id: %d", recordID)
 	}
 
 	start := s.Now()
@@ -458,17 +458,17 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsInput(ctx context.Context
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26052304) missing ARTIFACT_DIR")
+		procErr := errors.New("(MID-20260523-04) missing ARTIFACT_DIR")
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(s.ArtifactWebDir) == "" {
-		procErr := errors.New("(MID_26052305) missing ARTIFACT_WEB_DIR")
+		procErr := errors.New("(MID-20260523-05) missing ARTIFACT_WEB_DIR")
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
-		procErr := errors.New("(MID_26052306) missing input filename")
+		procErr := errors.New("(MID-20260523-06) missing input filename")
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
@@ -477,7 +477,7 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsInput(ctx context.Context
 		return s.ModelErr
 	}
 	if s.PromptErr != nil {
-		procErr := fmt.Errorf("(MID_26052307) load fixed-size topic prompt %q failed: %w", s.PromptRef, s.PromptErr)
+		procErr := fmt.Errorf("(MID-20260523-07) load fixed-size topic prompt %q failed: %w", s.PromptRef, s.PromptErr)
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
@@ -492,16 +492,16 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsInput(ctx context.Context
 
 func (s *FixedSizeChunkingService) HandleGenerateTopicsBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
 	if buf == nil {
-		return errors.New("(MID_26052308) block buffer is nil")
+		return errors.New("(MID-20260523-08) block buffer is nil")
 	}
 	if s.Store == nil {
-		return errors.New("(MID_26052309) store is nil")
+		return errors.New("(MID-20260523-09) store is nil")
 	}
 	if s.Extractor == nil {
-		return errors.New("(MID_26052310) fixed-size topic extractor is nil")
+		return errors.New("(MID-20260523-10) fixed-size topic extractor is nil")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26052311) invalid record_id: %d", recordID)
+		return fmt.Errorf("(MID-20260523-11) invalid record_id: %d", recordID)
 	}
 
 	start := s.Now()
@@ -510,17 +510,17 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsBlockInput(ctx context.Co
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26052312) missing ARTIFACT_DIR")
+		procErr := errors.New("(MID-20260523-12) missing ARTIFACT_DIR")
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(s.ArtifactWebDir) == "" {
-		procErr := errors.New("(MID_26052313) missing ARTIFACT_WEB_DIR")
+		procErr := errors.New("(MID-20260523-13) missing ARTIFACT_WEB_DIR")
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
-		procErr := errors.New("(MID_26052314) missing input filename")
+		procErr := errors.New("(MID-20260523-14) missing input filename")
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
@@ -529,7 +529,7 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsBlockInput(ctx context.Co
 		return s.ModelErr
 	}
 	if s.PromptErr != nil {
-		procErr := fmt.Errorf("(MID_26052315) load fixed-size topic prompt %q failed: %w", s.PromptRef, s.PromptErr)
+		procErr := fmt.Errorf("(MID-20260523-15) load fixed-size topic prompt %q failed: %w", s.PromptRef, s.PromptErr)
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, procErr)
 		return procErr
 	}
@@ -539,13 +539,13 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsBlockInput(ctx context.Co
 
 func (s *FixedSizeChunkingService) HandleGenerateSummariesInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
 	if s.Store == nil {
-		return errors.New("(MID_26052316) store is nil")
+		return errors.New("(MID-20260523-16) store is nil")
 	}
 	if s.Extractor == nil && s.GenerateSummary == nil {
-		return errors.New("(MID_26052317) fixed-size summary extractor is nil")
+		return errors.New("(MID-20260523-17) fixed-size summary extractor is nil")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26052318) invalid record_id: %d", recordID)
+		return fmt.Errorf("(MID-20260523-18) invalid record_id: %d", recordID)
 	}
 
 	start := s.Now()
@@ -554,17 +554,17 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesInput(ctx context.Cont
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26052319) missing ARTIFACT_DIR")
+		procErr := errors.New("(MID-20260523-19) missing ARTIFACT_DIR")
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(s.ArtifactWebDir) == "" {
-		procErr := errors.New("(MID_26052320) missing ARTIFACT_WEB_DIR")
+		procErr := errors.New("(MID-20260523-20) missing ARTIFACT_WEB_DIR")
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
-		procErr := errors.New("(MID_26052321) missing input filename")
+		procErr := errors.New("(MID-20260523-21) missing input filename")
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -573,7 +573,7 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesInput(ctx context.Cont
 		return s.SummaryModelErr
 	}
 	if s.GenerateSummary == nil && s.SummaryPromptErr != nil {
-		procErr := fmt.Errorf("(MID_26052322) load fixed-size summary prompt %q failed: %w", s.SummaryPromptRef, s.SummaryPromptErr)
+		procErr := fmt.Errorf("(MID-20260523-22) load fixed-size summary prompt %q failed: %w", s.SummaryPromptRef, s.SummaryPromptErr)
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -588,16 +588,16 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesInput(ctx context.Cont
 
 func (s *FixedSizeChunkingService) HandleGenerateSummariesBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
 	if buf == nil {
-		return errors.New("(MID_26052323) block buffer is nil")
+		return errors.New("(MID-20260523-23) block buffer is nil")
 	}
 	if s.Store == nil {
-		return errors.New("(MID_26052324) store is nil")
+		return errors.New("(MID-20260523-24) store is nil")
 	}
 	if s.Extractor == nil && s.GenerateSummary == nil {
-		return errors.New("(MID_26052325) fixed-size summary extractor is nil")
+		return errors.New("(MID-20260523-25) fixed-size summary extractor is nil")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26052326) invalid record_id: %d", recordID)
+		return fmt.Errorf("(MID-20260523-26) invalid record_id: %d", recordID)
 	}
 
 	start := s.Now()
@@ -606,17 +606,17 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesBlockInput(ctx context
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26052327) missing ARTIFACT_DIR")
+		procErr := errors.New("(MID-20260523-27) missing ARTIFACT_DIR")
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(s.ArtifactWebDir) == "" {
-		procErr := errors.New("(MID_26052328) missing ARTIFACT_WEB_DIR")
+		procErr := errors.New("(MID-20260523-28) missing ARTIFACT_WEB_DIR")
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
-		procErr := errors.New("(MID_26052329) missing input filename")
+		procErr := errors.New("(MID-20260523-29) missing input filename")
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -625,7 +625,7 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesBlockInput(ctx context
 		return s.SummaryModelErr
 	}
 	if s.GenerateSummary == nil && s.SummaryPromptErr != nil {
-		procErr := fmt.Errorf("(MID_26052330) load fixed-size summary prompt %q failed: %w", s.SummaryPromptRef, s.SummaryPromptErr)
+		procErr := fmt.Errorf("(MID-20260523-30) load fixed-size summary prompt %q failed: %w", s.SummaryPromptRef, s.SummaryPromptErr)
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -640,7 +640,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 	if ApiTypes.ProjectDBHandle != nil {
 		snapshot, ok := ctx.Value(chunkSearchLockKey{}).(chunkSearchSnapshot)
 		if !ok || snapshot.recordID != rec.ID {
-			return fmt.Errorf("chunk source lock is missing for record %d", rec.ID)
+			return fmt.Errorf("chunk source lock is missing for record %d (MID-20261112-35)", rec.ID)
 		}
 		generation = snapshot.generation
 		if err := verifyChunkSearchSource(rec, lines); err != nil {
@@ -743,12 +743,12 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 
 	totalChunks := len(chunks)
 	initialProgress := extractTopicsProgressFull(0, totalChunks)
-	s.Logger.Info("(MID_26052801) extract_topics: starting, updating status to initial progress",
+	s.Logger.Info("(MID-2026052801) extract_topics: starting, updating status to initial progress",
 		"record_id", rec.ID, "total_chunks", totalChunks, "progress", initialProgress)
 	if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
 		return updateTopicChunkStatusProgress(current, initialProgress)
 	}); updateErr != nil {
-		s.Logger.Warn("(MID_26052802) failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
+		s.Logger.Warn("(MID-20260528-02) failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
 	}
 
 	type chunkTopicsResult struct {
@@ -785,14 +785,14 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 					usedFallback = true
 				}
 			} else if chunkErr != nil {
-				return chunkTopicsResult{}, fmt.Errorf("(MID_26042016) %w", chunkErr)
+				return chunkTopicsResult{}, fmt.Errorf("(MID-20260420-16) %w", chunkErr)
 			}
 		}
 		chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
 		if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
 			return updateTopicChunkStatusProgress(current, chunkProgress)
 		}); updateErr != nil {
-			s.Logger.Warn("(MID_26052804) failed to persist topic progress",
+			s.Logger.Warn("(MID-20260528-04) failed to persist topic progress",
 				"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "error", updateErr)
 		}
 		return chunkTopicsResult{chunk: chunk, topics: chunkTopics, usedFallback: usedFallback, msUsed: chunkMSUsed}, nil
@@ -891,7 +891,7 @@ func (s *FixedSizeChunkingService) logExtractTopicsChunk(
 	usedFallback bool,
 ) {
 	if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
-		s.Logger.Warn("(MID_26052806) extract_topics: ProcLogger DB is nil, skipping doc_proc_logs insert",
+		s.Logger.Warn("(MID-2026052806) extract_topics: ProcLogger DB is nil, skipping doc_proc_logs insert",
 			"record_id", recordID, "chunk_seqno", chunk.SeqNo)
 		return
 	}
@@ -927,8 +927,8 @@ func (s *FixedSizeChunkingService) logExtractTopicsChunk(
 		MSUsed:                int64Ptr(msUsed),
 		PromptCacheHitTokens:  cacheHit,
 		PromptCacheMissTokens: cacheMiss,
-	}, "MID-26052807"); err != nil {
-		s.Logger.Warn("(MID_26052808) failed to write extract_topics log",
+	}, "MID-2026052807"); err != nil {
+		s.Logger.Warn("(MID-2026052808) failed to write extract_topics log",
 			"record_id", recordID, "chunk_seqno", chunk.SeqNo, "error", err)
 	}
 }
@@ -1039,7 +1039,7 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		return fixErr
 	}
 	if err := validateSummaryArtifacts(rec.ID, rec.SourceLanguage, allSummaries, s.ChunkDir, s.ArtifactWebDir); err != nil {
-		err = fmt.Errorf("(MID_26060401) summary sanity check failed: %w", err)
+		err = fmt.Errorf("(MID-2026060401) summary sanity check failed: %w", err)
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
 	}
@@ -1224,7 +1224,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 			MSUsed:                int64Ptr(time.Since(startTime).Milliseconds()),
 			PromptCacheHitTokens:  cacheHit,
 			PromptCacheMissTokens: cacheMiss,
-		}, "MID-26052850"); err != nil {
+		}, "MID-2026052850"); err != nil {
 			s.Logger.Warn("failed to write generate_summary log", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
 		}
 	}
@@ -1241,12 +1241,12 @@ func (s *FixedSizeChunkingService) generateSummary(
 		return result, err
 	}
 	if s.Extractor == nil {
-		err := errors.New("(MID_26042904) summary extractor is nil")
+		err := errors.New("(MID-2026042904) summary extractor is nil")
 		logSummaryCall(err)
 		return summaryGenerateResult{}, err
 	}
 	if len(lines) == 0 && len(children) == 0 {
-		err := fmt.Errorf("(MID_26053001) empty summary input for level %d seq %d", level, seqNo)
+		err := fmt.Errorf("(MID-20260530-01) empty summary input for level %d seq %d", level, seqNo)
 		logSummaryCall(err)
 		return summaryGenerateResult{}, err
 	}
@@ -1278,14 +1278,14 @@ func (s *FixedSizeChunkingService) generateSummary(
 		parsed, err = s.Extractor.ExtractJSON(ctx, in)
 	}
 	if err != nil {
-		err = fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
+		err = fmt.Errorf("(MID-20260429-05) generate summary for level %d seq %d: %w", level, seqNo, err)
 		logSummaryCall(err)
 		return summaryGenerateResult{}, err
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
 		summary = sanitizeTopicText(asString(parsed["text"]))
-		s.Logger.Error("failed retrieving summary", "prompt", s.SummaryPromptText,
+		s.Logger.Error("failed retrieving summary (MID-20261112-21)", "prompt", s.SummaryPromptText,
 			"model_name", s.SummaryModelName,
 			"prompt_ref", s.SummaryPromptRef,
 			"level", level,
@@ -1309,7 +1309,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
 		if reason != "missing-category" {
-			s.Logger.Warn("(MID_26042906) invalid category path in summary response; using empty path",
+			s.Logger.Warn("(MID-2026042906) invalid category path in summary response; using empty path",
 				"level", level, "seq", seqNo, "reason", reason, "raw_path", rawPath)
 		}
 		path = nil
@@ -1326,7 +1326,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 		ss := time.Now()
 		categoryPathItemsEn, translateErr = s.translateSummaryCategoryPaths(ctx, categoryPathItems)
 		if translateErr != nil {
-			err := fmt.Errorf("(MID_26052702) translate summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
+			err := fmt.Errorf("(MID-20260527-02) translate summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
 			logSummaryCall(err)
 			return summaryGenerateResult{}, err
 		}
@@ -1424,7 +1424,7 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 		}
 	}()
 	if s.Extractor == nil {
-		err := errors.New("(MID_26070401) summary extractor is nil (batch)")
+		err := errors.New("(MID-2026070401) summary extractor is nil (batch)")
 		logSummaryCall(err)
 		return summaryGenerateResult{}, err
 	}
@@ -1446,14 +1446,14 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 		parsed, err = s.Extractor.ExtractJSON(ctx, in)
 	}
 	if err != nil {
-		err = fmt.Errorf("(MID_26070402) generate summary batch for level %d seq %d: %w", level, seqNo, err)
+		err = fmt.Errorf("(MID-20260704-02) generate summary batch for level %d seq %d: %w", level, seqNo, err)
 		logSummaryCall(err)
 		return summaryGenerateResult{}, err
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
 		summary = sanitizeTopicText(asString(parsed["text"]))
-		s.Logger.Error("failed retrieving batch summary", "model_name", s.SummaryModelName, "prompt_ref", s.SummaryPromptRef, "level", level, "seq", seqNo, "reason", "missing summary and text fields", "raw_response", rawResponse)
+		s.Logger.Error("failed retrieving batch summary (MID-20261112-22)", "model_name", s.SummaryModelName, "prompt_ref", s.SummaryPromptRef, "level", level, "seq", seqNo, "reason", "missing summary and text fields", "raw_response", rawResponse)
 	}
 	if summary == "" {
 		summary = fallbackSummaryText(inputText)
@@ -1465,7 +1465,7 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
 		if reason != "missing-category" {
-			s.Logger.Warn("(MID_26070403) invalid category path in batch summary; using empty path", "level", level, "seq", seqNo, "reason", reason)
+			s.Logger.Warn("(MID-2026070403) invalid category path in batch summary; using empty path", "level", level, "seq", seqNo, "reason", reason)
 		}
 		path = nil
 	}
@@ -1475,7 +1475,7 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 		var translateErr error
 		categoryPathItemsEn, translateErr = s.translateSummaryCategoryPaths(ctx, categoryPathItems)
 		if translateErr != nil {
-			err := fmt.Errorf("(MID_26070404) translate batch summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
+			err := fmt.Errorf("(MID-20260704-04) translate batch summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
 			logSummaryCall(err)
 			return summaryGenerateResult{}, err
 		}
@@ -1533,7 +1533,7 @@ func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, re
 	chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
 	s.logExtractTopicsChunk(ctx, recordID, chunk, totalChunks, topics, 0, msUsed, chunkProgress, usedFallback)
 	if primaryErr != nil {
-		return nil, fmt.Errorf("(MID_26070301) extract topics batch chunk %d record %d: %w", chunk.SeqNo, recordID, primaryErr)
+		return nil, fmt.Errorf("(MID-20260703-01) extract topics batch chunk %d record %d: %w", chunk.SeqNo, recordID, primaryErr)
 	}
 	return topics, nil
 }
@@ -1543,22 +1543,22 @@ func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, re
 func (s *FixedSizeChunkingService) FinalizeTopics(ctx context.Context, recordID int64, inputFilename string, start time.Time, topics []TopicItem, chunks []Chunk) error {
 	rec, err := s.Store.GetInputRecord(ctx, recordID)
 	if err != nil {
-		return fmt.Errorf("(MID_26070310) batch finalize topics: load record %d: %w", recordID, err)
+		return fmt.Errorf("(MID-20260703-10) batch finalize topics: load record %d: %w", recordID, err)
 	}
 	artifactBase := buildFixedSizeArtifactBase(rec, inputFilename)
 	topics = dedupeTopicItems(topics)
 	outputFilename, err := writeTopicsFile(s.ChunkDir, rec.ID, artifactBase+".topics", topics)
 	if err != nil {
-		return fmt.Errorf("(MID_26070311) batch write topics file: %w", err)
+		return fmt.Errorf("(MID-20260703-11) batch write topics file: %w", err)
 	}
 	if err := indexTopicsInTreeDir(s.Logger, s.ArtifactWebDir, rec.ID, topics); err != nil {
-		return fmt.Errorf("(MID_26070312) batch index topics in tree dir: %w", err)
+		return fmt.Errorf("(MID-20260703-12) batch index topics in tree dir: %w", err)
 	}
 	if err := s.embedAndWriteTopics(ctx, rec.ID, artifactBase, topics); err != nil {
-		return fmt.Errorf("(MID_26070313) batch embed and write topics: %w", err)
+		return fmt.Errorf("(MID-20260703-13) batch embed and write topics: %w", err)
 	}
 	if err := ReplaceTopicArtifactsForRecord(ctx, rec.ID, topics, s.Logger); err != nil {
-		return fmt.Errorf("(MID_26070314) batch replace topic artifacts: %w", err)
+		return fmt.Errorf("(MID-20260703-14) batch replace topic artifacts: %w", err)
 	}
 	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
 		s.Logger.Warn("batch reindex topic search registry failed", "record_id", rec.ID, "error", err)
@@ -1579,7 +1579,7 @@ func (s *FixedSizeChunkingService) FinalizeTopics(ctx context.Context, recordID 
 			Progress:       extractTopicsProgressFull(len(chunks), len(chunks)),
 		})
 	}); err != nil {
-		return fmt.Errorf("(MID_26070315) batch persist topic status: %w", err)
+		return fmt.Errorf("(MID-20260703-15) batch persist topic status: %w", err)
 	}
 	s.Logger.Info("batch topic finalize completed", "record_id", rec.ID, "num_chunks", len(chunks), "num_topics", len(topics))
 	s.setDocProcSummaryExtraInfo(map[string]any{"total_chunks": len(chunks), "topics_generated": len(topics)})
@@ -1591,7 +1591,7 @@ func (s *FixedSizeChunkingService) FinalizeTopics(ctx context.Context, recordID 
 func (s *FixedSizeChunkingService) GenerateLeafSummaryForChunk(ctx context.Context, recordID int64, chunk Chunk, inputText string) (SummaryItem, error) {
 	res, err := s.generateSummaryWithInputText(ctx, recordID, 0, chunk.SeqNo, inputText)
 	if err != nil {
-		return SummaryItem{}, fmt.Errorf("(MID_26070410) generate leaf summary batch chunk %d record %d: %w", chunk.SeqNo, recordID, err)
+		return SummaryItem{}, fmt.Errorf("(MID-20260704-10) generate leaf summary batch chunk %d record %d: %w", chunk.SeqNo, recordID, err)
 	}
 	return SummaryItem{
 		SummaryID:           buildSummaryID(recordID, 0, chunk.SeqNo),
@@ -1615,17 +1615,17 @@ func (s *FixedSizeChunkingService) GenerateLeafSummaryForChunk(ctx context.Conte
 func (s *FixedSizeChunkingService) FinalizeSummaries(ctx context.Context, recordID int64, inputFilename string, start time.Time, leafSummaries []SummaryItem, chunks []Chunk) error {
 	rec, err := s.Store.GetInputRecord(ctx, recordID)
 	if err != nil {
-		return fmt.Errorf("(MID_26070420) batch finalize summaries: load record %d: %w", recordID, err)
+		return fmt.Errorf("(MID-20260704-20) batch finalize summaries: load record %d: %w", recordID, err)
 	}
 	if err := deleteSummaryFiles(s.ChunkDir, rec.ID); err != nil {
-		return fmt.Errorf("(MID_26070421) batch delete old summary files: %w", err)
+		return fmt.Errorf("(MID-20260704-21) batch delete old summary files: %w", err)
 	}
 	for i := range leafSummaries {
 		leafSummaries[i].Language = rec.SourceLanguage
 	}
 	for _, item := range leafSummaries {
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
-			return fmt.Errorf("(MID_26070422) batch write leaf summary file: %w", err)
+			return fmt.Errorf("(MID-20260704-22) batch write leaf summary file: %w", err)
 		}
 	}
 	allSummaries := leafSummaries
@@ -1633,29 +1633,29 @@ func (s *FixedSizeChunkingService) FinalizeSummaries(ctx context.Context, record
 		allSummaries[i].Language = rec.SourceLanguage
 	}
 	if err := os.MkdirAll(s.ArtifactWebDir, 0o755); err != nil {
-		return fmt.Errorf("(MID_26070425) batch create artifact web dir: %w", err)
+		return fmt.Errorf("(MID-20260704-25) batch create artifact web dir: %w", err)
 	}
 	if err := removeSummaryTreeRecord(s.ArtifactWebDir, rec.ID); err != nil {
-		return fmt.Errorf("(MID_26070426) batch remove old summary tree entries: %w", err)
+		return fmt.Errorf("(MID-20260704-26) batch remove old summary tree entries: %w", err)
 	}
 	for _, item := range allSummaries {
 		if err := writeSummaryTreeEntriesForItem(s.Logger, s.ArtifactWebDir, item); err != nil {
-			return fmt.Errorf("(MID_26070427) batch write summary tree entry: %w", err)
+			return fmt.Errorf("(MID-20260704-27) batch write summary tree entry: %w", err)
 		}
 	}
 	var fixErr error
 	allSummaries, fixErr = s.fixSummarySourceLanguage(ctx, rec.SourceLanguage, allSummaries)
 	if fixErr != nil {
-		return fmt.Errorf("(MID_26070428) batch fix summary source language: %w", fixErr)
+		return fmt.Errorf("(MID-20260704-28) batch fix summary source language: %w", fixErr)
 	}
 	if err := validateSummaryArtifacts(rec.ID, rec.SourceLanguage, allSummaries, s.ChunkDir, s.ArtifactWebDir); err != nil {
-		return fmt.Errorf("(MID_26070429) batch summary sanity check failed: %w", err)
+		return fmt.Errorf("(MID-20260704-29) batch summary sanity check failed: %w", err)
 	}
 	if err := s.embedAndWriteSummaries(ctx, rec.ID, allSummaries); err != nil {
-		return fmt.Errorf("(MID_26070430) batch embed and write summaries: %w", err)
+		return fmt.Errorf("(MID-20260704-30) batch embed and write summaries: %w", err)
 	}
 	if err := ReplaceSummaryArtifactsForRecord(ctx, rec.ID, allSummaries, s.Logger); err != nil {
-		return fmt.Errorf("(MID_26070431) batch replace summary artifacts: %w", err)
+		return fmt.Errorf("(MID-20260704-31) batch replace summary artifacts: %w", err)
 	}
 	if err := ReindexSummarySearchForRecord(ctx, rec.ID, s.Logger); err != nil {
 		s.Logger.Warn("batch reindex summary search registry failed", "record_id", rec.ID, "error", err)
@@ -1685,7 +1685,7 @@ func (s *FixedSizeChunkingService) FinalizeSummaries(ctx context.Context, record
 			ProcErr:       nil,
 		})
 	}); err != nil {
-		return fmt.Errorf("(MID_26070432) batch persist summary status: %w", err)
+		return fmt.Errorf("(MID-20260704-32) batch persist summary status: %w", err)
 	}
 	s.Logger.Info("batch summary finalize completed", "record_id", rec.ID, "num_chunks", len(chunks), "num_summaries", len(allSummaries))
 	s.setDocProcSummaryExtraInfo(map[string]any{"total_chunks": len(chunks), "num_summaries": len(allSummaries), "summaries_generated": len(allSummaries)})
@@ -1784,10 +1784,10 @@ func (s *FixedSizeChunkingService) translateSummaryCategoryPaths(ctx context.Con
 		return nil, nil
 	}
 	if !s.TranslationEnabled || strings.TrimSpace(s.TranslationModelName) == "" {
-		return nil, errors.New("(MID_26052703) TRANSLATION_MODEL_NAME is required when category_paths_en is missing for non-English summary categories")
+		return nil, errors.New("(MID-2026052703) TRANSLATION_MODEL_NAME is required when category_paths_en is missing for non-English summary categories")
 	}
 	if s.Extractor == nil {
-		return nil, errors.New("(MID_26052704) summary extractor is nil")
+		return nil, errors.New("(MID-2026052704) summary extractor is nil")
 	}
 	inputPayload, err := json.Marshal(map[string]any{
 		"category_paths": categoryPaths,
@@ -1818,7 +1818,7 @@ func (s *FixedSizeChunkingService) translateSummaryCategoryPaths(ctx context.Con
 		}
 	}
 	if len(translated) == 0 {
-		return nil, errors.New("(MID_26052705) translation returned empty category_paths_en")
+		return nil, errors.New("(MID-2026052705) translation returned empty category_paths_en")
 	}
 	return translated, nil
 }
@@ -1836,10 +1836,10 @@ func summaryLanguageName(langCode string) string {
 
 func (s *FixedSizeChunkingService) translateSummaryText(ctx context.Context, targetLang, text string) (string, error) {
 	if !s.TranslationEnabled || strings.TrimSpace(s.TranslationModelName) == "" {
-		return "", fmt.Errorf("(MID_26052901) TRANSLATION_MODEL_NAME is required to translate summary to %q", targetLang)
+		return "", fmt.Errorf("(MID-20260529-01) TRANSLATION_MODEL_NAME is required to translate summary to %q", targetLang)
 	}
 	if s.Extractor == nil {
-		return "", errors.New("(MID_26052902) summary extractor is nil")
+		return "", errors.New("(MID-20260529-02) summary extractor is nil")
 	}
 	inputPayload, err := json.Marshal(map[string]any{
 		"target_language": targetLang,
@@ -1866,7 +1866,7 @@ func (s *FixedSizeChunkingService) translateSummaryText(ctx context.Context, tar
 	}
 	translated := sanitizeTopicText(asString(parsed["summary"]))
 	if translated == "" {
-		return "", fmt.Errorf("(MID_26052903) translation to %q returned empty summary", targetLang)
+		return "", fmt.Errorf("(MID-20260529-03) translation to %q returned empty summary", targetLang)
 	}
 	return translated, nil
 }
@@ -1876,10 +1876,10 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 		return nil, nil
 	}
 	if !s.TranslationEnabled || strings.TrimSpace(s.TranslationModelName) == "" {
-		return nil, fmt.Errorf("(MID_26053001) TRANSLATION_MODEL_NAME is required to translate summary keywords to %q", targetLang)
+		return nil, fmt.Errorf("(MID-20260530-01) TRANSLATION_MODEL_NAME is required to translate summary keywords to %q", targetLang)
 	}
 	if s.Extractor == nil {
-		return nil, errors.New("(MID_26053002) summary extractor is nil")
+		return nil, errors.New("(MID-2026053002) summary extractor is nil")
 	}
 	inputPayload, err := json.Marshal(map[string]any{
 		"target_language": targetLang,
@@ -1906,7 +1906,7 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 	}
 	translated := compactTopicArray(parsed["keywords"])
 	if len(translated) == 0 {
-		return nil, fmt.Errorf("(MID_26053053) translation to %q returned empty keywords", targetLang)
+		return nil, fmt.Errorf("(MID-20260530-53) translation to %q returned empty keywords", targetLang)
 	}
 	return translated, nil
 }
@@ -1923,7 +1923,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 		if normalizedLang == "" || normalizedLang == "en" {
 			for _, item := range summaries {
 				if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
-					s.Logger.Warn("(MID_26060801) summary and summary_en are identical for English/unknown source; ignoring",
+					s.Logger.Warn("(MID-2026060801) summary and summary_en are identical for English/unknown source; ignoring",
 						"summary_id", item.SummaryID,
 						"source_lang", normalizedLang,
 					)
@@ -1949,7 +1949,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 			if summaryEn == "" && summary != "" && detectContentLanguage(summary) == normalizedLang {
 				translated, err := s.translateSummaryText(ctx, summaryLanguageName("en"), summary)
 				if err != nil {
-					s.Logger.Warn("(MID_26052906) failed to translate summary to English; keeping missing summary_en",
+					s.Logger.Warn("(MID-2026052906) failed to translate summary to English; keeping missing summary_en",
 						"summary_id", item.SummaryID,
 						"source_lang", normalizedLang,
 						"error", err,
@@ -1972,7 +1972,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 			if summaryEn != "" && summary == summaryEn {
 				translated, err := s.translateSummaryText(ctx, langName, summaryEn)
 				if err != nil {
-					s.Logger.Warn("(MID_26052904) failed to translate summary to source language; keeping English",
+					s.Logger.Warn("(MID-2026052904) failed to translate summary to source language; keeping English",
 						"summary_id", item.SummaryID,
 						"target_lang", normalizedLang,
 						"error", err,
@@ -1999,7 +1999,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 			if len(keywordsEn) > 0 && equalTrimmedStringSlices(item.Keywords, keywordsEn) {
 				translatedKeywords, err := s.translateSummaryKeywords(ctx, langName, keywordsEn)
 				if err != nil {
-					s.Logger.Warn("(MID_26053004) failed to translate summary keywords to source language; keeping English",
+					s.Logger.Warn("(MID-2026053004) failed to translate summary keywords to source language; keeping English",
 						"summary_id", item.SummaryID,
 						"target_lang", normalizedLang,
 						"error", err,
@@ -2017,7 +2017,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 				return
 			}
 			if _, err := writeSummaryFile(s.ChunkDir, item.RecordID, summaries[idx]); err != nil {
-				s.Logger.Warn("(MID_26052905) failed to re-write summary file after translation; keeping original",
+				s.Logger.Warn("(MID-2026052905) failed to re-write summary file after translation; keeping original",
 					"summary_id", item.SummaryID,
 					"error", err,
 				)
@@ -2115,15 +2115,15 @@ func (s *FixedSizeChunkingService) failAndPersist(
 		ProcErr:         procErr,
 	})
 	if err != nil {
-		s.Logger.Error("failed building chunk status", "record_id", rec.ID, "error", err)
+		s.Logger.Error("failed building chunk status (MID-20261112-23)", "record_id", rec.ID, "error", err)
 		return
 	}
 	errMsg := sanitizeUTF8Text(procErr.Error())
 	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, &errMsg); updateErr != nil {
-		s.Logger.Error("failed persisting chunk failure status", "record_id", rec.ID, "error", updateErr)
+		s.Logger.Error("failed persisting chunk failure status (MID-20261112-24)", "record_id", rec.ID, "error", updateErr)
 		return
 	}
-	s.Logger.Error("chunking failed", "record_id", rec.ID, "error", procErr)
+	s.Logger.Error("chunking failed (MID-20261112-25)", "record_id", rec.ID, "error", procErr)
 }
 
 // updateInputStatusLocked re-reads the record's status under the per-record
@@ -2170,10 +2170,10 @@ func (s *FixedSizeChunkingService) failAndPersistTopics(
 			ProcErr:       procErr,
 		})
 	}); updateErr != nil {
-		s.Logger.Error("failed persisting topic failure status", "record_id", rec.ID, "error", updateErr)
+		s.Logger.Error("failed persisting topic failure status (MID-20261112-26)", "record_id", rec.ID, "error", updateErr)
 		return
 	}
-	s.Logger.Error("topic generation failed", "record_id", rec.ID, "error", procErr)
+	s.Logger.Error("topic generation failed (MID-20261112-27)", "record_id", rec.ID, "error", procErr)
 }
 
 // stopAndPersistTopics writes a "stopped" status entry to kb.inputs.status and
@@ -2197,9 +2197,9 @@ func (s *FixedSizeChunkingService) stopAndPersistTopics(
 			ProcStatus:    "stopped",
 		})
 	}); updateErr != nil {
-		s.Logger.Error("(MID_26052822) failed persisting topic stopped status", "record_id", rec.ID, "error", updateErr)
+		s.Logger.Error("(MID-20260528-22) failed persisting topic stopped status", "record_id", rec.ID, "error", updateErr)
 	}
-	s.Logger.Info("(MID_26052823) topic generation stopped by user request", "record_id", rec.ID, "topics_so_far", numTopics)
+	s.Logger.Info("(MID-2026052823) topic generation stopped by user request", "record_id", rec.ID, "topics_so_far", numTopics)
 }
 
 func (s *FixedSizeChunkingService) failAndPersistSummaries(
@@ -2222,10 +2222,10 @@ func (s *FixedSizeChunkingService) failAndPersistSummaries(
 			ProcErr:       procErr,
 		})
 	}); updateErr != nil {
-		s.Logger.Error("failed persisting summary failure status", "record_id", rec.ID, "error", updateErr)
+		s.Logger.Error("failed persisting summary failure status (MID-20261112-28)", "record_id", rec.ID, "error", updateErr)
 		return
 	}
-	s.Logger.Error("summary generation failed", "record_id", rec.ID, "error", procErr)
+	s.Logger.Error("summary generation failed (MID-20261112-29)", "record_id", rec.ID, "error", procErr)
 }
 
 func (s *FixedSizeChunkingService) stopAndPersistSummaries(ctx context.Context, rec InputRecord, inputFilename string, start time.Time) {
@@ -2239,9 +2239,9 @@ func (s *FixedSizeChunkingService) stopAndPersistSummaries(ctx context.Context, 
 			ProcStatus:    "stopped",
 		})
 	}); updateErr != nil {
-		s.Logger.Error("(MID_26052832) failed persisting summaries stopped status", "record_id", rec.ID, "error", updateErr)
+		s.Logger.Error("(MID-20260528-32) failed persisting summaries stopped status", "record_id", rec.ID, "error", updateErr)
 	}
-	s.Logger.Info("(MID_26052833) summary generation stopped by user request", "record_id", rec.ID)
+	s.Logger.Info("(MID-2026052833) summary generation stopped by user request", "record_id", rec.ID)
 }
 
 func (s *FixedSizeChunkingService) currentSummaryProgress() string {
@@ -2321,7 +2321,7 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 	}
 	embedDir := filepath.Join(targetDir, "embeddings")
 	if err := os.MkdirAll(embedDir, 0o755); err != nil {
-		return fmt.Errorf("(MID_26050201) create embeddings dir failed: %w", err)
+		return fmt.Errorf("(MID-20260502-01) create embeddings dir failed: %w", err)
 	}
 
 	for _, topic := range topics {
@@ -2335,11 +2335,11 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 			CallLoc:    "MID-20260719-0001",
 		})
 		if err != nil {
-			return fmt.Errorf("(MID_26050202) embed topic seq=%d failed: %w", topic.SeqNo, err)
+			return fmt.Errorf("(MID-20260502-02) embed topic seq=%d failed: %w", topic.SeqNo, err)
 		}
 		embedPath := filepath.Join(embedDir, fmt.Sprintf("topic_%d.embed", topic.SeqNo))
 		if err := os.WriteFile(embedPath, []byte(formatFloatArray(vec)+"\n"), 0o644); err != nil {
-			return fmt.Errorf("(MID_26050203) write embed file for topic %d failed: %w", topic.SeqNo, err)
+			return fmt.Errorf("(MID-20260502-03) write embed file for topic %d failed: %w", topic.SeqNo, err)
 		}
 	}
 	return nil
@@ -2361,7 +2361,7 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 	}
 	embedDir := filepath.Join(targetDir, "embeddings")
 	if err := os.MkdirAll(embedDir, 0o755); err != nil {
-		return fmt.Errorf("(MID_26043100) create embeddings dir failed: %w", err)
+		return fmt.Errorf("(MID-20260431-00) create embeddings dir failed: %w", err)
 	}
 	for _, item := range summaries {
 		summaryText := strings.TrimSpace(item.Summary)
@@ -2378,11 +2378,11 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 			CallLoc:    "MID-20260719-0002",
 		})
 		if err != nil {
-			return fmt.Errorf("(MID_26043101) embed summary %q failed: %w", item.SummaryID, err)
+			return fmt.Errorf("(MID-20260431-01) embed summary %q failed: %w", item.SummaryID, err)
 		}
 		embedPath := filepath.Join(embedDir, summaryEmbedFileName(item.Level, item.SeqNo))
 		if err := os.WriteFile(embedPath, []byte(formatFloatArray(vec)+"\n"), 0o644); err != nil {
-			return fmt.Errorf("(MID_26043102) write embed file for summary %q failed: %w", item.SummaryID, err)
+			return fmt.Errorf("(MID-20260431-02) write embed file for summary %q failed: %w", item.SummaryID, err)
 		}
 	}
 	return nil
@@ -2419,7 +2419,7 @@ func parseInputLines(input []byte, opts parseInputLinesOptions) ([]Line, error) 
 		}
 		parsed, err := parseLine(raw)
 		if err != nil {
-			return nil, fmt.Errorf("(MID_26042005) line %d: %w", lineNo, err)
+			return nil, fmt.Errorf("(MID-20260420-05) line %d: %w", lineNo, err)
 		}
 		out = append(out, parsed)
 	}
@@ -2432,15 +2432,15 @@ func parseInputLines(input []byte, opts parseInputLinesOptions) ([]Line, error) 
 func parseLine(raw string) (Line, error) {
 	fields := strings.Split(raw, "\t")
 	if len(fields) != 7 {
-		return Line{}, fmt.Errorf("(MID_26042006) invalid input line format, line:%s", raw)
+		return Line{}, fmt.Errorf("(MID-20260420-06) invalid input line format, line:%s", raw)
 	}
 	lineNo, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 	if err != nil {
-		return Line{}, fmt.Errorf("(MID_26042007) invalid line number: %w", err)
+		return Line{}, fmt.Errorf("(MID-20260420-07) invalid line number: %w", err)
 	}
 	pageNo, err := strconv.Atoi(strings.TrimSpace(fields[1]))
 	if err != nil {
-		return Line{}, fmt.Errorf("(MID_26042008) invalid page number: %w", err)
+		return Line{}, fmt.Errorf("(MID-20260420-08) invalid page number: %w", err)
 	}
 	lineType := strings.ToLower(strings.TrimSpace(fields[2]))
 	font := strings.TrimSpace(fields[3])
@@ -2448,7 +2448,7 @@ func parseLine(raw string) (Line, error) {
 	coordinate := strings.TrimSpace(fields[5])
 	content := strings.TrimSpace(fields[6])
 	if lineType == "" || font == "" || fontSize == "" || coordinate == "" {
-		return Line{}, fmt.Errorf("(MID_26042006) invalid input line format, line:%s", raw)
+		return Line{}, fmt.Errorf("(MID-20260420-06) invalid input line format, line:%s", raw)
 	}
 	return Line{
 		Raw:        raw,
@@ -2464,7 +2464,7 @@ func parseLine(raw string) (Line, error) {
 
 func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 	if opts.ChunkSize <= 0 {
-		return nil, errors.New("(MID_26042009) chunk size must be positive")
+		return nil, errors.New("(MID-2026042009) chunk size must be positive")
 	}
 	lines = filterTOCLines(lines)
 	if len(lines) == 0 {
@@ -2610,7 +2610,7 @@ func validateChunkSizeSanity(chunks []Chunk, minBytes int) error {
 		overlapLines, regularLines := chunkLineNumbers(chunk)
 		if overlapCount > 1 && overlapBytes > maxOverlap {
 			return fmt.Errorf(
-				"(MID_26060202) chunk sanity check failed: chunk %d overlap payload is too large: overlap_bytes=%d max_overlap_bytes=%d overlap=%s lines=%s",
+				"(MID-20260602-02) chunk sanity check failed: chunk %d overlap payload is too large: overlap_bytes=%d max_overlap_bytes=%d overlap=%s lines=%s",
 				chunk.SeqNo,
 				overlapBytes,
 				maxOverlap,
@@ -2625,7 +2625,7 @@ func validateChunkSizeSanity(chunks []Chunk, minBytes int) error {
 			continue
 		}
 		return fmt.Errorf(
-			"(MID_26060201) chunk sanity check failed: non-final chunk %d regular payload is too small: regular_bytes=%d min_regular_bytes=%d overlap=%s lines=%s",
+			"(MID-20260602-01) chunk sanity check failed: non-final chunk %d regular payload is too small: regular_bytes=%d min_regular_bytes=%d overlap=%s lines=%s",
 			chunk.SeqNo,
 			regularBytes,
 			minRegular,
@@ -2670,10 +2670,10 @@ func findTargetByBytes(lines []Line, start int, targetBytes int) int {
 /*
 func writeChunkFiles(chunkDir string, recordID int64, chunks []Chunk) error {
 	if strings.TrimSpace(chunkDir) == "" {
-		return errors.New("(MID_26042010) chunk dir is empty")
+		return errors.New("(MID-2026042010) chunk dir is empty")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26042011) invalid record id: %d", recordID)
+		return fmt.Errorf("(MID-20260420-11) invalid record id: %d", recordID)
 	}
 	groupID := recordID / 1000
 	targetDir := filepath.Join(chunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
@@ -3072,7 +3072,7 @@ func buildFixedSizeArtifactBase(rec InputRecord, inputFilename string) string {
 }
 
 func isChunkArtifactNotFoundError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "(MID_26052331)")
+	return err != nil && strings.Contains(err.Error(), "(MID-20260523-31)")
 }
 
 func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string, lines []Line) ([]Chunk, error) {
@@ -3084,7 +3084,7 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("(MID_26052331) chunk artifact not found: %s", path)
+			return nil, fmt.Errorf("(MID-20260523-31) chunk artifact not found: %s", path)
 		}
 		return nil, err
 	}
@@ -3132,7 +3132,7 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 		}
 		if len(chunkLines) == 0 {
 			return fmt.Errorf(
-				"(MID_26053002) chunk artifact %s for record %d seq %d references only missing/filtered lines: overlap=%s regular=%s missing_overlap=%s missing_regular=%s",
+				"(MID-20260530-02) chunk artifact %s for record %d seq %d references only missing/filtered lines: overlap=%s regular=%s missing_overlap=%s missing_regular=%s",
 				fileName,
 				recordID,
 				seqNo,
@@ -3158,20 +3158,20 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 		case strings.HasPrefix(raw, "overlap:"):
 			values, err := parseLineNumberRanges(strings.TrimSpace(strings.TrimPrefix(raw, "overlap:")))
 			if err != nil {
-				return nil, fmt.Errorf("(MID_26052334) parse overlap ranges: %w", err)
+				return nil, fmt.Errorf("(MID-20260523-34) parse overlap ranges: %w", err)
 			}
 			overlap = values
 		case strings.HasPrefix(raw, "lines:"):
 			values, err := parseLineNumberRanges(strings.TrimSpace(strings.TrimPrefix(raw, "lines:")))
 			if err != nil {
-				return nil, fmt.Errorf("(MID_26052335) parse line ranges: %w", err)
+				return nil, fmt.Errorf("(MID-20260523-35) parse line ranges: %w", err)
 			}
 			regular = values
 			if err := appendChunk(); err != nil {
 				return nil, err
 			}
 		default:
-			return nil, fmt.Errorf("(MID_26052336) invalid chunk artifact line: %s", raw)
+			return nil, fmt.Errorf("(MID-20260523-36) invalid chunk artifact line: %s", raw)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -3189,7 +3189,7 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 func validateChunksNonEmpty(chunks []Chunk, source string) error {
 	for _, chunk := range chunks {
 		if len(chunk.Lines) == 0 {
-			return fmt.Errorf("(MID_26053054) %s contain empty chunk seq %d", source, chunk.SeqNo)
+			return fmt.Errorf("(MID-20260530-54) %s contain empty chunk seq %d", source, chunk.SeqNo)
 		}
 	}
 	return nil
@@ -3201,7 +3201,7 @@ func parseLineNumberRanges(raw string) ([]int, error) {
 		return nil, nil
 	}
 	if !strings.HasPrefix(text, "[") || !strings.HasSuffix(text, "]") {
-		return nil, fmt.Errorf("invalid range list: %q", raw)
+		return nil, fmt.Errorf("invalid range list: %q (MID-20261112-30)", raw)
 	}
 	text = strings.TrimSpace(text[1 : len(text)-1])
 	if text == "" {
@@ -3218,7 +3218,7 @@ func parseLineNumberRanges(raw string) ([]int, error) {
 		if strings.Contains(item, "-") {
 			bounds := strings.SplitN(item, "-", 2)
 			if len(bounds) != 2 {
-				return nil, fmt.Errorf("invalid range: %q", item)
+				return nil, fmt.Errorf("invalid range: %q (MID-20261112-31)", item)
 			}
 			start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
 			if err != nil {
@@ -3229,7 +3229,7 @@ func parseLineNumberRanges(raw string) ([]int, error) {
 				return nil, err
 			}
 			if end < start {
-				return nil, fmt.Errorf("invalid descending range: %q", item)
+				return nil, fmt.Errorf("invalid descending range: %q (MID-20261112-31)", item)
 			}
 			for n := start; n <= end; n++ {
 				out = append(out, n)
@@ -3350,27 +3350,27 @@ func envFloat(key string, fallback float64, minVal float64) float64 {
 func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
 	modelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_MODEL_NAME"))
 	if modelRef == "" {
-		return "", "", structureModelConfig{}, fmt.Errorf("EXTRACT_TOPIC_MODEL_NAME is required")
+		return "", "", structureModelConfig{}, fmt.Errorf("EXTRACT_TOPIC_MODEL_NAME is required (MID-20261112-32)")
 	}
 
 	modelPath, err = resolveModelsFilePath("CHUNK_EXTRACT_TOPIC_MODELS_FILE")
 	if err != nil {
-		return modelRef, "", structureModelConfig{}, fmt.Errorf("(MID_26042016) resolve models file for EXTRACT_TOPIC_MODEL_NAME %q failed: %w", modelRef, err)
+		return modelRef, "", structureModelConfig{}, fmt.Errorf("(MID-20260420-16) resolve models file for EXTRACT_TOPIC_MODEL_NAME %q failed: %w", modelRef, err)
 	}
 	raw, err := os.ReadFile(modelPath)
 	if err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042017) read %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260420-17) read %s failed: %w", modelPath, err)
 	}
 	parsed := ApiTypes.LLMModelsFile{}
 	if err := parseTOMLMap(raw, &parsed); err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042018) parse %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260420-18) parse %s failed: %w", modelPath, err)
 	}
 	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042021) EXTRACT_TOPIC_MODEL_NAME %q not found in %s", modelRef, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260420-21) EXTRACT_TOPIC_MODEL_NAME %q not found in %s", modelRef, modelPath)
 	}
 	if strings.TrimSpace(modelDef.ModelName) == "" {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042019) model %q in %s missing model_name", modelRef, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260420-19) model %q in %s missing model_name", modelRef, modelPath)
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelPath, structureModelConfig{
@@ -3394,7 +3394,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 		modelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_MODEL_NAME"))
 	}
 	if modelRef == "" {
-		return "", "", structureModelConfig{}, fmt.Errorf("CHUNK_SUMMARY_MODEL_NAME or EXTRACT_TOPIC_MODEL_NAME is required")
+		return "", "", structureModelConfig{}, fmt.Errorf("CHUNK_SUMMARY_MODEL_NAME or EXTRACT_TOPIC_MODEL_NAME is required (MID-20261112-32)")
 	}
 
 	modelPath, err = resolveModelsFilePath("CHUNK_SUMMARY_MODELS_FILE")
@@ -3403,23 +3403,23 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 			modelPath, err = resolveModelsFilePath("CHUNK_EXTRACT_TOPIC_MODELS_FILE")
 		}
 		if err != nil {
-			return modelRef, "", structureModelConfig{}, fmt.Errorf("(MID_26042905) resolve models file for CHUNK_SUMMARY_MODEL_NAME %q failed: %w", modelRef, err)
+			return modelRef, "", structureModelConfig{}, fmt.Errorf("(MID-20260429-05) resolve models file for CHUNK_SUMMARY_MODEL_NAME %q failed: %w", modelRef, err)
 		}
 	}
 	raw, err := os.ReadFile(modelPath)
 	if err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042906) read %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260429-06) read %s failed: %w", modelPath, err)
 	}
 	parsed := ApiTypes.LLMModelsFile{}
 	if err := parseTOMLMap(raw, &parsed); err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042907) parse %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260429-07) parse %s failed: %w", modelPath, err)
 	}
 	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042909) CHUNK_SUMMARY_MODEL_NAME %q not found in %s", modelRef, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260429-09) CHUNK_SUMMARY_MODEL_NAME %q not found in %s", modelRef, modelPath)
 	}
 	if strings.TrimSpace(modelDef.ModelName) == "" {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042908) model %q in %s missing model_name", modelRef, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID-20260429-08) model %q in %s missing model_name", modelRef, modelPath)
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelPath, structureModelConfig{
@@ -3434,7 +3434,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
 	promptRef = promptRefFromEnv("EXTRACT_TOPIC_PROMPT", "")
 	if promptRef == "" {
-		return "", "", "", errors.New("(MID_26042020) missing EXTRACT_TOPIC_PROMPT")
+		return "", "", "", errors.New("(MID-2026042020) missing EXTRACT_TOPIC_PROMPT")
 	}
 
 	paths := make([]string, 0, 8)
@@ -3472,7 +3472,7 @@ func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, pro
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, errors.New("(MID_26042021) prompt file is empty")
+			return "", promptRef, candidate, errors.New("(MID-2026042021) prompt file is empty")
 		}
 		return text, promptRef, candidate, nil
 	}
@@ -3483,7 +3483,7 @@ func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, pro
 	if lastErr == nil {
 		lastErr = os.ErrNotExist
 	}
-	return "", promptRef, "", fmt.Errorf("(MID_26042022) prompt file not found: %w", lastErr)
+	return "", promptRef, "", fmt.Errorf("(MID-20260420-22) prompt file not found: %w", lastErr)
 }
 
 func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
@@ -3492,7 +3492,7 @@ func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, p
 		promptRef = promptRefFromEnv("EXTRACT_TOPIC_PROMPT", "")
 	}
 	if promptRef == "" {
-		return "", "", "", errors.New("(MID_26042909) missing GENERATE_SUMMARY_PROMPT")
+		return "", "", "", errors.New("(MID-2026042909) missing GENERATE_SUMMARY_PROMPT")
 	}
 
 	paths := make([]string, 0, 8)
@@ -3529,7 +3529,7 @@ func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, p
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, errors.New("(MID_26042910) summary prompt file is empty")
+			return "", promptRef, candidate, errors.New("(MID-2026042910) summary prompt file is empty")
 		}
 		return text, promptRef, candidate, nil
 	}
@@ -3539,7 +3539,7 @@ func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, p
 	if lastErr == nil {
 		lastErr = os.ErrNotExist
 	}
-	return "", promptRef, "", fmt.Errorf("(MID_26042911) summary prompt file not found: %w", lastErr)
+	return "", promptRef, "", fmt.Errorf("(MID-20260429-11) summary prompt file not found: %w", lastErr)
 }
 
 func min(a int, b int) int {
