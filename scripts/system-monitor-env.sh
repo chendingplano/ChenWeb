@@ -1,0 +1,14 @@
+# Defaults shared by the service launchers and the system monitor backend.
+# Export overrides before starting a service to put its logs elsewhere.
+: "${SYSTEM_MONITOR_LOG_ROOT:=$HOME/Apps/ChenWebLog/system-monitor}"
+: "${GO_BACKEND_LOG_DIR:=$SYSTEM_MONITOR_LOG_ROOT/chenweb}"
+: "${DOC_PROCESSOR_LOG_DIR:=$SYSTEM_MONITOR_LOG_ROOT/doc-processor}"
+: "${DOC_SERVICE_LOG_DIR:=$SYSTEM_MONITOR_LOG_ROOT/doc-service}"
+: "${PARSER_RESULT_CONVERTER_LOG_DIR:=$SYSTEM_MONITOR_LOG_ROOT/parser-result-converter}"
+: "${KRATOS_LOG_FILE:=$SYSTEM_MONITOR_LOG_ROOT/kratos.log}"
+: "${NATS_LOG_FILE:=$SYSTEM_MONITOR_LOG_ROOT/nats.log}"
+: "${PDF_PARSER_LOG_FILE:=$SYSTEM_MONITOR_LOG_ROOT/pdf-parser.log}"
+: "${CADDY_LOG_FILE:=$SYSTEM_MONITOR_LOG_ROOT/caddy.log}"
+: "${DEEPSEEK_WATCH_LOG:=$SYSTEM_MONITOR_LOG_ROOT/deepseek-traffic.log}"
+export SYSTEM_MONITOR_LOG_ROOT GO_BACKEND_LOG_DIR DOC_PROCESSOR_LOG_DIR DOC_SERVICE_LOG_DIR PARSER_RESULT_CONVERTER_LOG_DIR
+export KRATOS_LOG_FILE NATS_LOG_FILE PDF_PARSER_LOG_FILE CADDY_LOG_FILE DEEPSEEK_WATCH_LOG

@@ -5,7 +5,11 @@ go = "1.25.7"
 run = "go build -buildvcs=false -o ../../../.cache/doc-processor.exe ."
 
 [tasks.doc-processor-run]
-run = "go run ."
+run = '''
+. ../../../scripts/system-monitor-env.sh
+export LOG_FILE_DIR="$DOC_PROCESSOR_LOG_DIR"
+exec go run .
+'''
 
 [tasks.doc-processor-start]
 run = '''
@@ -14,6 +18,8 @@ if [ -f ../../../.cache/doc-processor.pid ] && kill -0 "$(cat ../../../.cache/do
   echo "doc-processor already running (pid $(cat ../../../.cache/doc-processor.pid))"
   exit 0
 fi
+. ../../../scripts/system-monitor-env.sh
+export LOG_FILE_DIR="$DOC_PROCESSOR_LOG_DIR"
 nohup go run . > ../../../.cache/doc-processor.log 2>&1 &
 echo $! > ../../../.cache/doc-processor.pid
 echo "doc-processor started (pid $(cat ../../../.cache/doc-processor.pid))"

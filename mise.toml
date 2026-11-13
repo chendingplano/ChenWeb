@@ -40,7 +40,11 @@ run = '''
 '''
 
 [tasks.dev-server]
-run = 'go tool air'
+run = '''
+. ./scripts/system-monitor-env.sh
+export LOG_FILE_DIR="$GO_BACKEND_LOG_DIR"
+exec go tool air
+'''
 
 [tasks.dev-web]
 run = "cd web && bun run dev"
@@ -377,6 +381,8 @@ if [ -f ./.cache/doc-service.pid ] && kill -0 "$(cat ./.cache/doc-service.pid)" 
   echo "doc-service already running (pid $(cat ./.cache/doc-service.pid))"
   exit 0
 fi
+. ./scripts/system-monitor-env.sh
+export LOG_FILE_DIR="$DOC_SERVICE_LOG_DIR"
 nohup go run ./server/cmd/doc-service/ > ./.cache/doc-service.log 2>&1 &
 echo $! > ./.cache/doc-service.pid
 echo "doc-service (staging) started (pid $(cat ./.cache/doc-service.pid))"

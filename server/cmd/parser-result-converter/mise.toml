@@ -5,7 +5,11 @@ go = "1.25.7"
 run = "go build -buildvcs=false -o ../../../.cache/parser-result-converter.exe ."
 
 [tasks.parser-result-converter-run]
-run = "go run ."
+run = '''
+. ../../../scripts/system-monitor-env.sh
+export LOG_FILE_DIR="$PARSER_RESULT_CONVERTER_LOG_DIR"
+exec go run .
+'''
 
 [tasks.parser-result-converter-start]
 run = '''
@@ -14,6 +18,8 @@ if [ -f ../../../.cache/parser-result-converter.pid ] && kill -0 "$(cat ../../..
   echo "parser-result-converter already running (pid $(cat ../../../.cache/parser-result-converter.pid))"
   exit 0
 fi
+. ../../../scripts/system-monitor-env.sh
+export LOG_FILE_DIR="$PARSER_RESULT_CONVERTER_LOG_DIR"
 nohup go run . > ../../../.cache/parser-result-converter.log 2>&1 &
 echo $! > ../../../.cache/parser-result-converter.pid
 echo "parser-result-converter started (pid $(cat ../../../.cache/parser-result-converter.pid))"

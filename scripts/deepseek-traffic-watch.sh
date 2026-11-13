@@ -5,7 +5,7 @@
 # are long enough (seconds) that normal LLM calls are caught.
 #
 # Usage: scripts/deepseek-traffic-watch.sh   (Ctrl-C to stop)
-# Env:   DEEPSEEK_WATCH_LOG       log file (default: $LOG_FILE_DIR/deepseek-traffic.log)
+# Env:   DEEPSEEK_WATCH_LOG       log file (default: $SYSTEM_MONITOR_LOG_ROOT/deepseek-traffic.log)
 #        DEEPSEEK_WATCH_INTERVAL  seconds between samples (default: 1)
 #        DEEPSEEK_WATCH_EXCLUDE   regex of process names to skip (default: ^Google Chrome)
 #                                 Chrome shares CloudFront edge IPs with DeepSeek, so its
@@ -13,7 +13,9 @@
 set -euo pipefail
 
 HOST="api.deepseek.com"
-LOG="${DEEPSEEK_WATCH_LOG:-${LOG_FILE_DIR:-$HOME/Apps/ChenWebLog}/deepseek-traffic.log}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+. "$SCRIPT_DIR/system-monitor-env.sh"
+LOG="$DEEPSEEK_WATCH_LOG"
 INTERVAL="${DEEPSEEK_WATCH_INTERVAL:-1}"
 EXCLUDE="${DEEPSEEK_WATCH_EXCLUDE:-^Google Chrome}"
 
