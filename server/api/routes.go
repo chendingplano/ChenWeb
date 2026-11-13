@@ -67,6 +67,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	"github.com/chendingplano/deepdoc/server/api/reusablemodules"
 	"github.com/chendingplano/deepdoc/server/api/sitehandler"
+	"github.com/chendingplano/deepdoc/server/api/systemmonitor"
 	"github.com/chendingplano/deepdoc/server/api/terminologyresourcehandler"
 	"github.com/chendingplano/deepdoc/server/api/useradminhandler"
 	"github.com/chendingplano/deepdoc/server/api/videohandler"
@@ -511,6 +512,7 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Release notes admin (System Admin > System > Releases).
 	apiGroup.GET("/system-admin/build-info", buildinfohandler.List)
+	apiGroup.GET("/system-admin/system-monitor", systemmonitor.List)
 	apiGroup.GET("/releases", releaseshandler.ListReleases)
 	apiGroup.POST("/releases", releaseshandler.CreateRelease)
 	apiGroup.PUT("/releases/:id", releaseshandler.UpdateRelease)
