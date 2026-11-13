@@ -480,7 +480,13 @@
 					id: 'sysadmin-doc-process-pipeline',
 					label: m.nav_sysadmin_doc_process_pipeline(),
 					children: [
-						{ id: 'sysadmin-doc-process-config', label: m.nav_sysadmin_doc_process_config() },
+						{
+							id: 'sysadmin-doc-process-configurations',
+							label: m.nav_sysadmin_doc_process_configurations(),
+							children: [
+								{ id: 'sysadmin-doc-process-config', label: m.nav_sysadmin_doc_process_config() }
+							]
+						},
 						{ id: 'sysadmin-doc-process-dag', label: m.nav_sysadmin_doc_process_dag() },
 						{
 							id: 'sysadmin-doc-process-processors',
