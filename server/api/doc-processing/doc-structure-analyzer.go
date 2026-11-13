@@ -568,6 +568,8 @@ func newOpenAIJSONClientForStructureModel(cfg structureModelConfig, embeddingDim
 
 func normalizeThinkingType(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "enable":
+		return "enabled"
 	case "enabled", "disabled":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:

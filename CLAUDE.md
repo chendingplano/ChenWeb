@@ -156,6 +156,8 @@ attribution; the provider request remains `GET /user/balance`.
 
 # Model configuration
 
+In model definitions, `thinking_type = "enable"` is an alias for `"enabled"` and sends `thinking.type = "enabled"` to the provider. An empty value omits the field; individual features may override the profile.
+
 Model selections and defaults in application code must come from environment variables.
 Never embed a concrete model name or profile reference in code, including fallback values,
 UI examples, and fixed option lists. Resolve configured profile references through
