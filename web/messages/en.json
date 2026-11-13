@@ -8937,7 +8937,7 @@
 	"pipeline_config_empty": "No optional processors are configured.",
 	"nav_sysadmin_doc_process_config_products": "Config Extract Products",
 	"products_config_title": "Configure product extraction",
-	"products_config_intro": "Set processor overrides. Leave a field blank to use the launch environment or processor default. Model references are resolved through MODEL_DEF_FILE.",
+	"products_config_intro": "Set processor overrides. Leave a field blank to use the launch environment or processor default.",
 	"products_config_restart": "Restart the document processor after saving. Changes apply to newly started processors.",
 	"products_config_error": "Could not load or save the configuration. Check access and server logs.",
 	"products_config_saved": "Configuration saved. Restart the document processor to apply it.",
@@ -8967,6 +8967,7 @@
 	"products_config_testing_hint": "First-pass-only mode is for testing and skips relationships, translation, and catalog resolution. Merged mode takes precedence if both are enabled.",
 	"products_config_reset_inherit": "Use environment or default",
 	"products_config_using_inherited": "Using environment or default",
+	"products_config_unset": "Not set",
 	"products_config_inherited_prompt": "Environment or default: {name}",
-	"products_config_inherited_note": "Inherited switch states and prompt names reflect the web server environment; the processor may use a different launch environment."
+	"products_config_inherited_note": "Inherited values reflect the web server environment; the processor may use a different launch environment."
 }

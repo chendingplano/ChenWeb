@@ -32,11 +32,15 @@ func GetProductsConfig(c echo.Context) error {
 	defaults := map[string]string{
 		"EXTRACT_PRODUCT_MENTIONS_PROMPT": "prompt-extract-product-mentions-v2.md", "ENRICH_PRODUCT_MENTION_PROMPT": "prompt-enrich-product-mention-v4.md", "EXTRACT_PRODUCT_MERGED_PROMPT": "prompt-extract-products-merged-v3.md", "TRANSLATE_PRODUCTS_PROMPT": "prompt-translate-products-v2.md",
 		"EXTRACT_PRODUCTS_MERGED_PASS": "false", "EXTRACT_PRODUCT_PASS_1_ONLY": "false", "EXTRACT_PRODUCTS_REASONING": "true", "EXTRACT_PRODUCT_TRANSLATION": "on",
+		"EXTRACT_PRODUCTS_MAX_TASKS": "1", "EXTRACT_PRODUCT_MENTIONS_MODEL_NAME": "", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME": "", "EXTRACT_PRODUCT_MODEL_NAME": "", "EXTRACT_PRODUCT_MODEL_FALLBACK": "", "TRANSLATION_MODEL_NAME": "",
 	}
 	for key := range defaults {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			defaults[key] = value
 		}
+	}
+	if n, err := strconv.Atoi(defaults["EXTRACT_PRODUCTS_MAX_TASKS"]); err != nil || n < 1 {
+		defaults["EXTRACT_PRODUCTS_MAX_TASKS"] = "1"
 	}
 	for _, key := range []string{"EXTRACT_PRODUCTS_MERGED_PASS", "EXTRACT_PRODUCT_PASS_1_ONLY", "EXTRACT_PRODUCTS_REASONING"} {
 		v, err := strconv.ParseBool(defaults[key])

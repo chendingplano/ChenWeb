@@ -8937,7 +8937,7 @@
 	"pipeline_config_empty": "尚未配置可选处理器。",
 	"nav_sysadmin_doc_process_config_products": "配置产品提取",
 	"products_config_title": "配置产品提取",
-	"products_config_intro": "设置处理器覆盖值。留空时使用启动环境或处理器默认值。模型引用通过 MODEL_DEF_FILE 解析。",
+	"products_config_intro": "设置处理器覆盖值。留空时使用启动环境或处理器默认值。",
 	"products_config_restart": "保存后请重启文档处理器。更改对新启动的处理器生效。",
 	"products_config_error": "无法加载或保存配置。请检查访问权限和服务器日志。",
 	"products_config_saved": "配置已保存。请重启文档处理器以应用更改。",
@@ -8967,6 +8967,7 @@
 	"products_config_testing_hint": "仅第一轮模式用于测试，会跳过关系提取、翻译和目录解析。如果同时启用，合并模式优先。",
 	"products_config_reset_inherit": "使用环境或默认值",
 	"products_config_using_inherited": "使用环境或默认值",
+	"products_config_unset": "未设置",
 	"products_config_inherited_prompt": "环境或默认值：{name}",
-	"products_config_inherited_note": "继承的开关状态和提示词名称反映 Web 服务器环境；处理器的启动环境可能不同。"
+	"products_config_inherited_note": "继承的值反映 Web 服务器环境；处理器的启动环境可能不同。"
 }

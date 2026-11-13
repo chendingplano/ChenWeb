@@ -54,15 +54,18 @@
  {#if !loading && loaded}
  <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
  {#each groups as group}<section><h2>{group.title}</h2><div class="fields">
-  {#each group.fields as field}<div class="field"><label for={field.key}>{field.label}</label><code>{field.key}</code>
+  {#each group.fields as field}<div class="field"><label for={field.key}>{field.label}</label>
    {#if field.type === 'bool' || field.type === 'translation'}
     <div class="switch-row"><input id={field.key} class="switch" type="checkbox" role="switch" checked={(values[field.key] || inherited[field.key]) === (field.type === 'bool' ? 'true' : 'on')} onchange={(e) => { values[field.key] = e.currentTarget.checked ? (field.type === 'bool' ? 'true' : 'on') : (field.type === 'bool' ? 'false' : 'off'); remember(); }} /><span>{(values[field.key] || inherited[field.key]) === (field.type === 'bool' ? 'true' : 'on') ? m.products_config_on() : m.products_config_off()}</span></div>
-    {#if values[field.key]}<button type="button" class="inherit" onclick={(e) => { e.preventDefault(); values[field.key] = ''; remember(); }}>{m.products_config_reset_inherit()}</button>{:else}<small>{m.products_config_using_inherited()}</small>{/if}
+    {#if values[field.key]}<button type="button" class="inherit" onclick={(e) => { e.preventDefault(); values[field.key] = ''; remember(); }}>{m.products_config_reset_inherit()}</button>{/if}
    {:else if field.type === 'model' || field.type === 'prompt' || field.type === 'tasks'}
     {@const options = field.type === 'model' ? models : field.type === 'prompt' ? (prompts[field.key] ?? []) : ['10','20','30','40','50']}
     {@const current = values[field.key] ?? ''}
+    {@const commonModel = values.EXTRACT_PRODUCT_MODEL_NAME || inherited.EXTRACT_PRODUCT_MODEL_NAME}
+    {@const relationModel = values.ENRICH_PRODUCT_RELATIONS_MODEL_NAME || inherited.ENRICH_PRODUCT_RELATIONS_MODEL_NAME || commonModel}
+    {@const effective = inherited[field.key] || (field.key === 'EXTRACT_PRODUCT_MENTIONS_MODEL_NAME' ? commonModel : field.key === 'ENRICH_PRODUCT_RELATIONS_MODEL_NAME' ? commonModel : field.key === 'TRANSLATION_MODEL_NAME' ? relationModel : '')}
     <select id={field.key} value={current} onchange={(e) => { values[field.key] = e.currentTarget.value; remember(); }}>
-     <option value="">{field.type === 'prompt' ? m.products_config_inherited_prompt({ name: inherited[field.key] ?? '' }) : m.products_config_inherit()}</option>
+     <option value="">{effective || m.products_config_unset()}</option>
      {#if current && !options.includes(current)}<option value={current}>{current}</option>{/if}
      {#each options as option}<option value={option}>{option}</option>{/each}
     </select>
