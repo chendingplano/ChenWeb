@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Usage: ./shell_server_build_rcp.sh "build_name" "target_machine" "os_info" "description"
+# Requires PROJECT_WORKSPACE_DIR and PostgreSQL settings (PG_* or ChenWeb/.env).
+# All kb.doc_group_members files and directories are staged relative to the workspace.
 
 set -euo pipefail
 
@@ -16,7 +18,14 @@ export TARGET_MACHINE="${2:-unknown}"
 export OS_INFO="${3:-linux/amd64}"
 export BUILD_DESCRIPTION="${4:-}"
 
+# Check the workspace before starting the potentially expensive server build.
+: "${PROJECT_WORKSPACE_DIR:?PROJECT_WORKSPACE_DIR must name an existing workspace directory}"
+[ -d "$PROJECT_WORKSPACE_DIR" ] || { echo "!! PROJECT_WORKSPACE_DIR is not a directory: $PROJECT_WORKSPACE_DIR" >&2; exit 1; }
+
 mise run build-server-linux
+
+# The server build recreates /tmp/chenweb-deploy, so stage documents afterwards.
+python3 "$SCRIPT_DIR/scripts/stage_document_members.py" /tmp/chenweb-deploy/document-workspace
 
 # The PDF parser runs as the chenweb-pdf-parser image, which the China box builds
 # from these sources (python/pdf-parser/container/README.md). Ship them in the

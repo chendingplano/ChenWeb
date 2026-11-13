@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Set PROJECT_WORKSPACE_DIR in the root environment to the existing target workspace.
+# Packaged Document Builder members are copied there without deleting other files.
+
 # Root is required to restart pdf-parser. Check before anything is changed.
 if [ "$(id -u)" != 0 ]; then
   echo "!! shell_server_deploy.sh must be run as root (for example: sudo -i, then run it)." >&2
@@ -43,9 +46,17 @@ fi
 [ -n "$archive" ] || { echo "No runshen archive found in $STAGING_DIR" >&2; exit 1; }
 [ -f "$archive" ] || { echo "Archive not found: $archive" >&2; exit 1; }
 
+# Validate before replacing the current deployment.
+: "${PROJECT_WORKSPACE_DIR:?PROJECT_WORKSPACE_DIR must name an existing workspace directory}"
+[ -d "$PROJECT_WORKSPACE_DIR" ] || { echo "!! PROJECT_WORKSPACE_DIR is not a directory: $PROJECT_WORKSPACE_DIR" >&2; exit 1; }
+
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$CHENWEB_DIR"
 tar -xzf "$archive" -C "$CHENWEB_DIR" --strip-components=1
+# Preserve the workspace-relative member paths used by Document Builder.
+if [ -d "$DEPLOY_DIR/document-workspace" ]; then
+  rsync -a --chown=gui:gui "$DEPLOY_DIR/document-workspace/" "$PROJECT_WORKSPACE_DIR/"
+fi
 bash "$DEPLOY_DIR/deploy-server-china.sh" "$DEPLOY_DIR"
 
 # --- pdf-parser -------------------------------------------------------------
