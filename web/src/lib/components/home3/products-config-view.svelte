@@ -29,17 +29,24 @@
    {key:'TRANSLATE_PRODUCTS_THINKING', label:m.products_config_thinking(), type:'text'} ] }
  ]);
  function remember() { saved = false; try { sessionStorage.setItem(draftKey, JSON.stringify(values)); } catch { /* optional storage */ } }
- onMount(() => { void (async () => { try {
+ onMount(() => {
+  const scroller = viewport.closest('main');
+  const rememberScroll = () => { try { if (scroller) sessionStorage.setItem(scrollKey, String(scroller.scrollTop)); } catch { /* optional storage */ } };
+  scroller?.addEventListener('scroll', rememberScroll);
+  let mounted = true;
+  void (async () => { try {
   const res = await fetch('/api/v1/kb/products-config', {credentials:'same-origin'}); if (!res.ok) throw new Error();
   values = (await res.json()).config; loaded = true;
   try { const draft = JSON.parse(sessionStorage.getItem(draftKey) ?? 'null'); if (draft && typeof draft === 'object' && !Array.isArray(draft)) values = draft; } catch { /* invalid draft */ }
- } catch { error = true; } finally { loading = false; await tick(); try { viewport.scrollTop = Number(sessionStorage.getItem(scrollKey) ?? 0); } catch { /* optional storage */ } } })(); });
+ } catch { error = true; } finally { loading = false; await tick(); try { if (mounted && scroller) scroller.scrollTop = Number(sessionStorage.getItem(scrollKey) ?? 0); } catch { /* optional storage */ } } })();
+  return () => { mounted = false; scroller?.removeEventListener('scroll', rememberScroll); };
+ });
  async function save() { saving = true; error = false; try {
   const res = await fetch('/api/v1/kb/products-config', {method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(values)}); if (!res.ok) throw new Error();
   try { sessionStorage.removeItem(draftKey); } catch { /* optional storage */ } saved = true;
  } catch { error = true; } finally { saving = false; } }
 </script>
-<div bind:this={viewport} class:light={!darkMode} class="page select-text" onscroll={() => { try { sessionStorage.setItem(scrollKey, String(viewport.scrollTop)); } catch { /* optional storage */ } }}>
+<div bind:this={viewport} class:light={!darkMode} class="page select-text">
  <header><h1>{m.products_config_title()}</h1><p>{m.products_config_intro()}</p><p>{m.products_config_restart()}</p></header>
  {#if error}<p class="notice error" role="alert">{m.products_config_error()}</p>{/if}
  {#if saved}<p class="notice" role="status">{m.products_config_saved()}</p>{/if}
@@ -55,5 +62,5 @@
  {/if}
 </div>
 <style>
- .page{--bg:#1f2333;--border:#343b52;--text:#e2e8f0;--muted:#9baac1;color:var(--text);max-width:1050px;max-height:calc(100vh - 100px);overflow:auto;padding:32px}.page.light{--bg:#fff;--border:#dce1e8;--text:#172033;--muted:#59677b}h1{font-size:26px;margin:0 0 8px}h2{font-size:17px;margin:0 0 16px}p{color:var(--muted);line-height:1.5;margin:5px 0}header{margin-bottom:24px}section{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:16px}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:18px}label{display:flex;flex-direction:column;gap:5px;font-weight:600}code{font-size:11px;color:var(--muted);font-weight:400;overflow-wrap:anywhere}input,select{box-sizing:border-box;width:100%;padding:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px}.hint{margin-top:16px}button{background:#818cf8;color:#101426;border:0;border-radius:8px;padding:11px 18px;font-weight:700;cursor:pointer}button:disabled{opacity:.5}.notice{padding:12px;margin-bottom:16px;border:1px solid #4a9f85;border-radius:8px}.error{border-color:#d96969}
+ .page{--bg:#1f2333;--border:#343b52;--text:#e2e8f0;--muted:#9baac1;color:var(--text);max-width:1050px;padding:32px}.page.light{--bg:#fff;--border:#dce1e8;--text:#172033;--muted:#59677b}h1{font-size:26px;margin:0 0 8px}h2{font-size:17px;margin:0 0 16px}p{color:var(--muted);line-height:1.5;margin:5px 0}header{margin-bottom:24px}section{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:16px}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:18px}label{display:flex;flex-direction:column;gap:5px;font-weight:600}code{font-size:11px;color:var(--muted);font-weight:400;overflow-wrap:anywhere}input,select{box-sizing:border-box;width:100%;padding:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px}.hint{margin-top:16px}button{background:#818cf8;color:#101426;border:0;border-radius:8px;padding:11px 18px;font-weight:700;cursor:pointer}button:disabled{opacity:.5}.notice{padding:12px;margin-bottom:16px;border:1px solid #4a9f85;border-radius:8px}.error{border-color:#d96969}
 </style>
