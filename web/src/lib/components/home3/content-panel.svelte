@@ -295,6 +295,7 @@
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
+			activeMenu?.childId !== 'sysadmin-system-monitor' &&
 			activeMenu?.childId !== 'dev-demos-customers' &&
 			activeMenu?.childId !== 'sysadmin-question-generator' &&
 			activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&

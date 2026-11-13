@@ -8991,5 +8991,7 @@
 	"sm_height": "高度",
 	"sm_filter_info": "没有时间戳的行会与前一条记录一起保留。",
 	"sm_pause": "暂停",
-	"sm_resume": "继续"
+	"sm_resume": "继续",
+	"sm_move_window": "移动{name}窗口（也可使用方向键）",
+	"sm_resize_window": "调整{name}窗口大小（也可使用方向键）"
 }

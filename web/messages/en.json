@@ -8991,5 +8991,7 @@
 	"sm_height": "Height",
 	"sm_filter_info": "Lines without a timestamp are retained with the preceding entry.",
 	"sm_pause": "Pause",
-	"sm_resume": "Resume"
+	"sm_resume": "Resume",
+	"sm_move_window": "Move {name} window (arrow keys also work)",
+	"sm_resize_window": "Resize {name} window (arrow keys also work)"
 }
