@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m as msg } from '$lib/paraglide/messages.js';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import {
 		getModelsTOML,
 		upsertModelTOML,
@@ -44,8 +44,50 @@
 
 	let draft = $state<ModelDraft>(emptyDraft());
 	let editDraft = $state<ModelDraft>(emptyDraft());
+	let editDialog: HTMLDialogElement;
+	let drag: { id: number; x: number; y: number } | null = null;
+	let restored = $state(false);
+	const stateKey = 'llm-models-editor';
+
+	function positionDialog(left: number, top: number) {
+		const rect = editDialog.getBoundingClientRect();
+		editDialog.style.left = `${Math.max(8, Math.min(left, innerWidth - rect.width - 8))}px`;
+		editDialog.style.top = `${Math.max(8, Math.min(top, innerHeight - rect.height - 8))}px`;
+	}
+	async function openDialog(anchor?: DOMRect) {
+		await tick();
+		if (!editDialog?.open) editDialog?.show();
+		const rect = editDialog.getBoundingClientRect();
+		const left = anchor ? (anchor.left - rect.width - 8 >= 8 ? anchor.left - rect.width - 8 : anchor.right + 8) : 16;
+		positionDialog(left, anchor?.top ?? 80);
+	}
+	function startDrag(e: PointerEvent) {
+		if (e.button !== 0 || (e.target as Element).closest('button')) return;
+		const rect = editDialog.getBoundingClientRect();
+		drag = { id: e.pointerId, x: e.clientX - rect.left, y: e.clientY - rect.top };
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+	function moveDrag(e: PointerEvent) {
+		if (drag?.id === e.pointerId) positionDialog(e.clientX - drag.x, e.clientY - drag.y);
+	}
+	function closeEdit() { editingKey = null; }
+	$effect(() => {
+		if (!restored) return;
+		sessionStorage.setItem(stateKey, JSON.stringify({ editingKey, editDraft, showCreate, draft }));
+	});
 
 	onMount(() => {
+		try {
+			const saved = JSON.parse(sessionStorage.getItem(stateKey) || 'null');
+			if (saved) {
+				editingKey = saved.editingKey;
+				editDraft = saved.editDraft ?? emptyDraft();
+				showCreate = saved.showCreate ?? false;
+				draft = saved.draft ?? emptyDraft();
+				if (editingKey) openDialog();
+			}
+		} catch { sessionStorage.removeItem(stateKey); }
+		restored = true;
 		loadModels();
 	});
 
@@ -85,9 +127,10 @@
 		}
 	}
 
-	function startEdit(m: LLMModelEntry) {
+	function startEdit(m: LLMModelEntry, anchor: DOMRect) {
 		editingKey = m.key;
 		editDraft = { ...m };
+		openDialog(anchor);
 		error = null;
 		info = null;
 	}
@@ -137,8 +180,10 @@
 	const panelBg = $derived(darkMode ? '#151A29' : '#FDFDFD');
 </script>
 
+<svelte:window onresize={() => { if (editDialog?.open) { const r = editDialog.getBoundingClientRect(); positionDialog(r.left, r.top); } }} />
+
 <div
-	class="wrap"
+	class="wrap select-text"
 	style:--page={pageBg}
 	style:--card={card}
 	style:--border={border}
@@ -312,16 +357,28 @@
 											</button>
 											<button class="ghost compact-btn" onclick={() => (deletingKey = null)}>{msg.llm_models_cancel()}</button>
 										{:else}
-											<button class="ghost compact-btn" onclick={() => startEdit(m)}>{msg.llm_models_edit()}</button>
+											<button class="ghost compact-btn" onclick={(event) => startEdit(m, event.currentTarget.getBoundingClientRect())}>{msg.llm_models_edit()}</button>
 											<button class="ghost compact-btn" onclick={() => (deletingKey = m.key)}>{msg.llm_models_delete()}</button>
 										{/if}
 									</div>
 								</td>
 							</tr>
-							{#if editingKey === m.key}
-								<tr>
-									<td colspan="6" class="edit-cell">
-										<form
+
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</div>
+	{#if editingKey}
+		<dialog bind:this={editDialog} aria-labelledby="model-edit-title" oncancel={closeEdit}>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="dialog-header" onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={() => drag = null} onpointercancel={() => drag = null}>
+				<h3 id="model-edit-title">{msg.llm_models_edit()} · {editingKey}</h3>
+				<button type="button" class="ghost compact-btn" onclick={closeEdit} disabled={submitting}>{msg.llm_models_cancel()}</button>
+			</div>
+			{#if error}<div class="error" role="alert">{error}</div>{/if}
+			<form
 											class="edit-form"
 											onsubmit={(e) => {
 												e.preventDefault();
@@ -331,7 +388,7 @@
 											<div class="row two">
 												<label>
 													<span>{msg.llm_models_key()}</span>
-													<input bind:value={editDraft.key} required />
+													<input value={editDraft.key} readonly />
 												</label>
 												<label>
 													<span>{msg.llm_models_model_name()}</span>
@@ -390,15 +447,8 @@
 												</button>
 											</div>
 										</form>
-									</td>
-								</tr>
-							{/if}
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	</div>
+		</dialog>
+	{/if}
 </div>
 
 <style>
@@ -452,7 +502,9 @@
 	.summary-value { margin-top: 6px; font-size: 22px; font-weight: 600; color: var(--heading); }
 	.create-form, .panel { padding: 16px; }
 	.create-form { display: flex; flex-direction: column; gap: 10px; }
-	.edit-cell { padding: 0; }
+	dialog { position: fixed; inset: auto; margin: 0; width: min(740px, calc(100vw - 16px)); height: min(640px, calc(100vh - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); min-width: min(320px, calc(100vw - 16px)); min-height: min(240px, calc(100vh - 16px)); padding: 0; overflow: auto; resize: both; z-index: 100; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-bg); color: var(--heading); box-shadow: 0 16px 50px #0008; }
+	.dialog-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--card); cursor: move; touch-action: none; }
+	.dialog-header h3 { overflow: hidden; text-overflow: ellipsis; }
 	.edit-form {
 		padding: 16px;
 		background: var(--panel-bg);

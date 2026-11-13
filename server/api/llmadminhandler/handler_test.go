@@ -69,6 +69,53 @@ func TestModelTOMLEndpointsPreserveModelType(t *testing.T) {
 	}
 }
 
+func TestModelTOMLEditPreservesUneditedFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	t.Setenv("CHENWEB_MODELS_TOML", path)
+	initial := "[alpha]\nmodel_name = 'old'\napi_key = 'secret'\ndecision_model_type = 'native'\nmax_output_tokens = 321\nomit_temperature = true\ncustom_option = 'keep'\n"
+	if err := os.WriteFile(path, []byte(initial), 0600); err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/llm/models-toml/alpha", strings.NewReader(`{"model_name":"updated"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("key")
+	c.SetParamValues("alpha")
+	if err := UpsertModelTOML(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("update: %v, status %d", err, rec.Code)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"secret", "native", "321", "omit_temperature = true", "custom_option", "updated"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("updated file missing %q", want)
+		}
+	}
+}
+
+func TestModelTOMLCreateStoresAPIKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".models.toml")
+	t.Setenv("CHENWEB_MODELS_TOML", path)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(`{"model_name":"example","api_key":"test-secret"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("key")
+	c.SetParamValues("example")
+	if err := UpsertModelTOML(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("create: %v, status %d", err, rec.Code)
+	}
+	models, err := readModelsTOML(path)
+	if err != nil || models["example"].APIKey != "test-secret" {
+		t.Fatalf("API key was not stored: %v", err)
+	}
+}
+
 func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
 	return s.listAccountsResult, s.listAccountsErr
 }

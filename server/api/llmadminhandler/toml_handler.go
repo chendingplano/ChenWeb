@@ -1,6 +1,7 @@
 package llmadminhandler
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -178,9 +179,14 @@ func UpsertModelTOML(c echo.Context) error {
 			"message": "model key is required",
 		})
 	}
+	for _, reserved := range reservedTopLevelKeys {
+		if key == reserved {
+			return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": "reserved model key"})
+		}
+	}
 
-	var req modelTOMLEntry
-	if err := c.Bind(&req); err != nil {
+	var fields map[string]json.RawMessage
+	if err := c.Bind(&fields); err != nil || fields == nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"ok":      false,
 			"message": "invalid json body",
@@ -188,20 +194,7 @@ func UpsertModelTOML(c echo.Context) error {
 	}
 
 	path := modelsTOMLPath()
-	if err := UpsertModelsTOMLEntry(path, key, ApiTypes.LLMModelDef{
-		Host:                 req.Host,
-		ModelType:            req.ModelType,
-		ModelName:            req.ModelName,
-		Dimension:            req.Dimension,
-		MaxChars:             req.MaxChars,
-		BaseURL:              req.BaseURL,
-		TimeoutSec:           req.TimeoutSec,
-		ThinkingType:         req.ThinkingType,
-		MaxInflight:          req.MaxInflight,
-		MaxRequestsPerMinute: req.MaxRequestsPerMinute,
-		MaxTokensPerMinute:   req.MaxTokensPerMinute,
-		TokenReservePerCall:  req.TokenReservePerCall,
-	}); err != nil {
+	if err := updateModelTOMLFields(path, key, fields); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{
 			"ok":      false,
 			"message": "failed to write .models.toml",
@@ -213,6 +206,46 @@ func UpsertModelTOML(c echo.Context) error {
 		"ok":  true,
 		"key": key,
 	})
+}
+
+// Update only submitted properties so secrets and settings not exposed by the editor survive.
+func updateModelTOMLFields(path, key string, fields map[string]json.RawMessage) error {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	all := map[string]any{}
+	if len(data) > 0 {
+		if err := toml.Unmarshal(data, &all); err != nil {
+			return err
+		}
+	}
+	entry, _ := all[key].(map[string]any)
+	if entry == nil {
+		entry = map[string]any{}
+	}
+	for name, raw := range fields {
+		switch name {
+		case "host", "model_type", "model_name", "base_url", "thinking_type", "api_key":
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			entry[name] = value
+		case "dimension", "max_chars", "timeout_sec", "max_inflight", "max_requests_per_minute", "max_tokens_per_minute", "token_reserve_per_call":
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return err
+			}
+			entry[name] = value
+		}
+	}
+	all[key] = entry
+	data, err = toml.Marshal(all)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
 }
 
 // DeleteModelTOML removes a model entry from .models.toml.
