@@ -46,9 +46,19 @@ fi
 [ -n "$archive" ] || { echo "No runshen archive found in $STAGING_DIR" >&2; exit 1; }
 [ -f "$archive" ] || { echo "Archive not found: $archive" >&2; exit 1; }
 
+# The target workspace must exist before replacing the current deployment.
+: "${PROJECT_WORKSPACE_DIR:?PROJECT_WORKSPACE_DIR must name an existing workspace directory}"
+[ -d "$PROJECT_WORKSPACE_DIR" ] || { echo "!! PROJECT_WORKSPACE_DIR is not a directory: $PROJECT_WORKSPACE_DIR" >&2; exit 1; }
+export PROJECT_WORKSPACE_DIR
+
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$CHENWEB_DIR"
 tar -xzf "$archive" -C "$CHENWEB_DIR" --strip-components=1
+# Older packaged installers do not install Document Builder files themselves.
+if [ -d "$DEPLOY_DIR/document-workspace" ]; then
+  echo "== Document Builder files: $PROJECT_WORKSPACE_DIR =="
+  rsync -a --chown=gui:gui "$DEPLOY_DIR/document-workspace/" "$PROJECT_WORKSPACE_DIR/"
+fi
 bash "$DEPLOY_DIR/deploy-server-china.sh" "$DEPLOY_DIR"
 
 # --- pdf-parser -------------------------------------------------------------
