@@ -178,49 +178,42 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26052001")
 	}
-	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
-		[]string{"EXTRACT_PRODUCT_MENTIONS_PROMPT"},
-		"prompt-extract-product-mentions-v2.md",
-	)
-	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
-		[]string{"ENRICH_PRODUCT_MENTION_PROMPT"},
-		"prompt-enrich-product-mention-v4.md",
-	)
-	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
-		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_DEF_FILE",
-	)
-	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
-		[]string{"ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_DEF_FILE",
-	)
-	translatePromptText, translatePromptRef, translatePromptPath, translatePromptErr := loadProductPromptFromEnvKeys(
-		[]string{"TRANSLATE_PRODUCTS_PROMPT"},
-		"prompt-translate-products-v2.md",
-	)
-	translateModelRef, _, translateModelCfg, translateModelErr := loadOptionalModelConfigFromEnvKeys(
-		[]string{"TRANSLATION_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_DEF_FILE",
-	)
-	// Pass 3a is mechanical: translate five short fields per row, no
-	// reasoning required. On a hybrid-reasoning model that thinks by default
-	// it was spending ~78% of its output tokens on discarded reasoning_content
-	// (measured 2026-09-22 over 14 days of `product translation` calls).
-	// Disabling thinking cut output tokens 81.6% across a 6-call replay with
-	// every batch's row count preserved and only wording-level differences in
-	// the translations. Contrast Pass 1, where the same change cost ~20% of
-	// distinct mentions -- so this is scoped to translation, not applied
-	// processor-wide. Override with TRANSLATE_PRODUCTS_THINKING (set it to ""
-	// for endpoints that reject the `thinking` field, e.g. local
-	// llama.cpp/ollama hosts).
-	translateModelCfg.ThinkingType = normalizeThinkingType(envString("TRANSLATE_PRODUCTS_THINKING", "disabled"))
-	mergedPromptText, mergedPromptRef, mergedPromptPath, mergedPromptErr := loadProductPromptFromEnvKeys(
-		[]string{"EXTRACT_PRODUCT_MERGED_PROMPT"},
-		"prompt-extract-products-merged-v3.md",
-	)
-	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
+	settings, configErr := LoadProductsConfig(ProductsConfigPath())
+	if configErr != nil {
+		logger.Warn("load extract products configuration failed", "err", configErr)
+	}
+	prompt := func(key, fallback string) (string, string, string, error) {
+		ref := settings.first(key)
+		if ref == "" {
+			ref = fallback
+		}
+		return loadPromptByRef(ref)
+	}
+	model := func(required bool, keys ...string) (string, string, structureModelConfig, error) {
+		ref := settings.first(keys...)
+		if ref == "" {
+			if required {
+				return "", "", structureModelConfig{}, fmt.Errorf("missing one of %s", strings.Join(keys, ", "))
+			}
+			return "", "", structureModelConfig{}, nil
+		}
+		return loadModelConfigByRef(ref, "MODEL_DEF_FILE")
+	}
+	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := prompt("EXTRACT_PRODUCT_MENTIONS_PROMPT", "prompt-extract-product-mentions-v2.md")
+	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := prompt("ENRICH_PRODUCT_MENTION_PROMPT", "prompt-enrich-product-mention-v4.md")
+	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := model(true, "EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME")
+	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := model(true, "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME")
+	translatePromptText, translatePromptRef, translatePromptPath, translatePromptErr := prompt("TRANSLATE_PRODUCTS_PROMPT", "prompt-translate-products-v2.md")
+	translateModelRef, _, translateModelCfg, translateModelErr := model(false, "TRANSLATION_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME")
+	thinking := settings.value("TRANSLATE_PRODUCTS_THINKING")
+	if _, ok := settings["TRANSLATE_PRODUCTS_THINKING"]; !ok && thinking == "" {
+		thinking = "disabled"
+	}
+	translateModelCfg.ThinkingType = normalizeThinkingType(thinking)
+	mergedPromptText, mergedPromptRef, mergedPromptPath, mergedPromptErr := prompt("EXTRACT_PRODUCT_MERGED_PROMPT", "prompt-extract-products-merged-v3.md")
+	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := model(false, "EXTRACT_PRODUCT_MODEL_FALLBACK")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
-	translateEnabled := !strings.EqualFold(strings.TrimSpace(os.Getenv("EXTRACT_PRODUCT_TRANSLATION")), "off") && translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
+	translateEnabled := !strings.EqualFold(strings.TrimSpace(settings.value("EXTRACT_PRODUCT_TRANSLATION")), "off") && translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
 	proc := &ProductsProcessor{
 		InputStore:           inputStore,
 		Store:                store,
@@ -263,7 +256,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		TranslateModelName:   translateModelCfg.ModelName,
 		TranslateModelCfg:    translateModelCfg,
 		TranslateEnabled:     translateEnabled,
-		TranslateBatchSize:   envInt("TRANSLATE_PRODUCTS_BATCH_SIZE", defaultTranslateBatchSize, 1),
+		TranslateBatchSize:   settings.integer("TRANSLATE_PRODUCTS_BATCH_SIZE", defaultTranslateBatchSize),
 		FallbackModelRef:     fallbackModelRef,
 		FallbackModelCfgPath: fallbackModelCfgPath,
 		FallbackModelErr:     fallbackModelErr,
@@ -272,9 +265,9 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		ArtifactDir:          strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ArtifactWebDir:       strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ProductNames:         ProductNameSQLStore{DB: ApiTypes.ProjectDBHandle},
-		MaxTasks:             envInt("EXTRACT_PRODUCTS_MAX_TASKS", 1, 1),
-		Pass1Only:            ExtractProductPass1OnlyFromEnv(),
-		MergedPass:           ExtractProductsMergedPassFromEnv(),
+		MaxTasks:             settings.integer("EXTRACT_PRODUCTS_MAX_TASKS", 1),
+		Pass1Only:            settings.boolean("EXTRACT_PRODUCT_PASS_1_ONLY", false),
+		MergedPass:           settings.boolean("EXTRACT_PRODUCTS_MERGED_PASS", false),
 		MergedPromptText:     mergedPromptText,
 		MergedPromptRef:      mergedPromptRef,
 		MergedPromptPath:     mergedPromptPath,
@@ -282,7 +275,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		MergedModelRef:       mentionModelRef,
 		MergedModelName:      mentionModelCfg.ModelName,
 		MergedModelCfg:       mentionModelCfg,
-		Reasoning:            ExtractProductsReasoningFromEnv(),
+		Reasoning:            settings.boolean("EXTRACT_PRODUCTS_REASONING", true),
 	}
 	// Pass-1-only and merged-pass are mutually exclusive: the merged pass
 	// produces relation rows directly and never emits the mentions that

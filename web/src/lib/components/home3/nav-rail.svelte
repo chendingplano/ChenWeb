@@ -484,7 +484,8 @@
 							id: 'sysadmin-doc-process-configurations',
 							label: m.nav_sysadmin_doc_process_configurations(),
 							children: [
-								{ id: 'sysadmin-doc-process-config', label: m.nav_sysadmin_doc_process_config() }
+								{ id: 'sysadmin-doc-process-config', label: m.nav_sysadmin_doc_process_config() },
+                                { id: 'sysadmin-doc-process-config-products', label: m.nav_sysadmin_doc_process_config_products() }
 							]
 						},
 						{ id: 'sysadmin-doc-process-dag', label: m.nav_sysadmin_doc_process_dag() },

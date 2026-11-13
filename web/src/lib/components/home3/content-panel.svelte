@@ -54,6 +54,7 @@
 	import ResolveOrphanedLabelsView from '$lib/components/home3/resolve-orphaned-labels-view.svelte';
 	import SchedulesView from '$lib/components/home3/schedules-view.svelte';
 	import DocProcessConfigView from '$lib/components/home3/doc-process-config-view.svelte';
+	import ProductsConfigView from '$lib/components/home3/products-config-view.svelte';
 	import DocProcessDagView from '$lib/components/home3/doc-process-dag-view.svelte';
 	import DocProcessorsView from '$lib/components/home3/doc-processors-view.svelte';
 	import SemanticDecisionCandidatesView from '$lib/components/home3/semantic-decision-candidates-view.svelte';
@@ -539,6 +540,8 @@
 			<SchedulesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-config'}
 			<DocProcessConfigView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-process-config-products'}
+			<ProductsConfigView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-dag'}
 			<DocProcessDagView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-processors'}
