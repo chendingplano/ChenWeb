@@ -26,7 +26,7 @@
    {key:'EXTRACT_PRODUCT_TRANSLATION', label:m.products_config_translation_enabled(), type:'translation'},
    {key:'TRANSLATION_MODEL_NAME', label:m.products_config_translation_model(), type:'model'},
    {key:'TRANSLATE_PRODUCTS_PROMPT', label:m.products_config_translation_prompt(), type:'prompt'},
-   {key:'TRANSLATE_PRODUCTS_BATCH_SIZE', label:m.products_config_batch(), type:'number'},
+   {key:'TRANSLATE_PRODUCTS_BATCH_SIZE', label:m.products_config_batch(), type:'tasks'},
    {key:'TRANSLATE_PRODUCTS_THINKING', label:m.products_config_thinking(), type:'thinking'} ] }
  ]);
  function remember() { saved = false; try { sessionStorage.setItem(draftKey, JSON.stringify(values)); } catch { /* optional storage */ } }
