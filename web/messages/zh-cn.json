@@ -8946,11 +8946,11 @@
 	"products_config_prompts": "提取提示词",
 	"products_config_translation": "翻译",
 	"products_config_merged": "合并处理",
-	"products_config_pass1": "仅第一轮（测试）",
+	"products_config_pass1": "仅第一轮（仅供开发测试）",
 	"products_config_reasoning": "提取推理",
 	"products_config_tasks": "最大并发任务数",
-	"products_config_mention_model": "产品名称提取模型",
-	"products_config_relation_model": "关系提取模型",
+	"products_config_mention_model": "提取名称模型",
+	"products_config_relation_model": "提取关系模型",
 	"products_config_common_model": "通用后备模型",
 	"products_config_retry_model": "重试模型",
 	"products_config_mention_prompt": "产品名称提取提示词",
@@ -8964,5 +8964,9 @@
 	"products_config_inherit": "使用环境或默认值",
 	"products_config_on": "开启",
 	"products_config_off": "关闭",
-	"products_config_testing_hint": "仅第一轮模式用于测试，会跳过关系提取、翻译和目录解析。如果同时启用，合并模式优先。"
+	"products_config_testing_hint": "仅第一轮模式用于测试，会跳过关系提取、翻译和目录解析。如果同时启用，合并模式优先。",
+	"products_config_reset_inherit": "使用环境或默认值",
+	"products_config_using_inherited": "使用环境或默认值",
+	"products_config_inherited_prompt": "环境或默认值：{name}",
+	"products_config_inherited_note": "继承的开关状态和提示词名称反映 Web 服务器环境；处理器的启动环境可能不同。"
 }
