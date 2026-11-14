@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+func (p *ProvisionsProcessor) provisionChunkInputText(lines []MarkedLine, docCtx string) string {
+	if filepath.Base(p.PromptRef) == "prompt-extract-provisions-v8.md" {
+		return wrapLinesWithDocContext(markedLinesToCompactJSON(lines), docCtx)
+	}
+	return canonicalChunkInputText(lines, docCtx)
+}
+
 func (p *ProvisionsProcessor) reviewProvisionPayload(ctx context.Context, inputText, promptText string, payload map[string]any, model string, unit, total int) (map[string]any, error) {
 	// Only v7 runs the second pass; v8 carries the audit-only rules in one pass.
 	if filepath.Base(p.PromptRef) != "prompt-extract-provisions-v7.md" || !provisionNeedsReview(inputText, payload) {

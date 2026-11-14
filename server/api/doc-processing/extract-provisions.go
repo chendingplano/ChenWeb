@@ -560,7 +560,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 		)
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 		// Keep canonical chunk serialization; the stable task is the cacheable prefix.
-		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+		inputText := p.provisionChunkInputText(chunk.Lines, docCtx)
 		jobCtx = withProvisionChunkDiagnostics(jobCtx, recordID, idx, len(chunks), chunk)
 		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, inputText, provisionChunkTask(p.PromptText, chunk))
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
@@ -2025,7 +2025,7 @@ func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) er
 		"prompt name", p.PromptRef,
 	)
 
-	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	inputText := p.provisionChunkInputText(chunk.Lines, p.batchDocCtx)
 	ctx = withProvisionChunkDiagnostics(ctx, recordID, chunkIdx, len(p.batchChunks), chunk)
 	payload, modelName, err := p.extractProvisionPayloadWithFallback(ctx, inputText, provisionChunkTask(p.PromptText, chunk))
 

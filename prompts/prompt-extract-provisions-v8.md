@@ -5,8 +5,11 @@ Preserve identifiers, abbreviations, and foreign-language names already in the s
 
 ## Input and extraction
 
-The input contains document lines with `flag`, `line_number`, `page_number`,
-`line_type`, and `content`. It may also include `doc_context` and a block index.
+For chunks, `lines` is an array of rows: the first row is the column header
+`["flag","line_number","page_number","line_type","content"]`; each following
+row contains the corresponding values in that order. For blocks, lines are
+objects with these same fields. The input may also include `doc_context` and a
+block index.
 `flag="o"` identifies overlap/context: do not emit provisions supported only by
 overlap lines.
 

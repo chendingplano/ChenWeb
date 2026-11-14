@@ -143,17 +143,26 @@ var compactLinesHeader = []string{"flag", "line_number", "page_number", "line_ty
 // which drops the per-line keys (about half the input tokens). Topic extraction and the other
 // processors keep rawLinesToJSON.
 func rawLinesToCompactJSON(lines []Line) string {
+	marked := make([]MarkedLine, len(lines))
+	for i, line := range lines {
+		marked[i] = MarkedLine{Mark: "n", Line: line}
+	}
+	return markedLinesToCompactJSON(marked)
+}
+
+func markedLinesToCompactJSON(lines []MarkedLine) string {
 	rows := make([][]any, 0, len(lines)+1)
 	header := make([]any, len(compactLinesHeader))
 	for i, h := range compactLinesHeader {
 		header[i] = h
 	}
 	rows = append(rows, header)
-	for _, l := range lines {
+	for _, marked := range lines {
+		l := marked.Line
 		if l.LineType == "image" {
 			continue
 		}
-		rows = append(rows, []any{"n", l.LineNo, l.PageNo, l.LineType, llmLineContent(l.LineType, l.LineNo, l.Content)})
+		rows = append(rows, []any{normalizeChunkFlag(marked.Mark), l.LineNo, l.PageNo, l.LineType, llmLineContent(l.LineType, l.LineNo, l.Content)})
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

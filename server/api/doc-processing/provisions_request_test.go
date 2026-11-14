@@ -79,3 +79,21 @@ func TestProvisionsDefaultPromptUsesCompactFormat(t *testing.T) {
 		t.Fatalf("unexpected default ref=%q text=%q", ref, text)
 	}
 }
+
+func TestProvisionChunkInputUsesSharedHeaderForV8(t *testing.T) {
+	lines := []MarkedLine{
+		{Mark: "o", Line: Line{LineNo: 7, PageNo: 2, LineType: "paragraph", Content: "context & text"}},
+		{Mark: "n", Line: Line{LineNo: 8, PageNo: 3, LineType: "list-item", Content: "shall inspect"}},
+		{Mark: "n", Line: Line{LineNo: 9, PageNo: 3, LineType: "image", Content: "image.png"}},
+	}
+	p := &ProvisionsProcessor{PromptRef: "prompt-extract-provisions-v8.md"}
+	got := p.provisionChunkInputText(lines, "document")
+	want := `{"doc_context":"document","lines":[["flag","line_number","page_number","line_type","content"],["o",7,2,"paragraph","context \u0026 text"],["n",8,3,"list-item","shall inspect"]]}`
+	if got != want {
+		t.Fatalf("got %s\nwant %s", got, want)
+	}
+	p.PromptRef = "prompt-extract-provisions-v7.md"
+	if got := p.provisionChunkInputText(lines, "document"); got != canonicalChunkInputText(lines, "document") {
+		t.Fatalf("legacy input changed: %s", got)
+	}
+}
