@@ -8997,5 +8997,17 @@
 	"sm_pause": "暂停",
 	"sm_resume": "继续",
 	"sm_move_window": "移动{name}窗口（也可使用方向键）",
-	"sm_resize_window": "调整{name}窗口大小（也可使用方向键）"
+	"sm_resize_window": "调整{name}窗口大小（也可使用方向键）",
+	"nav_sysadmin_doc_process_config_metrics_simple": "配置简易指标提取",
+	"nav_sysadmin_doc_process_config_references": "配置引用提取",
+	"nav_sysadmin_doc_process_config_provisions": "配置条款提取",
+	"extractor_config_intro": "配置处理器的模型、提示词和执行设置。",
+	"extractor_config_model": "模型配置",
+	"extractor_config_fallback": "备用模型配置",
+	"extractor_config_prompt": "提取提示词",
+	"extractor_config_review_prompt": "审查提示词",
+	"extractor_config_tasks": "最大并发任务数",
+	"extractor_config_input": "输入模式",
+	"extractor_config_chunks": "分块",
+	"extractor_config_blocks": "文本块"
 }

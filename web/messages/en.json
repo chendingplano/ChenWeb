@@ -8997,5 +8997,17 @@
 	"sm_pause": "Pause",
 	"sm_resume": "Resume",
 	"sm_move_window": "Move {name} window (arrow keys also work)",
-	"sm_resize_window": "Resize {name} window (arrow keys also work)"
+	"sm_resize_window": "Resize {name} window (arrow keys also work)",
+	"nav_sysadmin_doc_process_config_metrics_simple": "Config Extract Metrics Simple",
+	"nav_sysadmin_doc_process_config_references": "Config Extract References",
+	"nav_sysadmin_doc_process_config_provisions": "Config Extract Provisions",
+	"extractor_config_intro": "Configure the processor’s model, prompts and execution settings.",
+	"extractor_config_model": "Model profile",
+	"extractor_config_fallback": "Fallback model profile",
+	"extractor_config_prompt": "Extraction prompt",
+	"extractor_config_review_prompt": "Review prompt",
+	"extractor_config_tasks": "Maximum concurrent tasks",
+	"extractor_config_input": "Input mode",
+	"extractor_config_chunks": "Chunks",
+	"extractor_config_blocks": "Blocks"
 }

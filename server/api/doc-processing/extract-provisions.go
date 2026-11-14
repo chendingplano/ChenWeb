@@ -111,6 +111,20 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	promptText, promptRef, promptPath, promptErr := loadProvisionsPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_NAME", "EXTRACT_PROVISIONS_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_FALLBACK", "EXTRACT_PROVISIONS_MODELS_FILE")
+	settings, configErr := LoadExtractorConfig("provisions")
+	if configErr != nil {
+		promptErr = configErr
+	} else {
+		if ref, ok := settings["EXTRACT_PROVISIONS_PROMPT"]; ok {
+			promptText, promptRef, promptPath, promptErr = loadPromptByRef(ref)
+		}
+		if ref, ok := settings["EXTRACT_PROVISIONS_MODEL_NAME"]; ok {
+			modelRef, modelCfgPath, modelCfg, modelErr = loadModelConfigByRef(ref, "EXTRACT_PROVISIONS_MODELS_FILE")
+		}
+		if ref, ok := settings["EXTRACT_PROVISIONS_MODEL_FALLBACK"]; ok {
+			fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr = loadModelConfigByRef(ref, "EXTRACT_PROVISIONS_MODELS_FILE")
+		}
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		modelCfg = forceDisableThinking(modelCfg)
 		fallbackModelCfg = forceDisableThinking(fallbackModelCfg)
@@ -156,6 +170,13 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	}
 	p.ReviewPromptText, p.ReviewPromptRef, _, p.ReviewPromptErr = loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_PROVISIONS_REVIEW_PROMPT"}, "prompt-audit-provision-extraction-v1.md")
+	if ref, ok := settings["EXTRACT_PROVISIONS_REVIEW_PROMPT"]; ok {
+		p.ReviewPromptText, p.ReviewPromptRef, _, p.ReviewPromptErr = loadPromptByRef(ref)
+	}
+	p.ExtractProvisionsMaxTasks = settings.integer("EXTRACT_PROVISIONS_MAX_TASKS", 1)
+	if input, ok := settings["EXTRACT_PROVISIONS_INPUT"]; ok {
+		p.ExtractProvisionsInput = input
+	}
 	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
 		p.AmbiguousObjectLLMResolver = resolver
 		p.ResolveAmbiguousMinConfidence = minConfidence

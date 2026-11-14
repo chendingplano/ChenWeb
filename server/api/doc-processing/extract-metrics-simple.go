@@ -56,14 +56,23 @@ func NewMetricsSimpleProcessor(inputStore DocMetadataStore, store MetricsStore, 
 	p.simple = true
 	p.simpleWarmupWait = metricSimpleWarmupWait
 	p.Logger = loggerutil.CreateDefaultLogger("MID-20261101-01")
-	p.setSimplePrompt(loadProductPromptFromEnvKeys(
-		[]string{"EXTRACT_METRICS_SIMPLE_PROMPT"},
-		"prompt-extract-metric-simple-v1.md",
-	))
-	p.setSimpleModel(loadModelConfigFromEnvKeys(
-		[]string{"EXTRACT_METRICS_SIMPLE_MODEL_NAME", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
-		"MODEL_DEF_FILE",
-	))
+	settings, configErr := LoadExtractorConfig("metrics-simple")
+	if configErr != nil {
+		p.setSimplePrompt("", "", "", configErr)
+		return p
+	}
+	promptRef := settings.first("EXTRACT_METRICS_SIMPLE_PROMPT")
+	if promptRef == "" {
+		promptRef = "prompt-extract-metric-simple-v1.md"
+	}
+	p.setSimplePrompt(loadPromptByRef(promptRef))
+	modelRef := settings.first("EXTRACT_METRICS_SIMPLE_MODEL_NAME", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME")
+	if modelRef != "" {
+		p.setSimpleModel(loadModelConfigByRef(modelRef, "MODEL_DEF_FILE"))
+	} else {
+		p.setSimpleModel(loadModelConfigFromEnvKeys([]string{"EXTRACT_METRICS_SIMPLE_MODEL_NAME", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"}, "MODEL_DEF_FILE"))
+	}
+	p.MaxTasks = settings.integer("EXTRACT_METRICS_MAX_TASKS", 1)
 	return p
 }
 

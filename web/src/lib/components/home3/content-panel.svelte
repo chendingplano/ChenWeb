@@ -55,6 +55,7 @@
 	import ResolveOrphanedLabelsView from '$lib/components/home3/resolve-orphaned-labels-view.svelte';
 	import SchedulesView from '$lib/components/home3/schedules-view.svelte';
 	import DocProcessConfigView from '$lib/components/home3/doc-process-config-view.svelte';
+	import ExtractorConfigView from '$lib/components/home3/extractor-config-view.svelte';
 	import ProductsConfigView from '$lib/components/home3/products-config-view.svelte';
 	import DocProcessDagView from '$lib/components/home3/doc-process-dag-view.svelte';
 	import DocProcessorsView from '$lib/components/home3/doc-processors-view.svelte';
@@ -319,6 +320,7 @@
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
 			activeMenu?.childId !== 'sysadmin-alert-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-config-products' &&
+			!['sysadmin-doc-process-config-metrics-simple', 'sysadmin-doc-process-config-references', 'sysadmin-doc-process-config-provisions'].includes(activeMenu?.childId ?? '') &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-decision-candidates' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-assertions' &&
 			activeMenu?.childId !== 'cdm-editor' &&
@@ -546,6 +548,12 @@
 			<DocProcessConfigView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-config-products'}
 			<ProductsConfigView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-process-config-metrics-simple'}
+			<ExtractorConfigView {darkMode} extractor="metrics-simple" />
+		{:else if activeMenu?.childId === 'sysadmin-doc-process-config-references'}
+			<ExtractorConfigView {darkMode} extractor="references" />
+		{:else if activeMenu?.childId === 'sysadmin-doc-process-config-provisions'}
+			<ExtractorConfigView {darkMode} extractor="provisions" />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-dag'}
 			<DocProcessDagView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-process-processors'}

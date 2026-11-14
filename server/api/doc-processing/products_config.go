@@ -37,8 +37,12 @@ func LoadProductsConfig(path string) (ProductsConfig, error) {
 	return c, nil
 }
 func SaveProductsConfig(path string, c ProductsConfig) error {
+	return saveProcessorConfig(path, c, productConfigKeys)
+}
+
+func saveProcessorConfig(path string, c ProductsConfig, keys map[string]string) error {
 	for k, v := range c {
-		kind, ok := productConfigKeys[k]
+		kind, ok := keys[k]
 		if !ok {
 			return fmt.Errorf("unknown setting %s", k)
 		}
@@ -55,6 +59,10 @@ func SaveProductsConfig(path string, c ProductsConfig) error {
 			n, e := strconv.Atoi(v)
 			if e != nil || n < 1 {
 				return fmt.Errorf("invalid positive integer for %s", k)
+			}
+		case "input":
+			if v != "chunks" && v != "blocks" {
+				return fmt.Errorf("invalid input for %s", k)
 			}
 		case "translation":
 			if v != "on" && v != "off" {
