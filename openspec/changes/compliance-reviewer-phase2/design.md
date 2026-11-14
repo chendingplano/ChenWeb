@@ -89,7 +89,80 @@ panel both annotators judge and the adjudicator resolves disagreements. This is 
 record that the pooling search misses is never judged, so recall measured against the pool is an
 upper bound. The scorer reports it as "recall within the pool" and the gold run stores the
 pooling parameters. The judged pool is also what gives the cosine distribution for choosing
-`min_cosine` (task 4.5): governing versus topical versus unrelated.
+`min_cosine` (task 4.5): governing versus topical versus unrelated. *The pool was widened and
+extended on 2026-11-14 (D11).*
+
+**D11. The pool aims at the complete set of relevant passages (second revision 2026-11-14).** The
+gold is "what should be": every passage of the snapshot that governs an activity. A passage that
+never enters the pool can never enter the gold, so the pool is the judge's search space and must be
+wider than the reviewer's search and independent of the settings the gold is used to tune
+(`min_cosine`, keyword coverage, a decision model). The judge filters; the search does not. No
+floor is applied anywhere in pooling. Per activity:
+
+1. *Queries.* The source text and the name with its object, as before, plus up to six queries the
+   agent writes in the activities file (`queries`: other wordings, both the document's language and
+   English, the regulated object, cited numbers). Agent queries are searched as written (keyword
+   extraction off); they are search text, never evidence.
+2. *Three rankings per query.* One search per query (limit 200) gives the fused ranking, and the
+   same results ordered by keyword rank and by vector rank (`Diag.LexicalRank`, `Diag.VectorRank`).
+   A strong keyword-only or vector-only hit is no longer crowded out of the fused top N by passages
+   both lists ranked in the middle. Results beyond the engine's 200 are not seen; with the cap
+   shared by many lists, only their top ranks are used.
+3. *Cap.* All lists are interleaved by rank until `max_candidates` (unchanged meaning: the first
+   pass's labelling budget).
+4. *Cited documents.* The agent lists, per activity, the documents the text cites for it
+   (`cited_docs`, at most ten, e.g. `GB/T 19095-2019`). The pool resolves each to snapshot records
+   by the extract_references identifier parser: the citation's identity key (no edition) against
+   each record's own identifier read from `doc_no`, title or file name, so every edition the
+   knowledge base holds is found; a citation without a number (a law cited by its title) matches a
+   record title exactly, ignoring case, spaces, brackets and quotes. Only snapshot records are
+   indexed, the document and its copies left out. For each resolved record, every query of the activity is searched
+   within that record and up to ten new passages are added beyond the cap. Unresolved citations are
+   listed in the pool file: the knowledge base does not hold that document, which the audit
+   reports.
+5. *Expansion.* After labelling, `compliance-gold expand` searches, for each activity, every record
+   with a `governs` label that was not yet searched for it, in the same way, and adds up to ten new
+   passages per record. The agent labels them and repeats until expansion adds nothing. `save`
+   refuses an activity with a `governs` record that was not expanded.
+6. *Provenance.* Each candidate records the list that first found it (`found_by`: `q2/lexical`,
+   `cited:GB/T 19095-2019`, `expand:1234`, `review:101`), stored with the judgement, so a later
+   analysis can show which channel finds governing passages.
+
+Cost: pooling and expansion call the embedding model once per query and record, and the keyword
+model for the two built-in queries. *Alternative:* filtering the pool by cosine or keyword
+coverage to cut labelling; rejected, because each filter can only remove relevant passages and
+would hide exactly the misses the gold must reveal. *Alternative:* resolving citations only through
+the references catalogue (`kb.ref_resource_identifiers`); rejected for now because it covers only
+records that extract_references has processed.
+
+**D12. Candidate-level scoring and pool augmentation (second revision 2026-11-14).** Record-level
+recall and activity-level false grounding cannot say whether a reported passage is relevant.
+
+- *Candidate precision.* The scorer reads each reported passage (`[type id] ... record N`) from the
+  reviewer's row text. For a reviewer row that covers gold activities, a passage's label is the
+  best label it has for any of them (`governs` over `ambiguous` over `topical` over `unrelated`),
+  because the reviewer reports candidates per its own, often coarser, activity. Candidate precision
+  is `governs` over `governs` + `topical` + `unrelated`; `ambiguous` is left out. A passage on a
+  record added after the snapshot is unjudged (new record); one on a snapshot record that the gold
+  never judged is unjudged (not in the pool), counted and reported with the instruction to augment.
+  A passage on the document itself or a byte-identical copy is never pooled and copies the
+  activity's own text, so it counts as `unrelated` (rule J3) without labelling; review runs made
+  before the copy exclusion (D1) report such passages (found during apply: run 101 on record 416).
+  Rows that cover no gold activity are already counted by activity precision and are left out.
+- *Unjudged is never wrong.* False grounding now counts an activity only when at least one of its
+  reported passages was judged; an activity whose reported passages are all unjudged is reported
+  as unjudged. The headline is unchanged.
+- *Augmentation.* `compliance-gold augment -run KEY -review ID` writes a pool file holding, per
+  gold activity, the reviewer's passages on snapshot records that the run never judged (text from
+  `kb.search_artifacts`, cosine as the reviewer reported it). The agent labels them under the same
+  rules, and `save` writes a new run: the base run's activities and judgements plus the new ones,
+  with `base_run_id` and `review_run_id`; it refuses a different snapshot or rules version. This
+  is the standard way to make a pooled gold set more complete over time. *Limit:* the labeller
+  knows these passages came from the reviewer; the rules require judging the passage alone, and
+  the audit notes say so.
+
+Storage: migration `20261114000003` adds `queries` and `cited_docs` to the gold activities,
+`found_by` to the judgements, and `base_run_id` and `review_run_id` to the runs.
 
 **D5. Baseline = same cases through current reviewers.** The phase 1 compliance reviewer (with
 D1 and D2 off, then on) and the existing legal, regulatory and standards compliance reviewers are

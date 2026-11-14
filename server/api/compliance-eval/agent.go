@@ -8,7 +8,12 @@ package complianceeval
 //  3. `compliance-gold pool` checks it (CheckActivities) and writes a pool file (PoolFile): for each
 //     activity the candidates pooled from the whole knowledge base;
 //  4. the agent writes one label per pooled candidate, one JSON object per line (AgentLabel);
-//  5. `compliance-gold save` checks every label (BuildAgentDocument) and saves the run.
+//  5. `compliance-gold expand` searches within every record with a governs label (ExpandPool), and
+//     the agent labels what it adds, until it adds nothing (design D11);
+//  6. `compliance-gold save` checks every label (BuildAgentDocument) and saves the run.
+//
+// `compliance-gold augment` later adds the passages a reviewer run reported that the run never
+// judged (AugmentPool, design D12); saving their labels makes a new run.
 
 import (
 	"bufio"
@@ -27,13 +32,37 @@ import (
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 )
 
-// AgentActivity is one activity as the agent writes it.
+// AgentActivity is one activity as the agent writes it. Queries are extra pool queries, searched as
+// written; CitedDocs are the documents the text cites for the activity (design D11).
 type AgentActivity struct {
-	Activity      string `json:"activity"`
-	Object        string `json:"object"`
-	LineStart     int    `json:"line_start"`
-	LineEnd       int    `json:"line_end"`
-	DocumentLevel bool   `json:"document_level"`
+	Activity      string   `json:"activity"`
+	Object        string   `json:"object"`
+	LineStart     int      `json:"line_start"`
+	LineEnd       int      `json:"line_end"`
+	DocumentLevel bool     `json:"document_level"`
+	Queries       []string `json:"queries,omitempty"`
+	CitedDocs     []string `json:"cited_docs,omitempty"`
+}
+
+// cleanList trims the entries, refusing an empty one, a repeated one, or more than max.
+func cleanList(in []string, max int, what string) ([]string, error) {
+	if len(in) > max {
+		return nil, fmt.Errorf("%d %s, at most %d are allowed", len(in), what, max)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		switch {
+		case s == "":
+			return nil, fmt.Errorf("an empty entry in %s", what)
+		case seen[s]:
+			return nil, fmt.Errorf("%q is listed twice in %s", s, what)
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // ActivitiesFile is the agent's activities file for one document.
@@ -88,13 +117,23 @@ func CheckActivities(chunks []docreviews.GoldChunk, in []AgentActivity) ([]Activ
 		if text == "" {
 			return nil, fmt.Errorf("%s: those lines hold no text", where)
 		}
+		queries, err := cleanList(a.Queries, MaxAgentQueries, "queries")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+		cited, err := cleanList(a.CitedDocs, MaxCitedDocs, "cited_docs")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
 		out = append(out, Activity{Name: name, Object: strings.TrimSpace(a.Object), LineStart: a.LineStart,
-			LineEnd: a.LineEnd, DocumentLevel: a.DocumentLevel, SourceText: text, Agreement: agreeSingle})
+			LineEnd: a.LineEnd, DocumentLevel: a.DocumentLevel, SourceText: text, Agreement: agreeSingle,
+			Queries: queries, CitedDocs: cited})
 	}
 	return out, nil
 }
 
-// PoolFile is what `compliance-gold pool` writes and `compliance-gold save` reads.
+// PoolFile is what `compliance-gold pool`, `expand` and `augment` write and `save` reads. An
+// augmentation pool names its BaseRun and ReviewRun and holds only the passages to add.
 type PoolFile struct {
 	SnapshotID    int64 `json:"snapshot_id"`
 	RecordID      int64 `json:"record_id"`
@@ -103,18 +142,25 @@ type PoolFile struct {
 	ExcludedRecords []int64 `json:"excluded_records"`
 	// AddedSinceSnapshot counts records left out because they were indexed after the snapshot.
 	AddedSinceSnapshot int            `json:"added_since_snapshot"`
+	BaseRun            string         `json:"base_run,omitempty"`
+	ReviewRun          int64          `json:"review_run,omitempty"`
 	Activities         []PoolActivity `json:"activities"`
 }
 
 // PoolActivity is one activity with its pooled candidates. ID is a1, a2, ... in file order.
+// SearchedRecords are the records searched within for it (cited documents and expansion);
+// UnresolvedCitedDocs are citations no usable record holds.
 type PoolActivity struct {
 	ID string `json:"id"`
 	AgentActivity
-	SourceText string          `json:"source_text"`
-	Candidates []PoolCandidate `json:"candidates"`
+	SourceText          string          `json:"source_text"`
+	SearchedRecords     []int64         `json:"searched_records,omitempty"`
+	UnresolvedCitedDocs []string        `json:"unresolved_cited_docs,omitempty"`
+	Candidates          []PoolCandidate `json:"candidates"`
 }
 
-// PoolCandidate is one pooled passage. ID is <artifact_type>/<artifact_id>.
+// PoolCandidate is one pooled passage. ID is <artifact_type>/<artifact_id>; FoundBy names the list
+// that first found it.
 type PoolCandidate struct {
 	ID           string   `json:"id"`
 	ArtifactType string   `json:"artifact_type"`
@@ -122,11 +168,46 @@ type PoolCandidate struct {
 	RecordID     int64    `json:"record_id"`
 	Source       string   `json:"source"`
 	Cosine       *float64 `json:"cosine"`
+	FoundBy      string   `json:"found_by"`
 	Text         string   `json:"text"`
 }
 
-// PoolActivities pools candidates for every checked activity.
-func PoolActivities(ctx context.Context, p *Pipeline, acts []Activity, exclude []int64) ([]PoolActivity, error) {
+func poolCandidate(c Candidate) PoolCandidate {
+	return PoolCandidate{ID: c.key(), ArtifactType: c.ArtifactType, ArtifactID: c.ArtifactID, RecordID: c.RecordID,
+		Source: c.Source, Cosine: c.Cosine, FoundBy: c.FoundBy, Text: c.Text}
+}
+
+func agentActivityOf(a Activity) AgentActivity {
+	return AgentActivity{Activity: a.Name, Object: a.Object, LineStart: a.LineStart, LineEnd: a.LineEnd,
+		DocumentLevel: a.DocumentLevel, Queries: a.Queries, CitedDocs: a.CitedDocs}
+}
+
+// searchWithin adds up to WithinPerRecord new passages of record to pa, unless pa already searched it.
+func searchWithin(ctx context.Context, p *Pipeline, a Activity, pa *PoolActivity, record int64, foundBy string) (int, error) {
+	for _, r := range pa.SearchedRecords {
+		if r == record {
+			return 0, nil
+		}
+	}
+	skip := map[string]bool{}
+	for _, c := range pa.Candidates {
+		skip[c.ID] = true
+	}
+	cands, err := p.Within(ctx, a, record, skip, foundBy)
+	if err != nil {
+		return 0, fmt.Errorf("activity %s (%q) record %d: %w", pa.ID, a.Name, record, err)
+	}
+	for _, c := range cands {
+		pa.Candidates = append(pa.Candidates, poolCandidate(c))
+	}
+	pa.SearchedRecords = append(pa.SearchedRecords, record)
+	return len(cands), nil
+}
+
+// PoolActivities pools candidates for every checked activity (design D11): the capped search of the
+// knowledge base, then a search within every record cites resolves for the activity's cited
+// documents. cites must index only records the pool may use.
+func PoolActivities(ctx context.Context, p *Pipeline, acts []Activity, exclude []int64, cites CitationIndex) ([]PoolActivity, error) {
 	out := make([]PoolActivity, 0, len(acts))
 	for i, a := range acts {
 		cands, err := p.Pool(ctx, a, exclude)
@@ -134,14 +215,103 @@ func PoolActivities(ctx context.Context, p *Pipeline, acts []Activity, exclude [
 			return nil, fmt.Errorf("activity %q: %w", a.Name, err)
 		}
 		pa := PoolActivity{ID: fmt.Sprintf("a%d", i+1), SourceText: a.SourceText, Candidates: []PoolCandidate{},
-			AgentActivity: AgentActivity{Activity: a.Name, Object: a.Object, LineStart: a.LineStart, LineEnd: a.LineEnd, DocumentLevel: a.DocumentLevel}}
+			AgentActivity: agentActivityOf(a)}
 		for _, c := range cands {
-			pa.Candidates = append(pa.Candidates, PoolCandidate{ID: c.key(), ArtifactType: c.ArtifactType, ArtifactID: c.ArtifactID,
-				RecordID: c.RecordID, Source: c.Source, Cosine: c.Cosine, Text: c.Text})
+			pa.Candidates = append(pa.Candidates, poolCandidate(c))
+		}
+		for _, cite := range a.CitedDocs {
+			recs := cites.Resolve(cite)
+			if len(recs) == 0 {
+				pa.UnresolvedCitedDocs = append(pa.UnresolvedCitedDocs, cite)
+				continue
+			}
+			for _, rec := range recs {
+				if _, err := searchWithin(ctx, p, a, &pa, rec, "cited:"+cite); err != nil {
+					return nil, err
+				}
+			}
 		}
 		out = append(out, pa)
 	}
 	return out, nil
+}
+
+// labelPairs checks that every label names a pooled pair and indexes the labels by pair.
+func labelPairs(pf PoolFile, labels []AgentLabel) (map[string]AgentLabel, error) {
+	pooled := map[string]bool{}
+	for _, pa := range pf.Activities {
+		for _, c := range pa.Candidates {
+			pooled[pairKey(pa.ID, c.ID)] = true
+		}
+	}
+	byPair := map[string]AgentLabel{}
+	for i, l := range labels {
+		k := pairKey(strings.TrimSpace(l.Activity), strings.TrimSpace(l.Candidate))
+		switch {
+		case !pooled[k]:
+			return nil, fmt.Errorf("label %d: activity %q has no pooled candidate %q", i+1, l.Activity, l.Candidate)
+		case byPair[k] != (AgentLabel{}):
+			return nil, fmt.Errorf("label %d: activity %q candidate %q is labelled twice", i+1, l.Activity, l.Candidate)
+		}
+		byPair[k] = l
+	}
+	return byPair, nil
+}
+
+func pairKey(a, c string) string { return a + " " + c }
+
+// unexpanded lists, per activity, the records with a governs label that were not searched within.
+func unexpanded(pf PoolFile, byPair map[string]AgentLabel) []string {
+	var out []string
+	for _, pa := range pf.Activities {
+		searched := map[int64]bool{}
+		for _, r := range pa.SearchedRecords {
+			searched[r] = true
+		}
+		for _, c := range pa.Candidates {
+			if byPair[pairKey(pa.ID, c.ID)].Label == labelGoverns && !searched[c.RecordID] {
+				searched[c.RecordID] = true // report each record once per activity
+				out = append(out, fmt.Sprintf("%s record %d", pa.ID, c.RecordID))
+			}
+		}
+	}
+	return out
+}
+
+// ExpandPool searches, for each activity, within every record with a governs label that was not yet
+// searched for it, and adds what it finds to pf (design D11). acts are the checked activities in
+// pool-file order. It returns how many passages were added; zero means expansion is complete.
+func ExpandPool(ctx context.Context, p *Pipeline, pf *PoolFile, acts []Activity, labels []AgentLabel) (int, error) {
+	if pf.BaseRun != "" {
+		return 0, fmt.Errorf("an augmentation pool is not expanded")
+	}
+	if len(acts) != len(pf.Activities) {
+		return 0, fmt.Errorf("pool file has %d activities, %d were checked", len(pf.Activities), len(acts))
+	}
+	byPair, err := labelPairs(*pf, labels)
+	if err != nil {
+		return 0, err
+	}
+	added := 0
+	for i := range pf.Activities {
+		pa := &pf.Activities[i]
+		var governing []int64
+		seen := map[int64]bool{}
+		for _, c := range pa.Candidates {
+			if byPair[pairKey(pa.ID, c.ID)].Label == labelGoverns && !seen[c.RecordID] {
+				seen[c.RecordID] = true
+				governing = append(governing, c.RecordID)
+			}
+		}
+		for _, rec := range governing {
+			n, err := searchWithin(ctx, p, acts[i], pa, rec, fmt.Sprintf("expand:%d", rec))
+			if err != nil {
+				return added, err
+			}
+			added += n
+		}
+	}
+	return added, nil
 }
 
 // AgentLabel is one judgement the agent writes: the activity id and candidate id from the pool file,
@@ -177,27 +347,18 @@ func ParseLabels(r io.Reader) ([]AgentLabel, error) {
 
 // BuildAgentDocument joins the checked activities (in pool-file order) with the agent's labels.
 // Every pooled candidate needs exactly one label; a label for a pair the pool does not hold, a label
-// outside the vocabulary, or a governs or ambiguous label without a reason is an error.
+// outside the vocabulary, or a governs or ambiguous label without a reason is an error. In a pool
+// that is not an augmentation, every record with a governs label must have been searched within
+// (`compliance-gold expand`, design D11).
 func BuildAgentDocument(pf PoolFile, acts []Activity, labels []AgentLabel, doc GoldDoc) (*GoldDocument, error) {
 	if len(acts) != len(pf.Activities) {
 		return nil, fmt.Errorf("pool file has %d activities, %d were checked", len(pf.Activities), len(acts))
 	}
-	pair := func(a, c string) string { return a + " " + c }
-	pooled := map[string]bool{}
-	for _, pa := range pf.Activities {
-		for _, c := range pa.Candidates {
-			pooled[pair(pa.ID, c.ID)] = true
-		}
+	byPair, err := labelPairs(pf, labels)
+	if err != nil {
+		return nil, err
 	}
-	byPair := map[string]AgentLabel{}
 	for i, l := range labels {
-		k := pair(strings.TrimSpace(l.Activity), strings.TrimSpace(l.Candidate))
-		switch {
-		case !pooled[k]:
-			return nil, fmt.Errorf("label %d: activity %q has no pooled candidate %q", i+1, l.Activity, l.Candidate)
-		case byPair[k] != (AgentLabel{}):
-			return nil, fmt.Errorf("label %d: activity %q candidate %q is labelled twice", i+1, l.Activity, l.Candidate)
-		}
 		switch l.Label {
 		case labelGoverns, labelAmbiguous:
 			if strings.TrimSpace(l.Reason) == "" {
@@ -207,21 +368,21 @@ func BuildAgentDocument(pf PoolFile, acts []Activity, labels []AgentLabel, doc G
 		default:
 			return nil, fmt.Errorf("label %d: label %q is not governs, topical, unrelated or ambiguous", i+1, l.Label)
 		}
-		byPair[k] = l
 	}
 	var missing []string
 	out := &GoldDocument{GoldDoc: doc}
 	for i, pa := range pf.Activities {
 		ga := GoldActivity{Activity: acts[i]}
 		for _, c := range pa.Candidates {
-			l, ok := byPair[pair(pa.ID, c.ID)]
+			l, ok := byPair[pairKey(pa.ID, c.ID)]
 			if !ok {
 				missing = append(missing, pa.ID+" "+c.ID)
 				continue
 			}
 			ga.Judgements = append(ga.Judgements, Judgement{
-				Candidate: Candidate{ArtifactType: c.ArtifactType, ArtifactID: c.ArtifactID, RecordID: c.RecordID, Source: c.Source, Text: c.Text, Cosine: c.Cosine},
-				Label1:    l.Label, Reason1: strings.TrimSpace(l.Reason), Final: l.Label,
+				Candidate: Candidate{ArtifactType: c.ArtifactType, ArtifactID: c.ArtifactID, RecordID: c.RecordID, Source: c.Source,
+					Text: c.Text, Cosine: c.Cosine, FoundBy: c.FoundBy},
+				Label1: l.Label, Reason1: strings.TrimSpace(l.Reason), Final: l.Label,
 			})
 		}
 		out.Activities = append(out.Activities, ga)
@@ -230,6 +391,12 @@ func BuildAgentDocument(pf PoolFile, acts []Activity, labels []AgentLabel, doc G
 		sort.Strings(missing)
 		shown := missing[:min(len(missing), 5)]
 		return nil, fmt.Errorf("%d pooled candidate(s) have no label, for example %s", len(missing), strings.Join(shown, ", "))
+	}
+	if pf.BaseRun == "" {
+		if todo := unexpanded(pf, byPair); len(todo) > 0 {
+			return nil, fmt.Errorf("%d record(s) with a governs label were not searched within; run compliance-gold expand and label what it adds: %s",
+				len(todo), strings.Join(todo[:min(len(todo), 5)], ", "))
+		}
 	}
 	return out, nil
 }

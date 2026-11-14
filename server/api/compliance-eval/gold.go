@@ -81,9 +81,12 @@ type Activity struct {
 	SourceText    string
 	Agreement     string
 	Rationale     string
+	Queries       []string // the agent's own pool queries (D11)
+	CitedDocs     []string // documents the text cites for this activity (D11)
 }
 
-// Candidate is one pooled search result. Source is the candidate record's title or file name.
+// Candidate is one pooled search result. Source is the candidate record's title or file name;
+// FoundBy names the list that first found it (D11).
 type Candidate struct {
 	ArtifactType string
 	ArtifactID   string
@@ -91,6 +94,7 @@ type Candidate struct {
 	Source       string
 	Text         string
 	Cosine       *float64
+	FoundBy      string
 }
 
 func (c Candidate) key() string { return c.ArtifactType + "/" + c.ArtifactID }
@@ -302,56 +306,128 @@ func (p *Pipeline) merge(ctx context.Context, a1, a2 []Activity) (final []Activi
 	return final, dropped, nil
 }
 
-// Pool searches the whole knowledge base deeply for one activity: two queries (the activity's source
-// text, and its name with its object), no relevance floor, the excluded records left out. The two
-// result lists are interleaved by rank and duplicates merged (keeping the highest cosine), so each
-// query contributes its best hits first; the pool stops at MaxCandidates.
-func (p *Pipeline) Pool(ctx context.Context, a Activity, exclude []int64) ([]Candidate, error) {
-	if p.MaxCandidates <= 0 {
-		return nil, fmt.Errorf("pool: max_candidates must be positive")
+// Pooling (design D10, widened by D11): the pool is the judge's search space, so it applies no
+// relevance floor and searches more widely than the reviewer does.
+const (
+	// poolSearchLimit is the results of one pool search, the engine's ceiling, so the keyword and
+	// vector orderings of its results reach past the fused top hits.
+	poolSearchLimit = 200
+	// WithinPerRecord is the number of new passages added per record searched within (a cited
+	// document, or a record with a governs label during expansion).
+	WithinPerRecord = 10
+	// MaxAgentQueries and MaxCitedDocs cap what the agent writes per activity.
+	MaxAgentQueries = 6
+	MaxCitedDocs    = 10
+)
+
+var poolArtifactTypes = []string{"provision", "chunk"}
+
+// poolQuery is one pool query; asWritten queries are the agent's and skip keyword extraction.
+type poolQuery struct {
+	text      string
+	asWritten bool
+}
+
+// poolQueries are the source text, the name with its object, then the agent's queries (q1, q2, q3...).
+func poolQueries(a Activity) []poolQuery {
+	qs := []poolQuery{{text: truncate(a.SourceText, activityTextMax)},
+		{text: strings.TrimSpace(strings.ReplaceAll(a.Name, "_", " ") + " " + a.Object)}}
+	for _, q := range a.Queries {
+		qs = append(qs, poolQuery{text: q, asWritten: true})
 	}
-	queries := []string{truncate(a.SourceText, activityTextMax), strings.TrimSpace(strings.ReplaceAll(a.Name, "_", " ") + " " + a.Object)}
-	var lists [][]Candidate
-	for _, q := range queries {
-		if q == "" {
+	return qs
+}
+
+// rankedList is one ordering of one search's results, named for found_by ("q3/lexical").
+type rankedList struct {
+	name  string
+	cands []Candidate
+}
+
+// CandidateText is a passage's text as the pool shows it to the labeller.
+func CandidateText(snippet string) string {
+	return truncate(strings.TrimSpace(snippet), candidateTextMax)
+}
+
+func candidateOf(r searchengine.Result) Candidate {
+	src := r.SourceTitle
+	if src == "" {
+		src = r.SourceFilename
+	}
+	return Candidate{ArtifactType: r.ArtifactType, ArtifactID: r.ArtifactID, RecordID: r.InputRecordID,
+		Source: src, Text: CandidateText(r.Snippet), Cosine: r.Diag.Cosine}
+}
+
+// rankings runs every query of a with the filters and returns, per query, its fused ranking and the
+// same results ordered by keyword rank and by vector rank, so a passage only one list ranks highly is
+// not crowded out by passages both lists ranked in the middle.
+func (p *Pipeline) rankings(ctx context.Context, a Activity, f searchengine.Filters) ([]rankedList, error) {
+	var out []rankedList
+	for i, q := range poolQueries(a) {
+		if q.text == "" {
 			continue
 		}
-		resp, err := p.Search(ctx, searchengine.Request{
-			Query:   searchengine.Query{Text: q},
-			Filters: searchengine.Filters{ArtifactTypes: []string{"provision", "chunk"}, ExcludeRecordIDs: exclude},
-			Options: searchengine.Options{Limit: p.MaxCandidates},
-		})
+		opts := searchengine.Options{Limit: poolSearchLimit}
+		if q.asWritten {
+			opts.KeywordExtraction = searchengine.KeywordExtractionOff
+		}
+		resp, err := p.Search(ctx, searchengine.Request{Query: searchengine.Query{Text: q.text}, Filters: f, Options: opts})
 		if err != nil {
-			return nil, fmt.Errorf("pool search %q: %w", truncate(q, 60), err)
+			return nil, fmt.Errorf("pool search %q: %w", truncate(q.text, 60), err)
 		}
-		var l []Candidate
+		var fused []Candidate
+		var lex, vec []searchengine.Result
 		for _, r := range resp.Results {
-			src := r.SourceTitle
-			if src == "" {
-				src = r.SourceFilename
+			fused = append(fused, candidateOf(r))
+			if r.Diag.LexicalRank != nil {
+				lex = append(lex, r)
 			}
-			l = append(l, Candidate{ArtifactType: r.ArtifactType, ArtifactID: r.ArtifactID, RecordID: r.InputRecordID,
-				Source: src, Text: truncate(strings.TrimSpace(r.Snippet), candidateTextMax), Cosine: r.Diag.Cosine})
+			if r.Diag.VectorRank != nil {
+				vec = append(vec, r)
+			}
 		}
-		lists = append(lists, l)
+		sort.SliceStable(lex, func(i, j int) bool { return *lex[i].Diag.LexicalRank < *lex[j].Diag.LexicalRank })
+		sort.SliceStable(vec, func(i, j int) bool { return *vec[i].Diag.VectorRank < *vec[j].Diag.VectorRank })
+		name := fmt.Sprintf("q%d", i+1)
+		out = append(out, rankedList{name + "/fused", fused}, rankedList{name + "/lexical", candidatesOf(lex)},
+			rankedList{name + "/vector", candidatesOf(vec)})
 	}
+	return out, nil
+}
+
+func candidatesOf(rs []searchengine.Result) []Candidate {
+	out := make([]Candidate, len(rs))
+	for i, r := range rs {
+		out[i] = candidateOf(r)
+	}
+	return out
+}
+
+// interleave takes the lists' candidates alternately by rank, so each list contributes its best
+// hits first, until limit candidates are taken. A duplicate keeps the highest cosine and the first
+// list that found it (FoundBy); keys in skip are never taken.
+func interleave(lists []rankedList, limit int, skip map[string]bool) []Candidate {
 	byKey := map[string]*Candidate{}
 	var order []string
 	for rank := 0; ; rank++ {
 		more := false
 		for _, l := range lists {
-			if rank >= len(l) {
+			if rank >= len(l.cands) {
 				continue
 			}
 			more = true
-			c := l[rank]
+			c := l.cands[rank]
+			if skip[c.key()] {
+				continue
+			}
 			if prev, ok := byKey[c.key()]; ok {
 				if c.Cosine != nil && (prev.Cosine == nil || *c.Cosine > *prev.Cosine) {
 					prev.Cosine = c.Cosine
 				}
 				continue
 			}
-			if len(order) < p.MaxCandidates {
+			if len(order) < limit {
+				c.FoundBy = l.name
 				byKey[c.key()] = &c
 				order = append(order, c.key())
 			}
@@ -363,6 +439,33 @@ func (p *Pipeline) Pool(ctx context.Context, a Activity, exclude []int64) ([]Can
 	out := make([]Candidate, 0, len(order))
 	for _, k := range order {
 		out = append(out, *byKey[k])
+	}
+	return out
+}
+
+// Pool searches the whole knowledge base for one activity, the excluded records left out: every
+// query in its fused, keyword and vector ranking, interleaved by rank until MaxCandidates.
+func (p *Pipeline) Pool(ctx context.Context, a Activity, exclude []int64) ([]Candidate, error) {
+	if p.MaxCandidates <= 0 {
+		return nil, fmt.Errorf("pool: max_candidates must be positive")
+	}
+	lists, err := p.rankings(ctx, a, searchengine.Filters{ArtifactTypes: poolArtifactTypes, ExcludeRecordIDs: exclude})
+	if err != nil {
+		return nil, err
+	}
+	return interleave(lists, p.MaxCandidates, nil), nil
+}
+
+// Within searches one record with every query of the activity and returns up to WithinPerRecord
+// passages whose keys are not in skip, each marked foundBy ("cited:GB/T 19095-2019", "expand:1234").
+func (p *Pipeline) Within(ctx context.Context, a Activity, record int64, skip map[string]bool, foundBy string) ([]Candidate, error) {
+	lists, err := p.rankings(ctx, a, searchengine.Filters{ArtifactTypes: poolArtifactTypes, RecordIDs: []int64{record}})
+	if err != nil {
+		return nil, err
+	}
+	out := interleave(lists, WithinPerRecord, skip)
+	for i := range out {
+		out[i].FoundBy = foundBy
 	}
 	return out, nil
 }

@@ -8,16 +8,40 @@ import (
 	"strings"
 )
 
-// GoldAct is a gold activity as the scorer sees it: its span and the records its final judgements
-// label `governs`. Ambiguous judgements are counted but never used as a label.
+// GoldAct is a gold activity as the scorer sees it: its span, the records its final judgements
+// label `governs`, and the final label of every judged passage. Ambiguous judgements are counted
+// but never used as a label.
 type GoldAct struct {
 	Record        int64
 	LineStart     int
 	LineEnd       int
 	DocumentLevel bool
-	Governs       map[int64]bool // candidate record ids with final label governs
-	Ambiguous     int
-	Pooled        int
+	Governs       map[int64]bool    // candidate record ids with final label governs
+	Labels        map[string]string // "<artifact_type>/<artifact_id>" -> final label
+	// OwnCopies are the document and its byte-identical copies. The gold never pools them, and a
+	// passage on them copies the activity's own text, so it is unrelated by rule J3 without labelling.
+	OwnCopies map[int64]bool
+	Ambiguous int
+	Pooled    int
+}
+
+// label is the gold's label of a reported passage for this activity: its judgement, unrelated for a
+// passage on the document's own copies, or "" when the gold never judged it.
+func (g GoldAct) label(c ReviewCandidate) string {
+	if l := g.Labels[c.Key]; l != "" {
+		return l
+	}
+	if g.OwnCopies[c.Record] {
+		return labelUnrelated
+	}
+	return ""
+}
+
+// ReviewCandidate is one passage a reviewer row reports.
+type ReviewCandidate struct {
+	Key    string // "<artifact_type>/<artifact_id>"
+	Record int64
+	Cosine *float64
 }
 
 // ReviewRow is one Compliance Review row: an activity with its reported candidates.
@@ -28,6 +52,7 @@ type ReviewRow struct {
 	DocumentLevel bool
 	NoGrounding   bool
 	Candidates    map[int64]bool // records of the reported candidates
+	Artifacts     []ReviewCandidate
 }
 
 // Metrics are the figures of one scoring, each with the count behind it. A ratio whose
@@ -45,16 +70,26 @@ type Metrics struct {
 	// Of those, share where gold had a governing record the reviewer's search did not report.
 	NoGroundingMissedBySearch Ratio
 	// Of matched activities with no governing record in gold: share where the reviewer reported
-	// candidates on snapshot records.
+	// a passage the gold judged.
 	FalseGrounding Ratio
-	// Matched activities with no governing record in gold whose reported candidates all lie on records
-	// added after the snapshot: unjudged, so left out of FalseGrounding.
+	// Matched activities with no governing record in gold whose reported passages the gold never
+	// judged (on records added after the snapshot, or outside the pool): left out of FalseGrounding.
 	UnjudgedActivities int
 	// Reported candidate records added after the snapshot, counted once per matched activity.
-	UnjudgedCandidates  int
-	AmbiguousJudgements int
-	Headline            Ratio
+	UnjudgedCandidates int
+	// Candidate-level figures over (reviewer row, reported passage) for rows covering a gold activity
+	// (design D12). A passage takes its best label over the gold activities the row covers.
+	CandidatePrecision     Ratio          // governs over governs + topical + unrelated
+	CandidateLabels        map[string]int // count per label, ambiguous included
+	CandidatesNotInPool    int            // on snapshot records but never judged: compliance-gold augment judges them
+	CandidatesOnNewRecords int            // on records added after the snapshot
+	CandidatesOnOwnCopies  int            // on the document itself or a byte-identical copy: unrelated (J3)
+	AmbiguousJudgements    int
+	Headline               Ratio
 }
+
+// labelRank orders labels for a passage judged under several gold activities.
+var labelRank = map[string]int{labelGoverns: 4, labelAmbiguous: 3, labelTopical: 2, labelUnrelated: 1}
 
 // Ratio is Num/Den; Den == 0 means not defined.
 type Ratio struct{ Num, Den int }
@@ -97,17 +132,20 @@ func spansMatch(aS, aE, bS, bE int, aDoc, bDoc bool) bool {
 //
 // inSnapshot is the gold snapshot's record set. A reviewer candidate on a record outside it was
 // indexed after the snapshot, so gold never judged it: it is unjudged, never a false grounding. Nil
-// treats every record as inside the snapshot.
+// treats every record as inside the snapshot. A passage on a snapshot record that the gold never
+// judged is unjudged too (outside the pool); it is never counted as wrong (design D12).
 func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics {
-	m := Metrics{GoldActivities: len(gold), ReviewRows: len(rows)}
+	m := Metrics{GoldActivities: len(gold), ReviewRows: len(rows), CandidateLabels: map[string]int{}}
 	rowSupported := make([]bool, len(rows))
-	for _, g := range gold {
+	rowCovers := make([][]int, len(rows)) // gold activities each row covers
+	for gi, g := range gold {
 		m.AmbiguousJudgements += g.Ambiguous
 		var cover []ReviewRow
 		for i, r := range rows {
 			if r.Record == g.Record && spansMatch(g.LineStart, g.LineEnd, r.LineStart, r.LineEnd, g.DocumentLevel, r.DocumentLevel) {
 				cover = append(cover, r)
 				rowSupported[i] = true
+				rowCovers[i] = append(rowCovers[i], gi)
 			}
 		}
 		if len(cover) == 0 {
@@ -116,9 +154,15 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 		m.MatchedActivities++
 		reported := map[int64]bool{}
 		allNo := true
+		judgedReport := false // some reported passage was judged for this activity
 		for _, r := range cover {
 			for rec := range r.Candidates {
 				reported[rec] = true
+			}
+			for _, c := range r.Artifacts {
+				if g.label(c) != "" {
+					judgedReport = true
+				}
 			}
 			allNo = allNo && r.NoGrounding
 		}
@@ -130,16 +174,11 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 				}
 			}
 		} else {
-			judgeable := false
-			for rec := range reported {
-				if inSnapshot == nil || inSnapshot[rec] {
-					judgeable = true
-				}
-			}
+			// The gold judges passages on snapshot records only, so a judged report is a judgeable one.
 			switch {
 			case allNo:
 				m.FalseGrounding.Den++
-			case judgeable:
+			case judgedReport:
 				m.FalseGrounding.Den++
 				m.FalseGrounding.Num++
 			default:
@@ -161,9 +200,37 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 			}
 		}
 	}
-	for _, ok := range rowSupported {
-		if ok {
-			m.SupportedRows++
+	for i, ok := range rowSupported {
+		if !ok {
+			continue
+		}
+		m.SupportedRows++
+		for _, c := range rows[i].Artifacts {
+			if inSnapshot != nil && !inSnapshot[c.Record] {
+				m.CandidatesOnNewRecords++
+				continue
+			}
+			best, ownCopy := "", false
+			for _, gi := range rowCovers[i] {
+				if l := gold[gi].label(c); labelRank[l] > labelRank[best] {
+					best = l
+				}
+				ownCopy = ownCopy || gold[gi].OwnCopies[c.Record]
+			}
+			if best == "" {
+				m.CandidatesNotInPool++
+				continue
+			}
+			if ownCopy {
+				m.CandidatesOnOwnCopies++
+			}
+			m.CandidateLabels[best]++
+			if best != labelAmbiguous {
+				m.CandidatePrecision.Den++
+				if best == labelGoverns {
+					m.CandidatePrecision.Num++
+				}
+			}
 		}
 	}
 	m.ActivityPrecision = Ratio{m.SupportedRows, len(rows)}
@@ -192,7 +259,8 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 	return m
 }
 
-var recordRef = regexp.MustCompile(`(?m)^- \[[^\]]+\](?: \(cosine [0-9.]+\))? record (\d+) `)
+// candidateRef reads one reported passage of a row description: "- [chunk 18342] (cosine 0.612) record 45 ...".
+var candidateRef = regexp.MustCompile(`(?m)^- \[(\S+) ([^\]]+)\](?: \(cosine ([0-9.]+)\))? record (\d+) `)
 
 // ParseReviewRow turns one saved Compliance Review finding into a ReviewRow. Location is
 // "start-end"; the document-level row's title names the activity "document: ...".
@@ -208,10 +276,17 @@ func ParseReviewRow(record int64, findingType, title, location, description stri
 	}
 	row := ReviewRow{Record: record, LineStart: s, LineEnd: e, NoGrounding: findingType == "compliance_no_grounding",
 		DocumentLevel: strings.Contains(title, ": document: "), Candidates: map[int64]bool{}}
-	for _, mm := range recordRef.FindAllStringSubmatch(description, -1) {
-		if id, err := strconv.ParseInt(mm[1], 10, 64); err == nil {
-			row.Candidates[id] = true
+	for _, mm := range candidateRef.FindAllStringSubmatch(description, -1) {
+		id, err := strconv.ParseInt(mm[4], 10, 64)
+		if err != nil {
+			continue
 		}
+		row.Candidates[id] = true
+		c := ReviewCandidate{Key: mm[1] + "/" + mm[2], Record: id}
+		if v, err := strconv.ParseFloat(mm[3], 64); err == nil {
+			c.Cosine = &v
+		}
+		row.Artifacts = append(row.Artifacts, c)
 	}
 	return row, nil
 }

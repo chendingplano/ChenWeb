@@ -3,11 +3,17 @@
 // The first iteration's gold is built by the coding agent, following the compliance-review-benchmark
 // skill (.agents/skills/compliance-review-benchmark), in these steps:
 //
-//	compliance-gold chunks -record 416 [-out chunks.txt]
-//	compliance-gold pool   -snapshot 3 -record 416 -activities acts.json -out pool.json [-user <user id>]
-//	compliance-gold save   -pool pool.json -labels labels.jsonl -model-name <model id> \
-//	                       -rules-dir <skill dir>/rules -rules-version 1.0.0 [-audit-notes audit.md]
-//	compliance-gold show   -run 20261114_150000
+//	compliance-gold chunks  -record 416 [-out chunks.txt]
+//	compliance-gold pool    -snapshot 3 -record 416 -activities acts.json -out pool.json [-user <user id>]
+//	compliance-gold expand  -pool pool.json -labels labels.jsonl -out pool.json [-user <user id>]
+//	compliance-gold save    -pool pool.json -labels labels.jsonl -model-name <model id> \
+//	                        -rules-dir <skill dir>/rules -rules-version 1.1.0 [-audit-notes audit.md]
+//	compliance-gold show    -run 20261114_150000
+//	compliance-gold augment -run 20261114_150000 -review 101 -out augment.json
+//
+// expand searches within every record with a governs label (repeat until it adds nothing); augment
+// writes the passages a doc-review run reported that the gold run never judged, and saving their
+// labels creates a new run (design D11, D12).
 //
 // panel runs the deferred model-panel labelling: two model annotators and a model adjudicator named
 // by COMPLIANCE_REVIEWER_ANNOTATOR_1, COMPLIANCE_REVIEWER_ANNOTATOR_2 and COMPLIANCE_ADJUDICATOR.
@@ -38,8 +44,10 @@ import (
 
 const usage = `usage: compliance-gold chunks -record N [-out FILE]
        compliance-gold pool -snapshot N -record N -activities FILE -out FILE [-user ID] [-config FILE]
+       compliance-gold expand -pool FILE -labels FILE -out FILE [-user ID] [-config FILE]
        compliance-gold save -pool FILE -labels FILE -model-name ID -rules-dir DIR -rules-version V [-audit-notes FILE] [-config FILE]
        compliance-gold show -run KEY
+       compliance-gold augment -run KEY -review ID -out FILE [-config FILE]
        compliance-gold panel -snapshot N -user ID [-check] [-config FILE]`
 
 func main() {
@@ -47,7 +55,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
-	cmds := map[string]func([]string) error{"chunks": cmdChunks, "pool": cmdPool, "save": cmdSave, "show": cmdShow, "panel": cmdPanel}
+	cmds := map[string]func([]string) error{"chunks": cmdChunks, "pool": cmdPool, "expand": cmdExpand, "save": cmdSave,
+		"show": cmdShow, "augment": cmdAugment, "panel": cmdPanel}
 	cmd, ok := cmds[os.Args[1]]
 	if !ok {
 		fmt.Fprintln(os.Stderr, usage)
@@ -104,6 +113,82 @@ func searchFunc(db *sql.DB) func(context.Context, searchengine.Request) (*search
 	return func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error) {
 		return searchengine.Search(ctx, db, cfg, req)
 	}
+}
+
+// attributeSearch attributes the pool searches' model calls (embedding, keyword model) to user, or
+// to the record's owner when user is empty, and returns the user id used.
+func attributeSearch(ctx context.Context, db *sql.DB, record int64, user string) (context.Context, string, error) {
+	if user == "" {
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(user_id::text, '') FROM kb.inputs WHERE id = $1`, record).Scan(&user); err != nil {
+			return ctx, "", fmt.Errorf("read owner of record %d: %w", record, err)
+		}
+		if user == "" {
+			return ctx, "", fmt.Errorf("record %d has no owner; pass -user", record)
+		}
+	}
+	return docprocessing.WithLLMUserID(ctx, user), user, nil
+}
+
+// citationIndex indexes the snapshot's records a pool may search within as cited documents: the
+// excluded ones (the document, its copies) left out.
+func citationIndex(ctx context.Context, db *sql.DB, snapshot int64, exclude []int64) (complianceeval.CitationIndex, error) {
+	members, err := complianceeval.SnapshotMembers(ctx, db, snapshot)
+	if err != nil {
+		return complianceeval.CitationIndex{}, err
+	}
+	skip := map[int64]bool{}
+	for _, id := range exclude {
+		skip[id] = true
+	}
+	var ids []int64
+	for _, m := range members {
+		if !skip[m.RecordID] {
+			ids = append(ids, m.RecordID)
+		}
+	}
+	names, err := complianceeval.LoadRecordNames(ctx, db, ids)
+	if err != nil {
+		return complianceeval.CitationIndex{}, err
+	}
+	return complianceeval.NewCitationIndex(names), nil
+}
+
+func readPoolFile(path string) (complianceeval.PoolFile, error) {
+	var pf complianceeval.PoolFile
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return pf, err
+	}
+	if err := json.Unmarshal(raw, &pf); err != nil {
+		return pf, fmt.Errorf("pool file %s: %w", path, err)
+	}
+	return pf, nil
+}
+
+func writePoolFile(path string, pf complianceeval.PoolFile) error {
+	data, err := json.MarshalIndent(pf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+func readLabels(path string) ([]complianceeval.AgentLabel, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return complianceeval.ParseLabels(f)
+}
+
+// poolActivities returns the pool file's activities as the agent wrote them.
+func poolActivities(pf complianceeval.PoolFile) []complianceeval.AgentActivity {
+	in := make([]complianceeval.AgentActivity, len(pf.Activities))
+	for i, pa := range pf.Activities {
+		in[i] = pa.AgentActivity
+	}
+	return in
 }
 
 func cmdChunks(args []string) error {
@@ -188,15 +273,10 @@ func cmdPool(args []string) error {
 	}
 	defer db.Close()
 	// The pool searches call an embedding model and the keyword model; attribute their usage.
-	if *user == "" {
-		if err := db.QueryRowContext(ctx, `SELECT COALESCE(user_id::text, '') FROM kb.inputs WHERE id = $1`, *record).Scan(user); err != nil {
-			return fmt.Errorf("read owner of record %d: %w", *record, err)
-		}
-		if *user == "" {
-			return fmt.Errorf("record %d has no owner; pass -user", *record)
-		}
+	ctx, who, err := attributeSearch(ctx, db, *record, *user)
+	if err != nil {
+		return err
 	}
-	ctx = docprocessing.WithLLMUserID(ctx, *user)
 	added, err := verifySnapshot(ctx, db, *snapshot)
 	if err != nil {
 		return err
@@ -214,26 +294,201 @@ func cmdPool(args []string) error {
 		return err
 	}
 	exclude := append(append([]int64(nil), copies...), added...)
+	cites, err := citationIndex(ctx, db, *snapshot, copies)
+	if err != nil {
+		return err
+	}
 	p := &complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Search: searchFunc(db)}
-	pas, err := complianceeval.PoolActivities(ctx, p, acts, exclude)
+	pas, err := complianceeval.PoolActivities(ctx, p, acts, exclude, cites)
 	if err != nil {
 		return err
 	}
 	pf := complianceeval.PoolFile{SnapshotID: *snapshot, RecordID: *record, MaxCandidates: cfg.MaxCandidates,
 		ExcludedRecords: copies, AddedSinceSnapshot: len(added), Activities: pas}
-	data, err := json.MarshalIndent(pf, "", "  ")
+	if err := writePoolFile(*out, pf); err != nil {
+		return err
+	}
+	total, cited := 0, 0
+	var unresolved []string
+	for _, pa := range pas {
+		total += len(pa.Candidates)
+		for _, c := range pa.Candidates {
+			if strings.HasPrefix(c.FoundBy, "cited:") {
+				cited++
+			}
+		}
+		for _, u := range pa.UnresolvedCitedDocs {
+			unresolved = append(unresolved, pa.ID+" "+u)
+		}
+	}
+	fmt.Printf("wrote %s: %d activities, %d candidates to label (at most %d per activity from the knowledge base, plus %d from cited documents), snapshot %d; %d record(s) indexed after the snapshot left out; search model usage attributed to user %s\n",
+		*out, len(pas), total, cfg.MaxCandidates, cited, *snapshot, len(added), who)
+	if len(unresolved) > 0 {
+		fmt.Printf("cited documents the knowledge base does not hold (report them in the audit): %s\n", strings.Join(unresolved, "; "))
+	}
+	return nil
+}
+
+func cmdExpand(args []string) error {
+	fs := flag.NewFlagSet("expand", flag.ExitOnError)
+	poolPath := fs.String("pool", "", "pool file written by compliance-gold pool (or a previous expand)")
+	labelsPath := fs.String("labels", "", "the agent's labels file so far")
+	out := fs.String("out", "", "pool file to write (may be the -pool file)")
+	cfgPath := fs.String("config", "doc-review.local.toml", "config file")
+	user := fs.String("user", "", "user id the search's model calls are attributed to (default: the document's owner)")
+	fs.Parse(args)
+	if *poolPath == "" || *labelsPath == "" || *out == "" {
+		return usageError("expand needs -pool, -labels and -out")
+	}
+	ctx := context.Background()
+	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil {
+	pf, err := readPoolFile(*poolPath)
+	if err != nil {
 		return err
 	}
-	total := 0
-	for _, pa := range pas {
-		total += len(pa.Candidates)
+	if _, err := listedDoc(cfg, *cfgPath, pf.RecordID); err != nil {
+		return err
 	}
-	fmt.Printf("wrote %s: %d activities, %d candidates to label (at most %d per activity), snapshot %d; %d record(s) indexed after the snapshot left out; search model usage attributed to user %s\n",
-		*out, len(pas), total, cfg.MaxCandidates, *snapshot, len(added), *user)
+	labels, err := readLabels(*labelsPath)
+	if err != nil {
+		return err
+	}
+	db, err := complianceeval.OpenDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	ctx, who, err := attributeSearch(ctx, db, pf.RecordID, *user)
+	if err != nil {
+		return err
+	}
+	if _, err := verifySnapshot(ctx, db, pf.SnapshotID); err != nil {
+		return err
+	}
+	chunks, err := docreviews.LoadGoldChunks(ctx, db, pf.RecordID)
+	if err != nil {
+		return err
+	}
+	acts, err := complianceeval.CheckActivities(chunks, poolActivities(pf))
+	if err != nil {
+		return fmt.Errorf("pool file %s: %w", *poolPath, err)
+	}
+	p := &complianceeval.Pipeline{MaxCandidates: pf.MaxCandidates, Search: searchFunc(db)}
+	added, err := complianceeval.ExpandPool(ctx, p, &pf, acts, labels)
+	if err != nil {
+		return err
+	}
+	if added == 0 {
+		fmt.Printf("expansion complete: every record with a governs label has been searched within; %s unchanged\n", *poolPath)
+		return nil
+	}
+	if err := writePoolFile(*out, pf); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s: %d passages added from records with a governs label (up to %d per record); label them, then run expand again; search model usage attributed to user %s\n",
+		*out, added, complianceeval.WithinPerRecord, who)
+	return nil
+}
+
+func cmdAugment(args []string) error {
+	fs := flag.NewFlagSet("augment", flag.ExitOnError)
+	key := fs.String("run", "", "gold run key to augment")
+	review := fs.Int64("review", 0, "doc-review run id (kb.doc_review_runs.id) of the same document")
+	out := fs.String("out", "", "augmentation pool file to write")
+	cfgPath := fs.String("config", "doc-review.local.toml", "config file")
+	fs.Parse(args)
+	if *key == "" || *review <= 0 || *out == "" {
+		return usageError("augment needs -run, -review and -out")
+	}
+	ctx := context.Background()
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	db, err := complianceeval.OpenDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	run, err := complianceeval.LoadStoredRun(ctx, db, *key)
+	if err != nil {
+		return err
+	}
+	if _, err := listedDoc(cfg, *cfgPath, run.RecordID); err != nil {
+		return err
+	}
+	if _, err := verifySnapshot(ctx, db, run.SnapshotID); err != nil {
+		return err
+	}
+	members, err := complianceeval.SnapshotMembers(ctx, db, run.SnapshotID)
+	if err != nil {
+		return err
+	}
+	inSnapshot := map[int64]bool{}
+	for _, m := range members {
+		inSnapshot[m.RecordID] = true
+	}
+	copies, err := docreviews.SameMD5RecordIDs(ctx, db, run.RecordID)
+	if err != nil {
+		return err
+	}
+	exclude := map[int64]bool{}
+	for _, id := range copies {
+		exclude[id] = true
+	}
+	rows, err := complianceeval.LoadReviewRows(ctx, db, *review)
+	if err != nil {
+		return err
+	}
+	if rows[0].Record != run.RecordID {
+		return fmt.Errorf("review run %d is of record %d, gold run %s of record %d", *review, rows[0].Record, *key, run.RecordID)
+	}
+	chunks, err := docreviews.LoadGoldChunks(ctx, db, run.RecordID)
+	if err != nil {
+		return err
+	}
+	in := make([]complianceeval.AgentActivity, len(run.Activities))
+	for i, a := range run.Activities {
+		in[i] = complianceeval.AgentActivity{Activity: a.Name, Object: a.Object, LineStart: a.LineStart, LineEnd: a.LineEnd,
+			DocumentLevel: a.DocumentLevel, Queries: a.Queries, CitedDocs: a.CitedDocs}
+	}
+	acts, err := complianceeval.CheckActivities(chunks, in)
+	if err != nil {
+		return fmt.Errorf("gold run %s: %w", *key, err)
+	}
+	scfg := searchengine.LoadConfig()
+	load := func(refs []searchengine.ArtifactRef) (map[string]complianceeval.Candidate, error) {
+		res, err := searchengine.Load(ctx, db, scfg, refs)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]complianceeval.Candidate{}
+		for _, r := range res {
+			src := r.SourceTitle
+			if src == "" {
+				src = r.SourceFilename
+			}
+			out[r.ArtifactType+"/"+r.ArtifactID] = complianceeval.Candidate{ArtifactType: r.ArtifactType, ArtifactID: r.ArtifactID,
+				RecordID: r.InputRecordID, Source: src, Text: complianceeval.CandidateText(r.Snippet)}
+		}
+		return out, nil
+	}
+	pf, n, err := complianceeval.AugmentPool(run, acts, *review, rows, inSnapshot, exclude, load)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		fmt.Printf("nothing to augment: gold run %s already judged every passage review run %d reports on snapshot records for the activities it covers\n", *key, *review)
+		return nil
+	}
+	if err := writePoolFile(*out, pf); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s: %d passages review run %d reported that gold run %s never judged; label them and save to create the augmented run\n",
+		*out, n, *review, *key)
 	return nil
 }
 
@@ -255,13 +510,9 @@ func cmdSave(args []string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := os.ReadFile(*poolPath)
+	pf, err := readPoolFile(*poolPath)
 	if err != nil {
 		return err
-	}
-	var pf complianceeval.PoolFile
-	if err := json.Unmarshal(raw, &pf); err != nil {
-		return fmt.Errorf("pool file %s: %w", *poolPath, err)
 	}
 	doc, err := listedDoc(cfg, *cfgPath, pf.RecordID)
 	if err != nil {
@@ -271,12 +522,7 @@ func cmdSave(args []string) error {
 	if err != nil {
 		return err
 	}
-	lf, err := os.Open(*labelsPath)
-	if err != nil {
-		return err
-	}
-	labels, err := complianceeval.ParseLabels(lf)
-	lf.Close()
+	labels, err := readLabels(*labelsPath)
 	if err != nil {
 		return err
 	}
@@ -300,11 +546,7 @@ func cmdSave(args []string) error {
 	if err != nil {
 		return err
 	}
-	in := make([]complianceeval.AgentActivity, len(pf.Activities))
-	for i, pa := range pf.Activities {
-		in[i] = pa.AgentActivity
-	}
-	acts, err := complianceeval.CheckActivities(chunks, in)
+	acts, err := complianceeval.CheckActivities(chunks, poolActivities(pf))
 	if err != nil {
 		return fmt.Errorf("pool file %s: %w", *poolPath, err)
 	}
@@ -317,12 +559,35 @@ func cmdSave(args []string) error {
 		RulesSHA256: rules.SHA256, Profiles: complianceeval.Profiles{Annotator1: strings.TrimSpace(*model)},
 		MaxCandidates: pf.MaxCandidates, AuditNotes: audit, Documents: []*complianceeval.GoldDocument{gd},
 	}
+	if pf.BaseRun != "" {
+		// An augmentation pool: the new run is the base run plus the labels of the added passages (design D12).
+		base, err := complianceeval.LoadStoredRun(ctx, db, pf.BaseRun)
+		if err != nil {
+			return err
+		}
+		if base.RulesVersion != rules.Version {
+			return fmt.Errorf("gold run %s used rules %s; label the augmentation under the same version, not %s", base.Key, base.RulesVersion, rules.Version)
+		}
+		merged, err := complianceeval.MergeAugmentation(base, pf, gd)
+		if err != nil {
+			return err
+		}
+		note := fmt.Sprintf("Augmentation of gold run %s (labelled by %s) with the unjudged passages of review run %d; the added passages were labelled by %s.",
+			base.Key, base.Annotator1, pf.ReviewRun, run.Profiles.Annotator1)
+		run.AuditNotes = strings.TrimSpace(note + "\n\n" + audit)
+		run.Documents = []*complianceeval.GoldDocument{merged}
+		run.MaxCandidates, run.BaseRunID, run.ReviewRunID = base.MaxCandidates, base.ID, pf.ReviewRun
+	}
 	key, id, err := complianceeval.SaveRun(ctx, db, run, time.Now())
 	if err != nil {
 		return err
 	}
-	fmt.Printf("saved gold run %s (id %d): record %d, %d activities, %d labels; labelled by %s alone (agent), rules %s\n",
-		key, id, pf.RecordID, len(gd.Activities), len(labels), run.Profiles.Annotator1, rules.File)
+	how := "labelled by " + run.Profiles.Annotator1 + " alone (agent)"
+	if pf.BaseRun != "" {
+		how = fmt.Sprintf("augmented from %s with %d new labels from review run %d", pf.BaseRun, len(labels), pf.ReviewRun)
+	}
+	fmt.Printf("saved gold run %s (id %d): record %d, %d activities, %d labels in this file; %s, rules %s\n",
+		key, id, pf.RecordID, len(run.Documents[0].Activities), len(labels), how, rules.File)
 	return nil
 }
 
@@ -348,6 +613,11 @@ func cmdShow(args []string) error {
 		s.Records, s.Activities, s.DocumentLevel, s.ActivitiesWithGoverns)
 	fmt.Printf("  labels: governs %d, topical %d, unrelated %d, ambiguous %d\n",
 		s.Labels["governs"], s.Labels["topical"], s.Labels["unrelated"], s.Labels["ambiguous"])
+	fmt.Printf("  governs labels by where the passage was found: pool %d, cited %d, expand %d, review %d, unknown %d\n",
+		s.GovernsByChannel["pool"], s.GovernsByChannel["cited"], s.GovernsByChannel["expand"], s.GovernsByChannel["review"], s.GovernsByChannel["unknown"])
+	if s.BaseRun != "" {
+		fmt.Printf("  augmented from gold run %s with review run %d\n", s.BaseRun, s.ReviewRun)
+	}
 	return nil
 }
 

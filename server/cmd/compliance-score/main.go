@@ -128,7 +128,16 @@ func run(gold, runs, compare string) error {
 	fmt.Printf("  'no grounding' precision:         %s\n", m.NoGroundingPrecision)
 	fmt.Printf("  'no grounding' missed by search:  %s\n", m.NoGroundingMissedBySearch)
 	fmt.Printf("  false grounding (none expected):  %s\n", m.FalseGrounding)
-	fmt.Printf("  unjudged, on records added after the snapshot: %d activities left out of false grounding, %d candidate records\n", m.UnjudgedActivities, m.UnjudgedCandidates)
+	fmt.Printf("  candidate precision:              %s   (reported passages the gold judged: governs %d, topical %d, unrelated %d, ambiguous %d not used)\n",
+		m.CandidatePrecision, m.CandidateLabels["governs"], m.CandidateLabels["topical"], m.CandidateLabels["unrelated"], m.CandidateLabels["ambiguous"])
+	if m.CandidatesOnOwnCopies > 0 {
+		fmt.Printf("  of the unrelated, %d lie on the document itself or a byte-identical copy (unrelated by rule J3, never pooled)\n", m.CandidatesOnOwnCopies)
+	}
+	fmt.Printf("  unjudged: %d activities left out of false grounding; reported passages on records added after the snapshot %d (%d records per activity), outside the pool %d\n",
+		m.UnjudgedActivities, m.CandidatesOnNewRecords, m.UnjudgedCandidates, m.CandidatesNotInPool)
+	if m.CandidatesNotInPool > 0 {
+		fmt.Printf("  %d reported passage(s) were never judged: run compliance-gold augment -run <gold run> -review <run id>, label them and score the augmented run\n", m.CandidatesNotInPool)
+	}
 	fmt.Printf("  ambiguous judgements (not used):  %d\n", m.AmbiguousJudgements)
 	fmt.Printf("  headline (mean of F1, recall, 1-false grounding; summary only): %s\n", m.Headline)
 	return nil

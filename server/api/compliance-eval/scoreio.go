@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/lib/pq"
 )
 
@@ -14,7 +15,9 @@ func LoadGoldActs(ctx context.Context, db *sql.DB, runKey string) ([]GoldAct, er
 		SELECT a.id, a.input_record_id, a.line_start, a.line_end, a.document_level,
 		       COALESCE(array_agg(j.candidate_record) FILTER (WHERE j.final_label = 'governs'), '{}'::bigint[]),
 		       count(*) FILTER (WHERE j.final_label = 'ambiguous'),
-		       count(j.id)
+		       count(j.id),
+		       COALESCE(array_agg(j.artifact_type || '/' || j.artifact_id ORDER BY j.id) FILTER (WHERE j.id IS NOT NULL), '{}'::text[]),
+		       COALESCE(array_agg(j.final_label ORDER BY j.id) FILTER (WHERE j.id IS NOT NULL), '{}'::text[])
 		FROM testbed.compliance_gold_activities a
 		JOIN testbed.compliance_gold_runs r ON r.id = a.run_id
 		LEFT JOIN testbed.compliance_gold_judgements j ON j.activity_id = a.id
@@ -29,12 +32,18 @@ func LoadGoldActs(ctx context.Context, db *sql.DB, runKey string) ([]GoldAct, er
 		var id int64
 		var g GoldAct
 		var governs []int64
-		if err := rows.Scan(&id, &g.Record, &g.LineStart, &g.LineEnd, &g.DocumentLevel, pq.Array(&governs), &g.Ambiguous, &g.Pooled); err != nil {
+		var keys, labels []string
+		if err := rows.Scan(&id, &g.Record, &g.LineStart, &g.LineEnd, &g.DocumentLevel, pq.Array(&governs), &g.Ambiguous, &g.Pooled,
+			pq.Array(&keys), pq.Array(&labels)); err != nil {
 			return nil, err
 		}
 		g.Governs = map[int64]bool{}
 		for _, v := range governs {
 			g.Governs[v] = true
+		}
+		g.Labels = make(map[string]string, len(keys))
+		for i, k := range keys {
+			g.Labels[k] = labels[i]
 		}
 		out = append(out, g)
 	}
@@ -78,11 +87,23 @@ func LoadGold(ctx context.Context, db *sql.DB, keys []string) ([]GoldAct, []Gold
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		for _, g := range a {
+		copies := map[int64]map[int64]bool{}
+		for i, g := range a {
 			if prev, ok := owner[g.Record]; ok && prev != k {
 				return nil, nil, nil, fmt.Errorf("record %d is in gold runs %s and %s; score one of them", g.Record, prev, k)
 			}
 			owner[g.Record] = k
+			if copies[g.Record] == nil {
+				ids, err := docreviews.SameMD5RecordIDs(ctx, db, g.Record)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				copies[g.Record] = map[int64]bool{g.Record: true}
+				for _, id := range ids {
+					copies[g.Record][id] = true
+				}
+			}
+			a[i].OwnCopies = copies[g.Record]
 		}
 		acts = append(acts, a...)
 		infos = append(infos, info)

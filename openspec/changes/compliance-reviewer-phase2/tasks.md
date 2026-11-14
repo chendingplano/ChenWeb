@@ -40,6 +40,18 @@
 - [x] 6.7 Skill `.agents/skills/compliance-review-benchmark` (SKILL.md, rules 1.0.0 with SHA-256, CHANGELOG, Codex metadata), linked for Claude Code and Codex.
 - [x] 6.8 Tests for activities, labels, rules versions, pool cap and unjudged scoring; a smoke run on record 416 (snapshot, chunks, pool, save, show, score) on the dev database, its data deleted.
 
+## 7. Complete pool and candidate-level scoring (design D11, D12, second revision 2026-11-14)
+
+- [x] 7.1 Before writing, run the `find-reusable-module` skill for loading artifacts by id and for resolving a cited document number to records; report what was searched. *Searched 2026-11-14 (catalogue: search artifact load lookup; document number citation reference resolve doc_no; code: doc_no normalization, citation resolution): Artifact Search had no load-by-id, so it is extended with `searchengine.Load`; the extract_references identifier parser (`reference_identifiers.go`, uncatalogued) gives edition-free keys and is reused through two exported wrappers. The references catalogue (`kb.ref_resource_identifiers`) was not used to resolve citations: on dev it covers 5 of 67 indexed records, `doc_no` 49.*
+- [x] 7.2 `searchengine.Load` (artifacts by type and id, display fields, no ranking) and exported citation identity keys in `doc-processing` (citation text, and a record's own identifier from `doc_no`, title, file name), with tests.
+- [x] 7.3 Pool: agent `queries` (at most 6, keyword extraction off) and `cited_docs` (at most 10) in the activities file; fused, keyword and vector rankings per query; cited documents resolved edition-insensitively to snapshot records and searched within (up to 10 new passages per record); unresolved citations and searched records in the pool file; `found_by` on every candidate.
+- [x] 7.4 `compliance-gold expand`: search within every record with a `governs` label not yet searched for that activity; `save` refuses an unexpanded governing record.
+- [x] 7.5 Scorer: reported passages parsed per row; candidate precision (best label over covered gold activities); unjudged counts for new records and for passages outside the pool; false grounding only over activities with a judged reported passage. *Added during apply: passages on the document's own copies count as unrelated (D12).*
+- [x] 7.6 `compliance-gold augment -run -review` and saving an augmentation pool as a new run (base run's activities and judgements plus the new ones; same snapshot and rules version).
+- [x] 7.7 Project migration `20261114000003` (activities `queries`, `cited_docs`; judgements `found_by`; runs `base_run_id`, `review_run_id`), applied to the dev database; Down/Up tested in a rolled-back transaction. *Applied by the running dev server at 14:45; Down/Up then tested in a rolled-back transaction.*
+- [x] 7.8 Skill: rules 1.1.0 (queries, cited documents, judging added passages), SKILL.md steps for expand and augment, CHANGELOG, `versions.json`.
+- [x] 7.9 Tests for each part; `go build ./server/...`; update devdoc 2026111201 and the phase 2 handoff; register the reused identifier parser and update Artifact Search with `create-reusable-module`. *Smoke run on record 416 with review run 101 (synthetic labels, data deleted); module `20261114-02` Document Identifier Keys registered (new capability `document-identifiers`), Artifact Search 1.2.0.*
+
 ## 5. Close out
 
 - [x] 5.1 Update research 2026111103 §12 status and devdoc 2026111201; answer the coding-practice questions (what knowledge changed, which docs are stale).

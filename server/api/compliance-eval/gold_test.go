@@ -3,6 +3,7 @@ package complianceeval
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -232,34 +233,90 @@ func TestMissingLabelIsRetriedForMissingCandidatesOnly(t *testing.T) {
 	}
 }
 
-func TestPoolInterleavesQueriesAndStopsAtMaxCandidates(t *testing.T) {
-	c := func(id string, cos float64) searchengine.Result {
-		return searchengine.Result{ArtifactType: "chunk", ArtifactID: id, InputRecordID: 9, SourceTitle: "GB 1", Snippet: id, Diag: searchengine.Diagnostics{Cosine: &cos}}
+// res is a search result with optional keyword and vector ranks (0 = not found by that list).
+func res(id string, rec int64, cos float64, lex, vec int) searchengine.Result {
+	r := searchengine.Result{ArtifactType: "chunk", ArtifactID: id, InputRecordID: rec, SourceTitle: "GB 1", Snippet: id,
+		Diag: searchengine.Diagnostics{Cosine: &cos}}
+	if lex > 0 {
+		r.Diag.LexicalRank = &lex
 	}
-	var limits []int
-	p := &Pipeline{MaxCandidates: 3, Search: func(_ context.Context, req searchengine.Request) (*searchengine.Response, error) {
-		limits = append(limits, req.Options.Limit)
-		if strings.Contains(req.Query.Text, "log") && !strings.Contains(req.Query.Text, "logs") { // name+object query
-			return &searchengine.Response{Results: []searchengine.Result{c("b1", 0.5), c("a1", 0.9), c("b2", 0.4)}}, nil
+	if vec > 0 {
+		r.Diag.VectorRank = &vec
+	}
+	return r
+}
+
+func ids(cs []Candidate) string {
+	var out []string
+	for _, c := range cs {
+		out = append(out, c.ArtifactID)
+	}
+	return strings.Join(out, ",")
+}
+
+func TestPoolUsesThreeRankingsPerQueryAndStopsAtMaxCandidates(t *testing.T) {
+	var reqs []searchengine.Request
+	p := &Pipeline{MaxCandidates: 4, Search: func(_ context.Context, req searchengine.Request) (*searchengine.Response, error) {
+		reqs = append(reqs, req)
+		switch req.Query.Text {
+		case "keep logs": // q1, the source text: a3 is the keyword list's best hit but last in the fused order
+			return &searchengine.Response{Results: []searchengine.Result{res("a1", 9, 0.7, 2, 1), res("a2", 9, 0.6, 0, 2), res("a3", 9, 0.2, 1, 0)}}, nil
+		case "log o": // q2, the name with its object
+			return &searchengine.Response{Results: []searchengine.Result{res("b1", 9, 0.5, 0, 1), res("a1", 9, 0.9, 1, 0)}}, nil
+		case "retention period": // q3, the agent's query
+			return &searchengine.Response{Results: []searchengine.Result{res("r1", 9, 0.3, 1, 0)}}, nil
 		}
-		return &searchengine.Response{Results: []searchengine.Result{c("a1", 0.7), c("a2", 0.6), c("a3", 0.5)}}, nil
+		t.Fatalf("unexpected query %q", req.Query.Text)
+		return nil, nil
 	}}
-	got, err := p.Pool(context.Background(), Activity{Name: "log", Object: "o", SourceText: "keep logs"}, nil)
+	got, err := p.Pool(context.Background(), Activity{Name: "log", Object: "o", SourceText: "keep logs", Queries: []string{"retention period"}}, []int64{416})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []string
-	for _, x := range got {
-		ids = append(ids, x.ArtifactID)
+	// rank 0 of the lists q1/fused, q1/lexical, q1/vector, q2/fused, ..., q3/fused: a1, a3, (a1), b1, (a1), (b1), r1.
+	if ids(got) != "a1,a3,b1,r1" {
+		t.Fatalf("pool = %s", ids(got))
 	}
-	// rank 0: a1 (text query), b1 (name query); rank 1: a2, then the cap of 3 is reached.
-	if strings.Join(ids, ",") != "a1,b1,a2" {
-		t.Fatalf("pool = %v", ids)
+	want := map[string]string{"a1": "q1/fused", "a3": "q1/lexical", "b1": "q2/fused", "r1": "q3/fused"}
+	for _, c := range got {
+		if c.FoundBy != want[c.ArtifactID] {
+			t.Errorf("%s found_by = %q, want %q", c.ArtifactID, c.FoundBy, want[c.ArtifactID])
+		}
 	}
-	if got[0].Source != "GB 1" || *got[0].Cosine != 0.9 { // a1 came from both queries: highest cosine kept
-		t.Errorf("a1 = %+v (cosine %v)", got[0], *got[0].Cosine)
+	if *got[0].Cosine != 0.9 { // a1 came from two queries: highest cosine kept
+		t.Errorf("a1 cosine = %v", *got[0].Cosine)
 	}
-	if len(limits) != 2 || limits[0] != 3 || limits[1] != 3 {
-		t.Errorf("search limits = %v, want max_candidates per query", limits)
+	if len(reqs) != 3 {
+		t.Fatalf("%d searches, want 3", len(reqs))
+	}
+	for i, r := range reqs {
+		agent := i == 2
+		if r.Options.Limit != poolSearchLimit || r.Criteria.MinCosine != 0 || len(r.Filters.ExcludeRecordIDs) != 1 ||
+			(r.Options.KeywordExtraction == searchengine.KeywordExtractionOff) != agent {
+			t.Errorf("search %d = %+v, want limit %d, no floor, the exclusion, keyword extraction off only for the agent's query", i+1, r, poolSearchLimit)
+		}
+	}
+}
+
+func TestWithinSearchesOneRecordAndSkipsPooledPassages(t *testing.T) {
+	var got []searchengine.Request
+	p := &Pipeline{MaxCandidates: 50, Search: func(_ context.Context, req searchengine.Request) (*searchengine.Response, error) {
+		got = append(got, req)
+		var rs []searchengine.Result
+		for i := 0; i < 12; i++ {
+			rs = append(rs, res(fmt.Sprintf("x%d", i), 55, 0.5, 0, i+1))
+		}
+		return &searchengine.Response{Results: rs}, nil
+	}}
+	cands, err := p.Within(context.Background(), Activity{Name: "log", Object: "o", SourceText: "keep logs"}, 55,
+		map[string]bool{"chunk/x0": true}, "cited:GB/T 19095-2019")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != WithinPerRecord || cands[0].ArtifactID != "x1" || cands[0].FoundBy != "cited:GB/T 19095-2019" {
+		t.Fatalf("within = %s (first found_by %q)", ids(cands), cands[0].FoundBy)
+	}
+	if len(got[0].Filters.RecordIDs) != 1 || got[0].Filters.RecordIDs[0] != 55 || len(got[0].Filters.ExcludeRecordIDs) != 0 {
+		t.Errorf("filters = %+v, want only record 55", got[0].Filters)
 	}
 }
