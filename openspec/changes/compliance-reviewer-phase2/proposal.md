@@ -17,7 +17,7 @@ that no amount of extra documents would reveal better, and one gap that blocks m
   one document.
 
 Research §12 phase 2 is "baseline and gold set": snapshot the current reviewers, freeze a
-knowledge-base snapshot and scope, record organization context, annotate gold cases. This change
+knowledge-base snapshot and scope, annotate gold cases. This change
 does that, and fixes the two defects first because the gold set must measure the corrected
 behaviour.
 
@@ -37,7 +37,8 @@ behaviour.
   expected grounding records per activity, and "no grounding expected" cases. Labelled by two
   independent model annotators and a model adjudicator, chosen by environment variable (research
   §11.1; labels are LLM-adjudicated, not legal validation). Gold documents are listed in
-  `doc-review.local.toml`, and organization context is recorded with each run.
+  `doc-review.local.toml`. There is no organization profile: activity context is extracted from
+  the documents (research 2026111103, activity context; design D9, revised 2026-11-14).
 - A baseline: the current reviewers and the phase 1 compliance reviewer scored on the same cases.
 - Row text that says "no grounding" and the candidate list are unchanged in meaning; no
   applicability, requirement comparison or omission reporting is added (phases 3 and 4).

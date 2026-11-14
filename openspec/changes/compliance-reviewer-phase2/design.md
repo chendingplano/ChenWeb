@@ -110,7 +110,9 @@ gates are phase 3 and later.
 One project goose migration for the `testbed` snapshot and gold tables (shared migrations are not touched). Config
 gains optional `min_cosine`; absent means today's behaviour. Rows gain a cosine only in the
 description text, so stored findings and the report view keep working. Rolling back means
-dropping the tables and removing the config key.
+dropping the tables and removing the config key. A second project migration
+(`20261114000001`) drops `testbed.compliance_gold_runs.organization` (D9); its Down restores the
+column with `{}` as the value.
 
 **D7. Annotators and adjudicator are model profiles named by environment variables.**
 `COMPLIANCE_REVIEWER_ANNOTATOR_1`, `COMPLIANCE_REVIEWER_ANNOTATOR_2` and
@@ -130,13 +132,21 @@ Each key is a `kb.inputs` record id and each value a one-line reason. The tables
 the gold run labels; they are not labels. A record in both tables, a missing record, or a record
 outside the snapshot is a startup error naming it.
 
-**D9. Organization context is recorded now, used in phase 3.** A table
-`[compliance-review.organization]` in the same file holds the facts of research §6.1 (operating
-territories, legal entities, regulated roles, sectors, data categories, deployment regions,
-adopted standards). Each is `{ value = [...], status = "asserted|inferred|disputed|unknown",
-source = "..." }`; an absent fact is `unknown`. A gold run stores a copy of the context it ran
-with. Phase 2 does not read it to decide anything; applicability is phase 3. The values are the
-user's to supply: this change ships every fact as `unknown`.
+**D9. No organization profile (revised 2026-11-14).** The first build had a
+`[compliance-review.organization]` table of organization facts (operating territories, legal
+entities, regulated roles, sectors, data categories, deployment regions, adopted standards), copied
+into each gold run. Research 2026111103 (activity context) now determines context automatically:
+each activity carries its actor, the actor's role, its object, the document's relationship to it,
+and context facts with source passages and an evidence status (`explicit`, `inferred`, `unknown`,
+`conflicting`). Users answer only questions whose answer changes an applicability decision. One
+profile per run could not describe gold documents from different issuers anyway. The table, its
+validation and the `organization` column of `testbed.compliance_gold_runs` are removed (migration
+`20261114000001`).
+
+Expected context is labelled in phase 3, as a separate pass over the frozen gold activities: it
+attaches context to spans already labelled, so a gold run made under rules v1 keeps its activities
+and judgements. The reviewer is unchanged here; its context extraction is built in phase 3
+together with the storage that keeps it, so the phase 2 baseline is not disturbed.
 
 ## Open Questions
 
@@ -147,6 +157,6 @@ user's to supply: this change ships every fact as `unknown`.
    built. Until then `compliance-score -compare` can compare two runs only if the operator produced
    them under different scopes by other means.
 
-1. The organization facts (D9) have no values yet; they need the user.
+1. *Resolved 2026-11-14:* no organization facts are needed (D9).
 2. The first covered and uncovered documents (D8) need choosing by the user, 10–15 in all.
 3. A human review sample of LLM-adjudicated labels (D7): who, how many, when.

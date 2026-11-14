@@ -830,9 +830,5 @@ thinking_type = "disabled"   # no reasoning: the output is a plain activity list
 [compliance-review.uncovered-docs]    # activities the snapshot is expected not to cover
 # 799 = "AI agent research paper"
 
-# Organization facts (research 2026111103 section 6.1). status is asserted | inferred | disputed |
-# unknown; an absent fact is unknown. Recorded with each gold run; the reviewer does not use them yet.
-# [compliance-review.organization.operating_territories]
-# value = ["CN"]
-# status = "asserted"
-# source = "who said so"
+# There is no organization table: activity context (actor, role, territory, ...) is extracted from the
+# documents with provenance (research 2026111103, activity context); the table was retired 2026-11-14.

@@ -3,29 +3,23 @@ package complianceeval
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 )
 
 // GoldRun is a complete gold labelling, ready to save.
 type GoldRun struct {
-	SnapshotID   int64
-	RulesFile    string
-	RulesSHA256  string
-	Profiles     Profiles
-	PoolLimit    int
-	Organization map[string]OrgFact
-	Documents    []*GoldDocument
+	SnapshotID  int64
+	RulesFile   string
+	RulesSHA256 string
+	Profiles    Profiles
+	PoolLimit   int
+	Documents   []*GoldDocument
 }
 
 // SaveRun writes the run, its activities and judgements in one transaction and returns the run key
 // and id. now is a parameter so tests control the key.
 func SaveRun(ctx context.Context, db *sql.DB, r *GoldRun, now time.Time) (key string, id int64, err error) {
-	org, err := json.Marshal(r.Organization)
-	if err != nil {
-		return "", 0, err
-	}
 	key = now.Format("20060102_150405")
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -33,10 +27,10 @@ func SaveRun(ctx context.Context, db *sql.DB, r *GoldRun, now time.Time) (key st
 	}
 	defer tx.Rollback()
 	if err := tx.QueryRowContext(ctx, `INSERT INTO testbed.compliance_gold_runs
-		(run_key, snapshot_id, rules_file, rules_sha256, annotator_1, annotator_2, adjudicator, pool_limit, organization)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		(run_key, snapshot_id, rules_file, rules_sha256, annotator_1, annotator_2, adjudicator, pool_limit)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
 		key, r.SnapshotID, r.RulesFile, r.RulesSHA256, r.Profiles.Annotator1, r.Profiles.Annotator2,
-		r.Profiles.Adjudicator, r.PoolLimit, string(org)).Scan(&id); err != nil {
+		r.Profiles.Adjudicator, r.PoolLimit).Scan(&id); err != nil {
 		return "", 0, fmt.Errorf("insert gold run: %w", err)
 	}
 	for _, d := range r.Documents {

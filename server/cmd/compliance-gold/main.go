@@ -1,7 +1,7 @@
 // Command compliance-gold labels the Compliance Review gold set (openspec compliance-reviewer-phase2).
 //
 // It reads the documents listed in doc-review.local.toml ([compliance-review.covered-docs] and
-// [compliance-review.uncovered-docs]) and the organization context, checks that the evaluation
+// [compliance-review.uncovered-docs]), checks that the evaluation
 // snapshot still matches the corpus, then has two model annotators label activities and judge a
 // pooled candidate list, with an adjudicator settling disagreements. The model profiles come from
 // COMPLIANCE_REVIEWER_ANNOTATOR_1, COMPLIANCE_REVIEWER_ANNOTATOR_2 and COMPLIANCE_ADJUDICATOR.
@@ -129,7 +129,7 @@ func run(snapshot int64, cfgPath string, poolLimit int, user string, check bool)
 
 	run := &complianceeval.GoldRun{
 		SnapshotID: snapshot, RulesFile: complianceeval.RulesFile, RulesSHA256: p.Prompts.RulesSHA256,
-		Profiles: profiles, PoolLimit: poolLimit, Organization: cfg.OrganizationContext(),
+		Profiles: profiles, PoolLimit: poolLimit,
 	}
 	for _, d := range docs {
 		start := time.Now()

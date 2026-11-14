@@ -101,18 +101,3 @@ the run and be named.
 #### Scenario: Listed in both
 - **WHEN** record 416 appears in both tables
 - **THEN** the run stops and names record 416
-
-### Requirement: Organization context is recorded with the gold run
-
-`[compliance-review.organization]` SHALL hold each fact with a value, a status of `asserted`,
-`inferred`, `disputed` or `unknown`, and a source; an absent fact SHALL be `unknown`. A gold run
-SHALL store a copy of the context it ran with. The reviewer SHALL NOT use the context to decide
-applicability in this change.
-
-#### Scenario: Context stored
-- **WHEN** a gold run starts with the context table present
-- **THEN** the run row holds a copy of the context and later edits to the file do not change it
-
-#### Scenario: No context table
-- **WHEN** the table is absent
-- **THEN** every fact is recorded as `unknown`
