@@ -120,7 +120,14 @@ narrower lines.
 
 ## Short JSON schema
 
-Top level: `{"v":2,"l":"zh","p":[...]}`.
+The top-level object has exactly three keys: `v`, `l`, and `p`.
+`o` and `g` are fields of an individual provision inside `p`; never put them
+or any other provision field at the top level. If there are no provisions,
+return exactly this shape, using the detected language code:
+
+```json
+{"v":2,"l":"zh","p":[]}
+```
 
 - `v`: always integer `2`.
 - `l`: detected source-language code, e.g. `zh` or `en`.
