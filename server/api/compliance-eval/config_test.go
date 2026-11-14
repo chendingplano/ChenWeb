@@ -7,10 +7,9 @@ import (
 
 func TestParseGoldConfigDocuments(t *testing.T) {
 	raw := `
-[compliance-review.covered-docs]
+[compliance-review.gold-docs]
 416 = "waste sorting standard"
 371 = "green building"
-[compliance-review.uncovered-docs]
 799 = "AI agent paper"
 `
 	c, err := ParseGoldConfig([]byte(raw))
@@ -18,15 +17,17 @@ func TestParseGoldConfigDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 	docs, _ := c.Documents()
-	if len(docs) != 3 || docs[0].RecordID != 371 || !docs[0].Covered || docs[2].RecordID != 799 || docs[2].Covered {
+	if len(docs) != 3 || docs[0].RecordID != 371 || docs[0].Reason != "green building" || docs[2].RecordID != 799 {
 		t.Fatalf("docs = %+v", docs)
 	}
 }
 
 func TestParseGoldConfigRefusals(t *testing.T) {
 	for name, tc := range map[string]struct{ raw, want string }{
-		"both tables": {"[compliance-review.covered-docs]\n416='a'\n[compliance-review.uncovered-docs]\n416='b'\n", "record 416 is listed in both"},
-		"not an id":   {"[compliance-review.covered-docs]\nabc='a'\n", `"abc" is not a record id`},
+		"retired covered table":   {"[compliance-review.covered-docs]\n416='a'\n", "merged into [compliance-review.gold-docs]"},
+		"retired uncovered table": {"[compliance-review.uncovered-docs]\n", "merged into [compliance-review.gold-docs]"},
+		"listed twice":            {"[compliance-review.gold-docs]\n416='a'\n0416='b'\n", "record 416 is listed twice"},
+		"not an id":               {"[compliance-review.gold-docs]\nabc='a'\n", `"abc" is not a record id`},
 	} {
 		if _, err := ParseGoldConfig([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want containing %q", name, err, tc.want)
@@ -45,7 +46,7 @@ func TestParseGoldConfigAbsentTables(t *testing.T) {
 }
 
 func TestParseGoldConfigMaxCandidates(t *testing.T) {
-	c, err := ParseGoldConfig([]byte("[compliance-review.covered-docs]\n416='a'\n"))
+	c, err := ParseGoldConfig([]byte("[compliance-review.gold-docs]\n416='a'\n"))
 	if err != nil || c.MaxCandidates != DefaultMaxCandidates {
 		t.Fatalf("absent: max=%v err=%v, want %d", c, err, DefaultMaxCandidates)
 	}
@@ -58,8 +59,8 @@ func TestParseGoldConfigMaxCandidates(t *testing.T) {
 			t.Errorf("max_candidates=%s: err = %v", bad, err)
 		}
 	}
-	c, _ = ParseGoldConfig([]byte("[compliance-review.uncovered-docs]\n799='paper'\n"))
-	if d, ok := c.Find(799); !ok || d.Covered || d.Reason != "paper" {
+	c, _ = ParseGoldConfig([]byte("[compliance-review.gold-docs]\n799='paper'\n"))
+	if d, ok := c.Find(799); !ok || d.Reason != "paper" {
 		t.Errorf("find 799 = %+v %v", d, ok)
 	}
 	if _, ok := c.Find(1); ok {

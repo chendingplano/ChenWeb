@@ -52,6 +52,13 @@
 - [x] 7.8 Skill: rules 1.1.0 (queries, cited documents, judging added passages), SKILL.md steps for expand and augment, CHANGELOG, `versions.json`.
 - [x] 7.9 Tests for each part; `go build ./server/...`; update devdoc 2026111201 and the phase 2 handoff; register the reused identifier parser and update Artifact Search with `create-reusable-module`. *Smoke run on record 416 with review run 101 (synthetic labels, data deleted); module `20261114-02` Document Identifier Keys registered (new capability `document-identifiers`), Artifact Search 1.2.0.*
 
+## 8. One gold document list (design D8 revised 2026-11-14)
+
+- [x] 8.1 `[compliance-review.gold-docs]` replaces `covered-docs` and `uncovered-docs` in the config parser, `compliance-gold` and `doc-review.local.toml`; the old tables, even empty, are refused with a message naming the new one; a record listed twice is refused. (Supersedes the two tables of 4.1.)
+- [x] 8.2 `save` and `compliance-score` report how many gold activities have a governing passage and how many have none (`show` already did).
+- [x] 8.3 Project migration `20261114000004` drops `testbed.compliance_gold_activities.covered`, applied to the dev database; Down/Up tested in a rolled-back transaction.
+- [x] 8.4 Tests; skill SKILL.md and CHANGELOG; devdoc 2026111201 and the phase 2 handoff.
+
 ## 5. Close out
 
 - [x] 5.1 Update research 2026111103 §12 status and devdoc 2026111201; answer the coding-practice questions (what knowledge changed, which docs are stale).

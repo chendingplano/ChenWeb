@@ -78,7 +78,7 @@ func TestBuildAgentDocument(t *testing.T) {
 	doc, err := BuildAgentDocument(pf, acts, []AgentLabel{
 		{Activity: "a1", Candidate: "chunk/c1", Label: "governs", Reason: "states the retention duty"},
 		{Activity: "a1", Candidate: "provision/p1", Label: "topical"},
-	}, GoldDoc{RecordID: 416, Covered: true})
+	}, GoldDoc{RecordID: 416})
 	if err != nil {
 		t.Fatal(err)
 	}

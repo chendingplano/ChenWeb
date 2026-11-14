@@ -59,6 +59,7 @@ type ReviewRow struct {
 // denominator is zero is reported as not defined (negative N means no data), never as 0 or 1.
 type Metrics struct {
 	GoldActivities, ReviewRows        int
+	GoldWithGoverns                   int // gold activities with a governing passage; the rest expect no grounding
 	MatchedActivities                 int // gold activities covered by a reviewer row
 	SupportedRows                     int // reviewer rows covering a gold activity
 	ActivityPrecision, ActivityRecall Ratio
@@ -140,6 +141,9 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 	rowCovers := make([][]int, len(rows)) // gold activities each row covers
 	for gi, g := range gold {
 		m.AmbiguousJudgements += g.Ambiguous
+		if len(g.Governs) > 0 {
+			m.GoldWithGoverns++
+		}
 		var cover []ReviewRow
 		for i, r := range rows {
 			if r.Record == g.Record && spansMatch(g.LineStart, g.LineEnd, r.LineStart, r.LineEnd, g.DocumentLevel, r.DocumentLevel) {

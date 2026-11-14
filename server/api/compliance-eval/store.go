@@ -61,9 +61,9 @@ func SaveRun(ctx context.Context, db *sql.DB, r *GoldRun, now time.Time) (key st
 		for _, a := range d.Activities {
 			var actID int64
 			if err := tx.QueryRowContext(ctx, `INSERT INTO testbed.compliance_gold_activities
-				(run_id, input_record_id, covered, activity, object, line_start, line_end, document_level, agreement, rationale, queries, cited_docs)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-				id, d.RecordID, d.Covered, a.Name, a.Object, a.LineStart, a.LineEnd, a.DocumentLevel, a.Agreement, a.Rationale,
+				(run_id, input_record_id, activity, object, line_start, line_end, document_level, agreement, rationale, queries, cited_docs)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+				id, d.RecordID, a.Name, a.Object, a.LineStart, a.LineEnd, a.DocumentLevel, a.Agreement, a.Rationale,
 				pq.Array(nonNil(a.Queries)), pq.Array(nonNil(a.CitedDocs))).Scan(&actID); err != nil {
 				return "", 0, fmt.Errorf("insert activity %q of record %d: %w", a.Name, d.RecordID, err)
 			}

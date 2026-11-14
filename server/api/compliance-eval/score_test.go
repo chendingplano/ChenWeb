@@ -31,7 +31,7 @@ func TestScoreMatchesRecallAndNoGrounding(t *testing.T) {
 		{Record: 1, LineStart: 1, LineEnd: 1, DocumentLevel: true, Candidates: set(400)},
 	}
 	m := Score(gold, rows, nil)
-	if m.MatchedActivities != 5 || m.SupportedRows != 5 || m.ActivityPrecision != (Ratio{5, 6}) || m.ActivityRecall != (Ratio{5, 6}) {
+	if m.GoldWithGoverns != 4 || m.MatchedActivities != 5 || m.SupportedRows != 5 || m.ActivityPrecision != (Ratio{5, 6}) || m.ActivityRecall != (Ratio{5, 6}) {
 		t.Fatalf("matching: %+v", m)
 	}
 	// governing records: 100,101 (reported 100), 200 (row says no grounding), 400 (reported) -> 2 of 4

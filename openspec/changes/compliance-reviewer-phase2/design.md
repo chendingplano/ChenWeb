@@ -185,8 +185,9 @@ gates are phase 3 and later.
 - **Hash duplicates are not the only duplicates.** → Documented non-goal; the gold set includes
   edition pairs, labelled so phase 3 can measure them.
 - **Annotation is the cost.** → Start with a small, deliberately mixed set (research suggests
-  10–15 documents for phase 1; this change targets that many with both covered and uncovered
-  activities) and report sample size and intervals, not a headline score.
+  10–15 documents for phase 1; this change targets that many, giving activities with a governing
+  passage and activities with none, as `show`, `save` and the scorer report) and report sample
+  size and intervals, not a headline score.
 - **Dev corpus is thin.** 143 of 207 dev records cannot be indexed and provisions are nearly
   absent. → The snapshot lists only records that are indexed; its counts show how thin it is, and
   scores say so. Provision grounding stays unmeasured until provisions exist.
@@ -217,13 +218,21 @@ agreement is not independent legal validation and that interpretation needs qual
 So scores from this gold set are reported as LLM-adjudicated, never as release-gate evidence, and
 a human review of a sample (including a check for governing records the pool missed) is listed as a follow-up, not silently skipped.
 
-**D8. Gold documents are listed in `ChenWeb/doc-review.local.toml`.** Two tables,
-`[compliance-review.covered-docs]` (documents with activities the snapshot is expected to cover)
-and `[compliance-review.uncovered-docs]` (documents with activities it is expected not to cover).
-Each key is a `kb.inputs` record id and each value a one-line reason. The tables select what
-the gold run labels; they are not labels. A record in both tables, or one the agent's `pool` or
-`save` step is given without being listed, is an error naming it. Covered and uncovered are
-relative to the whole knowledge base.
+**D8. Gold documents are listed in `ChenWeb/doc-review.local.toml` (revised 2026-11-14).** One
+table, `[compliance-review.gold-docs]`: each key is a `kb.inputs` record id and each value a
+one-line reason. The table selects what the gold run labels; it is not a label. A record the
+agent's `pool`, `expand`, `save` or `augment` step is given without being listed is an error naming
+it, and so is a key that is not a record id or a record listed twice.
+
+*Earlier revision:* two tables, `covered-docs` and `uncovered-docs`, for documents whose activities
+the knowledge base was expected to cover or not. The user merged them on 2026-11-14 because the
+split only predicted what the labels decide: whether an activity has grounding is whether any of
+its pooled passages is labelled `governs`, and one document usually has both kinds. The scorer never
+read the split, and procedures that differ by list would break the rule that the gold and the
+reviewer treat every document the same way. Instead, `show`, `save` and `compliance-score` report
+how many gold activities have a governing passage and how many have none, which shows whether a
+gold set is mixed. Either old table, even empty, is refused with a message naming the new one, so
+no listed document is dropped; migration `20261114000004` drops the per-activity `covered` column.
 
 **D9. No organization profile (revised 2026-11-14).** The first build had a
 `[compliance-review.organization]` table of organization facts (operating territories, legal
@@ -248,5 +257,6 @@ together with the storage that keeps it, so the phase 2 baseline is not disturbe
    stability is checked between runs made against different knowledge-base states.
 
 1. *Resolved 2026-11-14:* no organization facts are needed (D9).
-2. The first covered and uncovered documents (D8) need choosing by the user, 10–15 in all.
+2. The first gold documents (D8) need choosing by the user, 10–15 in all, so that the gold set has
+   activities with a governing passage and activities with none.
 3. A human review sample of the gold labels (agent-made in the first iteration; D4, D7): who, how many, when.

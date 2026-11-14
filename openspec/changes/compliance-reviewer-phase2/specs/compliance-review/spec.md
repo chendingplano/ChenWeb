@@ -174,10 +174,22 @@ LLM-adjudicated.
 
 ### Requirement: Gold documents are listed in configuration
 
-The documents a gold run labels SHALL be the record ids listed in `[compliance-review.covered-docs]`
-and `[compliance-review.uncovered-docs]` of `doc-review.local.toml`. A record listed in both
-tables, or one that is not listed, SHALL stop the run and be named.
+The documents a gold run labels SHALL be the record ids listed in the one table
+`[compliance-review.gold-docs]` of `doc-review.local.toml`. A record that is not listed, a key
+that is not a record id, or a record listed twice SHALL stop the run and be named. The retired
+tables `[compliance-review.covered-docs]` and `[compliance-review.uncovered-docs]` SHALL be refused
+with a message naming the new table. Whether an activity has grounding SHALL come from its labels,
+and `show`, `save` and the scorer SHALL report how many gold activities have a governing passage and
+how many have none.
 
-#### Scenario: Listed in both
-- **WHEN** record 416 appears in both tables
-- **THEN** the run stops and names record 416
+#### Scenario: Not listed
+- **WHEN** the agent pools record 416 and `[compliance-review.gold-docs]` does not list it
+- **THEN** pooling stops and names record 416 and the table
+
+#### Scenario: Retired table
+- **WHEN** `doc-review.local.toml` still has `[compliance-review.covered-docs]`, even empty
+- **THEN** every command that reads the config stops and says the tables were merged into `[compliance-review.gold-docs]`
+
+#### Scenario: Mix reported
+- **WHEN** a gold run is saved with 60 activities, 41 of which have a `governs` passage
+- **THEN** `save` reports 41 with a governing passage and 19 with none

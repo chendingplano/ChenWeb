@@ -107,7 +107,7 @@ func TestLabelDocumentAgreementAdjudicationAndPool(t *testing.T) {
 		excluded, scoped = req.Filters.ExcludeRecordIDs, req.Filters.RecordIDs
 		return twoResults(req)
 	})
-	doc, err := p.LabelDocument(context.Background(), GoldDoc{RecordID: 416, Covered: true})
+	doc, err := p.LabelDocument(context.Background(), GoldDoc{RecordID: 416})
 	if err != nil {
 		t.Fatal(err)
 	}

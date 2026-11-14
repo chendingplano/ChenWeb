@@ -20,8 +20,8 @@
 //
 //	compliance-gold panel -snapshot 3 -user <user id> [-check]
 //
-// A document must be listed in [compliance-review.covered-docs] or [compliance-review.uncovered-docs]
-// of doc-review.local.toml, and [reviewers.compliance].max_candidates caps each activity's pool. The
+// A document must be listed in [compliance-review.gold-docs] of doc-review.local.toml, and
+// [reviewers.compliance].max_candidates caps each activity's first-pass pool. The
 // pool searches the whole knowledge base and leaves out the document, its byte-identical copies and
 // the records indexed after the snapshot. Run from ChenWeb with `mise exec --`.
 package main
@@ -87,7 +87,7 @@ func loadConfig(path string) (*complianceeval.GoldConfig, error) {
 func listedDoc(cfg *complianceeval.GoldConfig, cfgPath string, record int64) (complianceeval.GoldDoc, error) {
 	d, ok := cfg.Find(record)
 	if !ok {
-		return d, fmt.Errorf("record %d is not listed in [compliance-review.covered-docs] or [compliance-review.uncovered-docs] of %s", record, cfgPath)
+		return d, fmt.Errorf("record %d is not listed in %s of %s", record, complianceeval.GoldDocsTable, cfgPath)
 	}
 	return d, nil
 }
@@ -586,8 +586,18 @@ func cmdSave(args []string) error {
 	if pf.BaseRun != "" {
 		how = fmt.Sprintf("augmented from %s with %d new labels from review run %d", pf.BaseRun, len(labels), pf.ReviewRun)
 	}
-	fmt.Printf("saved gold run %s (id %d): record %d, %d activities, %d labels in this file; %s, rules %s\n",
-		key, id, pf.RecordID, len(run.Documents[0].Activities), len(labels), how, rules.File)
+	withGoverns := 0
+	for _, a := range run.Documents[0].Activities {
+		for _, j := range a.Judgements {
+			if j.Final == "governs" {
+				withGoverns++
+				break
+			}
+		}
+	}
+	nActs := len(run.Documents[0].Activities)
+	fmt.Printf("saved gold run %s (id %d): record %d, %d activities (%d with a governing passage, %d with none), %d labels in this file; %s, rules %s\n",
+		key, id, pf.RecordID, nActs, withGoverns, nActs-withGoverns, len(labels), how, rules.File)
 	return nil
 }
 
@@ -641,7 +651,7 @@ func cmdPanel(args []string) error {
 	}
 	docs, _ := cfg.Documents()
 	if len(docs) == 0 {
-		return fmt.Errorf("no documents listed in [compliance-review.covered-docs] or [compliance-review.uncovered-docs] of %s", *cfgPath)
+		return fmt.Errorf("no documents listed in %s of %s", complianceeval.GoldDocsTable, *cfgPath)
 	}
 	profiles, err := complianceeval.ResolveProfiles(os.Getenv)
 	if err != nil {

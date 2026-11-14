@@ -824,12 +824,13 @@ max_candidates = 50   # gold set only: candidates pooled per activity for labell
 # The deferred model panel (compliance-gold panel) takes its models from COMPLIANCE_REVIEWER_ANNOTATOR_1,
 # COMPLIANCE_REVIEWER_ANNOTATOR_2 and COMPLIANCE_ADJUDICATOR (profile names in MODEL_DEF_FILE).
 #
-# Documents to label: the key is a kb.inputs record id, the value a one-line reason. A record may not
-# be in both tables. Covered and uncovered are relative to the whole knowledge base.
-[compliance-review.covered-docs]      # activities the knowledge base is expected to cover
+# Documents to label: the key is a kb.inputs record id, the value a one-line reason. Whether an
+# activity has grounding comes from its labels, not from this list: compliance-gold show/save and
+# compliance-score report how many gold activities have a governing passage and how many have none,
+# so pick documents that give both. (The covered-docs and uncovered-docs tables were merged into this
+# one on 2026-11-14; the old tables are refused.)
+[compliance-review.gold-docs]
 # 416 = "rural waste sorting standard"
-
-[compliance-review.uncovered-docs]    # activities the knowledge base is expected not to cover
 # 799 = "AI agent research paper"
 
 # There is no organization table: activity context (actor, role, territory, ...) is extracted from the

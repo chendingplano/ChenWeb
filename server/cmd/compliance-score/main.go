@@ -120,7 +120,8 @@ func run(gold, runs, compare string) error {
 		}
 		fmt.Printf("gold run %s, snapshot %d: %s\n", in.Key, in.SnapshotID, how)
 	}
-	fmt.Printf("%d document(s) scored\n", len(scored))
+	fmt.Printf("%d document(s) scored; gold activities with a governing passage %d, with none %d\n",
+		len(scored), m.GoldWithGoverns, m.GoldActivities-m.GoldWithGoverns)
 	fmt.Printf("  activities: gold %d (covered by a reviewer row: %d), reviewer rows %d (supported by gold: %d)\n", m.GoldActivities, m.MatchedActivities, m.ReviewRows, m.SupportedRows)
 	fmt.Printf("  activity precision:               %s\n", m.ActivityPrecision)
 	fmt.Printf("  activity recall:                  %s\n", m.ActivityRecall)
