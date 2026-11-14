@@ -1,3 +1,4 @@
+import { m } from '$lib/paraglide/messages.js';
 import {
 	MOCK_CATEGORY_SUMMARIES,
 	MOCK_SUMMARY_GRAPH_NODES,
@@ -424,7 +425,34 @@ export type GoldMetricOptionsResponse = {
 
 // Which gold benchmark set a gold view reads: testbed.metrics or the
 // testbed reference, summary, provision or product tables.
-export type GoldKind = 'metrics' | 'references' | 'summaries' | 'provisions' | 'products';
+export type GoldKind = 'metrics' | 'references' | 'summaries' | 'provisions' | 'products' | 'compliance';
+
+export type ComplianceGoldLabel = 'governs' | 'topical' | 'unrelated' | 'ambiguous';
+export type ComplianceGoldJudgement = {
+	id: number; artifact_type: string; artifact_id: string; candidate_record: number;
+	cosine: number | null; final_label: ComplianceGoldLabel; label_1: string; reason_1: string;
+	label_2: string | null; reason_2: string; adjudicated: boolean; rationale: string; found_by: string;
+	source_title: string; passage: string; source_line_spans: unknown; source_available: boolean;
+};
+export type ComplianceGoldActivity = {
+	id: number; activity: string; object: string; line_start: number; line_end: number;
+	document_level: boolean; agreement: string; rationale: string; queries: string[]; cited_docs: string[];
+	judgements: ComplianceGoldJudgement[];
+};
+export type ComplianceGoldData = {
+	run: { id: number; run_key: string; method: string; snapshot_id: number; rules_version: string;
+		rules_file: string; rules_sha256: string; annotator_1: string; annotator_2: string | null;
+		adjudicator: string | null; max_candidates: number; audit_notes: string; created_at: string;
+		base_run_id: number | null; review_run_id: number | null };
+	activities: ComplianceGoldActivity[];
+};
+export async function getGoldCompliance(inputRecordId: number, runId: string): Promise<ComplianceGoldData> {
+	const params = new URLSearchParams({ input_record_id: String(inputRecordId), run_id: runId });
+	const response = await fetchOrThrow<{ status: boolean; data: ComplianceGoldData }>(
+		`${BASE}/compliance/gold?${params}`, m.cgv_load_failed()
+	);
+	return response.data;
+}
 
 // Skill versions and models present in a gold set, for the gold views' filters.
 export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptionsResponse> {
@@ -438,7 +466,9 @@ export async function listGoldOptions(kind: GoldKind): Promise<GoldMetricOptions
 					? 'Failed to list gold provision options'
 					: kind === 'products'
 						? 'Failed to list gold product options'
-						: 'Failed to list gold summary options'
+						: kind === 'compliance'
+							? m.cgv_load_failed()
+							: 'Failed to list gold summary options'
 	);
 }
 

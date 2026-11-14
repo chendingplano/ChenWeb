@@ -24,6 +24,10 @@ var goldRunTables = map[string]string{
 	"products":     "testbed.product_benchmark_runs",
 	"summaries":    "testbed.summary_benchmark_runs",
 	"summary_rows": "testbed.summaries",
+	"compliance": `(SELECT DISTINCT a.input_record_id, r.rules_version AS skill_version,
+		r.annotator_1 AS model_name, r.run_key AS run_id
+		FROM testbed.compliance_gold_runs r
+		JOIN testbed.compliance_gold_activities a ON a.run_id = r.id)`,
 }
 
 // goldRunTable returns the table for kind, or false for an unknown kind.
@@ -154,6 +158,10 @@ func ListGoldProductOptions(c echo.Context) error {
 // ListGoldSummaryOptions handles GET /api/v1/kb/summaries/gold-options.
 func ListGoldSummaryOptions(c echo.Context) error {
 	return listGoldOptions(c, "CWB_KB_SUM_001", goldRunTables["summaries"])
+}
+
+func ListGoldComplianceOptions(c echo.Context) error {
+	return listGoldOptions(c, "20261114-684", goldRunTables["compliance"])
 }
 
 // listGoldOptions lists the (skill version, model) combinations in table, which

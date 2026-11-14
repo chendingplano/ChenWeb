@@ -347,6 +347,11 @@
 						...(pageKey === 'development'
 							? [
 									{
+										id: 'sysadmin-llm-compliance',
+										label: m.nav_sysadmin_llm_compliance(),
+										children: [{ id: 'sysadmin-llm-compliance-gold', label: m.nav_sysadmin_llm_compliance_gold() }]
+									},
+									{
 										id: 'sysadmin-llm-metrics',
 										label: m.nav_sysadmin_llm_metrics(),
 										children: [

@@ -856,6 +856,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/products/gold-options", kbhandler.ListGoldProductOptions)
 	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)
 	apiGroup.GET("/kb/metrics/gold-options", kbhandler.ListGoldMetricOptions)
+	apiGroup.GET("/kb/compliance/gold-options", kbhandler.ListGoldComplianceOptions, kbhandler.MetricScoreAdmin)
+	apiGroup.GET("/kb/compliance/gold", kbhandler.ListGoldCompliance, kbhandler.MetricScoreAdmin)
 	apiGroup.GET("/kb/metrics/ontology-analysis", kbhandler.GetMetricOntologyAnalysis)
 	apiGroup.GET("/kb/metrics/:metric_id/wiki", kbhandler.GetMetricWiki)
 	apiGroup.GET("/kb/metrics/:metric_id/graph", kbhandler.GetMetricGraph)

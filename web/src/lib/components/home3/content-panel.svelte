@@ -14,6 +14,7 @@
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import SummaryGoldView from '$lib/components/home3/summary-gold-view.svelte';
+	import ComplianceGoldView from '$lib/components/home3/compliance-gold-view.svelte';
 	import ReferencesMgmtView from '$lib/components/home3/references-mgmt-view.svelte';
 	import DocGenView from '$lib/components/home3/doc-gen-view.svelte';
 	import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
@@ -230,6 +231,7 @@
 
 	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
 	const retainedPages = [
+		{ id: 'sysadmin-llm-compliance-gold', component: ComplianceGoldView },
 		{ id: 'sysadmin-jetstream-events', component: JetStreamEventsView },
 		{ id: 'sysadmin-jetstream-subjects', component: JetStreamSubjectsView },
 		{ id: 'sysadmin-alert-logs', component: AlertLogsView },
@@ -307,6 +309,7 @@
 			activeMenu?.childId !== 'sysadmin-llm-review-metrics' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-summaries-gold' &&
+			activeMenu?.childId !== 'sysadmin-llm-compliance-gold' &&
 			activeMenu?.childId !== 'sysadmin-llm-metrics-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-summaries-benchmark' &&
 			activeMenu?.childId !== 'sysadmin-llm-references-gold' &&
@@ -406,7 +409,7 @@
 		{#each retainedPages as retained (retained.id)}
 			{#if visitedPages.includes(retained.id)}
 				<div
-					class:h-full={retained.id === 'sysadmin-alert-logs'}
+					class:h-full={retained.id === 'sysadmin-alert-logs' || retained.id === 'sysadmin-llm-compliance-gold'}
 					data-retained-page={retained.id}
 					hidden={activeMenu?.childId !== retained.id}
 					inert={activeMenu?.childId !== retained.id}
