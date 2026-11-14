@@ -9,7 +9,7 @@ import (
 
 // unitDef is a linear conversion into one canonical unit per quantity kind.
 // This is a deliberately minimal placeholder — see doc.go — good enough for
-// the pilot fixture's Time/Luminance/Dimensionless/Angle/Count units, none of
+// the supported Time/Length/Luminance/Dimensionless/Angle/Count units, none of
 // which need an offset (unlike temperature). DR13's `quantity` module
 // replaces this with QUDT-sourced quantity kinds, units, and conversions.
 type unitDef struct {
@@ -21,10 +21,16 @@ var unitRegistry = map[string]unitDef{
 	"ms": {QuantityKind: "Time", ToCanonical: decimal.NewFromInt(1)},
 	"s":  {QuantityKind: "Time", ToCanonical: decimal.NewFromInt(1000)}, // canonical unit for Time is ms
 
+	"mm": {QuantityKind: "Length", ToCanonical: decimal.NewFromInt(1)}, // canonical unit for Length is mm
+	"cm": {QuantityKind: "Length", ToCanonical: decimal.NewFromInt(10)},
+	"m":  {QuantityKind: "Length", ToCanonical: decimal.NewFromInt(1000)},
+
 	"cd/m2": {QuantityKind: "Luminance", ToCanonical: decimal.NewFromInt(1)},
 
 	"ratio":   {QuantityKind: "Dimensionless", ToCanonical: decimal.NewFromInt(1)},
 	"px_pair": {QuantityKind: "Dimensionless", ToCanonical: decimal.NewFromInt(1)},
+	"percent": {QuantityKind: "Dimensionless", ToCanonical: decimal.New(1, -2)},
+	"%":       {QuantityKind: "Dimensionless", ToCanonical: decimal.New(1, -2)},
 	// "1" is the unit string real extract_metrics output used for a ratio
 	// value on at least one document (e.g. "1000:1" contrast extracted with
 	// metric_unit="1" instead of "ratio" -- confirmed against a real

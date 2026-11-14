@@ -43,7 +43,7 @@ func TestComplianceChunkNoGroundingIsNormalResult(t *testing.T) {
 	if gotReq.Criteria.MinCosine != 0 {
 		t.Errorf("MinCosine must stay unset")
 	}
-	if got := strings.Join(gotReq.Filters.ArtifactTypes, ","); got != "provision,chunk" {
+	if got := strings.Join(gotReq.Filters.ArtifactTypes, ","); got != "chunk" {
 		t.Errorf("artifact types=%q", got)
 	}
 }
@@ -61,8 +61,8 @@ func TestComplianceChunkReportsCandidatesDeduplicated(t *testing.T) {
 	if err != nil || len(fs) != 1 {
 		t.Fatalf("err=%v findings=%d", err, len(fs))
 	}
-	if calls != 2 {
-		t.Errorf("searches=%d want 2 (one per query)", calls)
+	if calls != 6 {
+		t.Errorf("searches=%d want 6 (each query searches provisions, metrics and chunks independently)", calls)
 	}
 	if fs[0].FindingType != "compliance_grounding_candidates" || strings.Count(fs[0].Description, "[provision p1]") != 1 {
 		t.Errorf("unexpected finding %+v", fs[0])

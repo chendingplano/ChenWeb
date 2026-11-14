@@ -115,6 +115,14 @@ func searchFunc(db *sql.DB) func(context.Context, searchengine.Request) (*search
 	}
 }
 
+// loadFunc uses the same search display loader for independent trace candidates.
+func loadFunc(db *sql.DB) func(context.Context, []searchengine.ArtifactRef) ([]searchengine.Result, error) {
+	cfg := searchengine.LoadConfig()
+	return func(ctx context.Context, refs []searchengine.ArtifactRef) ([]searchengine.Result, error) {
+		return searchengine.Load(ctx, db, cfg, refs)
+	}
+}
+
 // attributeSearch attributes the pool searches' model calls (embedding, keyword model) to user, or
 // to the record's owner when user is empty, and returns the user id used.
 func attributeSearch(ctx context.Context, db *sql.DB, record int64, user string) (context.Context, string, error) {
@@ -277,6 +285,9 @@ func cmdPool(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := complianceeval.RequireMetricSnapshot(ctx, db, *snapshot); err != nil {
+		return err
+	}
 	added, err := verifySnapshot(ctx, db, *snapshot)
 	if err != nil {
 		return err
@@ -298,7 +309,7 @@ func cmdPool(args []string) error {
 	if err != nil {
 		return err
 	}
-	p := &complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Search: searchFunc(db)}
+	p := &complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Search: searchFunc(db), Load: loadFunc(db)}
 	pas, err := complianceeval.PoolActivities(ctx, p, acts, exclude, cites)
 	if err != nil {
 		return err
@@ -365,6 +376,11 @@ func cmdExpand(args []string) error {
 	if err != nil {
 		return err
 	}
+	if pf.BaseRun == "" {
+		if err := complianceeval.RequireMetricSnapshot(ctx, db, pf.SnapshotID); err != nil {
+			return err
+		}
+	}
 	if _, err := verifySnapshot(ctx, db, pf.SnapshotID); err != nil {
 		return err
 	}
@@ -376,7 +392,7 @@ func cmdExpand(args []string) error {
 	if err != nil {
 		return fmt.Errorf("pool file %s: %w", *poolPath, err)
 	}
-	p := &complianceeval.Pipeline{MaxCandidates: pf.MaxCandidates, Search: searchFunc(db)}
+	p := &complianceeval.Pipeline{MaxCandidates: pf.MaxCandidates, Search: searchFunc(db), Load: loadFunc(db)}
 	added, err := complianceeval.ExpandPool(ctx, p, &pf, acts, labels)
 	if err != nil {
 		return err
@@ -539,6 +555,14 @@ func cmdSave(args []string) error {
 		return err
 	}
 	defer db.Close()
+	if pf.BaseRun == "" {
+		if !strings.HasPrefix(rules.Version, "2.") {
+			return fmt.Errorf("initial metric-inclusive gold requires rules 2.x; rules %s are retained for historical augmentation", rules.Version)
+		}
+		if err := complianceeval.RequireMetricSnapshot(ctx, db, pf.SnapshotID); err != nil {
+			return err
+		}
+	}
 	if _, err := verifySnapshot(ctx, db, pf.SnapshotID); err != nil {
 		return err
 	}
@@ -662,6 +686,9 @@ func cmdPanel(args []string) error {
 		return err
 	}
 	defer db.Close()
+	if err := complianceeval.RequireMetricSnapshot(ctx, db, *snapshot); err != nil {
+		return err
+	}
 	added, err := verifySnapshot(ctx, db, *snapshot)
 	if err != nil {
 		return err
@@ -679,7 +706,7 @@ func cmdPanel(args []string) error {
 		}
 		return complianceeval.Labeller{Name: ref, Model: model, Client: c}, nil
 	}
-	p := complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Search: searchFunc(db)}
+	p := complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Search: searchFunc(db), Load: loadFunc(db)}
 	if p.A1, err = build(profiles.Annotator1); err != nil {
 		return err
 	}
@@ -705,7 +732,7 @@ func cmdPanel(args []string) error {
 
 	run := &complianceeval.GoldRun{
 		Method: complianceeval.MethodModelPanel, SnapshotID: *snapshot, RulesFile: complianceeval.RulesFile,
-		RulesVersion: "v1", RulesSHA256: p.Prompts.RulesSHA256, Profiles: profiles, MaxCandidates: cfg.MaxCandidates,
+		RulesVersion: "2.0.0", RulesSHA256: p.Prompts.RulesSHA256, Profiles: profiles, MaxCandidates: cfg.MaxCandidates,
 	}
 	for _, d := range docs {
 		start := time.Now()

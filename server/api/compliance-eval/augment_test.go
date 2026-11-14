@@ -107,3 +107,29 @@ func TestCitationIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestAugmentLegacyRunKeepsOriginalArtifactScope(t *testing.T) {
+	run := storedRun()
+	run.ManifestVersion = 1
+	acts := []Activity{run.Activities[0].Activity}
+	rows := []ReviewRow{{Record: run.RecordID, LineStart: 2, LineEnd: 2, Artifacts: []ReviewCandidate{{Key: "metric/m1", Record: 9}}}}
+	load := func([]searchengine.ArtifactRef) (map[string]Candidate, error) {
+		t.Fatal("legacy augmentation must not load metric")
+		return nil, nil
+	}
+	_, n, err := AugmentPool(run, acts, 200, rows, set(9), nil, load)
+	if err != nil || n != 0 {
+		t.Fatalf("legacy augmentation n=%d err=%v", n, err)
+	}
+	run.ManifestVersion = 2
+	load = func(refs []searchengine.ArtifactRef) (map[string]Candidate, error) {
+		if len(refs) != 1 || refs[0].Type != "metric" {
+			t.Fatalf("metric refs: %v", refs)
+		}
+		return map[string]Candidate{"metric/m1": {ArtifactType: "metric", ArtifactID: "m1", RecordID: 9}}, nil
+	}
+	_, n, err = AugmentPool(run, acts, 200, rows, set(9), nil, load)
+	if err != nil || n != 1 {
+		t.Fatalf("v2 augmentation n=%d err=%v", n, err)
+	}
+}

@@ -204,3 +204,18 @@ func TestScoreHitsOnRecordsAddedAfterSnapshotAreUnjudged(t *testing.T) {
 		t.Errorf("grounding recall = %v", m.GroundingRecall)
 	}
 }
+
+func TestMetricCandidateParsingAndScoring(t *testing.T) {
+	row, err := ParseReviewRow(1, "compliance_candidates_found", "Activity", "2-3", "Activity: inspect\n\n- [metric m42] (cosine 0.012) record 9 Standard: limit 10 mg/L\n")
+	if err != nil || len(row.Artifacts) != 1 || row.Artifacts[0].Key != "metric/m42" || *row.Artifacts[0].Cosine != 0.012 {
+		t.Fatalf("metric row=%+v err=%v", row, err)
+	}
+	g := []GoldAct{{Record: 1, LineStart: 2, LineEnd: 3, Governs: map[int64]bool{9: true}, Labels: map[string]string{"metric/m42": "governs"}}}
+	m := Score(g, []ReviewRow{row}, map[int64]bool{9: true})
+	if m.CandidatePrecision.Num != 1 || m.CandidatePrecision.Den != 1 || m.GroundingRecall.Num != 1 {
+		t.Fatalf("metric score=%+v", m)
+	}
+	if m.CandidatesByArtifactType["metric"].Labels["governs"] != 1 {
+		t.Fatalf("metric statistics=%+v", m.CandidatesByArtifactType)
+	}
+}

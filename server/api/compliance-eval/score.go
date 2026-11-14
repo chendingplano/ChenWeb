@@ -55,9 +55,17 @@ type ReviewRow struct {
 	Artifacts     []ReviewCandidate
 }
 
+// ArtifactCandidateStats reports candidate outcomes separately for metrics, provisions and chunks.
+type ArtifactCandidateStats struct {
+	Labels                               map[string]int
+	NotInPool, OnNewRecords, OnOwnCopies int
+	Precision                            Ratio
+}
+
 // Metrics are the figures of one scoring, each with the count behind it. A ratio whose
 // denominator is zero is reported as not defined (negative N means no data), never as 0 or 1.
 type Metrics struct {
+	CandidatesByArtifactType          map[string]*ArtifactCandidateStats
 	GoldActivities, ReviewRows        int
 	GoldWithGoverns                   int // gold activities with a governing passage; the rest expect no grounding
 	MatchedActivities                 int // gold activities covered by a reviewer row
@@ -136,7 +144,7 @@ func spansMatch(aS, aE, bS, bE int, aDoc, bDoc bool) bool {
 // treats every record as inside the snapshot. A passage on a snapshot record that the gold never
 // judged is unjudged too (outside the pool); it is never counted as wrong (design D12).
 func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics {
-	m := Metrics{GoldActivities: len(gold), ReviewRows: len(rows), CandidateLabels: map[string]int{}}
+	m := Metrics{GoldActivities: len(gold), ReviewRows: len(rows), CandidateLabels: map[string]int{}, CandidatesByArtifactType: map[string]*ArtifactCandidateStats{}}
 	rowSupported := make([]bool, len(rows))
 	rowCovers := make([][]int, len(rows)) // gold activities each row covers
 	for gi, g := range gold {
@@ -210,8 +218,15 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 		}
 		m.SupportedRows++
 		for _, c := range rows[i].Artifacts {
+			typ, _, _ := strings.Cut(c.Key, "/")
+			stats := m.CandidatesByArtifactType[typ]
+			if stats == nil {
+				stats = &ArtifactCandidateStats{Labels: map[string]int{}}
+				m.CandidatesByArtifactType[typ] = stats
+			}
 			if inSnapshot != nil && !inSnapshot[c.Record] {
 				m.CandidatesOnNewRecords++
+				stats.OnNewRecords++
 				continue
 			}
 			best, ownCopy := "", false
@@ -223,16 +238,21 @@ func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics 
 			}
 			if best == "" {
 				m.CandidatesNotInPool++
+				stats.NotInPool++
 				continue
 			}
 			if ownCopy {
 				m.CandidatesOnOwnCopies++
+				stats.OnOwnCopies++
 			}
 			m.CandidateLabels[best]++
+			stats.Labels[best]++
 			if best != labelAmbiguous {
 				m.CandidatePrecision.Den++
+				stats.Precision.Den++
 				if best == labelGoverns {
 					m.CandidatePrecision.Num++
+					stats.Precision.Num++
 				}
 			}
 		}

@@ -67,3 +67,22 @@ func TestAddedListsOnlyNewRecords(t *testing.T) {
 		t.Fatalf("a removed record must still be a difference, new ones must not: %v", d)
 	}
 }
+
+func TestDiffMetricFingerprintAndLegacyScope(t *testing.T) {
+	m := Member{RecordID: 1, ManifestVersion: 2, MetricCount: 3, MetricFingerprint: "old"}
+	c := m
+	c.MetricFingerprint = "changed semantic payload, vector, keywords or provenance"
+	if got := Diff([]Member{m}, map[int64]Member{1: c}); len(got) != 1 || !contains(got[0].Reason, "metric fingerprint") {
+		t.Fatalf("same-count metric edits must invalidate v2: %v", got)
+	}
+	m.ManifestVersion = 1
+	if got := Diff([]Member{m}, map[int64]Member{1: c}); len(got) != 0 {
+		t.Fatalf("legacy snapshots must ignore metrics: %v", got)
+	}
+	m.ManifestVersion = 2
+	c = m
+	c.MetricCount++
+	if got := Diff([]Member{m}, map[int64]Member{1: c}); len(got) != 1 || !contains(got[0].Reason, "metric artifacts 3 -> 4") {
+		t.Fatalf("metric count drift: %v", got)
+	}
+}

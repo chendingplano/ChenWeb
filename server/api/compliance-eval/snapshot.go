@@ -18,11 +18,14 @@ import (
 
 // Member is the state of one record in the searchable corpus.
 type Member struct {
-	RecordID       int64
-	MD5            string
-	Generation     int64
-	ChunkCount     int
-	ProvisionCount int
+	RecordID          int64
+	MD5               string
+	Generation        int64
+	ChunkCount        int
+	ProvisionCount    int
+	ManifestVersion   int
+	MetricCount       int
+	MetricFingerprint string
 }
 
 // Difference names one member that no longer matches the manifest.
@@ -59,6 +62,14 @@ func Diff(manifest []Member, current map[int64]Member) []Difference {
 		if c.ProvisionCount != m.ProvisionCount {
 			why = append(why, fmt.Sprintf("provision artifacts %d -> %d", m.ProvisionCount, c.ProvisionCount))
 		}
+		if m.ManifestVersion >= 2 {
+			if c.MetricCount != m.MetricCount {
+				why = append(why, fmt.Sprintf("metric artifacts %d -> %d", m.MetricCount, c.MetricCount))
+			}
+			if c.MetricFingerprint != m.MetricFingerprint {
+				why = append(why, "metric fingerprint changed")
+			}
+		}
 		if len(why) > 0 {
 			out = append(out, Difference{m.RecordID, strings.Join(why, "; ")})
 		}
@@ -67,15 +78,23 @@ func Diff(manifest []Member, current map[int64]Member) []Difference {
 }
 
 // CurrentIndexed reads the present state of every indexed record: each kb.inputs row with at least
-// one chunk or provision search artifact.
+// one chunk, provision or metric search artifact.
 func CurrentIndexed(ctx context.Context, db *sql.DB) (map[int64]Member, error) {
-	rows, err := db.QueryContext(ctx, `
+	return currentIndexed(ctx, db, 2)
+}
+
+func currentIndexed(ctx context.Context, db *sql.DB, version int) (map[int64]Member, error) {
+	query := `
 		SELECT i.id, COALESCE(i.md5, ''), COALESCE(s.generation, 0), COALESCE(c.n, 0), COALESCE(p.n, 0)
 		FROM kb.inputs i
 		LEFT JOIN kb.chunk_search_state s ON s.input_record_id = i.id
 		LEFT JOIN (SELECT input_record_id, count(*) AS n FROM kb.search_artifacts_chunk GROUP BY 1) c ON c.input_record_id = i.id
 		LEFT JOIN (SELECT input_record_id, count(*) AS n FROM kb.search_artifacts_provision GROUP BY 1) p ON p.input_record_id = i.id
-		WHERE COALESCE(c.n, 0) > 0 OR COALESCE(p.n, 0) > 0`)
+		WHERE COALESCE(c.n, 0) > 0 OR COALESCE(p.n, 0) > 0`
+	if version >= 2 {
+		query = metricIndexedSQL
+	}
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("read indexed records: %w", err)
 	}
@@ -83,7 +102,12 @@ func CurrentIndexed(ctx context.Context, db *sql.DB) (map[int64]Member, error) {
 	out := map[int64]Member{}
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount); err != nil {
+		m.ManifestVersion = version
+		args := []any{&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount}
+		if version >= 2 {
+			args = append(args, &m.MetricCount, &m.MetricFingerprint)
+		}
+		if err := rows.Scan(args...); err != nil {
 			return nil, err
 		}
 		out[m.RecordID] = m
@@ -130,14 +154,14 @@ func Record(ctx context.Context, db *sql.DB, name, embeddingModel, notes string)
 	}
 	defer tx.Rollback()
 	var snapID int64
-	if err := tx.QueryRowContext(ctx, `INSERT INTO testbed.compliance_eval_snapshots (name, embedding_model, notes)
-		VALUES ($1, $2, $3) RETURNING id`, name, embeddingModel, notes).Scan(&snapID); err != nil {
+	if err := tx.QueryRowContext(ctx, `INSERT INTO testbed.compliance_eval_snapshots (name, embedding_model, notes, manifest_version)
+		VALUES ($1, $2, $3, 2) RETURNING id`, name, embeddingModel, notes).Scan(&snapID); err != nil {
 		return 0, 0, fmt.Errorf("insert snapshot %q: %w", name, err)
 	}
 	for _, m := range cur {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.compliance_eval_snapshot_records
-			(snapshot_id, input_record_id, md5, generation, chunk_count, provision_count)
-			VALUES ($1, $2, $3, $4, $5, $6)`, snapID, m.RecordID, m.MD5, m.Generation, m.ChunkCount, m.ProvisionCount); err != nil {
+			(snapshot_id, input_record_id, md5, generation, chunk_count, provision_count, metric_count, metric_fingerprint)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, snapID, m.RecordID, m.MD5, m.Generation, m.ChunkCount, m.ProvisionCount, m.MetricCount, m.MetricFingerprint); err != nil {
 			return 0, 0, fmt.Errorf("insert snapshot record %d: %w", m.RecordID, err)
 		}
 	}
@@ -150,7 +174,8 @@ func Record(ctx context.Context, db *sql.DB, name, embeddingModel, notes string)
 // gold pooling leaves them out and the scorer reports reviewer hits on them as unjudged.
 func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingModel string) (diffs []Difference, added []int64, err error) {
 	var model string
-	if err := db.QueryRowContext(ctx, `SELECT embedding_model FROM testbed.compliance_eval_snapshots WHERE id = $1`, snapshotID).Scan(&model); err != nil {
+	var version int
+	if err := db.QueryRowContext(ctx, `SELECT embedding_model, manifest_version FROM testbed.compliance_eval_snapshots WHERE id = $1`, snapshotID).Scan(&model, &version); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil, fmt.Errorf("snapshot %d does not exist", snapshotID)
 		}
@@ -160,7 +185,7 @@ func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingM
 	if err != nil {
 		return nil, nil, err
 	}
-	cur, err := CurrentIndexed(ctx, db)
+	cur, err := currentIndexed(ctx, db, version)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -173,8 +198,8 @@ func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingM
 
 // SnapshotMembers returns the manifest rows of a snapshot.
 func SnapshotMembers(ctx context.Context, db *sql.DB, snapshotID int64) ([]Member, error) {
-	rows, err := db.QueryContext(ctx, `SELECT input_record_id, md5, generation, chunk_count, provision_count
-		FROM testbed.compliance_eval_snapshot_records WHERE snapshot_id = $1 ORDER BY input_record_id`, snapshotID)
+	rows, err := db.QueryContext(ctx, `SELECT r.input_record_id, r.md5, r.generation, r.chunk_count, r.provision_count, r.metric_count, r.metric_fingerprint, s.manifest_version
+		FROM testbed.compliance_eval_snapshot_records r JOIN testbed.compliance_eval_snapshots s ON s.id = r.snapshot_id WHERE r.snapshot_id = $1 ORDER BY r.input_record_id`, snapshotID)
 	if err != nil {
 		return nil, err
 	}
@@ -182,10 +207,39 @@ func SnapshotMembers(ctx context.Context, db *sql.DB, snapshotID int64) ([]Membe
 	var out []Member
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount); err != nil {
+		if err := rows.Scan(&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount, &m.MetricCount, &m.MetricFingerprint, &m.ManifestVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// Hash complete source and index rows: same-count changes to values, semantic payload,
+// embeddings, keywords and provenance all invalidate v2. Ignore maintenance timestamps.
+const metricIndexedSQL = `
+ SELECT i.id, COALESCE(i.md5, ''), COALESCE(s.generation, 0),
+        COALESCE(c.n, 0), COALESCE(p.n, 0), COALESCE(m.n, 0), COALESCE(m.fingerprint, '')
+ FROM kb.inputs i
+ LEFT JOIN kb.chunk_search_state s ON s.input_record_id = i.id
+ LEFT JOIN (SELECT input_record_id, count(*) n FROM kb.search_artifacts_chunk GROUP BY 1) c ON c.input_record_id = i.id
+ LEFT JOIN (SELECT input_record_id, count(*) n FROM kb.search_artifacts_provision GROUP BY 1) p ON p.input_record_id = i.id
+ LEFT JOIN (
+   SELECT a.input_record_id, count(*) n,
+          md5(string_agg(md5(jsonb_build_array(to_jsonb(a) - 'updated_at', to_jsonb(src) - 'updated_at')::text), E'\n' ORDER BY a.artifact_id)) fingerprint
+   FROM kb.search_artifacts_metric a LEFT JOIN kb.metrics src ON src.id = a.source_row_id
+   GROUP BY a.input_record_id
+ ) m ON m.input_record_id = i.id
+ WHERE COALESCE(c.n, 0) > 0 OR COALESCE(p.n, 0) > 0 OR COALESCE(m.n, 0) > 0`
+
+// RequireMetricSnapshot prevents new metric-inclusive pools from using a legacy manifest.
+func RequireMetricSnapshot(ctx context.Context, db *sql.DB, snapshotID int64) error {
+	var version int
+	if err := db.QueryRowContext(ctx, `SELECT manifest_version FROM testbed.compliance_eval_snapshots WHERE id = $1`, snapshotID).Scan(&version); err != nil {
+		return err
+	}
+	if version != 2 {
+		return fmt.Errorf("snapshot %d uses manifest version %d; record a new metric-inclusive snapshot (version 2)", snapshotID, version)
+	}
+	return nil
 }

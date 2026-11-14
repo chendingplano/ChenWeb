@@ -20,6 +20,7 @@ type StoredRun struct {
 	ID, SnapshotID, RecordID      int64
 	Key, RulesVersion, Annotator1 string
 	MaxCandidates                 int
+	ManifestVersion               int
 	Activities                    []GoldActivity // in saved order, with their judgements
 }
 
@@ -28,9 +29,9 @@ type StoredRun struct {
 func LoadStoredRun(ctx context.Context, db *sql.DB, key string) (*StoredRun, error) {
 	r := &StoredRun{Key: key}
 	var method string
-	if err := db.QueryRowContext(ctx, `SELECT id, method, snapshot_id, rules_version, annotator_1, max_candidates
-		FROM testbed.compliance_gold_runs WHERE run_key = $1`, key).
-		Scan(&r.ID, &method, &r.SnapshotID, &r.RulesVersion, &r.Annotator1, &r.MaxCandidates); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT r.id, r.method, r.snapshot_id, r.rules_version, r.annotator_1, r.max_candidates, s.manifest_version
+		FROM testbed.compliance_gold_runs r JOIN testbed.compliance_eval_snapshots s ON s.id = r.snapshot_id WHERE r.run_key = $1`, key).
+		Scan(&r.ID, &method, &r.SnapshotID, &r.RulesVersion, &r.Annotator1, &r.MaxCandidates, &r.ManifestVersion); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("gold run %q does not exist", key)
 		}
@@ -127,6 +128,9 @@ func AugmentPool(run *StoredRun, acts []Activity, reviewRun int64, rows []Review
 				continue
 			}
 			for _, c := range r.Artifacts {
+				if run.ManifestVersion == 1 && strings.HasPrefix(c.Key, "metric/") {
+					continue
+				}
 				if judged[c.Key] || exclude[c.Record] || (inSnapshot != nil && !inSnapshot[c.Record]) {
 					continue
 				}
@@ -195,6 +199,9 @@ func MergeAugmentation(base *StoredRun, pf PoolFile, aug *GoldDocument) (*GoldDo
 			merged.Judgements = append(merged.Judgements, j)
 		}
 		for _, j := range a.Judgements {
+			if base.ManifestVersion == 1 && j.Candidate.ArtifactType == "metric" {
+				return nil, fmt.Errorf("legacy run %s cannot be augmented with metrics", base.Key)
+			}
 			if seen[j.Candidate.key()] {
 				return nil, fmt.Errorf("activity %q: run %s already judged %s", b.Name, base.Key, j.Candidate.key())
 			}

@@ -17,11 +17,11 @@ import (
 // Prompt files (in ChenWeb/prompts). The rules file is frozen per version and prepended to every
 // task prompt; its SHA-256 is stored with the run.
 const (
-	RulesFile              = "prompt-compliance-gold-rules-v1.md"
-	ActivitiesPromptFile   = "prompt-compliance-gold-activities-v1.md"
-	JudgePromptFile        = "prompt-compliance-gold-judge-v1.md"
-	AdjActivityPromptFile  = "prompt-compliance-gold-adjudicate-activity-v1.md"
-	AdjJudgementPromptFile = "prompt-compliance-gold-adjudicate-judgement-v1.md"
+	RulesFile              = "prompt-compliance-gold-rules-v2.md"
+	ActivitiesPromptFile   = "prompt-compliance-gold-activities-v2.md"
+	JudgePromptFile        = "prompt-compliance-gold-judge-v2.md"
+	AdjActivityPromptFile  = "prompt-compliance-gold-adjudicate-activity-v2.md"
+	AdjJudgementPromptFile = "prompt-compliance-gold-adjudicate-judgement-v2.md"
 
 	judgeBatch       = 10
 	candidateTextMax = 1200
@@ -137,6 +137,8 @@ type Pipeline struct {
 	// byte-identical copies and the records added since the snapshot.
 	Exclude func(ctx context.Context, recordID int64) ([]int64, error)
 	Search  func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error)
+	// Load resolves trace candidates outside the fused result page.
+	Load func(ctx context.Context, refs []searchengine.ArtifactRef) ([]searchengine.Result, error)
 }
 
 func (p *Pipeline) call(ctx context.Context, lab Labeller, prompt, promptName, input, reason string) (map[string]any, error) {
@@ -204,6 +206,26 @@ func (p *Pipeline) extract(ctx context.Context, lab Labeller, chunks []docreview
 			}
 			if a.Name == "" || a.LineStart < ch.StartLine || a.LineEnd > ch.EndLine || a.LineEnd < a.LineStart {
 				return fmt.Errorf("%s: invalid activity %v for chunk lines %d-%d", lab.Name, m, ch.StartLine, ch.EndLine)
+			}
+			for key, dst := range map[string]*[]string{"queries": &a.Queries, "cited_docs": &a.CitedDocs} {
+				if raw, ok := m[key].([]any); ok {
+					for _, value := range raw {
+						text, ok := value.(string)
+						if !ok {
+							return fmt.Errorf("%s: %s entry must be text", lab.Name, key)
+						}
+						*dst = append(*dst, text)
+					}
+				}
+			}
+			var err error
+			a.Queries, err = cleanList(a.Queries, MaxAgentQueries, "queries")
+			if err != nil {
+				return err
+			}
+			a.CitedDocs, err = cleanList(a.CitedDocs, MaxCitedDocs, "cited_docs")
+			if err != nil {
+				return err
 			}
 			a.SourceText = docreviews.GoldLinesText(ch.InputJSON, a.LineStart, a.LineEnd)
 			out = append(out, a)
@@ -320,7 +342,7 @@ const (
 	MaxCitedDocs    = 10
 )
 
-var poolArtifactTypes = []string{"provision", "chunk"}
+var poolArtifactTypes = []string{"provision", "metric", "chunk"}
 
 // poolQuery is one pool query; asWritten queries are the agent's and skip keyword extraction.
 type poolQuery struct {
@@ -359,7 +381,7 @@ func candidateOf(r searchengine.Result) Candidate {
 }
 
 // rankings runs every query of a with the filters and returns, per query, its fused ranking and the
-// same results ordered by keyword rank and by vector rank, so a passage only one list ranks highly is
+// independent keyword and vector trace lists, so a passage only one list ranks highly is
 // not crowded out by passages both lists ranked in the middle.
 func (p *Pipeline) rankings(ctx context.Context, a Activity, f searchengine.Filters) ([]rankedList, error) {
 	var out []rankedList
@@ -367,30 +389,51 @@ func (p *Pipeline) rankings(ctx context.Context, a Activity, f searchengine.Filt
 		if q.text == "" {
 			continue
 		}
-		opts := searchengine.Options{Limit: poolSearchLimit}
+		opts := searchengine.Options{Limit: poolSearchLimit, Trace: true}
 		if q.asWritten {
 			opts.KeywordExtraction = searchengine.KeywordExtractionOff
 		}
-		resp, err := p.Search(ctx, searchengine.Request{Query: searchengine.Query{Text: q.text}, Filters: f, Options: opts})
-		if err != nil {
-			return nil, fmt.Errorf("pool search %q: %w", truncate(q.text, 60), err)
-		}
-		var fused []Candidate
-		var lex, vec []searchengine.Result
-		for _, r := range resp.Results {
-			fused = append(fused, candidateOf(r))
-			if r.Diag.LexicalRank != nil {
-				lex = append(lex, r)
+		var queryLists []rankedList
+		for _, typ := range f.ArtifactTypes {
+			filter := f
+			filter.ArtifactTypes = []string{typ}
+			resp, err := p.Search(ctx, searchengine.Request{Query: searchengine.Query{Text: q.text}, Filters: filter, Options: opts})
+			if err != nil {
+				return nil, fmt.Errorf("pool search %q: %w", truncate(q.text, 60), err)
 			}
-			if r.Diag.VectorRank != nil {
-				vec = append(vec, r)
+			if resp == nil {
+				return nil, fmt.Errorf("pool search %q returned a nil response", truncate(q.text, 60))
+			}
+			var fused []Candidate
+			var lex, vec []searchengine.Result
+			for _, r := range resp.Results {
+				fused = append(fused, candidateOf(r))
+				if r.Diag.LexicalRank != nil {
+					lex = append(lex, r)
+				}
+				if r.Diag.VectorRank != nil {
+					vec = append(vec, r)
+				}
+			}
+			if resp.Trace != nil {
+				lex, vec, err = p.traceRankings(ctx, resp)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				sort.SliceStable(lex, func(i, j int) bool { return *lex[i].Diag.LexicalRank < *lex[j].Diag.LexicalRank })
+				sort.SliceStable(vec, func(i, j int) bool { return *vec[i].Diag.VectorRank < *vec[j].Diag.VectorRank })
+			}
+			name := fmt.Sprintf("q%d/%s", i+1, typ)
+			queryLists = append(queryLists, rankedList{name + "/fused", fused}, rankedList{name + "/lexical", candidatesOf(lex)},
+				rankedList{name + "/vector", candidatesOf(vec)})
+		}
+		// Give each artifact type its first hit before another ranking of the same type.
+		for channel := 0; channel < 3; channel++ {
+			for typ := range f.ArtifactTypes {
+				out = append(out, queryLists[typ*3+channel])
 			}
 		}
-		sort.SliceStable(lex, func(i, j int) bool { return *lex[i].Diag.LexicalRank < *lex[j].Diag.LexicalRank })
-		sort.SliceStable(vec, func(i, j int) bool { return *vec[i].Diag.VectorRank < *vec[j].Diag.VectorRank })
-		name := fmt.Sprintf("q%d", i+1)
-		out = append(out, rankedList{name + "/fused", fused}, rankedList{name + "/lexical", candidatesOf(lex)},
-			rankedList{name + "/vector", candidatesOf(vec)})
 	}
 	return out, nil
 }
@@ -506,7 +549,7 @@ func (p *Pipeline) judgeBy(ctx context.Context, lab Labeller, a Activity, pool [
 			for _, item := range labels {
 				m, _ := item.(map[string]any)
 				id, label := str(m, "id"), str(m, "label")
-				if !want[id] || (label != labelGoverns && label != labelTopical && label != labelUnrelated) {
+				if !want[id] || (label != labelGoverns && label != labelTopical && label != labelUnrelated && label != labelAmbiguous) {
 					continue
 				}
 				delete(want, id)
@@ -582,4 +625,73 @@ func truncate(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+// traceRankings resolves every candidate in the independent keyword and vector lists.
+// Search traces precede paging; the pool applies no criteria, so these remain eligible.
+func (p *Pipeline) traceRankings(ctx context.Context, resp *searchengine.Response) ([]searchengine.Result, []searchengine.Result, error) {
+	key := func(typ, id string) string { return typ + "/" + id }
+	loaded := map[string]searchengine.Result{}
+	for _, result := range resp.Results {
+		loaded[key(result.ArtifactType, result.ArtifactID)] = result
+	}
+	var refs []searchengine.ArtifactRef
+	seen := map[string]bool{}
+	for _, list := range [][]searchengine.TraceHit{resp.Trace.Lexical, resp.Trace.Vector} {
+		for _, hit := range list {
+			k := key(hit.ArtifactType, hit.ArtifactID)
+			if _, ok := loaded[k]; !ok && !seen[k] {
+				refs = append(refs, searchengine.ArtifactRef{Type: hit.ArtifactType, ID: hit.ArtifactID})
+				seen[k] = true
+			}
+		}
+	}
+	if len(refs) > 0 {
+		if p.Load == nil {
+			return nil, nil, fmt.Errorf("pool candidate artifact loader is not configured")
+		}
+		results, err := p.Load(ctx, refs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load pool trace artifacts: %w", err)
+		}
+		for _, result := range results {
+			loaded[key(result.ArtifactType, result.ArtifactID)] = result
+		}
+		for _, ref := range refs {
+			if _, ok := loaded[key(ref.Type, ref.ID)]; !ok {
+				return nil, nil, fmt.Errorf("pool candidate %s/%s is no longer in the search index", ref.Type, ref.ID)
+			}
+		}
+	}
+	for channel, list := range [][]searchengine.TraceHit{resp.Trace.Lexical, resp.Trace.Vector} {
+		for i, hit := range list {
+			k := key(hit.ArtifactType, hit.ArtifactID)
+			result := loaded[k]
+			rank, score := i+1, hit.Score
+			if channel == 0 {
+				if result.Diag.LexicalRank == nil {
+					result.Diag.LexicalRank = &rank
+				}
+				if result.Diag.LexicalScore == nil {
+					result.Diag.LexicalScore = &score
+				}
+			} else {
+				if result.Diag.VectorRank == nil {
+					result.Diag.VectorRank = &rank
+				}
+				if result.Diag.Cosine == nil {
+					result.Diag.Cosine = &score
+				}
+			}
+			loaded[k] = result
+		}
+	}
+	var lex, vec []searchengine.Result
+	for _, hit := range resp.Trace.Lexical {
+		lex = append(lex, loaded[key(hit.ArtifactType, hit.ArtifactID)])
+	}
+	for _, hit := range resp.Trace.Vector {
+		vec = append(vec, loaded[key(hit.ArtifactType, hit.ArtifactID)])
+	}
+	return lex, vec, nil
 }

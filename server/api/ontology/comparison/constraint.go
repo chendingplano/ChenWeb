@@ -1,6 +1,10 @@
 package comparison
 
-import "github.com/shopspring/decimal"
+import (
+	"fmt"
+
+	"github.com/shopspring/decimal"
+)
 
 // ValueForm is the shape of a normalized constraint (research §6.2 value_form).
 type ValueForm string
@@ -35,6 +39,11 @@ type Constraint struct {
 	Value      decimal.Decimal
 	LowerValue decimal.Decimal
 	UpperValue decimal.Decimal
+
+	// Bounds are inclusive by default. Exclusivity applies to the matching
+	// lower/upper bound or range endpoint; exact values remain single points.
+	LowerExclusive bool
+	UpperExclusive bool
 }
 
 // bound is one endpoint of an interval. Value == nil means unbounded in that
@@ -69,13 +78,13 @@ func buildInterval(c Constraint) (interval, bool, error) {
 		if err != nil {
 			return interval{}, false, err
 		}
-		return interval{Lo: finite(v, true), Hi: unbounded}, true, nil
+		return interval{Lo: finite(v, !c.LowerExclusive), Hi: unbounded}, true, nil
 	case FormUpperBound:
 		v, err := toCanonical(c.QuantityKind, c.Unit, c.Value)
 		if err != nil {
 			return interval{}, false, err
 		}
-		return interval{Lo: unbounded, Hi: finite(v, true)}, true, nil
+		return interval{Lo: unbounded, Hi: finite(v, !c.UpperExclusive)}, true, nil
 	case FormExactValue:
 		v, err := toCanonical(c.QuantityKind, c.Unit, c.Value)
 		if err != nil {
@@ -91,7 +100,13 @@ func buildInterval(c Constraint) (interval, bool, error) {
 		if err != nil {
 			return interval{}, false, err
 		}
-		return interval{Lo: finite(lo, true), Hi: finite(hi, true)}, true, nil
+		if lo.GreaterThan(hi) {
+			return interval{}, false, fmt.Errorf("comparison: range lower value exceeds upper value")
+		}
+		if lo.Equal(hi) && (c.LowerExclusive || c.UpperExclusive) {
+			return interval{}, false, fmt.Errorf("comparison: range has no satisfying values")
+		}
+		return interval{Lo: finite(lo, !c.LowerExclusive), Hi: finite(hi, !c.UpperExclusive)}, true, nil
 	case FormQualitative, FormLimitAbsent:
 		return interval{}, false, nil
 	default:

@@ -1,5 +1,7 @@
 ## Context
 
+**2026-11-14 expert-workflow extension (user authorized):** the research document's expert-review and quantitative-assessment contracts now govern implementation tasks 9.1–9.6. The original non-goals below describe the historical phase 2 baseline. This extension adds provision/metric/chunk retrieval with separate candidate budgets, original source context, structured applicability and requirement assessment, whole-reviewed-document evidence screening, numeric checks, and verified findings. Activity detection remains per chunk and independent of the knowledge base. Source/evidence loading is bounded and reports incomplete coverage; incomplete evidence cannot support omission findings. A model proposes structured interpretations; deterministic anchors and numeric comparisons constrain publication. A separate verifier checks interpretation and adverse conclusions. Existing finding metadata retains the evidence/assessment trace. Missing configuration or model/search/load errors abort rather than pass silently. New v2 evaluation snapshots and rules retain legacy baseline readability. Models remain operator-configured; prompts are versioned files. No paid baseline or relevance-floor choice is included.
+
 Phase 1 calls `searchengine.Search` with `ArtifactTypes = ["provision","chunk"]`,
 `ExcludeRecordIDs = [reviewed record]`, limit 10, no `MinCosine`. The engine already supports an
 absolute floor (`Criteria.MinCosine`, with `Removed.MinCosine` counted in the response and

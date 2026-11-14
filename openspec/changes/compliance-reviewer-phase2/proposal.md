@@ -1,5 +1,7 @@
 ## Why
 
+**2026-11-14 user-authorized extension:** after reviewing the domain-expert workflow, implementation now also covers metric-aware snapshots/pooling/rules and bounded original-source applicability/requirement assessment, numeric checks, semantic verification, and coverage/reference ledgers. Tasks 9.1–9.6 and the updated requirements/design specify this extension. The rationale below describes the original candidate-retrieval baseline; paid gold/baseline tasks 4.3–4.5 remain open and no expert-accuracy claim follows from the implementation tests.
+
 Compliance Review phase 1 (devdoc 2026111201, research 2026111103 delivery phase 1) detects the
 activities a chunk describes and lists knowledge-base search results for each. A five-document
 trial on 2026-11-12 (records 416, 371, 376, 364, 799; 151 activities in all) showed two defects

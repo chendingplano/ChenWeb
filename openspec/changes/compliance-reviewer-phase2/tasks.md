@@ -59,6 +59,17 @@
 - [x] 8.3 Project migration `20261114000004` drops `testbed.compliance_gold_activities.covered`, applied to the dev database; Down/Up tested in a rolled-back transaction.
 - [x] 8.4 Tests; skill SKILL.md and CHANGELOG; devdoc 2026111201 and the phase 2 handoff.
 
+## 9. Expert workflow implementation (2026-11-14)
+
+The user approved implementation of the research document's domain-expert review contract. Earlier baseline tasks 4.3–4.5 remain separate data-dependent work.
+
+- [x] 9.1 Metric-aware versioned snapshots: preserve legacy snapshots; include metric-only records, content/index hashes and metric counts; reject drift and refuse metric-inclusive pooling against legacy snapshots. Goose migration first; test same-count mutations and legacy verification.
+- [x] 9.2 Pool/expand/cited search over provision, metric and chunk lists independently, interleaved under the existing budget; preserve legacy augmentation and candidate scoring; metric regression tests.
+- [x] 9.3 Reviewer: preserve per-chunk independent detection; search each artifact type independently; load original sources and the whole reviewed evidence boundary; follow source context with bounded expansion; report coverage and unresolved dependencies.
+- [x] 9.4 Versioned prompts and structured assessment: provenance, applicability, exceptions, qualitative/quantitative comparison, source/target quote verification and whole-boundary omission screening. Deterministic numeric verification reuses existing quantity code where suitable. Execution failures abort; unsupported conclusions remain unresolved.
+- [x] 9.5 Benchmark skill and frozen new rules version, model-panel prompts, metric-inclusive snapshot instructions, duplicate-obligation and normative/informative metric guidance; validate hashes and metadata.
+- [x] 9.6 Focused tests and build, migration smoke verification, independent code review, shipped-behavior docs/handoff, module catalogue updates if required, separate jj commits per repository. Do not run paid baselines or choose a relevance floor. *Full doc-reviews + evaluation/comparison suites, focused race tests, vet and server build pass; disposable PostgreSQL Up/Down/Up and same-count mutations verified; dev schema columns confirmed. Registered reused quantity comparison as 20261114-03. OpenSpec validation, rules hashes and module catalogue agree. Original data-dependent tasks 4.3–4.5 remain open.*
+
 ## 5. Close out
 
 - [x] 5.1 Update research 2026111103 §12 status and devdoc 2026111201; answer the coding-practice questions (what knowledge changed, which docs are stale).

@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -131,6 +132,15 @@ func run(gold, runs, compare string) error {
 	fmt.Printf("  false grounding (none expected):  %s\n", m.FalseGrounding)
 	fmt.Printf("  candidate precision:              %s   (reported passages the gold judged: governs %d, topical %d, unrelated %d, ambiguous %d not used)\n",
 		m.CandidatePrecision, m.CandidateLabels["governs"], m.CandidateLabels["topical"], m.CandidateLabels["unrelated"], m.CandidateLabels["ambiguous"])
+	types := make([]string, 0, len(m.CandidatesByArtifactType))
+	for typ := range m.CandidatesByArtifactType {
+		types = append(types, typ)
+	}
+	sort.Strings(types)
+	for _, typ := range types {
+		s := m.CandidatesByArtifactType[typ]
+		fmt.Printf("  %s candidates: precision %s; governs %d, topical %d, unrelated %d, ambiguous %d; outside judged pool %d, on new records %d\n", typ, s.Precision, s.Labels["governs"], s.Labels["topical"], s.Labels["unrelated"], s.Labels["ambiguous"], s.NotInPool, s.OnNewRecords)
+	}
 	if m.CandidatesOnOwnCopies > 0 {
 		fmt.Printf("  of the unrelated, %d lie on the document itself or a byte-identical copy (unrelated by rule J3, never pooled)\n", m.CandidatesOnOwnCopies)
 	}

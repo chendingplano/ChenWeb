@@ -16,8 +16,8 @@ no md5 SHALL exclude only itself.
 
 ### Requirement: Candidates below a relevance floor are not reported
 
-The reviewer SHALL apply `min_cosine` from `[reviewers.compliance]` as the search's minimum cosine
-similarity. When the setting is absent or 0, no floor SHALL apply. Every reported candidate SHALL
+The historical candidate-only reviewer SHALL apply `min_cosine` from `[reviewers.compliance]` as the search's minimum cosine
+similarity. The full expert-workflow authority-discovery path SHALL NOT apply a cosine floor, so exact lexical candidates remain independently eligible. When the setting is absent or 0, no floor SHALL apply. Every reported candidate SHALL
 show its cosine similarity. An activity whose search completes with no candidate at or above the
 floor SHALL get the `compliance_no_grounding` row, never an empty candidates row.
 
@@ -36,7 +36,7 @@ floor SHALL get the `compliance_no_grounding` row, never an empty candidates row
 ### Requirement: An evaluation snapshot stamps the whole indexed knowledge base
 
 An evaluation snapshot SHALL record, for every record indexed for search, its id, md5, chunk-index
-generation and the count of chunk and provision artifacts, and the embedding model of the index.
+generation and the count of chunk, provision and metric artifacts, and the embedding model of the index. New snapshots SHALL use manifest version 2, include metric-only indexed records, and fingerprint metric source/index content, embeddings, keywords and provenance so same-count changes invalidate them. Version-1 snapshots SHALL retain their original chunk/provision scope for historical verification and augmentation; metric-inclusive pooling SHALL refuse them.
 Pooling and saving gold SHALL refuse a snapshot when any of its records changed md5, generation or
 counts or disappeared, or the embedding model changed, and SHALL name each difference. Records
 indexed after the snapshot SHALL be allowed and SHALL be left out of gold pools.
@@ -125,7 +125,7 @@ gold run SHALL store the cap it used. The Compliance Review reviewer's own searc
 
 The gold pool SHALL apply no relevance floor and SHALL search, per activity, the source text, the
 name with its object and up to six agent-written queries, each in its fused, keyword and vector
-ranking. Documents the activity cites (`cited_docs`) SHALL be resolved edition-insensitively to
+ranking separately for provision, metric and chunk artifacts, interleaved by artifact type and channel under the existing cap. New initial gold saves SHALL use rules major version 2. Historical augmentation SHALL retain its base rules and artifact scope. Documents the activity cites (`cited_docs`) SHALL be resolved edition-insensitively to
 snapshot records and searched within; unresolved citations SHALL be listed. After labelling,
 expansion SHALL search within every record with a `governs` label, and saving SHALL refuse an
 activity with a `governs` record that was not expanded. Each judgement SHALL record which list
@@ -193,3 +193,39 @@ how many have none.
 #### Scenario: Mix reported
 - **WHEN** a gold run is saved with 60 activities, 41 of which have a `governs` passage
 - **THEN** `save` reports 41 with a governing passage and 19 with none
+
+### Requirement: Expert review assesses retrieved source requirements against canonical evidence
+
+Activity detection SHALL remain per chunk and independent of knowledge-base content, including the document-level activity in chunk zero. It SHALL preserve evidence-bearing context facts and document relationships, distinguishing plans, quotations, examples and reported results. For each activity discovery SHALL search provisions, metrics and original chunks independently, preserving lexical and semantic eligibility and retrieval diagnostics. Original source documents SHALL establish requirement text, scope, conditions, exceptions and definitions; extracted artifacts SHALL remain candidates, not automatically binding criteria.
+
+The reviewer SHALL screen all canonical reviewed-document portions within its recorded budget for each extracted requirement. It SHALL record examined/unexamined ranges, source hashes, retrieval trace, screenings, reference resolutions, applicability, evidence states and verifier outcomes in the finding metadata. Source or evidence budgets, images or unreadable content SHALL be recorded as incomplete. Selected supporting documents and historical-date UI are outside this implementation; the boundary SHALL explicitly name reviewed-document-only evidence and the assessment date SHALL default to current UTC date.
+
+#### Scenario: A quantitative criterion has no provision artifact
+- **WHEN** a relevant criterion is indexed only as a metric
+- **THEN** metric discovery retrieves it independently and original-source evidence is required before assessment
+
+#### Scenario: Supporting detail appears in a later annex
+- **WHEN** an early portion refers to an annex and a later screened portion supplies the actual detail
+- **THEN** the assessment may resolve the reference using exact canonical annex evidence and SHALL NOT report a local omission
+
+#### Scenario: Evidence screening is incomplete
+- **WHEN** some canonical lines are unreadable, unexamined, or outside the screening budget
+- **THEN** no `not_documented` conclusion is permitted and the coverage ledger identifies the incomplete work
+
+### Requirement: Published assessments are constrained by source evidence and numeric verification
+
+Every requirement assessment SHALL state applicability (`applicable`, `not_applicable`, `unknown`) separately from document evidence (`supported`, `contradicted`, `partially_supported`, `not_documented`, `insufficient_evidence`, `not_assessed`). Nonmandatory or inapplicable requirements SHALL NOT produce adverse conclusions. A published omission SHALL require established applicability/document responsibility, complete source context, whole-boundary screening with matching positive line counts, and resolved necessary references. All source/target quotes and resolved references SHALL match pinned canonical records and line anchors. Unknown, duplicate or omitted stage results and execution errors SHALL abort the reviewer.
+
+Quantitative conclusions SHALL additionally use structured property, operators, decimal values, units and compatible conditions/methods/basis. Deterministic comparison SHALL preserve exclusive endpoints and use the existing supported unit registry. Unsupported dimensions, units, methods, uncertainty rules or unresolved conditions SHALL remain insufficient evidence. A separate semantic verifier SHALL check entailment and numeric extraction; rejected drafts SHALL become unresolved. Verified documentary contradictions or omissions SHALL be medium-severity activity rows; documentary support SHALL NOT certify actual operation. Candidate-retrieval gold SHALL NOT be represented as validating these assessment conclusions.
+
+#### Scenario: Equivalent units at an inclusive boundary
+- **WHEN** the source requires clearance at least 5 mm and the document specifies 0.5 cm under established compatible conditions
+- **THEN** deterministic verification reports documentary support
+
+#### Scenario: Equality at an exclusive boundary
+- **WHEN** the source requires clearance greater than 5 mm and the document specifies exactly 5 mm under established compatible conditions
+- **THEN** deterministic verification reports documentary contradiction, subject to applicability and semantic verification
+
+#### Scenario: Verification rejects interpretation
+- **WHEN** a source quotation exists but the verifier finds it does not support the draft duty or numeric interpretation
+- **THEN** the result becomes insufficient evidence with unknown applicability and no unsupported suggested correction

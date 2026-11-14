@@ -121,6 +121,72 @@ func TestCompareUnknownUnitRecordsNoVerdict(t *testing.T) {
 	assertVerdict(t, upperBound("Time", "fortnight", "1"), upperBound("Time", "ms", "120"), NoVerdict)
 }
 
+func TestCompareLengthUnits(t *testing.T) {
+	assertVerdict(t, exactValue("Length", "cm", "0.5"), lowerBound("Length", "mm", "5"), Stronger)
+	assertVerdict(t, exactValue("Length", "m", "0.005"), exactValue("Length", "mm", "5"), Equivalent)
+	strict := lowerBound("Length", "mm", "5")
+	strict.LowerExclusive = true
+	assertVerdict(t, strict, exactValue("Length", "cm", "0.5"), Conflict)
+}
+
+func TestComparePercentUnits(t *testing.T) {
+	for _, unit := range []string{"percent", "%"} {
+		t.Run(unit, func(t *testing.T) {
+			assertVerdict(t, exactValue("Dimensionless", unit, "50"), exactValue("Dimensionless", "ratio", "0.5"), Equivalent)
+		})
+	}
+}
+
+func TestCompareUnsupportedAndMismatchedUnits(t *testing.T) {
+	assertVerdict(t, exactValue("Length", "mm", "5"), exactValue("Time", "ms", "5"), NoVerdict)
+	assertVerdict(t, exactValue("Length", "ms", "5"), exactValue("Length", "mm", "5"), NoVerdict)
+	assertVerdict(t, exactValue("Length", "inch", "5"), exactValue("Length", "mm", "5"), NoVerdict)
+	assertVerdict(t, exactValue("Time", "month", "1"), exactValue("Time", "day", "30"), NoVerdict)
+}
+
+func TestCompareReversedRangeHasNoVerdict(t *testing.T) {
+	invalid := rangeValue("Time", "ms", "10", "5")
+	valid := rangeValue("Time", "ms", "0", "20")
+	assertVerdict(t, invalid, valid, NoVerdict)
+	assertVerdict(t, valid, invalid, NoVerdict)
+}
+
+func TestCompareExclusiveBounds(t *testing.T) {
+	lower := lowerBound("Time", "ms", "5")
+	lower.LowerExclusive = true
+	upper := upperBound("Time", "ms", "5")
+	upper.UpperExclusive = true
+	for _, strict := range []Constraint{lower, upper} {
+		assertVerdict(t, strict, exactValue("Time", "ms", "5"), Conflict)
+	}
+	assertVerdict(t, lower, lowerBound("Time", "ms", "5"), Stronger)
+	assertVerdict(t, upper, upperBound("Time", "ms", "5"), Stronger)
+}
+
+func TestCompareExclusiveRangeEndpoints(t *testing.T) {
+	for _, endpoint := range []string{"5", "10"} {
+		t.Run(endpoint, func(t *testing.T) {
+			open := rangeValue("Time", "ms", "5", "10")
+			open.LowerExclusive = endpoint == "5"
+			open.UpperExclusive = endpoint == "10"
+			assertVerdict(t, open, exactValue("Time", "ms", endpoint), Conflict)
+			assertVerdict(t, open, rangeValue("Time", "ms", "5", "10"), Stronger)
+			assertVerdict(t, exactValue("Time", "ms", "7"), open, Stronger)
+		})
+	}
+}
+
+func TestCompareEmptyRangeHasNoVerdict(t *testing.T) {
+	for _, flags := range [][2]bool{{true, false}, {false, true}, {true, true}} {
+		empty := rangeValue("Time", "ms", "5", "5")
+		empty.LowerExclusive, empty.UpperExclusive = flags[0], flags[1]
+		point := exactValue("Time", "ms", "5")
+		assertVerdict(t, empty, point, NoVerdict)
+		assertVerdict(t, point, empty, NoVerdict)
+	}
+	assertVerdict(t, rangeValue("Time", "ms", "5", "5"), exactValue("Time", "ms", "5"), Identical)
+}
+
 func TestEvaluateFamilyNotApplicableTakesPrecedence(t *testing.T) {
 	subject := lowerBound("Luminance", "cd/m2", "250")
 	rep := upperBound("Luminance", "cd/m2", "999") // would otherwise compare fine
