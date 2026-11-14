@@ -5,17 +5,32 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
 
-// GoldRun is a complete gold labelling, ready to save.
+// Labelling methods of a gold run.
+const (
+	MethodAgent      = "agent"       // the coding agent labels alone (first iteration)
+	MethodModelPanel = "model_panel" // two model annotators and a model adjudicator (deferred)
+)
+
+// GoldRun is a complete gold labelling, ready to save. For MethodAgent, Profiles.Annotator1 is the
+// agent's model and the other two profiles are empty.
 type GoldRun struct {
-	SnapshotID  int64
-	RulesFile   string
-	RulesSHA256 string
-	Profiles    Profiles
-	PoolLimit   int
-	Documents   []*GoldDocument
+	Method        string
+	SnapshotID    int64
+	RulesFile     string
+	RulesVersion  string
+	RulesSHA256   string
+	Profiles      Profiles
+	MaxCandidates int
+	AuditNotes    string
+	Documents     []*GoldDocument
 }
+
+// nullIfEmpty stores an empty string as NULL.
+func nullIfEmpty(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
 
 // SaveRun writes the run, its activities and judgements in one transaction and returns the run key
 // and id. now is a parameter so tests control the key.
@@ -27,10 +42,10 @@ func SaveRun(ctx context.Context, db *sql.DB, r *GoldRun, now time.Time) (key st
 	}
 	defer tx.Rollback()
 	if err := tx.QueryRowContext(ctx, `INSERT INTO testbed.compliance_gold_runs
-		(run_key, snapshot_id, rules_file, rules_sha256, annotator_1, annotator_2, adjudicator, pool_limit)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-		key, r.SnapshotID, r.RulesFile, r.RulesSHA256, r.Profiles.Annotator1, r.Profiles.Annotator2,
-		r.Profiles.Adjudicator, r.PoolLimit).Scan(&id); err != nil {
+		(run_key, method, snapshot_id, rules_file, rules_version, rules_sha256, annotator_1, annotator_2, adjudicator, max_candidates, audit_notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+		key, r.Method, r.SnapshotID, r.RulesFile, r.RulesVersion, r.RulesSHA256, r.Profiles.Annotator1,
+		nullIfEmpty(r.Profiles.Annotator2), nullIfEmpty(r.Profiles.Adjudicator), r.MaxCandidates, r.AuditNotes).Scan(&id); err != nil {
 		return "", 0, fmt.Errorf("insert gold run: %w", err)
 	}
 	for _, d := range r.Documents {
@@ -47,11 +62,70 @@ func SaveRun(ctx context.Context, db *sql.DB, r *GoldRun, now time.Time) (key st
 					(activity_id, artifact_type, artifact_id, candidate_record, cosine, label_1, reason_1, label_2, reason_2, final_label, adjudicated, rationale)
 					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 					actID, j.Candidate.ArtifactType, j.Candidate.ArtifactID, j.Candidate.RecordID, j.Candidate.Cosine,
-					j.Label1, j.Reason1, j.Label2, j.Reason2, j.Final, j.Adjudicated, j.Rationale); err != nil {
+					j.Label1, j.Reason1, nullIfEmpty(j.Label2), j.Reason2, j.Final, j.Adjudicated, j.Rationale); err != nil {
 					return "", 0, fmt.Errorf("insert judgement %s of activity %q: %w", j.Candidate.key(), a.Name, err)
 				}
 			}
 		}
 	}
 	return key, id, tx.Commit()
+}
+
+// RunSummary is a saved gold run as read back from the database.
+type RunSummary struct {
+	Key, Method, RulesFile, RulesVersion, Annotator1 string
+	ID, SnapshotID                                   int64
+	MaxCandidates                                    int
+	Records                                          []int64
+	Activities, DocumentLevel                        int
+	Labels                                           map[string]int // final label -> judgements
+	ActivitiesWithGoverns                            int
+}
+
+// LoadRunSummary reads back a saved gold run by its key.
+func LoadRunSummary(ctx context.Context, db *sql.DB, key string) (*RunSummary, error) {
+	r := &RunSummary{Key: key, Labels: map[string]int{}}
+	if err := db.QueryRowContext(ctx, `SELECT id, method, snapshot_id, rules_file, rules_version, annotator_1, max_candidates
+		FROM testbed.compliance_gold_runs WHERE run_key = $1`, key).
+		Scan(&r.ID, &r.Method, &r.SnapshotID, &r.RulesFile, &r.RulesVersion, &r.Annotator1, &r.MaxCandidates); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("gold run %q does not exist", key)
+		}
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT a.input_record_id, a.document_level,
+		       count(j.id) FILTER (WHERE j.final_label = 'governs'),
+		       array_remove(array_agg(j.final_label), NULL)
+		FROM testbed.compliance_gold_activities a
+		LEFT JOIN testbed.compliance_gold_judgements j ON j.activity_id = a.id
+		WHERE a.run_id = $1 GROUP BY a.id ORDER BY a.input_record_id, a.line_start`, r.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[int64]bool{}
+	for rows.Next() {
+		var rec int64
+		var doc bool
+		var governs int
+		var labels []string
+		if err := rows.Scan(&rec, &doc, &governs, pq.Array(&labels)); err != nil {
+			return nil, err
+		}
+		if !seen[rec] {
+			seen[rec] = true
+			r.Records = append(r.Records, rec)
+		}
+		r.Activities++
+		if doc {
+			r.DocumentLevel++
+		}
+		if governs > 0 {
+			r.ActivitiesWithGoverns++
+		}
+		for _, l := range labels {
+			r.Labels[l]++
+		}
+	}
+	return r, rows.Err()
 }

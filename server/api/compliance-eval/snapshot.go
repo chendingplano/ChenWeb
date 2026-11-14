@@ -1,9 +1,11 @@
 // Package complianceeval holds the evaluation side of the Compliance Review reviewer
-// (openspec compliance-reviewer-phase2): frozen evaluation snapshots of the searchable corpus.
+// (openspec compliance-reviewer-phase2): evaluation snapshots, gold labelling and scoring.
 //
-// A snapshot does not copy the corpus, which stays in kb.search_artifacts_*. It records, for each
-// member record, the file hash, the chunk-index generation and the index counts, plus the
-// embedding model, so a gold run can refuse to start when any of them changed since the freeze.
+// A snapshot is a version stamp of the whole indexed knowledge base, not a chosen subset: the
+// knowledge base has no parts. It does not copy the corpus, which stays in kb.search_artifacts_*.
+// It records, for every indexed record, the file hash, the chunk-index generation and the index
+// counts, plus the embedding model. Records added later are allowed; a snapshot record that
+// changed or disappeared makes the snapshot fail verification.
 package complianceeval
 
 import (
@@ -31,8 +33,9 @@ type Difference struct {
 
 func (d Difference) String() string { return fmt.Sprintf("record %d: %s", d.RecordID, d.Reason) }
 
-// Diff compares the manifest with the current state of the same records. A record missing from
-// current (deleted or not indexed) is a difference. Order follows the manifest's record ids.
+// Diff compares the manifest with the current state of its records. A manifest record missing from
+// current (deleted or no longer indexed) is a difference; records only in current are not (see
+// Added). Order follows the manifest's record ids.
 func Diff(manifest []Member, current map[int64]Member) []Difference {
 	ms := append([]Member(nil), manifest...)
 	sort.Slice(ms, func(i, j int) bool { return ms[i].RecordID < ms[j].RecordID })
@@ -63,109 +66,109 @@ func Diff(manifest []Member, current map[int64]Member) []Difference {
 	return out
 }
 
-// CurrentMembers reads the present state of the given records. A record with no kb.inputs row is
-// absent from the result.
-func CurrentMembers(ctx context.Context, db *sql.DB, recordIDs []int64) (map[int64]Member, error) {
-	out := make(map[int64]Member, len(recordIDs))
-	for _, id := range recordIDs {
-		m := Member{RecordID: id}
-		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(i.md5, ''),
-			       COALESCE((SELECT generation FROM kb.chunk_search_state s WHERE s.input_record_id = i.id), 0),
-			       (SELECT count(*) FROM kb.search_artifacts_chunk c WHERE c.input_record_id = i.id),
-			       (SELECT count(*) FROM kb.search_artifacts_provision p WHERE p.input_record_id = i.id)
-			FROM kb.inputs i WHERE i.id = $1`, id).
-			Scan(&m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount)
-		if err == sql.ErrNoRows {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read record %d state: %w", id, err)
-		}
-		out[id] = m
+// CurrentIndexed reads the present state of every indexed record: each kb.inputs row with at least
+// one chunk or provision search artifact.
+func CurrentIndexed(ctx context.Context, db *sql.DB) (map[int64]Member, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT i.id, COALESCE(i.md5, ''), COALESCE(s.generation, 0), COALESCE(c.n, 0), COALESCE(p.n, 0)
+		FROM kb.inputs i
+		LEFT JOIN kb.chunk_search_state s ON s.input_record_id = i.id
+		LEFT JOIN (SELECT input_record_id, count(*) AS n FROM kb.search_artifacts_chunk GROUP BY 1) c ON c.input_record_id = i.id
+		LEFT JOIN (SELECT input_record_id, count(*) AS n FROM kb.search_artifacts_provision GROUP BY 1) p ON p.input_record_id = i.id
+		WHERE COALESCE(c.n, 0) > 0 OR COALESCE(p.n, 0) > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("read indexed records: %w", err)
 	}
-	return out, nil
+	defer rows.Close()
+	out := map[int64]Member{}
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.RecordID, &m.MD5, &m.Generation, &m.ChunkCount, &m.ProvisionCount); err != nil {
+			return nil, err
+		}
+		out[m.RecordID] = m
+	}
+	return out, rows.Err()
 }
 
-// Record freezes the current state of recordIDs as a new snapshot and returns its id. Every
-// record must exist and have at least one indexed chunk, otherwise nothing is written.
-func Record(ctx context.Context, db *sql.DB, name, embeddingModel, notes string, recordIDs []int64) (int64, error) {
+// Added returns, in id order, the records indexed now that the manifest does not hold.
+func Added(manifest []Member, current map[int64]Member) []int64 {
+	in := make(map[int64]bool, len(manifest))
+	for _, m := range manifest {
+		in[m.RecordID] = true
+	}
+	var out []int64
+	for id := range current {
+		if !in[id] {
+			out = append(out, id)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// Record stamps the current state of the whole indexed knowledge base as a new snapshot and
+// returns its id and record count. An empty index is an error: there would be nothing to judge.
+func Record(ctx context.Context, db *sql.DB, name, embeddingModel, notes string) (int64, int, error) {
 	name, embeddingModel = strings.TrimSpace(name), strings.TrimSpace(embeddingModel)
 	if name == "" {
-		return 0, fmt.Errorf("snapshot name is required")
+		return 0, 0, fmt.Errorf("snapshot name is required")
 	}
 	if embeddingModel == "" {
-		return 0, fmt.Errorf("embedding model is required (set EMBEDDING_MODEL_NAME)")
+		return 0, 0, fmt.Errorf("embedding model is required (set EMBEDDING_MODEL_NAME)")
 	}
-	if len(recordIDs) == 0 {
-		return 0, fmt.Errorf("a snapshot needs at least one record")
-	}
-	cur, err := CurrentMembers(ctx, db, recordIDs)
+	cur, err := CurrentIndexed(ctx, db)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	seen := map[int64]bool{}
-	for _, id := range recordIDs {
-		if seen[id] {
-			return 0, fmt.Errorf("record %d listed twice", id)
-		}
-		seen[id] = true
-		m, ok := cur[id]
-		if !ok {
-			return 0, fmt.Errorf("record %d does not exist", id)
-		}
-		if m.ChunkCount == 0 {
-			return 0, fmt.Errorf("record %d has no indexed chunks; index it before freezing", id)
-		}
+	if len(cur) == 0 {
+		return 0, 0, fmt.Errorf("no record is indexed for search; index the knowledge base first")
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer tx.Rollback()
 	var snapID int64
 	if err := tx.QueryRowContext(ctx, `INSERT INTO testbed.compliance_eval_snapshots (name, embedding_model, notes)
 		VALUES ($1, $2, $3) RETURNING id`, name, embeddingModel, notes).Scan(&snapID); err != nil {
-		return 0, fmt.Errorf("insert snapshot %q: %w", name, err)
+		return 0, 0, fmt.Errorf("insert snapshot %q: %w", name, err)
 	}
-	for _, id := range recordIDs {
-		m := cur[id]
+	for _, m := range cur {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO testbed.compliance_eval_snapshot_records
 			(snapshot_id, input_record_id, md5, generation, chunk_count, provision_count)
-			VALUES ($1, $2, $3, $4, $5, $6)`, snapID, id, m.MD5, m.Generation, m.ChunkCount, m.ProvisionCount); err != nil {
-			return 0, fmt.Errorf("insert snapshot member %d: %w", id, err)
+			VALUES ($1, $2, $3, $4, $5, $6)`, snapID, m.RecordID, m.MD5, m.Generation, m.ChunkCount, m.ProvisionCount); err != nil {
+			return 0, 0, fmt.Errorf("insert snapshot record %d: %w", m.RecordID, err)
 		}
 	}
-	return snapID, tx.Commit()
+	return snapID, len(cur), tx.Commit()
 }
 
-// Verify compares snapshot snapshotID with the corpus now and returns every difference, including
-// a changed embedding model (currentEmbeddingModel). An empty result means the snapshot still holds.
-func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingModel string) ([]Difference, error) {
+// Verify compares snapshot snapshotID with the knowledge base now. diffs names every snapshot record
+// that changed or disappeared, and a changed embedding model (currentEmbeddingModel); empty diffs
+// means the snapshot still holds. added lists records indexed since the snapshot, which are allowed:
+// gold pooling leaves them out and the scorer reports reviewer hits on them as unjudged.
+func Verify(ctx context.Context, db *sql.DB, snapshotID int64, currentEmbeddingModel string) (diffs []Difference, added []int64, err error) {
 	var model string
 	if err := db.QueryRowContext(ctx, `SELECT embedding_model FROM testbed.compliance_eval_snapshots WHERE id = $1`, snapshotID).Scan(&model); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("snapshot %d does not exist", snapshotID)
+			return nil, nil, fmt.Errorf("snapshot %d does not exist", snapshotID)
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	manifest, err := SnapshotMembers(ctx, db, snapshotID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	ids := make([]int64, len(manifest))
-	for i, m := range manifest {
-		ids[i] = m.RecordID
-	}
-	cur, err := CurrentMembers(ctx, db, ids)
+	cur, err := CurrentIndexed(ctx, db)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := Diff(manifest, cur)
+	diffs = Diff(manifest, cur)
 	if strings.TrimSpace(currentEmbeddingModel) != model {
-		out = append([]Difference{{0, fmt.Sprintf("embedding model %q -> %q", model, currentEmbeddingModel)}}, out...)
+		diffs = append([]Difference{{0, fmt.Sprintf("embedding model %q -> %q", model, currentEmbeddingModel)}}, diffs...)
 	}
-	return out, nil
+	return diffs, Added(manifest, cur), nil
 }
 
 // SnapshotMembers returns the manifest rows of a snapshot.
@@ -185,19 +188,4 @@ func SnapshotMembers(ctx context.Context, db *sql.DB, snapshotID int64) ([]Membe
 		out = append(out, m)
 	}
 	return out, rows.Err()
-}
-
-// DocsOutsideSnapshot names every listed document that is not a member of the snapshot.
-func DocsOutsideSnapshot(docs []GoldDoc, members []Member) []int64 {
-	in := map[int64]bool{}
-	for _, m := range members {
-		in[m.RecordID] = true
-	}
-	var out []int64
-	for _, d := range docs {
-		if !in[d.RecordID] {
-			out = append(out, d.RecordID)
-		}
-	}
-	return out
 }

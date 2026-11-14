@@ -30,8 +30,8 @@ const chunkJSON = `{"doc_context":"D","lines":[["flag","line_number","page_numbe
 func testPipeline(a1, a2, adj *fakeModel, search func(searchengine.Request) *searchengine.Response) *Pipeline {
 	return &Pipeline{
 		A1: Labeller{"p1", "m1", a1}, A2: Labeller{"p2", "m2", a2}, Adj: Labeller{"pa", "ma", adj},
-		Prompts:   Prompts{Activities: "rules\n\nact", Judge: "rules\n\njudge", AdjActivity: "rules\n\nadja", AdjJudgement: "rules\n\nadjj"},
-		PoolLimit: 50,
+		Prompts:       Prompts{Activities: "rules\n\nact", Judge: "rules\n\njudge", AdjActivity: "rules\n\nadja", AdjJudgement: "rules\n\nadjj"},
+		MaxCandidates: 50,
 		Chunks: func(context.Context, int64) ([]docreviews.GoldChunk, error) {
 			return []docreviews.GoldChunk{{Index: 0, StartLine: 1, EndLine: 3, InputJSON: chunkJSON}}, nil
 		},
@@ -106,7 +106,6 @@ func TestLabelDocumentAgreementAdjudicationAndPool(t *testing.T) {
 		excluded, scoped = req.Filters.ExcludeRecordIDs, req.Filters.RecordIDs
 		return twoResults(req)
 	})
-	p.Scope = []int64{9, 10, 416}
 	doc, err := p.LabelDocument(context.Background(), GoldDoc{RecordID: 416, Covered: true})
 	if err != nil {
 		t.Fatal(err)
@@ -125,8 +124,8 @@ func TestLabelDocumentAgreementAdjudicationAndPool(t *testing.T) {
 	if len(excluded) != 2 || excluded[1] != 198 {
 		t.Errorf("pool search excluded %v, want the document and its copy", excluded)
 	}
-	if len(scoped) != 3 || scoped[0] != 9 {
-		t.Errorf("pool search scope = %v, want the snapshot members", scoped)
+	if len(scoped) != 0 {
+		t.Errorf("pool search scope = %v, want the whole knowledge base", scoped)
 	}
 	js := first.Judgements
 	if len(js) != 2 {
@@ -230,5 +229,37 @@ func TestMissingLabelIsRetriedForMissingCandidatesOnly(t *testing.T) {
 	}
 	if len(asked[1]) != 2 || len(asked[2]) != 1 || asked[2][0] != "chunk/c2" {
 		t.Errorf("asked = %v, want the second ask to cover only the missing candidate", asked)
+	}
+}
+
+func TestPoolInterleavesQueriesAndStopsAtMaxCandidates(t *testing.T) {
+	c := func(id string, cos float64) searchengine.Result {
+		return searchengine.Result{ArtifactType: "chunk", ArtifactID: id, InputRecordID: 9, SourceTitle: "GB 1", Snippet: id, Diag: searchengine.Diagnostics{Cosine: &cos}}
+	}
+	var limits []int
+	p := &Pipeline{MaxCandidates: 3, Search: func(_ context.Context, req searchengine.Request) (*searchengine.Response, error) {
+		limits = append(limits, req.Options.Limit)
+		if strings.Contains(req.Query.Text, "log") && !strings.Contains(req.Query.Text, "logs") { // name+object query
+			return &searchengine.Response{Results: []searchengine.Result{c("b1", 0.5), c("a1", 0.9), c("b2", 0.4)}}, nil
+		}
+		return &searchengine.Response{Results: []searchengine.Result{c("a1", 0.7), c("a2", 0.6), c("a3", 0.5)}}, nil
+	}}
+	got, err := p.Pool(context.Background(), Activity{Name: "log", Object: "o", SourceText: "keep logs"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, x := range got {
+		ids = append(ids, x.ArtifactID)
+	}
+	// rank 0: a1 (text query), b1 (name query); rank 1: a2, then the cap of 3 is reached.
+	if strings.Join(ids, ",") != "a1,b1,a2" {
+		t.Fatalf("pool = %v", ids)
+	}
+	if got[0].Source != "GB 1" || *got[0].Cosine != 0.9 { // a1 came from both queries: highest cosine kept
+		t.Errorf("a1 = %+v (cosine %v)", got[0], *got[0].Cosine)
+	}
+	if len(limits) != 2 || limits[0] != 3 || limits[1] != 3 {
+		t.Errorf("search limits = %v, want max_candidates per query", limits)
 	}
 }

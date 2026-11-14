@@ -44,6 +44,29 @@ func TestParseGoldConfigAbsentTables(t *testing.T) {
 	}
 }
 
+func TestParseGoldConfigMaxCandidates(t *testing.T) {
+	c, err := ParseGoldConfig([]byte("[compliance-review.covered-docs]\n416='a'\n"))
+	if err != nil || c.MaxCandidates != DefaultMaxCandidates {
+		t.Fatalf("absent: max=%v err=%v, want %d", c, err, DefaultMaxCandidates)
+	}
+	c, err = ParseGoldConfig([]byte("[reviewers.compliance]\nmax_candidates = 50\n"))
+	if err != nil || c.MaxCandidates != 50 {
+		t.Fatalf("set: c=%+v err=%v", c, err)
+	}
+	for _, bad := range []string{"0", "-3"} {
+		if _, err := ParseGoldConfig([]byte("[reviewers.compliance]\nmax_candidates = " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "max_candidates") {
+			t.Errorf("max_candidates=%s: err = %v", bad, err)
+		}
+	}
+	c, _ = ParseGoldConfig([]byte("[compliance-review.uncovered-docs]\n799='paper'\n"))
+	if d, ok := c.Find(799); !ok || d.Covered || d.Reason != "paper" {
+		t.Errorf("find 799 = %+v %v", d, ok)
+	}
+	if _, ok := c.Find(1); ok {
+		t.Errorf("record 1 is not listed")
+	}
+}
+
 func TestResolveProfiles(t *testing.T) {
 	env := map[string]string{EnvAnnotator1: "a", EnvAnnotator2: "b", EnvAdjudicator: "c"}
 	get := func(k string) string { return env[k] }

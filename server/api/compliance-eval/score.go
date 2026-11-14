@@ -44,8 +44,14 @@ type Metrics struct {
 	NoGroundingPrecision Ratio
 	// Of those, share where gold had a governing record the reviewer's search did not report.
 	NoGroundingMissedBySearch Ratio
-	// Of matched activities with no governing record in gold: share where the reviewer reported candidates.
-	FalseGrounding      Ratio
+	// Of matched activities with no governing record in gold: share where the reviewer reported
+	// candidates on snapshot records.
+	FalseGrounding Ratio
+	// Matched activities with no governing record in gold whose reported candidates all lie on records
+	// added after the snapshot: unjudged, so left out of FalseGrounding.
+	UnjudgedActivities int
+	// Reported candidate records added after the snapshot, counted once per matched activity.
+	UnjudgedCandidates  int
 	AmbiguousJudgements int
 	Headline            Ratio
 }
@@ -88,7 +94,11 @@ func spansMatch(aS, aE, bS, bE int, aDoc, bDoc bool) bool {
 // as "no grounding" only when every covering row says so. The headline is the mean of activity F1,
 // grounding recall and one minus the false-grounding rate over the components that are defined;
 // it is a summary, and the components are the result.
-func Score(gold []GoldAct, rows []ReviewRow) Metrics {
+//
+// inSnapshot is the gold snapshot's record set. A reviewer candidate on a record outside it was
+// indexed after the snapshot, so gold never judged it: it is unjudged, never a false grounding. Nil
+// treats every record as inside the snapshot.
+func Score(gold []GoldAct, rows []ReviewRow, inSnapshot map[int64]bool) Metrics {
 	m := Metrics{GoldActivities: len(gold), ReviewRows: len(rows)}
 	rowSupported := make([]bool, len(rows))
 	for _, g := range gold {
@@ -120,9 +130,25 @@ func Score(gold []GoldAct, rows []ReviewRow) Metrics {
 				}
 			}
 		} else {
-			m.FalseGrounding.Den++
-			if !allNo {
+			judgeable := false
+			for rec := range reported {
+				if inSnapshot == nil || inSnapshot[rec] {
+					judgeable = true
+				}
+			}
+			switch {
+			case allNo:
+				m.FalseGrounding.Den++
+			case judgeable:
+				m.FalseGrounding.Den++
 				m.FalseGrounding.Num++
+			default:
+				m.UnjudgedActivities++
+			}
+		}
+		for rec := range reported {
+			if inSnapshot != nil && !inSnapshot[rec] {
+				m.UnjudgedCandidates++
 			}
 		}
 		if allNo {

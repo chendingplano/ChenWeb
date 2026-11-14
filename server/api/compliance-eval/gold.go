@@ -33,6 +33,7 @@ const (
 	labelAmbiguous   = "ambiguous"
 	agreeBoth        = "both"
 	agreeAdjudicated = "adjudicated_kept"
+	agreeSingle      = "single" // agent runs: one labeller
 )
 
 // Prompts are the composed (rules + task) prompt texts.
@@ -82,11 +83,12 @@ type Activity struct {
 	Rationale     string
 }
 
-// Candidate is one pooled search result.
+// Candidate is one pooled search result. Source is the candidate record's title or file name.
 type Candidate struct {
 	ArtifactType string
 	ArtifactID   string
 	RecordID     int64
+	Source       string
 	Text         string
 	Cosine       *float64
 }
@@ -118,15 +120,17 @@ type GoldDocument struct {
 	Dropped    int // activities proposed by one annotator only and rejected by the adjudicator
 }
 
-// Pipeline labels documents. Chunks, Exclude and Search are fields so tests need no database.
+// Pipeline is the model-panel labelling (two annotators and an adjudicator; deferred, the first
+// iteration's gold is agent-built, see agent.go) and the pool search both paths share. Chunks,
+// Exclude and Search are fields so tests need no database.
 type Pipeline struct {
 	A1, A2, Adj Labeller
 	Prompts     Prompts
-	PoolLimit   int
-	// Scope is the snapshot's member records: the pool searches only these, so every gold label
-	// refers to a frozen record. Empty means no restriction (tests only).
-	Scope   []int64
-	Chunks  func(ctx context.Context, recordID int64) ([]docreviews.GoldChunk, error)
+	// MaxCandidates caps the pool of one activity ([reviewers.compliance].max_candidates).
+	MaxCandidates int
+	Chunks        func(ctx context.Context, recordID int64) ([]docreviews.GoldChunk, error)
+	// Exclude returns the records the pool must leave out for a document: the document, its
+	// byte-identical copies and the records added since the snapshot.
 	Exclude func(ctx context.Context, recordID int64) ([]int64, error)
 	Search  func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error)
 }
@@ -163,7 +167,7 @@ func (p *Pipeline) LabelDocument(ctx context.Context, doc GoldDoc) (*GoldDocumen
 	}
 	out := &GoldDocument{GoldDoc: doc, Dropped: dropped}
 	for _, a := range final {
-		pool, err := p.pool(ctx, a, exclude)
+		pool, err := p.Pool(ctx, a, exclude)
 		if err != nil {
 			return nil, fmt.Errorf("record %d activity %q: %w", doc.RecordID, a.Name, err)
 		}
@@ -298,35 +302,62 @@ func (p *Pipeline) merge(ctx context.Context, a1, a2 []Activity) (final []Activi
 	return final, dropped, nil
 }
 
-// pool searches the snapshot corpus deeply for one activity: no relevance floor, the document and its
-// byte-identical copies excluded, duplicates across queries merged keeping the highest cosine.
-func (p *Pipeline) pool(ctx context.Context, a Activity, exclude []int64) ([]Candidate, error) {
+// Pool searches the whole knowledge base deeply for one activity: two queries (the activity's source
+// text, and its name with its object), no relevance floor, the excluded records left out. The two
+// result lists are interleaved by rank and duplicates merged (keeping the highest cosine), so each
+// query contributes its best hits first; the pool stops at MaxCandidates.
+func (p *Pipeline) Pool(ctx context.Context, a Activity, exclude []int64) ([]Candidate, error) {
+	if p.MaxCandidates <= 0 {
+		return nil, fmt.Errorf("pool: max_candidates must be positive")
+	}
 	queries := []string{truncate(a.SourceText, activityTextMax), strings.TrimSpace(strings.ReplaceAll(a.Name, "_", " ") + " " + a.Object)}
-	byKey := map[string]*Candidate{}
-	var order []string
+	var lists [][]Candidate
 	for _, q := range queries {
 		if q == "" {
 			continue
 		}
 		resp, err := p.Search(ctx, searchengine.Request{
 			Query:   searchengine.Query{Text: q},
-			Filters: searchengine.Filters{ArtifactTypes: []string{"provision", "chunk"}, RecordIDs: p.Scope, ExcludeRecordIDs: exclude},
-			Options: searchengine.Options{Limit: p.PoolLimit},
+			Filters: searchengine.Filters{ArtifactTypes: []string{"provision", "chunk"}, ExcludeRecordIDs: exclude},
+			Options: searchengine.Options{Limit: p.MaxCandidates},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("pool search %q: %w", truncate(q, 60), err)
 		}
+		var l []Candidate
 		for _, r := range resp.Results {
-			c := Candidate{ArtifactType: r.ArtifactType, ArtifactID: r.ArtifactID, RecordID: r.InputRecordID,
-				Text: truncate(strings.TrimSpace(r.Snippet), candidateTextMax), Cosine: r.Diag.Cosine}
+			src := r.SourceTitle
+			if src == "" {
+				src = r.SourceFilename
+			}
+			l = append(l, Candidate{ArtifactType: r.ArtifactType, ArtifactID: r.ArtifactID, RecordID: r.InputRecordID,
+				Source: src, Text: truncate(strings.TrimSpace(r.Snippet), candidateTextMax), Cosine: r.Diag.Cosine})
+		}
+		lists = append(lists, l)
+	}
+	byKey := map[string]*Candidate{}
+	var order []string
+	for rank := 0; ; rank++ {
+		more := false
+		for _, l := range lists {
+			if rank >= len(l) {
+				continue
+			}
+			more = true
+			c := l[rank]
 			if prev, ok := byKey[c.key()]; ok {
 				if c.Cosine != nil && (prev.Cosine == nil || *c.Cosine > *prev.Cosine) {
 					prev.Cosine = c.Cosine
 				}
 				continue
 			}
-			byKey[c.key()] = &c
-			order = append(order, c.key())
+			if len(order) < p.MaxCandidates {
+				byKey[c.key()] = &c
+				order = append(order, c.key())
+			}
+		}
+		if !more {
+			break
 		}
 	}
 	out := make([]Candidate, 0, len(order))

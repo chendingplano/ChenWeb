@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
@@ -41,6 +42,38 @@ func LoadGoldChunks(ctx context.Context, db *sql.DB, recordID int64) ([]GoldChun
 // reports as evidence), capped like the reviewer's own evidence.
 func GoldLinesText(inputJSON string, start, end int) string {
 	return complianceLinesText(inputJSON, start, end)
+}
+
+// GoldLine is one line of a chunk input: its document line number and content.
+type GoldLine struct {
+	Number  int
+	Content string
+}
+
+// GoldChunkLines returns the lines of a chunk input in order, so a gold annotator can read exactly
+// what the reviewer reads. Input that cannot be read yields no lines.
+func GoldChunkLines(inputJSON string) []GoldLine {
+	lines, _ := parseComplianceInput(inputJSON)
+	out := make([]GoldLine, len(lines))
+	for i, l := range lines {
+		out[i] = GoldLine{Number: l.LineNumber, Content: l.Content}
+	}
+	return out
+}
+
+// GoldDocContext returns the doc_context line of a chunk input, or "" when there is none.
+func GoldDocContext(inputJSON string) string {
+	var env struct {
+		DocContext any `json:"doc_context"`
+	}
+	if json.Unmarshal([]byte(inputJSON), &env) != nil || env.DocContext == nil {
+		return ""
+	}
+	if s, ok := env.DocContext.(string); ok {
+		return s
+	}
+	b, _ := json.Marshal(env.DocContext)
+	return string(b)
 }
 
 // SameMD5RecordIDs is the reviewer's duplicate lookup: the record plus every record with the same

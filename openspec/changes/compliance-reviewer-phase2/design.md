@@ -40,22 +40,31 @@ relative cut; rejected, because fused score is not comparable across queries.
 *Consequence:* cosine from a different embedding model is not comparable, so the snapshot records
 the embedding model and the floor is stored with it.
 
-**D3. A frozen evaluation snapshot is a recorded manifest, not a copy of the data.** Tables in the `testbed` schema
-(`testbed.compliance_eval_snapshots`: id, name, created time, embedding model, notes; and a child table
-of member records (record id, md5, chunk-index generation, counts of chunk and provision
-artifacts). The searched corpus itself stays where the search engine reads it, in the
-`kb.search_artifacts_*` tables; the snapshot only records which records of it a gold run may rely
-on. A gold run refuses to start when a member's current generation or md5 differs from
-the manifest, and says which. *Alternative:* a separate database copy; rejected, since it
-duplicates large data and the project keeps data in the database, not in files.
+**D3. A snapshot is a version stamp of the whole indexed knowledge base (revised 2026-11-14).**
+Tables in the `testbed` schema (`testbed.compliance_eval_snapshots`: id, name, created time,
+embedding model, notes; and a child table with one row per indexed record: record id, md5,
+chunk-index generation, counts of chunk and provision artifacts). The corpus itself stays where the
+search engine reads it, in the `kb.search_artifacts_*` tables. The knowledge base has no parts, so
+the snapshot stamps every indexed record rather than a chosen member list (the first build did the
+latter and restricted pooling to it, while the reviewer searched everything). Verification fails
+when a snapshot record's md5, generation or counts changed or the record disappeared, or the
+embedding model changed, and names each. Records indexed later are allowed: gold pooling leaves
+them out and the scorer reports reviewer hits on them as unjudged. *Alternative:* a separate
+database copy; rejected, since it duplicates large data and the project keeps data in the
+database, not in files.
 
-**D4. Gold set and scorer are Go commands, not agent skills (revised during apply).** The
-existing benchmarks (`extract-provisions-benchmark`) are skills that the invoking agent follows by
-hand, with the agent as the single labeller. Here the labellers are the model profiles of D7, so
-the labelling must be a program that calls them: `server/api/compliance-eval` plus two commands,
-`compliance-gold` (label and save) and `compliance-score`. What is kept from the existing pattern:
-rules frozen per version (a rules file in `prompts/`, its SHA-256 stored with the run), a saved
-run identified by snapshot, rules version and models, and a 1–100 score with per-group detail.
+**D4. The first iteration's gold is built by the coding agent (revised 2026-11-14).** The user
+judged the model panel of D7 too complicated for now. Gold is labelled by Claude Code or Codex
+following the skill `.agents/skills/compliance-review-benchmark`, the pattern of the other
+benchmarks (`extract-provisions-benchmark`): rules frozen per version in the skill's `rules/`
+with their SHA-256 in `rules/versions.json`, the invoking model recorded, one immutable run per
+document. Go does what the agent cannot: `compliance-gold chunks` prints the document as the
+reviewer reads it, `pool` checks the agent's activities and pools candidates from the knowledge
+base, `save` checks every label and the rules file's SHA-256 and writes the run (method `agent`),
+`show` reads it back. `compliance-score` scores one or more gold runs of one snapshot. One labeller
+means no inter-annotator agreement; the skill's audits and the human review sample (D7) are the
+checks. *Earlier revision (during apply):* gold as Go commands calling model profiles; kept as
+`compliance-gold panel`.
 Gold content: per document, the activity spans (including the document-level activity); per
 activity, a judgement for each pooled candidate (D10), and "no grounding expected" when none is
 judged to govern.
@@ -68,11 +77,15 @@ as supported when it overlaps some gold activity; grounding for a found activity
 covering it. The cost is that coarse rows are never penalised for being coarse; granularity is
 reported through the two counts instead.
 
-**D10. Grounding labels come from a judged pool, not from the whole corpus.** An annotator cannot
-read the corpus, so for each gold activity the system builds a candidate pool by a deep search
-(limit 50, no floor, byte-identical copies excluded) over the snapshot, and each annotator judges
-every pooled candidate as `governs`, `topical` or `unrelated`, with a reason. The adjudicator
-resolves disagreements. This is standard pooled evaluation and has a known bias: a governing
+**D10. Grounding labels come from a judged pool, not from the whole corpus (revised 2026-11-14).**
+A labeller cannot read the corpus, so for each gold activity the system builds a candidate pool by a
+deep search of the whole knowledge base: two queries (the activity's source text, and its name with
+its object), no floor, the document, its byte-identical copies and the records indexed after the
+snapshot left out. The two result lists are interleaved by rank and the pool stops at
+`[reviewers.compliance].max_candidates` per activity (default 100; it is the labelling workload, and
+the reviewer's own search ignores it). The agent judges every pooled candidate as `governs`,
+`topical`, `unrelated` or `ambiguous`, with a reason for `governs` and `ambiguous`; in the model
+panel both annotators judge and the adjudicator resolves disagreements. This is standard pooled evaluation and has a known bias: a governing
 record that the pooling search misses is never judged, so recall measured against the pool is an
 upper bound. The scorer reports it as "recall within the pool" and the gold run stores the
 pooling parameters. The judged pool is also what gives the cosine distribution for choosing
@@ -84,7 +97,9 @@ run on the gold documents against the same snapshot, and their findings are comp
 scorer. The baseline is stored with the gold run so later phases are measured against it.
 
 **D6. Metrics reported separately (research §11.2).** Activity span precision and recall;
-knowledge-base independence (activity lists identical across full, narrowed and empty scope);
+knowledge-base independence (activity lists identical for runs of one document made against
+different knowledge-base states, `compliance-score -compare`); hits on records indexed after the
+snapshot counted as unjudged, never as false grounding;
 grounding recall at the record level; precision of "no grounding" and the share where the
 snapshot did hold a governing record that search missed. Obligation-level recall and the 95%
 gates are phase 3 and later.
@@ -102,8 +117,9 @@ gates are phase 3 and later.
 - **Dev corpus is thin.** 143 of 207 dev records cannot be indexed and provisions are nearly
   absent. → The snapshot lists only records that are indexed; its counts show how thin it is, and
   scores say so. Provision grounding stays unmeasured until provisions exist.
-- **LLM labels share model blind spots.** → Different profiles for the two annotators, an
-  adjudicator with rationale, the `llm:` label source, and the human-sample follow-up (D7).
+- **One agent labels alone.** → No inter-annotator agreement; the skill's frozen rules, its
+  completeness and consistency audits (recorded with the run), and the human-sample follow-up (D7).
+  The model panel remains available for a later iteration.
 
 ## Migration Plan
 
@@ -112,9 +128,12 @@ gains optional `min_cosine`; absent means today's behaviour. Rows gain a cosine 
 description text, so stored findings and the report view keep working. Rolling back means
 dropping the tables and removing the config key. A second project migration
 (`20261114000001`) drops `testbed.compliance_gold_runs.organization` (D9); its Down restores the
-column with `{}` as the value.
+column with `{}` as the value. A third (`20261114000002`) lets a run have one labeller: `method`
+(`agent` or `model_panel`), `rules_version`, `audit_notes`, `pool_limit` renamed `max_candidates`,
+optional second annotator and adjudicator, agreement `single`, `label_1` may be `ambiguous`,
+`label_2` optional. Its Down deletes agent runs, which the old shape cannot hold.
 
-**D7. Annotators and adjudicator are model profiles named by environment variables.**
+**D7. Model-panel labelling (deferred 2026-11-14, kept as `compliance-gold panel`).**
 `COMPLIANCE_REVIEWER_ANNOTATOR_1`, `COMPLIANCE_REVIEWER_ANNOTATOR_2` and
 `COMPLIANCE_ADJUDICATOR` each name a profile resolved through `MODEL_DEF_FILE`; no model name is
 in code, and an unset variable fails with the variable's name. The two annotators label
@@ -129,8 +148,9 @@ a human review of a sample (including a check for governing records the pool mis
 `[compliance-review.covered-docs]` (documents with activities the snapshot is expected to cover)
 and `[compliance-review.uncovered-docs]` (documents with activities it is expected not to cover).
 Each key is a `kb.inputs` record id and each value a one-line reason. The tables select what
-the gold run labels; they are not labels. A record in both tables, a missing record, or a record
-outside the snapshot is a startup error naming it.
+the gold run labels; they are not labels. A record in both tables, or one the agent's `pool` or
+`save` step is given without being listed, is an error naming it. Covered and uncovered are
+relative to the whole knowledge base.
 
 **D9. No organization profile (revised 2026-11-14).** The first build had a
 `[compliance-review.organization]` table of organization facts (operating territories, legal
@@ -150,13 +170,10 @@ together with the storage that keeps it, so the phase 2 baseline is not disturbe
 
 ## Open Questions
 
-0. The scope-stability metric needs the *reviewer* to run against a narrowed scope (the snapshot,
-   or the snapshot minus the governing records). The reviewer still searches the whole knowledge
-   base. Pooling is already restricted to the snapshot (D10); restricting the reviewer needs a
-   scope setting (record ids or a document group passed to its search) that this change has not
-   built. Until then `compliance-score -compare` can compare two runs only if the operator produced
-   them under different scopes by other means.
+0. *Resolved 2026-11-14:* the knowledge base has no parts. The snapshot stamps the whole
+   knowledge base and pooling searches all of it (D3, D10), as the reviewer does; activity-list
+   stability is checked between runs made against different knowledge-base states.
 
 1. *Resolved 2026-11-14:* no organization facts are needed (D9).
 2. The first covered and uncovered documents (D8) need choosing by the user, 10–15 in all.
-3. A human review sample of LLM-adjudicated labels (D7): who, how many, when.
+3. A human review sample of the gold labels (agent-made in the first iteration; D4, D7): who, how many, when.

@@ -10,7 +10,7 @@
 
 - [x] 2.1 Before writing, run the `find-reusable-module` skill for a snapshot or manifest mechanism and for the benchmark layout; report what was searched. *Searched 2026-11-12 (catalogue: snapshot, manifest, benchmark, gold, scorer, freeze, generation; code and devdocs for snapshot/manifest): no snapshot module exists. Reused: Artifact Search (`searchengine`) and `kb.chunk_search_state.generation`; built new: `server/api/compliance-eval` (small, evaluation-only, not registered).*
 - [x] 2.2 Project migration (see `db-migration` skill): `testbed.compliance_eval_snapshots` and `testbed.compliance_eval_snapshot_records` (record id, md5, chunk-index generation, chunk and provision counts), with down migration. Apply to the dev database and confirm the columns.
-- [x] 2.3 A command that records a snapshot from a named list of records, and a check that compares current state with a manifest and names every member that differs.
+- [x] 2.3 A command that records a snapshot from a named list of records, and a check that compares current state with a manifest and names every member that differs. *(Replaced by a stamp of the whole knowledge base in 6.2.)*
 
 ## 3. Gold set and scorer (Go; see design D4, D10)
 
@@ -24,10 +24,21 @@
 
 - [x] 4.1 Read `[compliance-review.covered-docs]`, `[compliance-review.uncovered-docs]` and `[compliance-review.organization]` from `doc-review.local.toml`; validate as in the spec (both-tables, missing record, outside snapshot, status vocabulary). Ship the organization table with every fact `unknown` and both document tables empty, with comments. *(The organization table was removed by 4.6.)*
 - [x] 4.2 Labelling configuration (feeds 3.3): resolve `COMPLIANCE_REVIEWER_ANNOTATOR_1`, `_2` and `COMPLIANCE_ADJUDICATOR` through `MODEL_DEF_FILE`; fail naming an unset variable; refuse equal annotators; store label source and adjudication rationale. Prompts in `prompts/`, versioned.
-- [ ] 4.3 With the user's chosen documents: record the snapshot, run the labelling, save the gold run.
+- [ ] 4.3 With the user's chosen documents: record the snapshot, have the coding agent label each document with the `compliance-review-benchmark` skill, save one gold run per document.
 - [ ] 4.4 Run the baseline (current legal, regulatory and standards reviewers; Compliance Review with exclusion and floor off, then on) on the same snapshot and store the scores with the gold run, marked LLM-adjudicated.
 - [ ] 4.5 From the gold set's cosine distribution for governing versus non-governing candidates, propose a `min_cosine` and report the misses it would cause. Set it only with the user's agreement.
 - [x] 4.6 Retire the organization profile (design D9, revised 2026-11-14): remove `[compliance-review.organization]` from the config parser, `compliance-gold` and `doc-review.local.toml`; drop `testbed.compliance_gold_runs.organization` (migration `20261114000001`, applied to the dev database); update the config tests.
+
+## 6. Agent-built gold and whole-KB snapshot (design D3, D4, D10 revised 2026-11-14)
+
+- [x] 6.1 Before writing, run the `find-reusable-module` skill. *Searched 2026-11-14 (catalogue: benchmark, rules, version, gold, snapshot; code: `versions.json`, `rules_sha256`): no Go helper verifies a skill's rules versions (each benchmark skill does it in its own Python script). Reused the benchmark-skill pattern of `extract-provisions-benchmark`, `searchengine` (Artifact Search) and the existing `compliance-eval` code; built the rules check in Go because the save step is Go.*
+- [x] 6.2 Snapshot = stamp of the whole indexed knowledge base (`Record`, `Verify` returning changed and added records, `CurrentIndexed`, `Added`); `compliance-snapshot record -name | verify [-id] | list`; the snapshot-membership refusal removed.
+- [x] 6.3 Pool over the whole knowledge base, leaving out the document, its copies and records added since the snapshot; two queries interleaved by rank; cap `[reviewers.compliance].max_candidates` (default 100, positive); candidates carry their source title.
+- [x] 6.4 `compliance-gold chunks | pool | save | show` for the agent; `panel` keeps the model panel; pool search usage attributed to `-user` or the document's owner.
+- [x] 6.5 Project migration `20261114000002` (method, rules version, audit notes, `max_candidates`, one-labeller runs), applied to the dev database; Down/Up tested in a rolled-back transaction.
+- [x] 6.6 Scorer: several gold runs of one snapshot; hits on records added after the snapshot reported as unjudged; output names the labelling method.
+- [x] 6.7 Skill `.agents/skills/compliance-review-benchmark` (SKILL.md, rules 1.0.0 with SHA-256, CHANGELOG, Codex metadata), linked for Claude Code and Codex.
+- [x] 6.8 Tests for activities, labels, rules versions, pool cap and unjudged scoring; a smoke run on record 416 (snapshot, chunks, pool, save, show, score) on the dev database, its data deleted.
 
 ## 5. Close out
 

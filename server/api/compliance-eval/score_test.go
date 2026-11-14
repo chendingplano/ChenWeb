@@ -30,7 +30,7 @@ func TestScoreMatchesRecallAndNoGrounding(t *testing.T) {
 		{Record: 1, LineStart: 90, LineEnd: 91, Candidates: set(1)}, // spurious
 		{Record: 1, LineStart: 1, LineEnd: 1, DocumentLevel: true, Candidates: set(400)},
 	}
-	m := Score(gold, rows)
+	m := Score(gold, rows, nil)
 	if m.MatchedActivities != 5 || m.SupportedRows != 5 || m.ActivityPrecision != (Ratio{5, 6}) || m.ActivityRecall != (Ratio{5, 6}) {
 		t.Fatalf("matching: %+v", m)
 	}
@@ -53,7 +53,7 @@ func TestScoreMatchesRecallAndNoGrounding(t *testing.T) {
 }
 
 func TestScoreUndefinedRatiosAreNotZero(t *testing.T) {
-	m := Score(nil, nil)
+	m := Score(nil, nil, nil)
 	for name, r := range map[string]Ratio{"p": m.ActivityPrecision, "r": m.ActivityRecall, "g": m.GroundingRecall,
 		"n": m.NoGroundingPrecision, "f": m.FalseGrounding, "h": m.Headline} {
 		if r.Defined() || !strings.Contains(r.String(), "n/a") {
@@ -64,14 +64,14 @@ func TestScoreUndefinedRatiosAreNotZero(t *testing.T) {
 
 func TestScoreDocumentLevelOnlyMatchesDocumentLevel(t *testing.T) {
 	m := Score([]GoldAct{{Record: 1, LineStart: 1, LineEnd: 3, DocumentLevel: true}},
-		[]ReviewRow{{Record: 1, LineStart: 1, LineEnd: 3}})
+		[]ReviewRow{{Record: 1, LineStart: 1, LineEnd: 3}}, nil)
 	if m.MatchedActivities != 0 {
 		t.Fatalf("matched = %d", m.MatchedActivities)
 	}
 }
 
 func TestScoreMatchesPerRecord(t *testing.T) {
-	m := Score([]GoldAct{{Record: 1, LineStart: 1, LineEnd: 3}}, []ReviewRow{{Record: 2, LineStart: 1, LineEnd: 3}})
+	m := Score([]GoldAct{{Record: 1, LineStart: 1, LineEnd: 3}}, []ReviewRow{{Record: 2, LineStart: 1, LineEnd: 3}}, nil)
 	if m.MatchedActivities != 0 {
 		t.Fatalf("matched across records: %d", m.MatchedActivities)
 	}
@@ -110,7 +110,7 @@ func TestScoreOneMergedRowCoversManyFineGoldActivities(t *testing.T) {
 		{Record: 1, LineStart: 50, LineEnd: 50, Governs: set(100)},
 		{Record: 1, LineStart: 51, LineEnd: 51, Governs: set()},
 	}
-	m := Score(gold, []ReviewRow{{Record: 1, LineStart: 49, LineEnd: 52, Candidates: set(100)}})
+	m := Score(gold, []ReviewRow{{Record: 1, LineStart: 49, LineEnd: 52, Candidates: set(100)}}, nil)
 	if m.ActivityRecall != (Ratio{3, 3}) || m.ActivityPrecision != (Ratio{1, 1}) {
 		t.Fatalf("recall=%v precision=%v", m.ActivityRecall, m.ActivityPrecision)
 	}
@@ -125,8 +125,28 @@ func TestScoreNoGroundingNeedsEveryCoveringRowToAgree(t *testing.T) {
 		{Record: 1, LineStart: 5, LineEnd: 6, NoGrounding: true},
 		{Record: 1, LineStart: 7, LineEnd: 9, Candidates: set(7)},
 	}
-	m := Score(gold, rows)
+	m := Score(gold, rows, nil)
 	if m.NoGroundingPrecision.Defined() || m.GroundingRecall != (Ratio{1, 1}) {
 		t.Fatalf("no-grounding=%v recall=%v", m.NoGroundingPrecision, m.GroundingRecall)
+	}
+}
+
+func TestScoreHitsOnRecordsAddedAfterSnapshotAreUnjudged(t *testing.T) {
+	gold := []GoldAct{
+		{Record: 1, LineStart: 10, LineEnd: 10, Governs: set()}, // reviewer hit only a record added later
+		{Record: 1, LineStart: 20, LineEnd: 20, Governs: set()}, // reviewer hit a snapshot record
+		{Record: 1, LineStart: 30, LineEnd: 30, Governs: set(5)},
+	}
+	rows := []ReviewRow{
+		{Record: 1, LineStart: 10, LineEnd: 10, Candidates: set(900)},
+		{Record: 1, LineStart: 20, LineEnd: 20, Candidates: set(6, 901)},
+		{Record: 1, LineStart: 30, LineEnd: 30, Candidates: set(5)},
+	}
+	m := Score(gold, rows, set(5, 6))
+	if m.FalseGrounding != (Ratio{1, 1}) || m.UnjudgedActivities != 1 || m.UnjudgedCandidates != 2 {
+		t.Fatalf("false grounding %v, unjudged activities %d, unjudged candidates %d", m.FalseGrounding, m.UnjudgedActivities, m.UnjudgedCandidates)
+	}
+	if m.GroundingRecall != (Ratio{1, 1}) {
+		t.Errorf("grounding recall = %v", m.GroundingRecall)
 	}
 }

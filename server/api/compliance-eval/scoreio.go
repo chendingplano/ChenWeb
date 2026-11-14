@@ -47,6 +47,60 @@ func LoadGoldActs(ctx context.Context, db *sql.DB, runKey string) ([]GoldAct, er
 	return out, nil
 }
 
+// GoldRunInfo describes a saved gold run for reporting.
+type GoldRunInfo struct {
+	Key, Method, Annotator1 string
+	SnapshotID              int64
+}
+
+// LoadGold reads the activities of one or more gold runs (one run per document for agent-built gold).
+// The runs must share one snapshot, whose record set is returned for the scorer's unjudged check, and
+// no document may appear in two of them.
+func LoadGold(ctx context.Context, db *sql.DB, keys []string) ([]GoldAct, []GoldRunInfo, map[int64]bool, error) {
+	var acts []GoldAct
+	var infos []GoldRunInfo
+	owner := map[int64]string{}
+	for _, k := range keys {
+		var info GoldRunInfo
+		info.Key = k
+		if err := db.QueryRowContext(ctx, `SELECT method, annotator_1, snapshot_id FROM testbed.compliance_gold_runs WHERE run_key = $1`, k).
+			Scan(&info.Method, &info.Annotator1, &info.SnapshotID); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil, nil, fmt.Errorf("gold run %q does not exist", k)
+			}
+			return nil, nil, nil, err
+		}
+		if len(infos) > 0 && info.SnapshotID != infos[0].SnapshotID {
+			return nil, nil, nil, fmt.Errorf("gold runs %s and %s use different snapshots (%d, %d); score them separately",
+				infos[0].Key, k, infos[0].SnapshotID, info.SnapshotID)
+		}
+		a, err := LoadGoldActs(ctx, db, k)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for _, g := range a {
+			if prev, ok := owner[g.Record]; ok && prev != k {
+				return nil, nil, nil, fmt.Errorf("record %d is in gold runs %s and %s; score one of them", g.Record, prev, k)
+			}
+			owner[g.Record] = k
+		}
+		acts = append(acts, a...)
+		infos = append(infos, info)
+	}
+	if len(infos) == 0 {
+		return nil, nil, nil, fmt.Errorf("no gold run given")
+	}
+	members, err := SnapshotMembers(ctx, db, infos[0].SnapshotID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	in := make(map[int64]bool, len(members))
+	for _, m := range members {
+		in[m.RecordID] = true
+	}
+	return acts, infos, in, nil
+}
+
 // LoadReviewRows reads the Compliance Review findings of one doc-review run.
 func LoadReviewRows(ctx context.Context, db *sql.DB, runID int64) ([]ReviewRow, error) {
 	var record int64

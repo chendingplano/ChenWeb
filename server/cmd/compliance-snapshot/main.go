@@ -1,10 +1,13 @@
 // Command compliance-snapshot records and verifies evaluation snapshots for the Compliance
-// Review gold set (openspec compliance-reviewer-phase2).
+// Review gold set (openspec compliance-reviewer-phase2). A snapshot is a version stamp of the whole
+// indexed knowledge base: every indexed record's md5, chunk-index generation and index counts.
 //
-//	mise exec -- go run ./server/cmd/compliance-snapshot record -name gold-1 -ids 416,371 [-notes ...]
-//	mise exec -- go run ./server/cmd/compliance-snapshot verify -id 1
+//	mise exec -- go run ./server/cmd/compliance-snapshot record -name kb-20261114 [-notes ...]
+//	mise exec -- go run ./server/cmd/compliance-snapshot verify [-id 1]     # default: the latest
+//	mise exec -- go run ./server/cmd/compliance-snapshot list
 //
-// verify exits 1 and names every record that differs from the manifest.
+// verify exits 1 and names every snapshot record that changed or disappeared; records indexed since
+// the snapshot are reported but allowed.
 package main
 
 import (
@@ -13,8 +16,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 
 	_ "github.com/lib/pq"
 
@@ -28,9 +29,8 @@ func main() {
 	cmd, args := os.Args[1], os.Args[2:]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	name := fs.String("name", "", "snapshot name (record)")
-	ids := fs.String("ids", "", "comma-separated record ids (record)")
 	notes := fs.String("notes", "", "free-text notes (record)")
-	id := fs.Int64("id", 0, "snapshot id (verify)")
+	id := fs.Int64("id", 0, "snapshot id (verify; default the latest)")
 	fs.Parse(args)
 
 	db := connect()
@@ -39,57 +39,64 @@ func main() {
 	model := os.Getenv("EMBEDDING_MODEL_NAME")
 	switch cmd {
 	case "record":
-		recs, err := parseIDs(*ids)
+		snap, n, err := complianceeval.Record(ctx, db, *name, model, *notes)
 		if err != nil {
 			fatal(err)
 		}
-		snap, err := complianceeval.Record(ctx, db, *name, model, *notes, recs)
-		if err != nil {
-			fatal(err)
-		}
-		fmt.Printf("snapshot %d %q recorded: %d records, embedding model %s\n", snap, *name, len(recs), model)
+		fmt.Printf("snapshot %d %q recorded: %d indexed records, embedding model %s\n", snap, *name, n, model)
 	case "verify":
-		diffs, err := complianceeval.Verify(ctx, db, *id, model)
+		if *id == 0 {
+			if err := db.QueryRowContext(ctx, `SELECT COALESCE(max(id), 0) FROM testbed.compliance_eval_snapshots`).Scan(id); err != nil {
+				fatal(err)
+			}
+			if *id == 0 {
+				fatal(fmt.Errorf("no snapshot recorded yet"))
+			}
+		}
+		diffs, added, err := complianceeval.Verify(ctx, db, *id, model)
 		if err != nil {
 			fatal(err)
 		}
 		if len(diffs) == 0 {
-			fmt.Printf("snapshot %d still matches the corpus\n", *id)
+			fmt.Printf("snapshot %d still matches the knowledge base (%d record(s) indexed since, allowed)\n", *id, len(added))
 			return
 		}
 		for _, d := range diffs {
 			fmt.Println(d)
 		}
 		os.Exit(1)
+	case "list":
+		rows, err := db.QueryContext(ctx, `SELECT s.id, s.name, s.embedding_model, to_char(s.created_at, 'YYYY-MM-DD HH24:MI'),
+			(SELECT count(*) FROM testbed.compliance_eval_snapshot_records r WHERE r.snapshot_id = s.id)
+			FROM testbed.compliance_eval_snapshots s ORDER BY s.id`)
+		if err != nil {
+			fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var sid, n int64
+			var sname, emb, created string
+			if err := rows.Scan(&sid, &sname, &emb, &created, &n); err != nil {
+				fatal(err)
+			}
+			fmt.Printf("%d\t%s\t%s\t%d records\t%s\n", sid, created, sname, n, emb)
+		}
+		if err := rows.Err(); err != nil {
+			fatal(err)
+		}
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: compliance-snapshot record -name N -ids 1,2 [-notes T] | verify -id N")
+	fmt.Fprintln(os.Stderr, "usage: compliance-snapshot record -name N [-notes T] | verify [-id N] | list")
 	os.Exit(2)
 }
 
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	os.Exit(1)
-}
-
-func parseIDs(s string) ([]int64, error) {
-	var out []int64
-	for _, p := range strings.Split(s, ",") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		n, err := strconv.ParseInt(p, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("bad record id %q", p)
-		}
-		out = append(out, n)
-	}
-	return out, nil
 }
 
 func connect() *sql.DB {

@@ -15,7 +15,14 @@ import (
 type GoldConfig struct {
 	Covered   map[string]string
 	Uncovered map[string]string
+	// MaxCandidates caps the candidates pooled per gold activity ([reviewers.compliance].max_candidates,
+	// default DefaultMaxCandidates). It is the labelling workload per activity; the reviewer's own search
+	// does not read it.
+	MaxCandidates int
 }
+
+// DefaultMaxCandidates applies when [reviewers.compliance].max_candidates is absent.
+const DefaultMaxCandidates = 100
 
 // GoldDoc is one document the gold run labels.
 type GoldDoc struct {
@@ -29,6 +36,11 @@ type goldFile struct {
 		CoveredDocs   map[string]string `toml:"covered-docs"`
 		UncoveredDocs map[string]string `toml:"uncovered-docs"`
 	} `toml:"compliance-review"`
+	Reviewers struct {
+		Compliance struct {
+			MaxCandidates *int `toml:"max_candidates"`
+		} `toml:"compliance"`
+	} `toml:"reviewers"`
 }
 
 // ParseGoldConfig reads the gold tables from the config file text and validates them.
@@ -37,7 +49,13 @@ func ParseGoldConfig(raw []byte) (*GoldConfig, error) {
 	if err := toml.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse compliance-review config: %w", err)
 	}
-	c := &GoldConfig{Covered: f.ComplianceReview.CoveredDocs, Uncovered: f.ComplianceReview.UncoveredDocs}
+	c := &GoldConfig{Covered: f.ComplianceReview.CoveredDocs, Uncovered: f.ComplianceReview.UncoveredDocs, MaxCandidates: DefaultMaxCandidates}
+	if v := f.Reviewers.Compliance.MaxCandidates; v != nil {
+		if *v <= 0 {
+			return nil, fmt.Errorf("[reviewers.compliance] max_candidates must be a positive number, got %d", *v)
+		}
+		c.MaxCandidates = *v
+	}
 	if _, err := c.Documents(); err != nil {
 		return nil, err
 	}
@@ -73,4 +91,15 @@ func (c *GoldConfig) Documents() ([]GoldDoc, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RecordID < out[j].RecordID })
 	return out, nil
+}
+
+// Find returns the listed document with this record id, or false when neither table lists it.
+func (c *GoldConfig) Find(recordID int64) (GoldDoc, bool) {
+	docs, _ := c.Documents()
+	for _, d := range docs {
+		if d.RecordID == recordID {
+			return d, true
+		}
+	}
+	return GoldDoc{}, false
 }

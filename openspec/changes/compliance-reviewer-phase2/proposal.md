@@ -29,14 +29,15 @@ behaviour.
   (`min_cosine` in `[reviewers.compliance]`). A candidate below the floor is not reported. An
   activity left with none gets the existing `compliance_no_grounding` row. The default stays
   "no floor" until the gold set sets the value.
-- A frozen evaluation snapshot, kept in the `testbed` schema: a recorded set of indexed records (ids, `md5`,
-  index generation, counts per artifact type), so a gold run is reproducible and two runs are
-  comparable.
+- An evaluation snapshot, kept in the `testbed` schema: a version stamp of the whole indexed
+  knowledge base (per record `md5`, index generation, counts per artifact type), so a gold run is
+  reproducible and two runs are comparable (revised 2026-11-14; first built as a chosen member list).
 - A compliance gold set and a scorer, following the existing benchmark pattern (rules frozen per
   version, gold runs saved, scorer 1–100): activity spans and the document-level activity,
-  expected grounding records per activity, and "no grounding expected" cases. Labelled by two
-  independent model annotators and a model adjudicator, chosen by environment variable (research
-  §11.1; labels are LLM-adjudicated, not legal validation). Gold documents are listed in
+  expected grounding records per activity, and "no grounding expected" cases. In the first
+  iteration the coding agent labels each document with the `compliance-review-benchmark` skill
+  (decided 2026-11-14); the model panel of two annotators and an adjudicator is kept but deferred.
+  Labels are not legal validation. Gold documents are listed in
   `doc-review.local.toml`. There is no organization profile: activity context is extracted from
   the documents (research 2026111103, activity context; design D9, revised 2026-11-14).
 - A baseline: the current reviewers and the phase 1 compliance reviewer scored on the same cases.

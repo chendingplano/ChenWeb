@@ -1,11 +1,12 @@
 // Command compliance-score scores saved Compliance Review runs against a gold run
 // (openspec compliance-reviewer-phase2).
 //
-//	mise exec -- go run ./server/cmd/compliance-score -gold 20261112_150000 -runs 101,102
-//	mise exec -- go run ./server/cmd/compliance-score -compare 101,120      # scope stability of one document
+//	mise exec -- go run ./server/cmd/compliance-score -gold 20261114_150000,20261114_160000 -runs 101,102
+//	mise exec -- go run ./server/cmd/compliance-score -compare 101,120      # activity-list stability of one document
 //
-// -runs are doc-review run ids (kb.doc_review_runs.id), one per document. Scores are
-// LLM-adjudicated: the gold labels come from model annotators, not legal validation.
+// -gold is one or more gold run keys sharing one snapshot (agent-built gold has one run per document);
+// -runs are doc-review run ids (kb.doc_review_runs.id), one per document. Gold labels come from the
+// coding agent or a model panel, never from legal validation; the output names which.
 package main
 
 import (
@@ -20,7 +21,7 @@ import (
 )
 
 func main() {
-	gold := flag.String("gold", "", "gold run key (testbed.compliance_gold_runs.run_key)")
+	gold := flag.String("gold", "", "comma-separated gold run keys (testbed.compliance_gold_runs.run_key)")
 	runs := flag.String("runs", "", "comma-separated doc-review run ids to score")
 	compare := flag.String("compare", "", "two doc-review run ids of the same document: are the activity lists identical?")
 	flag.Parse()
@@ -82,7 +83,13 @@ func run(gold, runs, compare string) error {
 	if err != nil {
 		return err
 	}
-	acts, err := complianceeval.LoadGoldActs(ctx, db, gold)
+	var keys []string
+	for _, k := range strings.Split(gold, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	acts, infos, inSnapshot, err := complianceeval.LoadGold(ctx, db, keys)
 	if err != nil {
 		return err
 	}
@@ -103,10 +110,17 @@ func run(gold, runs, compare string) error {
 		}
 	}
 	if len(goldScored) == 0 {
-		return fmt.Errorf("none of the scored runs belongs to a document of gold run %s", gold)
+		return fmt.Errorf("none of the scored runs belongs to a document of gold run(s) %s", gold)
 	}
-	m := complianceeval.Score(goldScored, rows)
-	fmt.Printf("gold run %s, %d document(s) scored, LLM-adjudicated labels\n", gold, len(scored))
+	m := complianceeval.Score(goldScored, rows, inSnapshot)
+	for _, in := range infos {
+		how := "LLM-adjudicated labels (model panel)"
+		if in.Method == complianceeval.MethodAgent {
+			how = "labelled by " + in.Annotator1 + " alone (agent; no inter-annotator agreement)"
+		}
+		fmt.Printf("gold run %s, snapshot %d: %s\n", in.Key, in.SnapshotID, how)
+	}
+	fmt.Printf("%d document(s) scored\n", len(scored))
 	fmt.Printf("  activities: gold %d (covered by a reviewer row: %d), reviewer rows %d (supported by gold: %d)\n", m.GoldActivities, m.MatchedActivities, m.ReviewRows, m.SupportedRows)
 	fmt.Printf("  activity precision:               %s\n", m.ActivityPrecision)
 	fmt.Printf("  activity recall:                  %s\n", m.ActivityRecall)
@@ -114,6 +128,7 @@ func run(gold, runs, compare string) error {
 	fmt.Printf("  'no grounding' precision:         %s\n", m.NoGroundingPrecision)
 	fmt.Printf("  'no grounding' missed by search:  %s\n", m.NoGroundingMissedBySearch)
 	fmt.Printf("  false grounding (none expected):  %s\n", m.FalseGrounding)
+	fmt.Printf("  unjudged, on records added after the snapshot: %d activities left out of false grounding, %d candidate records\n", m.UnjudgedActivities, m.UnjudgedCandidates)
 	fmt.Printf("  ambiguous judgements (not used):  %d\n", m.AmbiguousJudgements)
 	fmt.Printf("  headline (mean of F1, recall, 1-false grounding; summary only): %s\n", m.Headline)
 	return nil

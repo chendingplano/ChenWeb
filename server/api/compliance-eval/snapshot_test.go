@@ -56,9 +56,14 @@ func contains(s, sub string) bool {
 	return false
 }
 
-func TestDocsOutsideSnapshot(t *testing.T) {
-	got := DocsOutsideSnapshot([]GoldDoc{{RecordID: 1}, {RecordID: 2}, {RecordID: 3}}, []Member{{RecordID: 1}, {RecordID: 3}})
-	if len(got) != 1 || got[0] != 2 {
-		t.Fatalf("outside = %v", got)
+func TestAddedListsOnlyNewRecords(t *testing.T) {
+	manifest := []Member{{RecordID: 1}, {RecordID: 3}}
+	cur := map[int64]Member{1: {RecordID: 1}, 7: {RecordID: 7}, 4: {RecordID: 4}}
+	got := Added(manifest, cur)
+	if len(got) != 2 || got[0] != 4 || got[1] != 7 {
+		t.Fatalf("added = %v", got)
+	}
+	if d := Diff(manifest, cur); len(d) != 1 || d[0].RecordID != 3 {
+		t.Fatalf("a removed record must still be a difference, new ones must not: %v", d)
 	}
 }
