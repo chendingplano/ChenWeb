@@ -542,3 +542,38 @@ func TestGarbledTableRejectsStructuralMismatch(t *testing.T) {
 		})
 	}
 }
+
+func TestRecord825Table2MixedLabelNoteGeometry(t *testing.T) {
+	line, err := os.ReadFile("../doc-processing/testdata/record825-table-lines.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/garbled-table.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var physical PhysicalDocument
+	if err := json.Unmarshal(data, &physical); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Build(line, physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range got.Tables {
+		if table.Line != 160 {
+			continue
+		}
+		for _, row := range table.Rows {
+			for _, cell := range row.Cells {
+				if cell.ID == "r5:c1:nb" {
+					if len(cell.Boxes) != 1 || cell.Boxes[0].Coords[1] != 850 || cell.Boxes[0].Coords[3] != 865 {
+						t.Fatalf("wrong note b geometry: %+v", cell)
+					}
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("table 2 note b geometry missing")
+}

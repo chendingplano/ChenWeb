@@ -11,7 +11,7 @@ test('unresolved note references suppress whole-table source-line fallback', () 
 
 test('note b resolves to its wrapped lines without painting the merged cell', () => {
 	const notes = structuredClone(geometry);
-	notes.algorithm = 'canonical-table-geometry-v8';
+	notes.algorithm = 'canonical-table-geometry-v9';
 	notes.tables[0].rows[0].cells.push({ id: 'r3:c1:nb', boxes: [
 		{ page: 7, coords: [110, 300, 900, 315] },
 		{ page: 7, coords: [110, 315, 600, 330] }

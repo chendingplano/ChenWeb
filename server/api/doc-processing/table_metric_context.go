@@ -328,6 +328,8 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 		rows, outcome := selectTableRows(g, cited[n], evidence)
 		if row, ok := matchTableMetricCellValue(g, metric); ok {
 			rows, outcome = []TableRow{row}, tableRowsFromEvidence
+		} else if note, ok := matchTableMetricNoteRow(g, metric); ok {
+			rows, outcome = []TableRow{note}, tableRowsFromEvidence
 		}
 		if outcome == tableRowsUnmatched {
 			if note, ok := matchTableMetricFootnote(g, metric); ok {

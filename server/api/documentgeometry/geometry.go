@@ -20,7 +20,7 @@ import (
 )
 
 const Version = 1
-const Algorithm = "canonical-table-geometry-v8"
+const Algorithm = "canonical-table-geometry-v9"
 
 // Extractor is the id table_geometry.py writes today. Older v1/v2 files still
 // build row/cell geometry; conversion regenerates them to add text-line geometry.
