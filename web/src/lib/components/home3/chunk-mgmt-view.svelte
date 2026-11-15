@@ -80,8 +80,8 @@
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	let fileUrl = $derived.by(() => {
 		if (!currentInput) return '';
-		const rev = isPdf ? '' : `&_r=${iframeRevision}`;
-		return `/api/v1/kb/inputs/${currentInput.id}/file#page=${docPage}&zoom=page-width${rev}`;
+		const url = `/api/v1/kb/inputs/${currentInput.id}/file`;
+		return isPdf ? url : `${url}#page=${docPage}&zoom=page-width&_r=${iframeRevision}`;
 	});
 
 	let selectedChunk = $derived.by(() => {
@@ -539,6 +539,7 @@
 						bind:zoom={pdfZoom}
 						bind:numPages={pdfNumPages}
 						highlightVersion={`${selectedSeqNo ?? 0}:${highlightSelectionVersion}`}
+						highlightPages={selectedChunk?.source_line_spans?.[0]?.page_number > 0 ? [selectedChunk.source_line_spans[0].page_number] : []}
 						renderHighlights={renderChunkHighlights}
 						showSidebar={false}
 					>
@@ -676,7 +677,7 @@
 	.chunk-mgmt {
 		height: 100%;
 		display: grid;
-		grid-template-rows: auto 1fr;
+		grid-template-rows: auto minmax(0, 1fr);
 		background: var(--page-bg);
 		color: var(--text-primary);
 		font-family: var(--font-sans);
@@ -694,6 +695,7 @@
 	.subtitle { color: var(--text-secondary); font-size: 14px; }
 	.body {
 		display: grid;
+		grid-template-rows: minmax(0, 1fr);
 		min-height: 0;
 	}
 	.chunk-sidebar {
