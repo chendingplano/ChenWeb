@@ -3057,6 +3057,7 @@
 	"chunk_mgmt_search_filter_and_select_input": "Search, filter, and select input records before inspecting chunks.",
 	"chunk_mgmt_no_records_yet": "No records yet",
 	"chunk_mgmt_use_search_or_retrieve_to": "Use Search or Retrieve to browse kb.inputs.",
+	"chunk_mgmt_lines_load_failed": "Unable to load document lines.",
 	"chunk_mgmt_found": "{chunksCount} found",
 	"chunk_mgmt_no_chunks_loaded": "No chunks loaded",
 	"chunk_mgmt_select_a_record_to_retrieve": "Select a record to retrieve `.chunks` entries.",

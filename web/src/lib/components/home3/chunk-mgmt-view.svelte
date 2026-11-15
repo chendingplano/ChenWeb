@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import { appAuthStore } from '@chendingplano/shared';
 	import {
 		getKbInput,
+		getKbDocStructure,
 		listKbChunks,
 		type KbInputRecord,
 		type KbTopicChunkRecord,
-		type RawLine
+		type RawLine,
+		type DocStructureLine
 	} from '$lib/services/kbService';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
@@ -62,6 +64,11 @@
 
 	let currentInput = $state<KbInputRecord | null>(null);
 	let chunks = $state<KbTopicChunkRecord[]>([]);
+	let lines = $state<DocStructureLine[]>([]);
+	let linesError = $state('');
+	let lineListEl = $state<HTMLDivElement | null>(null);
+	let focusedLine = $state<DocStructureLine | null>(null);
+	let loadSequence = 0;
 	let selectedSeqNo = $state<number | null>(null);
 	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
@@ -91,8 +98,7 @@
 
 	let selectedLinesByPage = $derived.by(() => {
 		const map = new Map<number, RawLine[]>();
-		if (!selectedChunk) return map;
-		for (const line of selectedChunk.content_lines ?? []) {
+		for (const line of focusedLine ? [focusedLine] : selectedChunk?.content_lines ?? []) {
 			if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
 			const arr = map.get(line.page_number) ?? [];
 			arr.push(line);
@@ -103,6 +109,7 @@
 		}
 		return map;
 	});
+	let chunkLineKeys = $derived(new Set((selectedChunk?.source_line_spans ?? []).map(line => `${line.page_number}:${line.line_number}`)));
 
 	let highlightCount = $derived.by(() => {
 		let n = 0;
@@ -210,7 +217,11 @@
 	}
 
 	async function loadChunksForRecord(id: number) {
+		const sequence = ++loadSequence;
 		errorMsg = '';
+		linesError = '';
+		lines = [];
+		focusedLine = null;
 		loading = true;
 		chunks = [];
 		selectedSeqNo = null;
@@ -219,10 +230,14 @@
 		docPage = 1;
 		pdfNumPages = 0;
 		try {
-			const [chunkRes, inputRes] = await Promise.all([
+			const [chunkRes, inputRes, structureRes] = await Promise.all([
 				listKbChunks(id),
-				getKbInput(id).catch(() => null)
+				getKbInput(id).catch(() => null),
+				getKbDocStructure(id).then(value => ({ value, error: '' })).catch(() => ({ value: null, error: m.chunk_mgmt_lines_load_failed() }))
 			]);
+			if (sequence !== loadSequence) return;
+			lines = structureRes.value?.lines ?? [];
+			linesError = structureRes.error;
 			console.log('[chunk-mgmt] listKbChunks response', {
 				recordId: id,
 				total: chunkRes.total,
@@ -239,14 +254,16 @@
 				await selectChunk(chunks[0]);
 			}
 		} catch (err) {
+			if (sequence !== loadSequence) return;
 			errorMsg = err instanceof Error ? err.message : m.chunk_mgmt_failed_to_retrieve_chunks();
 		} finally {
-			loading = false;
+			if (sequence === loadSequence) loading = false;
 		}
 	}
 
 	async function selectChunk(chunk: KbTopicChunkRecord) {
 		selectedSeqNo = chunk.seqno;
+		focusedLine = null;
 		highlightSelectionVersion += 1;
 		const first = (chunk.source_line_spans ?? [])[0];
 		if (first && first.page_number > 0) {
@@ -255,6 +272,15 @@
 		if (!isPdf) {
 			iframeRevision += 1;
 		}
+		await tick();
+		lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line')?.scrollIntoView({ block: 'nearest' });
+	}
+
+	function selectLine(line: DocStructureLine) {
+		focusedLine = line;
+		docPage = line.page_number;
+		highlightSelectionVersion += 1;
+		if (!isPdf) iframeRevision += 1;
 	}
 
 	function startChunkListResize(event: PointerEvent) {
@@ -438,7 +464,7 @@
 
 	</header>
 
-	<div class="body" style={`grid-template-columns:auto ${chunkListWidth}px 14px 1fr;`}>
+	<div class="body" style={`grid-template-columns:auto ${chunkListWidth}px 14px minmax(260px, 340px) minmax(300px, 1fr);`}>
 		<KbInputRecordBrowser
 			{darkMode}
 			instanceKey="chunks-record-browser"
@@ -515,6 +541,22 @@
 		>
 			<span class="chunk-list-resizer-grip" aria-hidden="true"></span>
 		</button>
+		<aside class="lines-sidebar">
+			<div class="left-meta"><div class="left-meta-copy"><div class="left-meta-title">{m.doc_structure_lines()}</div><div class="left-meta-count">{lines.length}</div></div></div>
+			<div class="lines-list" bind:this={lineListEl}>
+				{#if linesError}<div class="error">{linesError}</div>
+				{:else if !loading && lines.length === 0}<div class="empty">{m.doc_structure_no_lines_loaded()}</div>
+				{:else}
+					{#each lines as line, index (index)}
+						<button type="button" class="line-card" class:chunk-line={chunkLineKeys.has(`${line.page_number}:${line.line_number}`)} class:focused-line={focusedLine === line} onclick={() => selectLine(line)}>
+							<span class="line-number">P{line.page_number} · L{line.line_number}</span>
+							<span class="line-type">{line.corrected_line_type || line.line_type}</span>
+							<span class="line-content">{line.content}</span>
+						</button>
+					{/each}
+				{/if}
+			</div>
+		</aside>
 
 		<section class="right">
 			<div class="right-toolbar">
@@ -705,6 +747,15 @@
 		grid-template-rows: auto minmax(0, 1fr);
 		min-height: 0;
 	}
+	.lines-sidebar { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel-bg); border-right: 1px solid var(--ink-line); }
+	.lines-list { overflow-y: auto; padding: 10px; }
+	.line-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; width: 100%; text-align: left; padding: 10px; margin-bottom: 6px; color: var(--text-primary); background: var(--panel-bg-alt); border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
+	.line-card.chunk-line { border-color: var(--brass); }
+	.line-card.focused-line { background: var(--chunk-selected-bg); color: white; }
+	.line-number, .line-type { font: 11px var(--font-mono); color: var(--text-secondary); }
+	.line-type { text-transform: uppercase; color: var(--brass); }
+	.focused-line .line-number, .focused-line .line-type { color: white; }
+	.line-content { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 	input {
 		width: 100%;
 		height: 38px;
@@ -1105,8 +1156,9 @@
 		text-align: center;
 	}
 	@media (max-width: 1200px) {
-		.body { grid-template-columns: 1fr; }
+		.body { grid-template-columns: 1fr !important; overflow-y: auto; grid-template-rows: auto auto auto minmax(300px, 50vh); }
 		.chunk-sidebar { max-height: 44vh; border-right: none; border-bottom: 1px solid var(--ink-line); }
+		.lines-sidebar { height: 35vh; }
 		.chunk-list-resizer { display: none; }
 	}
 	@media (max-width: 820px) {

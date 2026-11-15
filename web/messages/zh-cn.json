@@ -3057,6 +3057,7 @@
 	"chunk_mgmt_search_filter_and_select_input": "在查看分块之前，先搜索、筛选并选择输入记录。",
 	"chunk_mgmt_no_records_yet": "还没有记录",
 	"chunk_mgmt_use_search_or_retrieve_to": "使用“搜索”或“获取”浏览 kb.inputs。",
+	"chunk_mgmt_lines_load_failed": "无法加载文档行。",
 	"chunk_mgmt_found": "找到 {chunksCount} 条",
 	"chunk_mgmt_no_chunks_loaded": "未加载分块",
 	"chunk_mgmt_select_a_record_to_retrieve": "选择一条记录以获取 `.chunks` 条目。",
