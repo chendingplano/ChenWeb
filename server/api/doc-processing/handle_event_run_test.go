@@ -359,6 +359,8 @@ func TestHandleEvent_ExplicitOperationsBypassPolicyGates(t *testing.T) {
 		RunStore:   runStore,
 		PlanStore:  planStore,
 		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &calls},
+			fakeProcessor{name: "chunking", calls: &calls},
 			fakeProcessor{name: "extract_metrics", calls: &calls},
 			fakeProcessor{name: "extract_provisions", calls: &calls},
 		},

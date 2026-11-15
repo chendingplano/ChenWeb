@@ -833,17 +833,11 @@
 		reParse: boolean,
 		reConvert: boolean
 	) {
-		// Re-parse triggers the whole downstream chain automatically (in auto mode).
-		// Re-convert triggers convert + only the selected doc processors: the
-		// converter forwards `operation` to doc processing, and an empty list
-		// means convert only.
-		// Both supersede a standalone doc-processor publish to avoid double-processing.
+		const chosen = selectableProcessorIds.filter((p) => procs[p]);
 		if (reParse) {
-			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true });
+			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true, convert: reConvert, operation: chosen });
 			return;
 		}
-		const chosen = selectableProcessorIds.filter((p) => procs[p]);
-		const allChosen = chosen.length === selectableProcessorIds.length;
 		if (reConvert) {
 			const payload: Record<string, unknown> = {
 				record_id: String(record.id),
@@ -852,12 +846,12 @@
 				force: true
 			};
 			if (record.user_id?.trim()) payload.user_id = record.user_id.trim();
-			if (!allChosen) payload.operation = chosen;
+			payload.operation = chosen;
 			await publishEvent('kb.pdf.parsed', payload);
 			return;
 		}
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
-		if (!allChosen) payload.operation = chosen;
+		payload.operation = chosen;
 		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}
 

@@ -559,3 +559,27 @@ class TestFontGarbleGuard:
 
         assert _mineru_is_ocr(_B()) is True
         assert _mineru_is_ocr(_Hybrid()) is False
+
+@pytest.mark.parametrize("stage_request,subject,operations", [
+    ({"operation": [], "convert": True}, "kb.pdf.parsed", []),
+    ({"operation": ["extract_provisions"], "convert": True}, "kb.pdf.parsed", ["extract_provisions"]),
+    ({"operation": [], "convert": False}, None, None),
+    ({"operation": ["extract_provisions"], "convert": False}, "kb.pdf.start-doc-processing", ["extract_provisions"]),
+    ({}, "kb.pdf.parsed", None),
+])
+def test_manual_parse_forwards_selected_stages(stage_request, subject, operations):
+    import json
+    published = []
+
+    class FakeJS:
+        async def publish(self, topic, data):
+            published.append((topic, json.loads(data)))
+
+    bus = pdf_parser_module.JetStreamBus()
+    bus._js = FakeJS()
+    asyncio.run(bus.publish_parsed({"record_id": 42, "status": "success"}, stage_request))
+    if subject is None:
+        assert published == []
+    else:
+        assert published[0][0] == subject
+        assert published[0][1].get("operation") == operations

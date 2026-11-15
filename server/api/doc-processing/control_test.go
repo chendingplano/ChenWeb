@@ -340,7 +340,7 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 	payload := []byte(`{"user_id":"test-user","record_id":"1","operation":["extract_metrics","chunking"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
-	want := []string{"extract_metrics", "static_analyzer", "chunking"}
+	want := []string{"extract_metrics", "chunking"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}
@@ -453,7 +453,7 @@ func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking
 	payload := []byte(`{"user_id":"test-user","record_id":"1","operation":["chunking","generate_summaries","extract_metrics"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
-	want := []string{"static_analyzer", "chunking", "generate_summaries", "extract_metrics"}
+	want := []string{"chunking", "generate_summaries", "extract_metrics"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}
@@ -464,7 +464,7 @@ func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking
 	}
 }
 
-func TestControlService_GenerateSummariesRequestRunsDependenciesFirst(t *testing.T) {
+func TestControlService_GenerateSummariesRequestRunsOnlySelected(t *testing.T) {
 	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)
 	svc := &ControlService{
@@ -477,7 +477,7 @@ func TestControlService_GenerateSummariesRequestRunsDependenciesFirst(t *testing
 
 	svc.HandleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["generate_summaries"]}`))
 
-	want := []string{"static_analyzer", "chunking", "generate_summaries"}
+	want := []string{"generate_summaries"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}
@@ -498,7 +498,7 @@ func TestControlService_StaticAnalyzerClearsStaleBlockBuffer(t *testing.T) {
 		},
 	}
 
-	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["chunking"]}`))
+	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"1","operation":["static_analyzer","chunking"]}`))
 	if err != nil {
 		t.Fatalf("handleEvent returned error: %v", err)
 	}

@@ -906,8 +906,17 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}
 	if len(evt.Operations) > 0 {
-		processors = s.selectRunProcessors(availableProcessors, evt.Operations)
-		processors = s.skipSatisfiedAutoDependencies(ctx, evt, processors)
+		requested := make(map[string]bool, len(evt.Operations))
+		for _, op := range evt.Operations {
+			requested[canonicalOperationName(op)] = true
+		}
+		selectedAvailable := make([]Processor, 0, len(availableProcessors))
+		for _, processor := range availableProcessors {
+			if processor != nil && requested[canonicalOperationName(processor.Name())] {
+				selectedAvailable = append(selectedAvailable, processor)
+			}
+		}
+		processors = s.selectRunProcessors(selectedAvailable, evt.Operations)
 		if len(processors) == 0 {
 			if s.Logger != nil {
 				allowed := make([]string, 0, len(s.Processors))

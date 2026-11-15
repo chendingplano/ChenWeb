@@ -866,7 +866,14 @@ class JetStreamBus:
             await self._nc.drain()
             await self._nc.close()
 
-    async def publish_parsed(self, result: dict) -> None:
+    async def publish_parsed(self, result: dict, stage_request: dict | None = None) -> None:
+        stage_request = stage_request or {}
+        if stage_request.get("convert") is False:
+            if result.get("status") == "success" and stage_request.get("operation"):
+                payload = {"record_id": result.get("record_id"), "operation": stage_request["operation"],
+                           "force": True, "user_id": stage_request.get("user_id", "")}
+                await self._js.publish("kb.pdf.start-doc-processing", json.dumps(payload).encode("utf-8"))
+            return
         payload = {
             "record_id": result.get("record_id"),
             "type": "pdf",
@@ -874,6 +881,11 @@ class JetStreamBus:
             "file_format": result.get("file_format", "json"),
             "result_filename": result.get("result_filename", ""),
         }
+        if "operation" in stage_request:
+            payload["operation"] = stage_request["operation"]
+            payload["force"] = True
+        if stage_request.get("user_id"):
+            payload["user_id"] = stage_request["user_id"]
         await self._js.publish(_parsed_subject(), json.dumps(payload).encode("utf-8"))
 
 
@@ -1007,9 +1019,9 @@ async def run_jetstream() -> None:
                     # ACK before publishing: even if publish fails, the record
                     # won't be re-parsed on the next redelivery.
                     await msg.ack()
-                    if result.get("status") != "stopped" and should_publish_parsed_event(rec):
+                    if result.get("status") != "stopped" and ("convert" in payload or should_publish_parsed_event(rec)):
                         try:
-                            await bus.publish_parsed(result)
+                            await bus.publish_parsed(result, payload)
                         except Exception as pub_exc:
                             log.error(
                                 "(MID_2026040717) publish parsed event failed id=%s: %s",
