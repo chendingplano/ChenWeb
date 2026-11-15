@@ -336,6 +336,22 @@ func TestTableMetricContext_Record825DefrostFootnote(t *testing.T) {
 	if res.Outcome != tableRowsFromEvidence || len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "r12" || !strings.Contains(res.Context, "运行期间至少融霜1次") {
 		t.Fatalf("footnote not recovered: %+v", res)
 	}
+	if strings.Join(res.Refs[0].Cells, ",") != "r12:c1:nb" || strings.Contains(res.Context, "名义产水量") || strings.Contains(res.Context, "最低热源侧温度") {
+		t.Fatalf("must cite and render note b alone: %+v", res)
+	}
+	// A saved whole-cell reference must also narrow without re-extraction.
+	row["source_table_rows"] = res.Refs
+	res = buildTableMetricContext(newTableLineIndex(lines), row)
+	if strings.Join(res.Refs[0].Cells, ",") != "r12:c1:nb" {
+		t.Fatalf("saved note lost: %+v", res)
+	}
+}
+
+func TestTableNoteReferencesSurviveJSON(t *testing.T) {
+	refs := parseTableRowRefs(`[{"line":157,"rows":["r12"],"cells":["r12:c1:nb","r12:c1:n!"],"row_hash":{"r12":"hash"}}]`)
+	if len(refs) != 1 || strings.Join(refs[0].Cells, ",") != "r12:c1:nb" {
+		t.Fatalf("note reference lost: %+v", refs)
+	}
 }
 
 func TestTableMetricContext_Record825WetBulbValue(t *testing.T) {

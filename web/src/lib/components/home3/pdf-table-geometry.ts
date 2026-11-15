@@ -1,4 +1,5 @@
-/** Canonical references accepted by both reusable PDF viewers. Columns are 1-based. */
+/** Canonical references accepted by both PDF viewers. Columns are 1-based;
+ * cells may include a note suffix, e.g. r12:c1:nb for note b in a merged cell. */
 export type TableReference = {
 	line: number;
 	rows?: string[];
@@ -62,7 +63,7 @@ export function resolveTableReferences(
 	if (
 		!geometry ||
 		geometry.version !== 1 ||
-		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5', 'canonical-table-geometry-v6'].includes(geometry.algorithm) ||
+		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5', 'canonical-table-geometry-v6', 'canonical-table-geometry-v7'].includes(geometry.algorithm) ||
 		geometry.coordinate_space !== 'page-normalized-1000' ||
 		!Array.isArray(geometry.tables)
 	)
@@ -106,7 +107,7 @@ export function resolveTableReferences(
 			...(ref.cells ?? []).filter((cell) => !selectedRows.has(`${ref.line}#${cell.split(':')[0]}`))
 		];
 		for (const target of targets) {
-			if (!/^(?:h\d+|r[1-9]\d*)(?::c[1-9]\d*)?$/.test(target)) continue;
+			if (!/^(?:h\d+|r[1-9]\d*)(?::c[1-9]\d*(?::n[a-z])?)?$/.test(target)) continue;
 			const rowId = target.split(':')[0];
 			const row = table.rows.find((r) => r.id === rowId);
 			if (!row || (ref.row_hash?.[rowId] !== undefined && ref.row_hash[rowId] !== row.hash))

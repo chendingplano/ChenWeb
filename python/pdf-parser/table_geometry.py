@@ -19,6 +19,28 @@ from stacked_cells import cell_lines, split_plan
 log = logging.getLogger(__name__)
 
 
+def _cell_text_lines(page, box, coords):
+    lines = []
+    for block in page.get_text('dict', clip=box)['blocks']:
+        for line in block.get('lines', []):
+            spans = [s for s in line['spans'] if s['text'].strip()]
+            if not spans:
+                continue
+            entry = {'text': ''.join(s['text'] for s in line['spans']).strip(),
+                     'coords': coords(line['bbox'])}
+            first = spans[0]
+            # A distinct small leading glyph identifies a superscript note marker,
+            # including fonts whose a/b/c/d Unicode mapping is broken (0/1/2/3).
+            if (len(spans) > 1 and len(first['text'].strip()) == 1
+                    and first['text'].strip().isascii() and first['text'].strip().isalnum()
+                    and first['size'] <= 0.8 * max(s['size'] for s in spans[1:])):
+                entry['marker'] = first['text'].strip()
+            lines.append((line['bbox'][1], line['bbox'][0], entry))
+    # Reading order belongs to unrotated page space, even though boxes are stored
+    # in displayed page space. Sorting transformed boxes reverses 180-degree PDFs.
+    return [entry for _, _, entry in sorted(lines, key=lambda line: line[:2])]
+
+
 def _sub_rows(page, row, top, bottom, cells, table_bbox, coords):
     """The sub-rows of a data row whose stacked values line up, as stacked_cells splits them.
 
@@ -48,7 +70,7 @@ def _sub_rows(page, row, top, bottom, cells, table_bbox, coords):
 
 def extract_table_geometry(pdf_path):
     pdf_path = Path(pdf_path)
-    result = {'version': 1, 'extractor': 'pymupdf-tables-v2',
+    result = {'version': 1, 'extractor': 'pymupdf-tables-v3',
               'pdf_sha256': hashlib.sha256(pdf_path.read_bytes()).hexdigest(), 'tables': []}
     with fitz.open(pdf_path) as document:
         for page_number, page in enumerate(document, 1):
@@ -67,6 +89,7 @@ def extract_table_geometry(pdf_path):
                         (rect.y1-display.y0)/display.height*1000]]
 
             # Ruled tables only, as mineru_cell_repair.py pairs them (no layout-model gating).
+            text_lines = {}
             for table in page.find_tables(use_layout=False).tables:
                 texts = table.extract()
                 x_edges = sorted({x for box in table.cells if box for x in (box[0], box[2])})
@@ -89,7 +112,15 @@ def extract_table_geometry(pdf_path):
                             box = next((b for b in table.cells if b and b[0] < cx < b[2] and b[1] < cy < b[3]), None)
                             if box:
                                 text = page.get_textbox(fitz.Rect(box))
-                        cells.append({'text': ' '.join(text.split()), 'coords': coords(box) if box else None})
+                        cell = {'text': ' '.join(text.split()), 'coords': coords(box) if box else None}
+                        if box:
+                            # Keep text geometry inside the cell for note-level highlights.
+                            # Cache shared colspan/rowspan cells within this page below.
+                            key = tuple(box)
+                            if key not in text_lines:
+                                text_lines[key] = _cell_text_lines(page, key, coords)
+                            cell['lines'] = text_lines[key]
+                        cells.append(cell)
                     entry = {'coords': coords((table.bbox[0], top, table.bbox[2], bottom)), 'cells': cells}
                     # Row 0 is the header, which the MinerU repair never splits either.
                     sub_rows = _sub_rows(page, row, top, bottom, cells, table.bbox, coords) if i else None

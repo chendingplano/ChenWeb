@@ -12,6 +12,37 @@ import (
 
 const lineFixture = "121\t6\ttable\tfont\t12\t[80,721,890,843]\t<table><tr><td>Type</td><td>Limit</td></tr><tr><td>Machine</td><td>Energy 30</td></tr><tr><td>Biogas</td><td>Volume 50</td></tr></table>\n"
 
+func TestMergedCellNoteGeometry(t *testing.T) {
+	line := []byte("1\t1\ttable\tf\t12\t[100,100,900,300]\t<table><tr><td>条件</td><td>温度</td></tr><tr><td colspan=\"2\">$^a$ 试验水量为名义产水量。 $^b$ 融霜工况为运行前的条件。运行期间至少融霜1次。 $^c$ 最高使用侧温度。</td></tr></table>\n")
+	var physical PhysicalDocument
+	err := json.Unmarshal([]byte(`{"version":1,"extractor":"pymupdf-tables-v2","tables":[{"page":1,"coords":[100,100,900,300],"rows":[
+	{"coords":[100,100,900,140],"cells":[{"text":"条件","coords":[100,100,500,140]},{"text":"温度","coords":[500,100,900,140]}]},
+	{"coords":[100,140,900,300],"cells":[{"text":"a 试验水量为名义产水量。b 融霜工况为运行前的条件。运行期间至少融霜1次。c 最高使用侧温度。","coords":[100,140,900,300],"lines":[
+	{"text":"a 试验水量为名义产水量。","coords":[110,150,800,165]},
+	{"text":"b 融霜工况为运行前的条件。","coords":[110,170,800,185]},
+	{"text":"运行期间至少融霜!次。","coords":[110,190,500,205]},
+	{"text":"c 最高使用侧温度。","coords":[110,210,700,225]}]},
+	{"text":"a 试验水量为名义产水量。b 融霜工况为运行前的条件。运行期间至少融霜1次。c 最高使用侧温度。","coords":[100,140,900,300]}]}]}]}`), &physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Build(line, physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range got.Tables[0].Rows {
+		for _, cell := range row.Cells {
+			if cell.ID == "r1:c1:nb" {
+				if len(cell.Boxes) != 2 || cell.Boxes[0].Coords[1] != 170 || cell.Boxes[1].Coords[3] != 205 {
+					t.Fatalf("wrong note b lines: %+v", cell)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("note b geometry missing: %+v", got)
+}
+
 func physicalFixture() PhysicalDocument {
 	return PhysicalDocument{Version: 1, Extractor: "pymupdf-tables-v1", PDFHash: "pdf", Tables: []PhysicalTable{
 		{Page: 6, Coords: []float64{80, 721, 890, 843}, Rows: []PhysicalRow{
@@ -447,6 +478,30 @@ func TestGarbledTableUsesVerifiedStructure(t *testing.T) {
 		}
 	}
 	t.Fatal("missing r1")
+}
+
+func TestRecord825GarbledNotesUseVerifiedSuperscriptBoundaries(t *testing.T) {
+	line, _ := os.ReadFile("testdata/garbled-table.txt")
+	data, _ := os.ReadFile("testdata/garbled-table.json")
+	var physical PhysicalDocument
+	if err := json.Unmarshal(data, &physical); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Build(line, physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range got.Tables[0].Rows {
+		for _, cell := range row.Cells {
+			if cell.ID == "r12:c1:nb" {
+				if len(cell.Boxes) != 2 || cell.Boxes[0].Coords[1] != 556 || cell.Boxes[1].Coords[3] != 587 {
+					t.Fatalf("wrong note b: %+v", cell)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("note b missing from garbled PDF")
 }
 
 func TestGarbledTableRejectsStructuralMismatch(t *testing.T) {

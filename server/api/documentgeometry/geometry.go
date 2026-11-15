@@ -20,11 +20,11 @@ import (
 )
 
 const Version = 1
-const Algorithm = "canonical-table-geometry-v6"
+const Algorithm = "canonical-table-geometry-v7"
 
-// Extractor is the id table_geometry.py writes today. Files from the previous extractor
-// (pymupdf-tables-v1, no sub-rows) still build; the file converter regenerates them.
-const Extractor = "pymupdf-tables-v2"
+// Extractor is the id table_geometry.py writes today. Older v1/v2 files still
+// build row/cell geometry; conversion regenerates them to add text-line geometry.
+const Extractor = "pymupdf-tables-v3"
 
 type Box struct {
 	Rotation int       `json:"rotation,omitempty"`
@@ -57,8 +57,14 @@ type Document struct {
 	Tables           []Table `json:"tables"`
 }
 type PhysicalCell struct {
+	Text   string             `json:"text"`
+	Coords []float64          `json:"coords"`
+	Lines  []PhysicalTextLine `json:"lines,omitempty"`
+}
+type PhysicalTextLine struct {
 	Text   string    `json:"text"`
 	Coords []float64 `json:"coords"`
+	Marker string    `json:"marker,omitempty"`
 }
 type PhysicalRow struct {
 	Coords []float64      `json:"coords"`
@@ -347,7 +353,7 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 		return nil, err
 	}
 	out := &Document{PhysicalHash: hash(physicalBytes), Version: Version, Algorithm: Algorithm, TableGridVersion: docprocessing.TableGridVersion, CoordinateSpace: "page-normalized-1000", LineHash: hash(lineData), PDFHash: physical.PDFHash, Tables: []Table{}}
-	if physical.Version != Version || (physical.Extractor != Extractor && physical.Extractor != "pymupdf-tables-v1") {
+	if physical.Version != Version || (physical.Extractor != Extractor && physical.Extractor != "pymupdf-tables-v1" && physical.Extractor != "pymupdf-tables-v2") {
 		return nil, fmt.Errorf("unsupported physical table geometry version/extractor")
 	}
 	physical.Tables = append([]PhysicalTable(nil), physical.Tables...)
@@ -515,6 +521,26 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 			for col, cell := range pr.Cells {
 				if validBox(cell.Coords) {
 					dest.Cells[col].Boxes = append(dest.Cells[col].Boxes, Box{Page: t.Page, Rotation: t.Rotation, Coords: integerCoords(cell.Coords)})
+				}
+				if col < len(r.Spans) && r.Spans[col] == 0 {
+					continue // colspan copies must not create duplicate note IDs
+				}
+				notes := docprocessing.TableCellNotes(r.Cells[col])
+				for _, note := range notes {
+					boxes := noteTextBoxes(note, cell, t.Page, t.Rotation)
+					if len(boxes) == 0 && structural && t.Page == c.page {
+						boxes = noteMarkerBoxes(note, notes, cell, t.Page, t.Rotation)
+					}
+					if len(boxes) == 0 {
+						continue
+					}
+					id := fmt.Sprintf("%s:c%d:n%s", r.ID, col+1, note.Label)
+					index := slices.IndexFunc(dest.Cells, func(c Cell) bool { return c.ID == id })
+					if index < 0 {
+						dest.Cells = append(dest.Cells, Cell{ID: id, Boxes: boxes})
+					} else {
+						dest.Cells[index].Boxes = append(dest.Cells[index].Boxes, boxes...)
+					}
 				}
 			}
 		}

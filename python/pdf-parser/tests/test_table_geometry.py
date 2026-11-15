@@ -2,6 +2,7 @@ import hashlib
 import json
 
 import fitz
+import pytest
 
 from table_geometry import extract_table_geometry, write_table_geometry
 
@@ -130,7 +131,37 @@ def test_rowspan_rows_have_no_sub_rows(tmp_path):
     assert not any('sub_rows' in row for row in extract_table_geometry(pdf)['tables'][0]['rows'])
 
 
-def test_extractor_id_is_v2(tmp_path):
+def test_extractor_id_is_v3(tmp_path):
     pdf = tmp_path / 'sample.pdf'
     make_pdf(pdf)
-    assert extract_table_geometry(pdf)['extractor'] == 'pymupdf-tables-v2'
+    assert extract_table_geometry(pdf)['extractor'] == 'pymupdf-tables-v3'
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_cell_geometry_retains_wrapped_text_line_boxes(tmp_path, rotation):
+    pdf = tmp_path / 'notes.pdf'
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=400)
+        for x in (40, 240):
+            page.draw_line((x, 40), (x, 160))
+        for y in (40, 70, 160):
+            page.draw_line((40, y), (240, y))
+        page.draw_line((120, 40), (120, 70))
+        page.insert_text((45, 60), 'Notes', fontsize=10)
+        page.insert_text((125, 60), 'Text', fontsize=10)
+        for y, text in [(85, 'a Water volume.'), (105, 'b Defrost conditions.'),
+                        (120, 'At least one defrost.'), (145, 'c Maximum temperature.')]:
+            if text[0] in 'abc':
+                page.insert_text((45, y-3), text[0], fontsize=6)
+                page.insert_text((51, y), text[2:], fontsize=10)
+            else:
+                page.insert_text((45, y), text, fontsize=10)
+        page.set_rotation(rotation)
+        doc.save(pdf)
+    cell = extract_table_geometry(pdf)['tables'][0]['rows'][1]['cells'][0]
+    assert [line['text'] for line in cell['lines']] == [
+        'a Water volume.', 'b Defrost conditions.', 'At least one defrost.', 'c Maximum temperature.']
+    if rotation == 0:
+        assert cell['lines'][1]['coords'][1] < cell['lines'][2]['coords'][1]
+        assert cell['lines'][2]['coords'][3] < cell['lines'][3]['coords'][1]
+    assert [line.get('marker') for line in cell['lines']] == ['a', 'b', None, 'c']

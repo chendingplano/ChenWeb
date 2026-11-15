@@ -21,7 +21,7 @@ import (
 type TableRowRef struct {
 	Line    int               `json:"line"`
 	Rows    []string          `json:"rows"`
-	Cells   []string          `json:"cells,omitempty"` // "r1:c5": one cell of a cited row; the viewer highlights it instead of the row
+	Cells   []string          `json:"cells,omitempty"` // "r1:c5" or "r12:c1:nb": a cell or labelled note, highlighted instead of the row
 	RowHash map[string]string `json:"row_hash,omitempty"`
 }
 
@@ -103,8 +103,11 @@ func isTableRowID(id string) bool {
 	return err == nil && n >= 0 && (id[0] == 'h' || n >= 1)
 }
 
-// isTableCellID accepts "r1:c5": a data row and its 1-based column.
+// isTableCellID accepts "r1:c5" with an optional note suffix such as ":nb".
 func isTableCellID(id string) bool {
+	if cell, label, ok := strings.Cut(id, ":n"); ok {
+		return len(label) == 1 && label[0] >= 'a' && label[0] <= 'z' && isTableCellID(cell) && !strings.Contains(cell, ":n")
+	}
 	row, col, ok := strings.Cut(id, ":c")
 	n, err := strconv.Atoi(col)
 	return ok && strings.HasPrefix(row, "r") && isTableRowID(row) && err == nil && n >= 1
@@ -338,6 +341,7 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 			continue
 		}
 		ref := TableRowRef{Line: n, RowHash: map[string]string{}}
+		ref.Cells = tableMetricCellIDs(g, rows, outcome, asString(metric["metric_name"]))
 		var b strings.Builder
 		if c := idx.caption(n); c != "" {
 			b.WriteString(c)
@@ -348,9 +352,22 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 			if b.Len() > 0 {
 				b.WriteByte('\n')
 			}
-			b.WriteString(renderTableRowPairs(g, r))
+			if notes := tableMetricNotes(r, metric); len(notes) > 0 && outcome != tableRowsWholeTable {
+				kept := ref.Cells[:0]
+				for _, id := range ref.Cells {
+					if !strings.HasPrefix(id, r.ID+":") {
+						kept = append(kept, id)
+					}
+				}
+				ref.Cells = kept
+				for _, note := range notes {
+					ref.Cells = append(ref.Cells, r.ID+":c1:n"+note.Label)
+					b.WriteString("[" + r.ID + ":n" + note.Label + "] " + note.Text)
+				}
+			} else {
+				b.WriteString(renderTableRowPairs(g, r))
+			}
 		}
-		ref.Cells = tableMetricCellIDs(g, rows, outcome, asString(metric["metric_name"]))
 		res.Refs = append(res.Refs, ref)
 		blocks = append(blocks, b.String())
 	}
@@ -500,10 +517,27 @@ func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]Tabl
 // value with its unit and a condition clause identify exactly one full-width row.
 // Single-digit values alone and condition-only temperature rows are not evidence.
 func matchTableMetricFootnote(g *TableGrid, metric map[string]any) (TableRow, bool) {
+	matches := tableMetricFootnoteMatcher(metric)
+	var found TableRow
+	matched := false
+	for _, row := range g.Rows {
+		text, fullWidth := row.FullWidthText()
+		if !fullWidth || !matches(text) {
+			continue
+		}
+		if matched {
+			return TableRow{}, false
+		}
+		found, matched = row, true
+	}
+	return found, matched
+}
+
+func tableMetricFootnoteMatcher(metric map[string]any) func(string) bool {
 	value := normalizeTableMatchText(asString(metric["metric_value"]))
 	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
 	if unit == "" || !regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`).MatchString(value) {
-		return TableRow{}, false
+		return func(string) bool { return false }
 	}
 	quantity := regexp.MustCompile(`(?:^|[^\pN.])` + regexp.QuoteMeta(value+unit))
 	var clauses []string
@@ -521,26 +555,18 @@ func matchTableMetricFootnote(g *TableGrid, metric map[string]any) (TableRow, bo
 			clauses = append(clauses, clause)
 		}
 	}
-	var found TableRow
-	matched := false
-	for _, row := range g.Rows {
-		text, fullWidth := row.FullWidthText()
+	return func(text string) bool {
 		text = normalizeTableMatchText(text)
-		if !fullWidth || !quantity.MatchString(text) {
-			continue
+		if !quantity.MatchString(text) {
+			return false
 		}
 		for _, clause := range clauses {
-			if !strings.Contains(text, clause) {
-				continue
+			if strings.Contains(text, clause) {
+				return true
 			}
-			if matched {
-				return TableRow{}, false
-			}
-			found, matched = row, true
-			break
 		}
+		return false
 	}
-	return found, matched
 }
 
 // tableMetricEvidence returns the normalized strings used to find a metric's row.

@@ -2,6 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveTableReferences, type TableGeometry } from './pdf-table-geometry';
 
+test('note b resolves to its wrapped lines without painting the merged cell', () => {
+	const notes = structuredClone(geometry);
+	notes.algorithm = 'canonical-table-geometry-v7';
+	notes.tables[0].rows[0].cells.push({ id: 'r3:c1:nb', boxes: [
+		{ page: 7, coords: [110, 300, 900, 315] },
+		{ page: 7, coords: [110, 315, 600, 330] }
+	] });
+	const refs = [{ line: 121, rows: ['r3'], cells: ['r3:c1:nb'], row_hash: { r3: '5364693c56e5' } }];
+	assert.deepEqual(resolveTableReferences(refs, notes).map(b => b.coords), [
+		[110, 300, 900, 315], [110, 315, 600, 330]
+	]);
+	assert.deepEqual(resolveTableReferences(refs, geometry), []);
+	assert.deepEqual(resolveTableReferences([{ ...refs[0], row_hash: { r3: 'stale' } }], notes), []);
+});
+
 const geometry: TableGeometry = {
 	version: 1,
 	algorithm: 'canonical-table-geometry-v4',

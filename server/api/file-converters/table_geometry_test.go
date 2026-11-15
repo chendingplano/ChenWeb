@@ -59,7 +59,7 @@ func testConversionBuildsGeometryBeforePublishing(t *testing.T, state string) {
 	if err := os.WriteFile(filepath.Join(dir, "doc_mineru.json"), []byte(parser), 0600); err != nil {
 		t.Fatal(err)
 	}
-	physical := documentgeometry.PhysicalDocument{Version: 1, Extractor: "pymupdf-tables-v2", PDFHash: hex.EncodeToString(sum[:]), Tables: []documentgeometry.PhysicalTable{
+	physical := documentgeometry.PhysicalDocument{Version: 1, Extractor: documentgeometry.Extractor, PDFHash: hex.EncodeToString(sum[:]), Tables: []documentgeometry.PhysicalTable{
 		{Page: 1, Coords: []float64{100, 100, 900, 200}, Rows: []documentgeometry.PhysicalRow{
 			{Coords: []float64{100, 100, 900, 120}, Cells: []documentgeometry.PhysicalCell{{Text: "Type", Coords: []float64{100, 100, 200, 120}}, {Text: "Limit", Coords: []float64{200, 100, 900, 120}}}},
 			{Coords: []float64{100, 120, 900, 200}, Cells: []documentgeometry.PhysicalCell{{Text: "Machine", Coords: []float64{100, 120, 200, 200}}, {Text: "Energy 30", Coords: []float64{200, 120, 900, 200}}}},
