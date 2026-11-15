@@ -72,3 +72,32 @@ def test_image_footnotes_match_their_own_picture():
     _add_caption_boxes(items, {"pages": [{"page_idx": 21, "blocks": blocks[::-1]}]})
     assert items[0]["image_footnote_bboxes"] == [[200, 400, 300, 420]]
     assert items[1]["image_footnote_bboxes"] == [[600, 400, 700, 420]]
+
+
+def test_chart_annotations_use_their_own_geometry(monkeypatch, tmp_path):
+    middle = {"pages": [{"page_idx": 0, "blocks": [{
+        "type": "chart", "bbox": [.1, .2, .9, .7], "content": [
+            {"type": "chart_body", "bbox": [.1, .2, .9, .7], "content": ""},
+            {"type": "chart_footnote", "index": 2, "bbox": [.1, .8, .8, .82], "content": "Second note"},
+            {"type": "chart_footnote", "index": 1, "bbox": [.1, .75, .8, .78], "content": "First note"},
+        ],
+    }]}]}
+    rendered = [{"type": "chart", "page_idx": 0, "bbox": [100, 200, 900, 700],
+                 "img_path": "chart.jpg", "chart_footnote": ["First note", "Second note", "Missing"]}]
+    # A missing annotation cannot be matched; its geometry must never be the chart box.
+    monkeypatch.setitem(sys.modules, "mineru.parser", SimpleNamespace(
+        ParseResult=SimpleNamespace(from_json=lambda raw: SimpleNamespace(middle_json=middle))))
+    monkeypatch.setitem(sys.modules, "mineru.render", SimpleNamespace(
+        RenderFormat=SimpleNamespace(CONTENT_LIST="content_list"), render=lambda *args: rendered))
+    source, target = tmp_path / "middle.json", tmp_path / "output.json"
+    source.write_text(json.dumps(middle))
+    convert(source, target)
+    items = json.loads(target.read_text())["pages"][0]["items"]
+    assert all(item.get("bbox") != [100, 200, 900, 700] for item in items if item["type"] == "text")
+
+    rendered[0]["chart_footnote"] = ["First note", "Second note"]
+    convert(source, target)
+    items = json.loads(target.read_text())["pages"][0]["items"]
+    assert [(item["text"], item["bbox"]) for item in items if item["type"] == "text"] == [
+        ("First note", [100, 750, 800, 780]), ("Second note", [100, 800, 800, 820])]
+    assert next(item for item in items if item["type"] == "image")["bbox"] == [100, 200, 900, 700]

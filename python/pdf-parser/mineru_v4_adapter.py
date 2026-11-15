@@ -67,24 +67,27 @@ def _add_list_item_boxes(items: list[dict[str, Any]], middle: dict[str, Any]) ->
 
 
 def _add_caption_boxes(items: list[dict[str, Any]], middle: dict[str, Any]) -> None:
-    """Preserve caption and image-footnote geometry lost by Content List V1.
+    """Preserve visual annotation geometry lost by Content List V1.
 
     Match annotation lists within one visual block on the page. Ambiguous or incomplete
-    matches retain the legacy converter fallback rather than invent geometry.
+    matches leave geometry unset rather than invent it.
     """
     for page in middle.get("pages", []):
         for item in items:
             kind = item.get("type")
-            if item.get("page_idx") != page.get("page_idx") or kind not in {"table", "image"}:
+            if item.get("page_idx") != page.get("page_idx") or kind not in {"table", "image", "chart"}:
                 continue
-            fields = ["table_caption"] if kind == "table" else ["image_caption", "image_footnote"]
+            fields = {"table": ["table_caption"], "image": ["image_caption", "image_footnote"],
+                      "chart": ["chart_caption", "chart_footnote"]}[kind]
             matches = []
             for block in page.get("blocks", []):
                 if block.get("type") != kind:
                     continue
                 annotations = {
-                    field: [part for part in block.get("content", [])
-                            if isinstance(part, dict) and part.get("type") == field]
+                    field: sorted(
+                        [part for part in block.get("content", [])
+                         if isinstance(part, dict) and part.get("type") == field],
+                        key=lambda part: (part.get("index") is None, part.get("index") or 0))
                     for field in fields
                 }
                 if all([_text(part.get("content")).strip() for part in annotations[field]]
@@ -124,6 +127,9 @@ def convert(middle_path: Path, output_path: Path) -> None:
     if not isinstance(content_list, list):
         raise ValueError("MinerU CONTENT_LIST renderer did not return a list")
 
+    # Chart annotations must be enriched before the chart is split into lines.
+    _add_caption_boxes([item for item in content_list if isinstance(item, dict)], middle)
+
     pages_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
     supported = {
         "text", "list", "table", "image", "equation", "header", "footer",
@@ -159,7 +165,11 @@ def convert(middle_path: Path, output_path: Path) -> None:
         elif kind == "chart":
             text_items = _text_items(source.get("content", ""), source.get("bbox"))
             for key in ("chart_caption", "chart_footnote"):
-                text_items.extend(_text_items(source.get(key, []), source.get("bbox")))
+                values = source.get(key, [])
+                boxes = source.get(key + "_bboxes", [])
+                for index, value in enumerate(values):
+                    bbox = boxes[index] if len(boxes) == len(values) else None
+                    text_items.extend(_text_items(value, bbox))
             pages_map[page_idx].extend(text_items)
             if source.get("img_path"):
                 image_item = {"type": "image", "img_path": source["img_path"]}
