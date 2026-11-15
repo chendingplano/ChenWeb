@@ -543,16 +543,13 @@
 		const hostRect = host.getBoundingClientRect();
 		const highlightRect = firstHighlight.getBoundingClientRect();
 
-		if (
-			highlightRect.height <= host.clientHeight &&
-			highlightRect.top >= hostRect.top &&
-			highlightRect.bottom < hostRect.bottom
-		) {
+		const highlightTop = highlightRect.top - hostRect.top;
+		if (highlightTop >= host.clientHeight / 3 && highlightTop <= host.clientHeight * 2 / 3) {
 			return true;
 		}
 
-		const relativeTop = highlightRect.top - hostRect.top + host.scrollTop;
-		const targetScrollTop = relativeTop - host.clientHeight / 2 + highlightRect.height / 2;
+		const relativeTop = highlightTop + host.scrollTop;
+		const targetScrollTop = relativeTop - host.clientHeight / 3;
 		host.scrollTo({ top: Math.max(0, targetScrollTop), behavior });
 		return true;
 	}
