@@ -81,6 +81,7 @@
 		| 'kb-ontology-mesh-browser'
 		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
+		| 'kb-chunk-view'
 		| 'kb-scene-blocks'
 		| 'kb-products'
 		| 'kb-chunks'
@@ -171,6 +172,11 @@
 					id: 'kb-doc-structure',
 					label: m.home3_knowledge_document_structure(),
 					description: m.home3_knowledge_inspect_parsed_hierarchy()
+				},
+				{
+					id: 'kb-chunk-view',
+					label: m.chunk_mgmt_chunks(),
+					description: m.home3_knowledge_browse_chunk_output()
 				},
 				{
 					id: 'kb-summary-tree',
@@ -424,6 +430,12 @@
 	);
 	let provisionVisited = $state(false);
 	let metricsVisited = $state(false);
+	let chunksVisited = $state(false);
+	$effect(() => {
+		if ((activeSection === 'kb-chunk-view' || activeSection === 'kb-chunks') && knowledgeStoreState.activeStore) {
+			chunksVisited = true;
+		}
+	});
 	$effect(() => {
 		if (activeSection === 'kb-provision-tree' && knowledgeStoreState.activeStore) {
 			provisionVisited = true;
@@ -913,6 +925,11 @@
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
+			{#if chunksVisited}
+				<div class="h-full" hidden={(activeSection !== 'kb-chunk-view' && activeSection !== 'kb-chunks') || !knowledgeStoreState.activeStore}>
+					<ChunkMgmtView {darkMode} />
+				</div>
+			{/if}
 			{#if metricsVisited}
 				<div
 					class="h-full"
@@ -1041,8 +1058,8 @@
 					browserInstanceKey="products"
 					onFocusModeChange={handleExtractionFocusMode}
 				/>
-			{:else if activeSection === 'kb-chunks'}
-				<ChunkMgmtView {darkMode} />
+			{:else if activeSection === 'kb-chunks' || activeSection === 'kb-chunk-view'}
+				<!-- The visited Chunks view remains mounted above. -->
 			{:else if activeSection === 'kb-category-review'}
 				<CategoryReviewView {darkMode} />
 			{:else if activeSection === 'kb-summary-graph'}

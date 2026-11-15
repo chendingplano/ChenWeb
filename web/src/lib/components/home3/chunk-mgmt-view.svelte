@@ -395,7 +395,7 @@
 </script>
 
 <div
-	class="chunk-mgmt"
+	class="chunk-mgmt select-text"
 	style="
 		--page-bg:{pageBg};
 		--panel-bg:{panelBg};
