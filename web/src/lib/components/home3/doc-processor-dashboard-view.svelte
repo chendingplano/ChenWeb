@@ -1696,10 +1696,10 @@
 					{/each}
 				</div>
 			</div>
+			<div class="mt-4">
+				<SystemMonitorView {darkMode} sourceId="pdf-parser" />
+			</div>
 		{/if}
-		<div class="mt-4">
-			<SystemMonitorView {darkMode} sourceId="pdf-parser" />
-		</div>
 	</section>
 
 	<!-- ── Section divider ────────────────────────────────────── -->

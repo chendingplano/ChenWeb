@@ -8984,6 +8984,8 @@
 	"sm_filter": "筛选",
 	"sm_from": "开始时间",
 	"sm_to": "结束时间",
+	"sm_collapse": "收起",
+	"sm_show_window": "显示 {name}",
 	"sm_close": "关闭",
 	"sm_search": "搜索日志",
 	"sm_prev": "上一个匹配项",

@@ -8984,6 +8984,8 @@
 	"sm_filter": "Filter",
 	"sm_from": "From",
 	"sm_to": "To",
+	"sm_collapse": "Collapse",
+	"sm_show_window": "Show {name}",
 	"sm_close": "Close",
 	"sm_search": "Search logs",
 	"sm_prev": "Previous match",
