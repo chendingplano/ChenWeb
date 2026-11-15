@@ -24,18 +24,19 @@ type mineruPage struct {
 }
 
 type mineruItem struct {
-	Type           string            `json:"type"`
-	Text           string            `json:"text"`
-	TextLevel      *int              `json:"text_level"`
-	ListItems      []string          `json:"list_items"`
-	ListItemBBoxes []json.RawMessage `json:"list_item_bboxes"`
-	TableCaption   []string          `json:"table_caption"`
-	TableFootnote  []string          `json:"table_footnote"`
-	TableBody      string            `json:"table_body"`
-	ImgPath        string            `json:"img_path"`
-	ImageCaption   []string          `json:"image_caption"`
-	ImageFootnote  []string          `json:"image_footnote"`
-	BBox           json.RawMessage   `json:"bbox"`
+	Type               string            `json:"type"`
+	Text               string            `json:"text"`
+	TextLevel          *int              `json:"text_level"`
+	ListItems          []string          `json:"list_items"`
+	ListItemBBoxes     []json.RawMessage `json:"list_item_bboxes"`
+	TableCaption       []string          `json:"table_caption"`
+	TableCaptionBBoxes []json.RawMessage `json:"table_caption_bboxes"`
+	TableFootnote      []string          `json:"table_footnote"`
+	TableBody          string            `json:"table_body"`
+	ImgPath            string            `json:"img_path"`
+	ImageCaption       []string          `json:"image_caption"`
+	ImageFootnote      []string          `json:"image_footnote"`
+	BBox               json.RawMessage   `json:"bbox"`
 }
 
 func ConvertMineruFile(inputPath string) (string, error) {
@@ -180,12 +181,20 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 
 			case "table":
 				bbox := mineruBBoxStr(item.BBox)
-				for _, cap := range item.TableCaption {
+				for i, cap := range item.TableCaption {
 					if c := strings.TrimSpace(cap); c != "" {
+						captionBBox := bbox
+						if len(item.TableCaptionBBoxes) == len(item.TableCaption) {
+							var coords []float64
+							if err := json.Unmarshal(item.TableCaptionBBoxes[i], &coords); err == nil && len(coords) == 4 {
+								b := mineruBBoxStr(item.TableCaptionBBoxes[i])
+								captionBBox = b
+							}
+						}
 						items = append(items, extractedOpenDataLine{
 							Page:    pageStr,
 							Type:    "table-caption",
-							BBox:    bbox,
+							BBox:    captionBBox,
 							Content: c,
 						})
 					}
