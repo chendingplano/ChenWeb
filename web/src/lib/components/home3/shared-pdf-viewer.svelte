@@ -50,6 +50,7 @@
 		numPages = $bindable(0),
 		highlightVersion = 0,
 		highlightPages,
+		alignOverflowingHighlights = false,
 		repaintVersion = 0,
 		renderHighlights,
 		tableReferences = [],
@@ -72,6 +73,7 @@
 		numPages?: number;
 		highlightVersion?: number | string;
 		highlightPages?: number[];
+		alignOverflowingHighlights?: boolean;
 		repaintVersion?: number | string;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
 		tableReferences?: TableReference[];
@@ -542,6 +544,18 @@
 
 		const hostRect = host.getBoundingClientRect();
 		const highlightRect = firstHighlight.getBoundingClientRect();
+
+		if (alignOverflowingHighlights) {
+			const highlights = host.querySelectorAll<HTMLElement>('.pdf-highlight');
+			const extendsOutside = Array.from(highlights).some((highlight) => {
+				const rect = highlight.getBoundingClientRect();
+				return rect.top < hostRect.top || rect.bottom > hostRect.bottom;
+			});
+			if (extendsOutside) {
+				host.scrollTo({ top: Math.max(0, highlightRect.top - hostRect.top + host.scrollTop - 30), behavior });
+			}
+			return true;
+		}
 
 		const highlightTop = highlightRect.top - hostRect.top;
 		if (highlightTop >= host.clientHeight / 3 && highlightTop <= host.clientHeight * 2 / 3) {

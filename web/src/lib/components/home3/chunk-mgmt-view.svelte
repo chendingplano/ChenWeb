@@ -289,8 +289,16 @@
 			lineScrollPending = true;
 		} else {
 			await tick();
-			lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line')?.scrollIntoView({ block: 'nearest' });
+			scrollToChunkLines();
 		}
+	}
+
+	function scrollToChunkLines() {
+		const first = lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line');
+		if (!first || !lineListEl) return;
+		const previous = first.previousElementSibling as HTMLElement | null;
+		const target = previous?.classList.contains('line-card') && !previous.classList.contains('chunk-line') ? previous : first;
+		lineListEl.scrollTop += target.getBoundingClientRect().top - lineListEl.getBoundingClientRect().top;
 	}
 
 	function selectLine(line: DocStructureLine, event: MouseEvent) {
@@ -328,7 +336,7 @@
 		if (!linesCollapsed && lineScrollPending) {
 			lineScrollPending = false;
 			await tick();
-			lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line')?.scrollIntoView({ block: 'nearest' });
+			scrollToChunkLines();
 		}
 	}
 
@@ -652,6 +660,7 @@
 						bind:page={docPage}
 						bind:zoom={pdfZoom}
 						bind:numPages={pdfNumPages}
+						alignOverflowingHighlights={true}
 						highlightVersion={`${selectedSeqNo ?? 0}:${highlightSelectionVersion}`}
 						highlightPages={[...selectedLinesByPage.keys()].sort((a, b) => a - b)}
 						renderHighlights={renderChunkHighlights}
