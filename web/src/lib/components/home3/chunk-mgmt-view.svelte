@@ -111,7 +111,6 @@
 	let selectedBBoxes = $derived.by(() => selectedChunk?.bounding_boxes ?? []);
 	let chunkListWidth = $derived(chunkPanelSettings.chunkListWidth);
 	let chunkCardBackground = $derived(chunkPanelSettings.chunkCardBackground);
-	let summaryBackground = $derived(chunkPanelSettings.summaryBackground);
 
 	function getChunkSettingsUserId(): string | null {
 		return appAuthStore.getUser()?.id ?? null;
@@ -423,8 +422,7 @@
 		--btn-disabled-text:{btnDisabledText};
 		--btn-disabled-line:{btnDisabledLine};
 		--content-slab:{contentSlab};
-		--chunk-card-bg:{chunkCardBackground || 'var(--panel-bg)'};
-		--chunk-summary-bg:{summaryBackground || 'var(--panel-bg-alt)'};
+		--chunk-card-bg:{chunkCardBackground || (darkMode ? '#252f3e' : '#e5dbc6')};
 	"
 >
 	<header class="header">
@@ -590,7 +588,7 @@
 									<input
 										class="settings-color-input"
 										type="color"
-										value={chunkPanelSettings.chunkCardBackground || panelBg}
+										value={chunkPanelSettings.chunkCardBackground || (darkMode ? '#252f3e' : '#e5dbc6')}
 										oninput={(e) =>
 											applyChunkPanelSettings({
 												chunkCardBackground: (e.currentTarget as HTMLInputElement).value
@@ -602,29 +600,6 @@
 										disabled={chunkPanelSettings.chunkCardBackground === CHUNK_THEME_BACKGROUND}
 										onclick={() =>
 											applyChunkPanelSettings({ chunkCardBackground: CHUNK_THEME_BACKGROUND })}
-									>
-										{m.chunk_mgmt_follow_theme()}
-									</button>
-								</div>
-							</label>
-							<label class="field dialog-field settings-field">
-								<span class="field-label">{m.chunk_mgmt_summary_block_background_color()}</span>
-								<div class="settings-color-row">
-									<input
-										class="settings-color-input"
-										type="color"
-										value={chunkPanelSettings.summaryBackground || panelBgAlt}
-										oninput={(e) =>
-											applyChunkPanelSettings({
-												summaryBackground: (e.currentTarget as HTMLInputElement).value
-											})}
-									/>
-									<button
-										type="button"
-										class="settings-color-reset"
-										disabled={chunkPanelSettings.summaryBackground === CHUNK_THEME_BACKGROUND}
-										onclick={() =>
-											applyChunkPanelSettings({ summaryBackground: CHUNK_THEME_BACKGROUND })}
 									>
 										{m.chunk_mgmt_follow_theme()}
 									</button>
@@ -818,12 +793,11 @@
 		display: grid;
 		gap: 8px;
 	}
-	.chunk-card.selected { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass-faint) inset; }
+	.chunk-card.selected { background: color-mix(in srgb, var(--chunk-card-bg) 75%, white); border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass-faint) inset; }
 	.chunk-summary {
 		border-radius: 10px;
 		padding: 10px;
 	}
-	.chunk-summary { background: var(--chunk-summary-bg); }
 	.chunk-section-label {
 		font-family: var(--font-mono);
 		font-size: 10px;
