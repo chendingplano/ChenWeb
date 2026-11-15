@@ -834,10 +834,12 @@
 	.lines-sidebar.collapsed .lines-header { justify-content: center; padding: 10px 2px; }
 	.lines-toggle { flex: none; width: 28px; height: 32px; border: 1px solid var(--ink-line); border-radius: 8px; background: var(--panel-bg-alt); color: var(--text-secondary); cursor: pointer; font-size: 20px; line-height: 1; }
 	.lines-toggle:hover { color: var(--text-primary); }
-	.lines-list { min-height: 0; overflow-y: auto; padding: 10px; scrollbar-width: thin; scrollbar-color: var(--ink-line) transparent; }
-	.lines-list::-webkit-scrollbar { width: 6px; }
-	.lines-list::-webkit-scrollbar-thumb { background: var(--ink-line); border-radius: 999px; }
-	.lines-list::-webkit-scrollbar-track { background: transparent; }
+	.lines-list { min-height: 0; overflow-y: auto; padding: 10px; }
+	.lines-list, .table-window, .table-window-content { scrollbar-width: thin; scrollbar-color: var(--ink-line) transparent; }
+	.lines-list::-webkit-scrollbar, .table-window::-webkit-scrollbar, .table-window-content::-webkit-scrollbar { width: 6px; height: 6px; }
+	.lines-list::-webkit-scrollbar-thumb, .table-window::-webkit-scrollbar-thumb, .table-window-content::-webkit-scrollbar-thumb { background: var(--ink-line); border-radius: 999px; }
+	.lines-list::-webkit-scrollbar-track, .table-window::-webkit-scrollbar-track, .table-window-content::-webkit-scrollbar-track { background: transparent; }
+	.table-window::-webkit-scrollbar-corner, .table-window-content::-webkit-scrollbar-corner { background: transparent; }
 	.line-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; width: 100%; text-align: left; padding: 10px; margin-bottom: 6px; color: var(--text-primary); background: var(--panel-bg-alt); border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
 	.line-card.chunk-line { border-color: var(--brass); }
 	.line-card.focused-line { background: var(--chunk-selected-bg); color: white; }
