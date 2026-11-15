@@ -539,7 +539,7 @@
 						bind:zoom={pdfZoom}
 						bind:numPages={pdfNumPages}
 						highlightVersion={`${selectedSeqNo ?? 0}:${highlightSelectionVersion}`}
-						highlightPages={selectedChunk?.source_line_spans?.[0]?.page_number > 0 ? [selectedChunk.source_line_spans[0].page_number] : []}
+						highlightPages={[...selectedLinesByPage.keys()].sort((a, b) => a - b)}
 						renderHighlights={renderChunkHighlights}
 						showSidebar={false}
 					>
