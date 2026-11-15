@@ -1503,7 +1503,7 @@
 
 		<!-- Active PDF parsing list -->
 		{#if pdfActiveParsing.length > 0}
-			<div class="w-full md:w-1/2">
+			<div class="w-full">
 				<div
 					class="mb-2"
 					style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;"
