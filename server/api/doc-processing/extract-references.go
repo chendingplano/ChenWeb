@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,7 +55,7 @@ func NewReferencesProcessor(inputStore DocMetadataStore, db *sql.DB, e LLMJSONEx
 		logger = loggerutil.CreateDefaultLogger("MID_26101120")
 	}
 	promptText, promptRef, promptPath, promptErr := loadProductPromptFromEnvKeys(
-		[]string{"EXTRACT_REFERENCES_PROMPT"}, "prompt-extract-references-v1.md")
+		[]string{"EXTRACT_REFERENCES_PROMPT"}, "prompt-extract-references-v2.md")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_REFERENCES_MODEL_NAME"}, "MODEL_DEF_FILE")
 	settings, configErr := LoadExtractorConfig("references")
@@ -100,13 +101,20 @@ func (p *ReferencesProcessor) InitChunkBatch(_ context.Context, recordID int64, 
 	return nil
 }
 
+func (p *ReferencesProcessor) referenceChunkInputText(lines []MarkedLine, docCtx string) string {
+	if filepath.Base(p.PromptRef) == "prompt-extract-references-v2.md" {
+		return wrapLinesWithDocContext(markedLinesToCompactJSON(lines), docCtx)
+	}
+	return canonicalChunkInputText(lines, docCtx)
+}
+
 func (p *ReferencesProcessor) ProcessChunk(ctx context.Context, idx int) error {
 	if idx < 0 || idx >= len(p.batchChunks) {
 		return fmt.Errorf("%s chunk index out of range", p.Name())
 	}
 	start := time.Now()
 	in := newLLMJSONInput(ctx, p.Name(), p.PromptText, p.ModelName,
-		canonicalChunkInputText(p.batchChunks[idx].Lines, p.batchDocCtx), p.Name(), "MID_26101121")
+		p.referenceChunkInputText(p.batchChunks[idx].Lines, p.batchDocCtx), p.Name(), "MID_26101121")
 	// The extraction instructions are large and identical across chunks, while each
 	// chunk's document input changes. Keep the prompt first so its stable prefix can
 	// be reused by the provider's prompt cache.
