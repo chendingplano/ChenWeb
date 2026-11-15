@@ -67,6 +67,7 @@
 		onResultsChange = () => {},
 		onError = () => {},
 		onFiltersChange = () => {},
+		onHighlightColorChange = () => {},
 		extraControls,
 		listParams,
 		listPausedMessage = ''
@@ -91,6 +92,7 @@
 		onResultsChange?: (payload: { results: KbInputRecord[]; total: number; page: number }) => void;
 		onError?: (error: Error) => void;
 		onFiltersChange?: (filters: RecordBrowserFilters) => void;
+		onHighlightColorChange?: (color: string) => void;
 		// Host-specific filters rendered in the search block, below the record id field.
 		extraControls?: Snippet;
 		// Host-specific list filters merged into every list request; a change reloads page 1.
@@ -134,6 +136,7 @@
 	let settingsHydrated = $state(false);
 
 	let highlightColor = $state(KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR);
+	$effect(() => onHighlightColorChange(highlightColor));
 	let effectivePageSize = $state(clampKbInputRecordBrowserPageSize(untrack(() => pageSize)));
 	let listTotalPages = $derived(Math.max(1, Math.ceil(listTotal / effectivePageSize)));
 	let resetDisabled = $derived(!hasActiveRecordBrowserFilters(filters) && !pinnedMode && recordIdInput.trim() === '');
@@ -896,7 +899,7 @@
 		grid-template-columns: 4px minmax(0, 1fr);
 		padding: 0;
 		border: 1px solid var(--rb-line-soft);
-		background: var(--rb-panel-alt);
+		background: var(--record-card-bg, var(--rb-panel-alt));
 		overflow: hidden;
 	}
 	.record-browser-card:hover,
@@ -938,7 +941,7 @@
 	.card-foot { margin-top: 0.75rem; }
 	.record-card {
 		border: 1px solid var(--rb-line-soft);
-		background: var(--rb-panel-alt);
+		background: var(--record-card-bg, var(--rb-panel-alt));
 		padding: 1rem;
 	}
 	.record-meta {

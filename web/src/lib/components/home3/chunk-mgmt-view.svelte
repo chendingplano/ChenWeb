@@ -13,6 +13,7 @@
 	} from '$lib/services/kbService';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import { KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR } from './kb-input-record-browser-settings.js';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import {
 		CHUNK_LIST_MAX_WIDTH,
@@ -67,6 +68,7 @@
 	let errorMsg = $state('');
 	let chunkListResizing = $state(false);
 	let chunkListSettingsOpen = $state(false);
+	let recordHighlightColor = $state(KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR);
 	let chunkListSettingsHydrated = $state(false);
 	let chunkPanelSettings = $state<ChunkPanelSettings>({ ...CHUNK_PANEL_DEFAULT_SETTINGS });
 
@@ -423,6 +425,8 @@
 		--btn-disabled-line:{btnDisabledLine};
 		--content-slab:{contentSlab};
 		--chunk-card-bg:{chunkCardBackground || (darkMode ? '#252f3e' : '#e5dbc6')};
+		--record-card-bg:var(--chunk-card-bg);
+		--chunk-selected-bg:{recordHighlightColor};
 	"
 >
 	<header class="header">
@@ -445,6 +449,7 @@
 			selectedRecordId={currentInput?.id ?? null}
 			mapRecord={mapBrowserRecord}
 			onSelect={(record) => void loadChunksForRecord(record.id)}
+			onHighlightColorChange={(color) => (recordHighlightColor = color)}
 			onError={(error) => {
 				errorMsg = error.message;
 			}}
@@ -695,7 +700,7 @@
 		border-right: 1px solid var(--ink-line);
 		background: var(--panel-bg);
 		display: grid;
-		grid-template-rows: auto auto 1fr;
+		grid-template-rows: auto minmax(0, 1fr);
 		min-height: 0;
 	}
 	input {
@@ -778,7 +783,7 @@
 			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
 			var(--panel-bg);
 	}
-	.chunk-list { overflow: auto; padding: 10px; display: grid; align-content: start; gap: 10px; scrollbar-width: thin; scrollbar-color: var(--ink-line) transparent; }
+	.chunk-list { min-height: 0; overflow: auto; padding: 10px; display: grid; align-content: start; gap: 10px; scrollbar-width: thin; scrollbar-color: var(--ink-line) transparent; }
 	.chunk-list::-webkit-scrollbar { width: 6px; }
 	.chunk-list::-webkit-scrollbar-thumb { background: var(--ink-line); border-radius: 999px; }
 	.chunk-list::-webkit-scrollbar-track { background: transparent; }
@@ -793,7 +798,8 @@
 		display: grid;
 		gap: 8px;
 	}
-	.chunk-card.selected { background: color-mix(in srgb, var(--chunk-card-bg) 75%, white); border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass-faint) inset; }
+	.chunk-card.selected { background: var(--chunk-selected-bg); border-color: var(--chunk-selected-bg); color: #fff; }
+	.chunk-card.selected .chunk-section-label, .chunk-card.selected .type, .chunk-card.selected .seq, .chunk-card.selected .chunk-keywords, .chunk-card.selected .info-span-chip { color: #fff; }
 	.chunk-summary {
 		border-radius: 10px;
 		padding: 10px;
