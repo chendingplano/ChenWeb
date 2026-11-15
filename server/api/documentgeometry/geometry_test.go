@@ -491,17 +491,28 @@ func TestRecord825GarbledNotesUseVerifiedSuperscriptBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantNotes := map[string]int{"r12:c1:na": 1, "r12:c1:nb": 2, "r12:c1:nc": 1, "r12:c1:nd": 1}
 	for _, row := range got.Tables[0].Rows {
 		for _, cell := range row.Cells {
+			if count, ok := wantNotes[cell.ID]; ok {
+				if len(cell.Boxes) != count {
+					t.Fatalf("%s: %+v", cell.ID, cell.Boxes)
+				}
+				delete(wantNotes, cell.ID)
+			}
+			if cell.ID == "r12:c1:na" && (cell.Boxes[0].Coords[0] != 144 || cell.Boxes[0].Coords[1] != 538 || cell.Boxes[0].Coords[2] != 759 || cell.Boxes[0].Coords[3] != 553) {
+				t.Fatalf("note a includes the margin artifact or wrong lines: %+v", cell)
+			}
 			if cell.ID == "r12:c1:nb" {
 				if len(cell.Boxes) != 2 || cell.Boxes[0].Coords[1] != 556 || cell.Boxes[1].Coords[3] != 587 {
 					t.Fatalf("wrong note b: %+v", cell)
 				}
-				return
 			}
 		}
 	}
-	t.Fatal("note b missing from garbled PDF")
+	if len(wantNotes) != 0 {
+		t.Fatalf("notes missing from garbled PDF: %+v", wantNotes)
+	}
 }
 
 func TestGarbledTableRejectsStructuralMismatch(t *testing.T) {

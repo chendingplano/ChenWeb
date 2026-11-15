@@ -1,10 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveTableReferences, type TableGeometry } from './pdf-table-geometry';
+import { resolveTableReferences, tableLinesWithoutFallback, type TableGeometry } from './pdf-table-geometry';
+
+test('unresolved note references suppress whole-table source-line fallback', () => {
+	const refs = [{ line: 157, rows: ['r12'], cells: ['r12:c1:na'] }];
+	assert.deepEqual([...tableLinesWithoutFallback(refs, [])], [157]);
+	assert.deepEqual([...tableLinesWithoutFallback([{ line: 160, rows: ['r3'] }], [])], []);
+	assert.deepEqual([...tableLinesWithoutFallback(refs, [{ page: 8, line: 160, target: 'r3:c2', coords: [10, 20, 30, 40] }])], [160, 157]);
+});
 
 test('note b resolves to its wrapped lines without painting the merged cell', () => {
 	const notes = structuredClone(geometry);
-	notes.algorithm = 'canonical-table-geometry-v7';
+	notes.algorithm = 'canonical-table-geometry-v8';
 	notes.tables[0].rows[0].cells.push({ id: 'r3:c1:nb', boxes: [
 		{ page: 7, coords: [110, 300, 900, 315] },
 		{ page: 7, coords: [110, 315, 600, 330] }

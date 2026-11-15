@@ -27,6 +27,21 @@ export type TableGeometry = {
 // including when the physical table was recovered after line renumbering.
 export type TableHighlight = GeometryBox & { line: number; target: string };
 
+/** Lines excluded from the caller's whole-line overlay. Explicit note targets
+ * stay narrow even while their geometry is loading, missing, or stale. */
+export function tableLinesWithoutFallback(
+	refs: TableReference[], highlights: TableHighlight[]
+): Set<number> {
+	const lines = new Set(highlights.map(box => box.line));
+	for (const ref of refs) {
+		if (Number.isInteger(ref.line) && ref.line > 0 &&
+			ref.cells?.some(cell => /^r[1-9]\d*:c[1-9]\d*:n[a-z]$/.test(cell))) {
+			lines.add(ref.line);
+		}
+	}
+	return lines;
+}
+
 function validBox(box: GeometryBox): boolean {
 	const c = box.coords;
 	return (
@@ -63,7 +78,7 @@ export function resolveTableReferences(
 	if (
 		!geometry ||
 		geometry.version !== 1 ||
-		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5', 'canonical-table-geometry-v6', 'canonical-table-geometry-v7'].includes(geometry.algorithm) ||
+		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5', 'canonical-table-geometry-v6', 'canonical-table-geometry-v7', 'canonical-table-geometry-v8'].includes(geometry.algorithm) ||
 		geometry.coordinate_space !== 'page-normalized-1000' ||
 		!Array.isArray(geometry.tables)
 	)

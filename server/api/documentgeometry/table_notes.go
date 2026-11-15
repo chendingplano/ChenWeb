@@ -111,15 +111,24 @@ func noteMarkerBoxes(note docprocessing.TableNote, notes []docprocessing.TableNo
 		end = markers[selected+1]
 	}
 	var boxes []Box
+	var previous []float64
+	markerLeft := unrotated(cell.Lines[markers[0]].Coords)[0]
 	for i := markers[selected]; i < end; i++ {
 		c := cell.Lines[i].Coords
 		if !validBox(c) || c[0] < cell.Coords[0] || c[1] < cell.Coords[1] || c[2] > cell.Coords[2] || c[3] > cell.Coords[3] {
 			return nil
 		}
-		if i > markers[selected] && unrotated(c)[1] < unrotated(cell.Lines[i-1].Coords)[3] {
+		readingBox := unrotated(c)
+		// Some broken fonts emit an extra fragment in the left cell margin at
+		// the same height as note a. It is outside the aligned note-marker column.
+		if readingBox[2] <= markerLeft {
+			continue
+		}
+		if previous != nil && readingBox[1] < previous[3] {
 			return nil
 		}
 		boxes = append(boxes, Box{Page: page, Rotation: rotation, Coords: integerCoords(c)})
+		previous = readingBox
 	}
 	return boxes
 }

@@ -3,7 +3,7 @@
 	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { resolveTableReferences, type TableReference, type TableGeometry } from './pdf-table-geometry';
+	import { resolveTableReferences, tableLinesWithoutFallback, type TableReference, type TableGeometry } from './pdf-table-geometry';
 
 	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
@@ -110,8 +110,8 @@
 	let tableHighlights = $derived(resolveTableReferences(tableReferences, tableGeometry, respectPageRotation));
 	let tableGeometryDocumentId: number | null = null;
 	let tableGeometryRequestedInputId: number | null = null;
-	// Lines whose cited table rows were located; callers draw the whole line for the rest.
-	let resolvedTableLines = $derived(new Set(tableHighlights.map(box => box.line)));
+	// Explicit notes never fall back to a whole-table source-line highlight.
+	let resolvedTableLines = $derived(tableLinesWithoutFallback(tableReferences, tableHighlights));
 	let tablePaintSeq = 0;
 	let tableNavigationPending = false;
 
