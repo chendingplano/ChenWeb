@@ -463,3 +463,26 @@ func TestMetricsSimpleStopsWhenDeletionFails(t *testing.T) {
 		t.Fatal("saved after deletion failed")
 	}
 }
+
+func TestSimpleChunkInputMatchesPromptVersion(t *testing.T) {
+	lines := []MarkedLine{
+		{Mark: "o", Line: Line{LineNo: 7, PageNo: 2, LineType: "paragraph", Content: "context"}},
+		{Mark: "n", Line: Line{LineNo: 8, PageNo: 3, LineType: "paragraph", Content: "limit 5"}},
+	}
+	for _, tc := range []struct{ prompt, want string }{
+		{"prompt-extract-metric-simple-v2.md", `{"doc_context":"document","lines":[["flag","line_number","page_number","line_type","content"],["o",7,2,"paragraph","context"],["n",8,3,"paragraph","limit 5"]]}`},
+		{"prompt-extract-metric-simple-v1.md", canonicalChunkInputText(lines, "document")},
+	} {
+		ext := &simpleMetricsExtractor{respond: func(_ int, in llmclients.JSONExtractionInput) (map[string]any, error) {
+			if in.InputText != tc.want {
+				t.Errorf("%s: got %s, want %s", tc.prompt, in.InputText, tc.want)
+			}
+			return map[string]any{"lang": "en", "m": []any{}}, nil
+		}}
+		p := makeTestSimpleMetricsProcessor(ext, &fakeMetricsStore{}, nil)
+		p.RelationPromptRef = tc.prompt
+		if _, err := p.callSimpleChunk(context.Background(), 1, Chunk{SeqNo: 1}, lines, "document", 1, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

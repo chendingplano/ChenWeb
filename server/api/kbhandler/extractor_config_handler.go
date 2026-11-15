@@ -12,7 +12,7 @@ import (
 )
 
 var extractorDefaults = map[string]map[string]string{
-	"metrics-simple": {"EXTRACT_METRICS_SIMPLE_PROMPT": "prompt-extract-metric-simple-v1.md", "EXTRACT_METRICS_SIMPLE_MODEL_NAME": "", "EXTRACT_METRICS_MAX_TASKS": "1"},
+	"metrics-simple": {"EXTRACT_METRICS_SIMPLE_PROMPT": "prompt-extract-metric-simple-v2.md", "EXTRACT_METRICS_SIMPLE_MODEL_NAME": "", "EXTRACT_METRICS_MAX_TASKS": "1"},
 	"references":     {"EXTRACT_REFERENCES_PROMPT": "prompt-extract-references-v1.md", "EXTRACT_REFERENCES_MODEL_NAME": ""},
 	"provisions":     {"EXTRACT_PROVISIONS_PROMPT": "prompt-extract-provisions-v8.md", "EXTRACT_PROVISIONS_REVIEW_PROMPT": "prompt-audit-provision-extraction-v1.md", "EXTRACT_PROVISIONS_MODEL_NAME": "", "EXTRACT_PROVISIONS_MODEL_FALLBACK": "", "EXTRACT_PROVISIONS_MAX_TASKS": "1", "EXTRACT_PROVISIONS_INPUT": "chunks"},
 }

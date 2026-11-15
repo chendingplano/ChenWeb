@@ -7,6 +7,7 @@ package docprocessing
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -63,7 +64,7 @@ func NewMetricsSimpleProcessor(inputStore DocMetadataStore, store MetricsStore, 
 	}
 	promptRef := settings.first("EXTRACT_METRICS_SIMPLE_PROMPT")
 	if promptRef == "" {
-		promptRef = "prompt-extract-metric-simple-v1.md"
+		promptRef = "prompt-extract-metric-simple-v2.md"
 	}
 	p.setSimplePrompt(loadPromptByRef(promptRef))
 	modelRef := settings.first("EXTRACT_METRICS_SIMPLE_MODEL_NAME", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME")
@@ -222,7 +223,11 @@ func (p *MetricsProcessor) extractSimpleChunk(ctx context.Context, recordID int6
 // parses its response; callSuffix tells the halves' log entries apart.
 func (p *MetricsProcessor) callSimpleChunk(ctx context.Context, recordID int64, chunk Chunk, lines []MarkedLine, docCtx string, total int, callSuffix string) (metricSimpleResult, error) {
 	start := p.Now()
-	payload, err := p.extractMetricSimplePayload(ctx, canonicalChunkInputText(lines, docCtx))
+	input := canonicalChunkInputText(lines, docCtx)
+	if filepath.Base(p.RelationPromptRef) == "prompt-extract-metric-simple-v2.md" {
+		input = wrapLinesWithDocContext(markedLinesToCompactJSON(lines), docCtx)
+	}
+	payload, err := p.extractMetricSimplePayload(ctx, input)
 	p.logExtractMetricsChunk(ctx, recordID, fmt.Sprintf("%d_s_c%d%s", recordID, chunk.SeqNo, callSuffix),
 		chunk.SeqNo, total, []string{p.RelationModelName}, p.RelationPromptRef, payload, err, start, p.Now(), "")
 	if err != nil {
