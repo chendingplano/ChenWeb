@@ -955,7 +955,7 @@
 	.empty { padding: 18px 10px; text-align: center; color: var(--text-secondary); }
 	.empty-title { font-weight: 700; margin-bottom: 4px; }
 	.empty-sub { font-size: 12px; color: var(--text-muted); }
-	.document-view { min-width: 0; min-height: 0; height: 100%; }
+	.document-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
 	.document-view[hidden] { display: none; }
 	.doc-iframe { width: 100%; height: 100%; border: none; }
 	.dialog-overlay {
