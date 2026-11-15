@@ -22,6 +22,7 @@
 		numPages = $bindable(0),
 		highlightVersion = 0,
 		highlightPages,
+		alignOverflowingHighlights = false,
 		renderHighlights,
 		tableReferences = [],
 		loadingLabel = m.pdf_view_window_rendering_page(),
@@ -55,6 +56,7 @@
 		numPages?: number;
 		highlightVersion?: number | string;
 		highlightPages?: number[];
+		alignOverflowingHighlights?: boolean;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement, resolvedTableLines: ReadonlySet<number>) => void;
 		tableReferences?: TableReference[];
 		loadingLabel?: string;
@@ -374,6 +376,7 @@
 			bind:numPages
 			highlightVersion={effectiveHighlightVersion}
 			{highlightPages}
+			{alignOverflowingHighlights}
 			repaintVersion={useBuiltinDialog ? builtinRepaintVersion : undefined}
 			{tableReferences}
 			renderHighlights={effectiveRenderHighlights}
