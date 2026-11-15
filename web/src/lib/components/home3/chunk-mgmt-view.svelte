@@ -112,7 +112,6 @@
 	let chunkListWidth = $derived(chunkPanelSettings.chunkListWidth);
 	let chunkCardBackground = $derived(chunkPanelSettings.chunkCardBackground);
 	let summaryBackground = $derived(chunkPanelSettings.summaryBackground);
-	let contentBackground = $derived(chunkPanelSettings.contentBackground);
 
 	function getChunkSettingsUserId(): string | null {
 		return appAuthStore.getUser()?.id ?? null;
@@ -426,7 +425,6 @@
 		--content-slab:{contentSlab};
 		--chunk-card-bg:{chunkCardBackground || 'var(--panel-bg)'};
 		--chunk-summary-bg:{summaryBackground || 'var(--panel-bg-alt)'};
-		--chunk-content-bg:{contentBackground || 'var(--content-slab)'};
 	"
 >
 	<header class="header">
@@ -435,12 +433,7 @@
 				<h1 class="display">{m.chunk_mgmt_chunks()}</h1>
 				<div class="subtitle">{m.chunk_mgmt_review_fixed_size_chunks_and()}</div>
 			</div>
-		<div class="header-actions">
-			<button class="btn btn-ghost header-settings-btn" type="button" onclick={openChunkSettings}>
-				<SettingsIcon size={15} />
-				{m.chunk_mgmt_settings()}
-			</button>
-		</div>
+
 	</header>
 
 	<div class="body" style={`grid-template-columns:auto ${chunkListWidth}px 14px 1fr;`}>
@@ -465,6 +458,10 @@
 					<div class="left-meta-title">{m.chunk_mgmt_chunks()}</div>
 					<div class="left-meta-count">{m.chunk_mgmt_found({ chunksCount: chunks.length })}</div>
 				</div>
+				<button class="btn btn-ghost" type="button" onclick={openChunkSettings}>
+					<SettingsIcon size={15} />
+					{m.chunk_mgmt_settings()}
+				</button>
 			</div>
 
 			<div class="chunk-list">
@@ -492,18 +489,14 @@
 								<div class="chunk-topic">{chunk.topic}</div>
 								<div class="chunk-keywords">{(chunk.keywords ?? []).join(', ') || '—'}</div>
 							</div>
-							<div class="chunk-content">
-								<div class="chunk-section-label">{m.chunk_mgmt_content()}</div>
-								{#if (chunk.content_lines ?? []).length === 0}
-									<div class="chunk-content-line muted">{m.chunk_mgmt_no_source_lines_found()}</div>
-								{:else}
-									{#each chunk.content_lines as ln (`${chunk.seqno}-${ln.page_number}-${ln.line_number}`)}
-										<div class="chunk-content-line">
-											<span>{ln.content}</span>
-										</div>
+							{#if (chunk.source_line_spans ?? []).length > 0}
+								<div class="chunk-section-label">{m.chunk_mgmt_source_lines()}</div>
+								<div class="info-spans">
+									{#each formatSourceLineRanges(chunk.source_line_spans) as spanLabel (spanLabel)}
+										<span class="info-span-chip">{spanLabel}</span>
 									{/each}
-								{/if}
-							</div>
+								</div>
+							{/if}
 						</button>
 					{/each}
 				{/if}
@@ -544,80 +537,8 @@
 						bind:numPages={pdfNumPages}
 						highlightVersion={`${selectedSeqNo ?? 0}:${highlightSelectionVersion}`}
 						renderHighlights={renderChunkHighlights}
-						sidebarMinWidth={140}
-						sidebarMaxWidth={420}
-						sidebarDefaultWidth={270}
-						sidebarTitle={m.chunk_mgmt_chunk_details()}
-						sidebarSettingsKey="chunk-mgmt-pdf-sidebar"
-						sidebarWidthSettingLabel={m.chunk_mgmt_panel_width()}
+						showSidebar={false}
 					>
-						{#snippet sidebar()}
-							{#if selectedChunk}
-								<div class="info-block">
-									<div class="info-section">
-										<div class="info-section-title">{m.chunk_mgmt_chunk()}</div>
-										<div class="info-row">
-											<span class="info-label">#{selectedChunk.seqno}</span>
-											<span class="info-type">{selectedChunk.topic_type}</span>
-										</div>
-										<div class="info-topic">{selectedChunk.topic}</div>
-									</div>
-
-									{#if (selectedChunk.keywords ?? []).length > 0}
-										<div class="info-section">
-											<div class="info-section-title">{m.chunk_mgmt_keywords()}</div>
-											<div class="info-keywords">
-												{selectedChunk.keywords.join(', ')}
-											</div>
-										</div>
-									{/if}
-
-									{#if (selectedChunk.source_line_spans ?? []).length > 0}
-										<div class="info-section">
-											<div class="info-section-title">{m.chunk_mgmt_source_lines()}</div>
-											<div class="info-spans">
-												{#each formatSourceLineRanges(selectedChunk.source_line_spans) as spanLabel (spanLabel)}
-													<span class="info-span-chip">{spanLabel}</span>
-												{/each}
-											</div>
-										</div>
-									{/if}
-
-									{#if selectedBBoxes.length > 0}
-										<div class="info-section">
-											<div class="info-section-title">{m.chunk_mgmt_bounding_boxes({ selectedBBoxesCount: selectedBBoxes.length })}</div>
-											<div class="info-bbox-list">
-												{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
-													<div class="info-bbox-row">
-														<span class="info-bbox-page">{m.chunk_mgmt_page({ page_number: box.page_number })}</span>
-														<span class="info-bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</span>
-													</div>
-												{/each}
-											</div>
-										</div>
-									{/if}
-
-									{#if (selectedChunk.content_lines ?? []).length > 0}
-										<div class="info-section info-section-content">
-											<div class="info-section-title">{m.chunk_mgmt_content_lines({ content_linesCount: selectedChunk.content_lines.length })}</div>
-											<div class="info-content-list">
-												{#each selectedChunk.content_lines as ln (`${ln.page_number}-${ln.line_number}`)}
-													<div class="info-content-item">
-														<div class="info-content-meta">
-															<span class="info-content-line">L{ln.line_number}</span>
-															<span class="info-content-type">{ln.line_type}</span>
-														</div>
-														<div class="info-content-preview">{ln.content}</div>
-													</div>
-												{/each}
-											</div>
-										</div>
-									{/if}
-								</div>
-							{:else}
-								<div class="meta-empty">{m.chunk_mgmt_select_a_chunk_to_view()}</div>
-							{/if}
-						{/snippet}
 					</PdfViewWindow>
 				{:else}
 					<iframe class="doc-iframe" src={fileUrl} title={m.chunk_mgmt_document_viewer()}></iframe>
@@ -709,29 +630,6 @@
 									</button>
 								</div>
 							</label>
-							<label class="field dialog-field settings-field">
-								<span class="field-label">{m.chunk_mgmt_content_block_background_color()}</span>
-								<div class="settings-color-row">
-									<input
-										class="settings-color-input"
-										type="color"
-										value={chunkPanelSettings.contentBackground || contentSlab}
-										oninput={(e) =>
-											applyChunkPanelSettings({
-												contentBackground: (e.currentTarget as HTMLInputElement).value
-											})}
-									/>
-									<button
-										type="button"
-										class="settings-color-reset"
-										disabled={chunkPanelSettings.contentBackground === CHUNK_THEME_BACKGROUND}
-										onclick={() =>
-											applyChunkPanelSettings({ contentBackground: CHUNK_THEME_BACKGROUND })}
-									>
-										{m.chunk_mgmt_follow_theme()}
-									</button>
-								</div>
-							</label>
 							<div class="field dialog-field settings-field settings-field-wide">
 								<span class="field-label">{m.chunk_mgmt_chunks_list_width_px({ chunkListWidth: chunkPanelSettings.chunkListWidth })}</span>
 								<div class="settings-width-row">
@@ -811,8 +709,6 @@
 		border-bottom: 1px solid var(--ink-line);
 		background: linear-gradient(180deg, var(--panel-bg), var(--panel-bg-alt));
 	}
-	.header-actions { display: flex; align-items: center; gap: 10px; }
-	.header-settings-btn { white-space: nowrap; }
 	.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 	.display { font-family: var(--font-serif); font-size: 32px; line-height: 1.1; margin: 6px 0 2px; }
 	.subtitle { color: var(--text-secondary); font-size: 14px; }
@@ -907,7 +803,10 @@
 			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
 			var(--panel-bg);
 	}
-	.chunk-list { overflow: auto; padding: 10px; display: grid; gap: 10px; }
+	.chunk-list { overflow: auto; padding: 10px; display: grid; align-content: start; gap: 10px; scrollbar-width: thin; scrollbar-color: var(--ink-line) transparent; }
+	.chunk-list::-webkit-scrollbar { width: 6px; }
+	.chunk-list::-webkit-scrollbar-thumb { background: var(--ink-line); border-radius: 999px; }
+	.chunk-list::-webkit-scrollbar-track { background: transparent; }
 	.chunk-card {
 		border: 1px solid var(--ink-line-soft);
 		background: var(--chunk-card-bg);
@@ -920,13 +819,11 @@
 		gap: 8px;
 	}
 	.chunk-card.selected { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass-faint) inset; }
-	.chunk-summary,
-	.chunk-content {
+	.chunk-summary {
 		border-radius: 10px;
 		padding: 10px;
 	}
 	.chunk-summary { background: var(--chunk-summary-bg); }
-	.chunk-content { background: var(--chunk-content-bg); display: grid; gap: 6px; }
 	.chunk-section-label {
 		font-family: var(--font-mono);
 		font-size: 10px;
@@ -946,7 +843,6 @@
 	.type { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.06em; }
 	.chunk-topic { font-weight: 700; margin-bottom: 4px; }
 	.chunk-keywords { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-	.chunk-content-line { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
 	.muted { color: var(--text-muted); }
 	.right { min-width: 0; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 	.right-toolbar {
@@ -961,38 +857,6 @@
 	.name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.stats { display: flex; gap: 14px; color: var(--text-secondary); font-size: 12px; }
 	.doc-empty { padding: 20px; color: var(--text-secondary); }
-	.info-block { display: flex; flex-direction: column; gap: 2px; min-height: 100%; flex: 1 1 auto; }
-	.info-section {
-		padding: 8px 0;
-		border-bottom: 1px solid var(--ink-line-soft);
-	}
-	.info-section-content {
-		display: flex;
-		flex: 1 1 auto;
-		flex-direction: column;
-		min-height: 0;
-	}
-	.info-section:last-child { border-bottom: none; }
-	.info-section-title {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--text-muted);
-		margin-bottom: 5px;
-	}
-	.info-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-	.info-label { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--brass); }
-	.info-type {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		padding: 1px 6px;
-		border-radius: 999px;
-		background: rgba(212, 162, 76, 0.14);
-		color: var(--info-type);
-	}
-	.info-topic { font-size: 12px; line-height: 1.5; color: var(--text-primary); }
-	.info-keywords { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 	.info-spans { display: flex; flex-wrap: wrap; gap: 4px; }
 	.info-span-chip {
 		font-family: var(--font-mono);
@@ -1002,36 +866,6 @@
 		background: rgba(255, 255, 255, 0.05);
 		color: var(--text-secondary);
 	}
-	.info-content-list {
-		display: flex;
-		flex: 1 1 auto;
-		flex-direction: column;
-		gap: 4px;
-		min-height: 0;
-		max-height: none;
-		padding-bottom: 24px;
-		overflow-y: auto;
-	}
-	.info-content-item {
-		padding: 4px 6px;
-		border-radius: 4px;
-		background: rgba(255, 255, 255, 0.03);
-	}
-	.info-content-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
-	.info-content-line { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--brass); }
-	.info-content-type {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		padding: 0 4px;
-		border-radius: 3px;
-		background: rgba(255, 255, 255, 0.06);
-		color: var(--text-muted);
-	}
-	.info-content-preview { font-size: 11px; line-height: 1.4; color: var(--text-primary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; }
-	.info-bbox-list { display: flex; flex-direction: column; gap: 4px; }
-	.info-bbox-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
-	.info-bbox-page { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
-	.info-bbox-coord { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 	:global(.pdf-highlight) {
 		position: absolute;
 		background: rgba(212, 162, 76, 0.28);
