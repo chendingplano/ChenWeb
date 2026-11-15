@@ -600,7 +600,9 @@
 					<div class="line-image-view">
 						{#if imageLoadFailed}<div class="error">{m.chunk_mgmt_image_load_failed()}</div>{:else}<img src={imageUrl} alt={focusedLine?.content ?? ''} onerror={() => (imageLoadFailed = true)} />{/if}
 					</div>
-				{:else if isPdf}
+				{/if}
+				<div class="document-view" hidden={!!imageUrl}>
+				{#if isPdf}
 					<PdfViewWindow
 						inputId={currentInput.id}
 						{fileUrl}
@@ -616,6 +618,7 @@
 				{:else}
 					<iframe class="doc-iframe" src={fileUrl} title={m.chunk_mgmt_document_viewer()}></iframe>
 				{/if}
+				</div>
 			{/if}
 		</section>
 	</div>
@@ -952,6 +955,8 @@
 	.empty { padding: 18px 10px; text-align: center; color: var(--text-secondary); }
 	.empty-title { font-weight: 700; margin-bottom: 4px; }
 	.empty-sub { font-size: 12px; color: var(--text-muted); }
+	.document-view { min-width: 0; min-height: 0; height: 100%; }
+	.document-view[hidden] { display: none; }
 	.doc-iframe { width: 100%; height: 100%; border: none; }
 	.dialog-overlay {
 		position: fixed;
