@@ -185,7 +185,7 @@ After the extraction calls, the processor SHALL apply the same steps, in the sam
 `extract_metrics` applies after its enrich calls: drop-reason tags, metric frames, clause and
 served-quantity condition inheritance, condition repeats, final dedup, value-range
 canonicalization, value notation, resource-spec rows, pure requirements, rows without a value and
-the open-value decision. It SHALL then save, merge (when `force_clear` is false), link provisions,
+the open-value decision. It SHALL then replace the existing metrics, link provisions,
 persist objects, write the `.metrics` file, harvest metric definitions, resolve incoming
 references and index in Phase C exactly as `extract_metrics` does. Rows that keep a combined
 multi-value value SHALL stay `unresolved` with tag `value_review_unresolved`, without a review call.
@@ -195,11 +195,12 @@ multi-value value SHALL stay `unresolved` with tag `value_review_unresolved`, wi
 - **WHEN** the model returns a row with no `v`
 - **THEN** the row SHALL be saved to `kb.metrics_dropped` with stage `no_value`
 
-#### Scenario: Merge mode
+#### Scenario: Replacement on every run
 
-- **WHEN** the run has `force_clear` false and the record already has metrics
-- **THEN** the new rows SHALL be merged with the existing rows by the `extract_metrics` merge
-  procedure, including merge-resolve calls for conflicting groups
+- **WHEN** the processor runs, regardless of `force` or `force_clear`
+- **THEN** it SHALL delete the record’s existing metrics and save the newly extracted rows
+- **AND** it SHALL NOT invoke metric merge resolution, including when no rows are extracted
+- **AND** a deletion error SHALL fail the run without saving replacement rows
 
 ### Requirement: Prompt and model configuration
 

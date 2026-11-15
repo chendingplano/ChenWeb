@@ -62,7 +62,8 @@ Facts about the code that shape the design:
 `name` field (`extract_metrics_simple`), a `simple` flag and the simple prompt/model fields.
 `Name()` returns `name` when set. The two entry points branch on `simple` only where they call the
 LLM: `extractMetricsFromChunksWithLLM` (sequential) and `ProcessChunk` / `FinalizeChunkBatch`
-(chunk batch). Everything else (status, save, merge, logs, indexing, `PostProcessIndex`) is shared.
+(chunk batch). The remaining processing, logs and indexing are shared, but simple runs always replace existing
+metrics and never use the merge path, regardless of `force` or `force_clear`.
 
 *Alternative:* a `MetricsSimpleProcessor` struct embedding `*MetricsProcessor` and overriding
 `Name()`. Go has no virtual dispatch: the shared methods would still call the embedded `Name()`

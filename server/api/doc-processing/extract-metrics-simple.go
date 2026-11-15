@@ -2,7 +2,7 @@ package docprocessing
 
 // extract_metrics_simple (openspec change extract-metrics-simple): the metrics of a chunk in one
 // LLM call, with the instructions as a cacheable system message and a compact output. Everything
-// after the calls (finishMetricRows, save, merge, indexing) is extract_metrics' own code.
+// after the calls (finishMetricRows, replacement save, indexing) uses extract_metrics' code.
 
 import (
 	"context"

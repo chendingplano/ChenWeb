@@ -367,12 +367,12 @@ func TestMetricsSimpleChunkBatchSavesRowsAndSetAsides(t *testing.T) {
 			map[string]any{"l": []any{"20"}, "n": "术语", "r": "term_definition"},
 		}}, nil
 	}}
-	store := &fakeMetricsStore{}
+	store := &fakeMetricsStore{exists: true, existingMetrics: []map[string]any{{"metric_id": "old"}}}
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: recordID, StatusRaw: "[]"}}
 	p := makeTestSimpleMetricsProcessor(ext, store, inputStore)
 	p.ChunkDir = t.TempDir()
 	chunks := metricsBlocksToChunks([]Block{makeMetricsBlock(0, 10), makeMetricsBlock(1, 20)})
-	ctx := withDocProcessorFlags(context.Background(), true, true)
+	ctx := withDocProcessorFlags(context.Background(), false, false)
 	if err := p.InitChunkBatch(ctx, recordID, chunks, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +386,9 @@ func TestMetricsSimpleChunkBatchSavesRowsAndSetAsides(t *testing.T) {
 	}
 	if len(ext.inputs) != 2 {
 		t.Errorf("calls=%d, want one per chunk", len(ext.inputs))
+	}
+	if store.deleteCalled != 1 || store.upsertCalled != 0 {
+		t.Fatalf("delete=%d upsert=%d, want replacement without merge", store.deleteCalled, store.upsertCalled)
 	}
 	if store.saveCalled != 1 || len(store.lastSave.Metrics) != 1 {
 		t.Fatalf("saveCalled=%d metrics=%d, want one saved row", store.saveCalled, len(store.lastSave.Metrics))
@@ -430,5 +433,33 @@ func TestBothMetricProcessorsCanBeConfigured(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(plan.ExecutionOrder(), ","), "extract_metrics_simple") {
 		t.Fatalf("execution order=%v", plan.ExecutionOrder())
+	}
+}
+
+func TestMetricsSimpleEmptyResultReplacesExisting(t *testing.T) {
+	store := &fakeMetricsStore{exists: true}
+	p := makeTestSimpleMetricsProcessor(&simpleMetricsExtractor{}, store, &fakeDocMetadataStore{})
+	if err := p.InitChunkBatch(context.Background(), 173, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.deleteCalled != 1 || store.upsertCalled != 0 {
+		t.Fatalf("delete=%d upsert=%d", store.deleteCalled, store.upsertCalled)
+	}
+}
+
+func TestMetricsSimpleStopsWhenDeletionFails(t *testing.T) {
+	store := &fakeMetricsStore{deleteErr: errors.New("delete failed")}
+	p := makeTestSimpleMetricsProcessor(&simpleMetricsExtractor{}, store, &fakeDocMetadataStore{})
+	if err := p.InitChunkBatch(context.Background(), 173, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.FinalizeChunkBatch(context.Background()); err == nil || !strings.Contains(err.Error(), "delete failed") {
+		t.Fatalf("error=%v", err)
+	}
+	if store.saveCalled != 0 {
+		t.Fatal("saved after deletion failed")
 	}
 }

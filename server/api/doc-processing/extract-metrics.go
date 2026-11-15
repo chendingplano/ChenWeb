@@ -704,7 +704,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 
-	if !evt.Force {
+	if !evt.Force && !p.simple {
 		exists, err := p.Store.MetricsExist(ctx, evt.RecordID)
 		if err != nil {
 			p.Logger.Error("check metrics exist failed", "record_id", evt.RecordID, "error", err)
@@ -777,7 +777,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	p.applyTableMetricContextsForRecord(rec, evt.RecordID, allMetrics)
 
 	// Preserve the previous extraction until the replacement has passed coverage checks.
-	if evt.Force {
+	if evt.Force || p.simple {
 		if _, err := p.Store.DeleteMetricsByInputRecordID(ctx, evt.RecordID); err != nil {
 			p.persistMetricsStatus(ctx, rec, start, err)
 			return fmt.Errorf("(MID_26101602) delete previous metrics: %w", err)
@@ -3887,14 +3887,14 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 	}
 
 	force, forceClear := docProcessorFlagsFromContext(ctx)
-	p.batchForceClear = forceClear
+	p.batchForceClear = forceClear || p.simple
 	p.batchSkip = false
 	p.batchExistingMetrics = nil
 
 	p.Logger.Info("metrics InitChunkBatch", "record_id", recordID,
 		"force", force, "force_clear", forceClear, "record_stage", "init_batch")
 
-	if !force {
+	if !force && !p.simple {
 		exists, err := p.Store.MetricsExist(ctx, recordID)
 		if err != nil {
 			return fmt.Errorf("(MID_26071110) %s check metrics exist: %w", p.Name(), err)
@@ -3906,7 +3906,7 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 		}
 	}
 
-	if !forceClear {
+	if !p.batchForceClear {
 		existing, err := p.Store.GetMetricsByInputRecordID(ctx, recordID)
 		if err != nil {
 			return fmt.Errorf("(MID_26071111) %s load existing metrics: %w", p.Name(), err)
@@ -4005,7 +4005,10 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	candidates := mentionsAsCandidates(p.batchMentions)
 	if (!p.simple && len(candidates) == 0) || (p.simple && p.batchSimple.empty()) {
 		if p.batchForceClear {
-			deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+			deleted, err := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+			if err != nil {
+				return fmt.Errorf("%s delete previous metrics: %w", p.Name(), err)
+			}
 			p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
 				"deleted_rows", deleted, "new_count", 0)
 			p.resolveIncomingReferences(ctx, p.batchRecordID)
@@ -4055,7 +4058,10 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			metrics[i] = m
 		}
 		p.applyTableMetricContextsForRecord(rec, p.batchRecordID, metrics)
-		deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+		deleted, err := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+		if err != nil {
+			return fmt.Errorf("%s delete previous metrics: %w", p.Name(), err)
+		}
 		p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
 			"deleted_rows", deleted, "new_count", len(metrics))
 		if _, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
