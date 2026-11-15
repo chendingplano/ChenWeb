@@ -91,7 +91,7 @@ func hasTableLine(lines []Line) bool {
 func backfillRecordTableContexts(ctx context.Context, db *sql.DB, recordID int64, lines []Line, dryRun bool, stats *TableContextBackfillStats, onChange func(TableContextBackfillChange)) error {
 	rows, err := db.QueryContext(ctx, `
 SELECT id, COALESCE(metric_id, ''), COALESCE(metric_name, ''), COALESCE(metric_value, ''),
-       COALESCE(threshold_or_target, ''), COALESCE(condition, ''),
+       COALESCE(threshold_or_target, ''), COALESCE(condition, ''), COALESCE(metric_unit, ''),
        COALESCE(source_line_spans::text, '[]'), COALESCE(metric_context, ''),
        COALESCE(source_table_rows::text, ''), COALESCE(search_document, '')
 FROM kb.metrics
@@ -108,8 +108,8 @@ ORDER BY id`, recordID)
 	var list []pending
 	for rows.Next() {
 		var p pending
-		var name, value, threshold, condition, spans string
-		if err := rows.Scan(&p.id, &p.metricID, &name, &value, &threshold, &condition, &spans, &p.oldCtx, &p.oldRows, &p.sDoc); err != nil {
+		var name, value, threshold, condition, unit, spans string
+		if err := rows.Scan(&p.id, &p.metricID, &name, &value, &threshold, &condition, &unit, &spans, &p.oldCtx, &p.oldRows, &p.sDoc); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -117,7 +117,7 @@ ORDER BY id`, recordID)
 		_ = json.Unmarshal([]byte(spans), &spanVal)
 		p.metric = map[string]any{
 			"metric_id": p.metricID, "metric_name": name, "metric_value": value,
-			"threshold_or_target": threshold, "condition": condition,
+			"threshold_or_target": threshold, "condition": condition, "unit": unit,
 			"source_line_spans": spanVal, "context": p.oldCtx,
 			"source_table_rows": parseTableRowRefs(p.oldRows),
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -321,6 +322,11 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 	for _, n := range tableLines {
 		g, _ := idx.grid(n)
 		rows, outcome := selectTableRows(g, cited[n], evidence)
+		if outcome == tableRowsUnmatched {
+			if note, ok := matchTableMetricFootnote(g, metric); ok {
+				rows, outcome = []TableRow{note}, tableRowsFromEvidence
+			}
+		}
 		if outcomeRank[outcome] > outcomeRank[res.Outcome] {
 			res.Outcome = outcome
 		}
@@ -459,6 +465,53 @@ func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]Tabl
 		return g.Rows, tableRowsWholeTable
 	}
 	return nil, tableRowsUnmatched
+}
+
+// matchTableMetricFootnote recovers an uncited note only when both a scalar
+// value with its unit and a condition clause identify exactly one full-width row.
+// Single-digit values alone and condition-only temperature rows are not evidence.
+func matchTableMetricFootnote(g *TableGrid, metric map[string]any) (TableRow, bool) {
+	value := normalizeTableMatchText(asString(metric["metric_value"]))
+	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
+	if unit == "" || !regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`).MatchString(value) {
+		return TableRow{}, false
+	}
+	quantity := regexp.MustCompile(`(?:^|[^\pN.])` + regexp.QuoteMeta(value+unit))
+	var clauses []string
+	for _, clause := range strings.FieldsFunc(asString(metric["condition"]), func(r rune) bool {
+		return strings.ContainsRune(";；,，。\n", r)
+	}) {
+		if _, after, ok := strings.Cut(clause, "："); ok {
+			clause = after
+		}
+		if _, after, ok := strings.Cut(clause, ":"); ok {
+			clause = after
+		}
+		clause = normalizeTableMatchText(clause)
+		if utf8.RuneCountInString(clause) >= 2 {
+			clauses = append(clauses, clause)
+		}
+	}
+	var found TableRow
+	matched := false
+	for _, row := range g.Rows {
+		text, fullWidth := row.FullWidthText()
+		text = normalizeTableMatchText(text)
+		if !fullWidth || !quantity.MatchString(text) {
+			continue
+		}
+		for _, clause := range clauses {
+			if !strings.Contains(text, clause) {
+				continue
+			}
+			if matched {
+				return TableRow{}, false
+			}
+			found, matched = row, true
+			break
+		}
+	}
+	return found, matched
 }
 
 // tableMetricEvidence returns the normalized strings used to find a metric's row.

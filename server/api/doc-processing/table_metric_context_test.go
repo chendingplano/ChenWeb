@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -306,5 +307,61 @@ func TestTableRowRefs_CellsParseAndMerge(t *testing.T) {
 	merged := mergeTableRowRefs(append(refs, TableRowRef{Line: 123, Rows: []string{"r1"}, Cells: []string{"r1:c5"}}))
 	if len(merged) != 1 || len(merged[0].Cells) != 1 {
 		t.Fatalf("merged = %+v, want one deduplicated cell", merged)
+	}
+}
+
+// The count is in the full-width note, not the temperature row labelled 融霜工况.
+func TestTableMetricContext_Record825DefrostFootnote(t *testing.T) {
+	body, err := os.ReadFile("testdata/record825-table-lines.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ParseInputLines(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := make([]MarkedLine, len(lines))
+	for i, l := range lines {
+		marked[i] = MarkedLine{Mark: "n", Line: l}
+	}
+	raw := map[string]any{"n": "融霜次数", "v": "1", "u": "次", "c": "试验工况：融霜工况；运行期间", "l": []any{"157"}, "r": "lower_bound", "k": "requirement"}
+	row := expandSimpleMetricRow(raw, newSimpleChunkLines(marked))
+	if text := asString(row["threshold_or_target"]); !strings.Contains(text, "运行期间至少融霜1次") || strings.Contains(text, "157#r1:") {
+		t.Errorf("threshold must contain the footnote without neighboring data rows: %s", text)
+	}
+	// Also recover already stored metrics with truncated whole-table context.
+	row["source_table_rows"] = nil
+	row["threshold_or_target"] = "157#h0: 试验工况 | 使用侧(热水侧)"
+	res := buildTableMetricContext(newTableLineIndex(lines), row)
+	if res.Outcome != tableRowsFromEvidence || len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "r12" || !strings.Contains(res.Context, "运行期间至少融霜1次") {
+		t.Fatalf("footnote not recovered: %+v", res)
+	}
+}
+
+func TestTableMetricFootnoteRequiresCorroboration(t *testing.T) {
+	for _, tc := range []struct {
+		name, note, condition, value, unit string
+		duplicate                          bool
+	}{
+		{name: "ambiguous notes", note: "运行期间至少融霜1次。", condition: "运行期间", value: "1", unit: "次", duplicate: true},
+		{name: "wrong quantity", note: "运行期间至少融霜11次。", condition: "运行期间", value: "1", unit: "次"},
+		{name: "missing condition", note: "运行期间至少融霜1次。", value: "1", unit: "次"},
+		{name: "unrelated condition", note: "运行期间至少融霜1次。", condition: "低温环境", value: "1", unit: "次"},
+		{name: "missing unit", note: "运行期间至少融霜1次。", condition: "运行期间", value: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			note := "<tr><td colspan=\"2\">" + tc.note + "</td></tr>"
+			table := "<table><tr><td>工况</td><td>温度</td></tr>" + note
+			if tc.duplicate {
+				table += note
+			}
+			g, err := ParseTableGrid(table + "</table>")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row, ok := matchTableMetricFootnote(g, map[string]any{"metric_value": tc.value, "unit": tc.unit, "condition": tc.condition}); ok {
+				t.Fatalf("unexpected match: %+v", row)
+			}
+		})
 	}
 }

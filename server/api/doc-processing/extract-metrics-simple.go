@@ -374,6 +374,17 @@ func expandSimpleMetricRow(raw map[string]any, idx simpleChunkLines) map[string]
 	}
 	spans, _ := row["source_line_spans"].([]string)
 	refs, _ := row["source_table_rows"].([]TableRowRef)
+	// Recover missing table citations before sourceText truncates a whole table.
+	if len(refs) == 0 {
+		lines := make([]Line, len(idx.ordered))
+		for i, marked := range idx.ordered {
+			lines[i] = marked.Line
+		}
+		if res := buildTableMetricContext(newTableLineIndex(lines), row); len(res.Refs) > 0 {
+			refs = res.Refs
+			row["source_table_rows"] = refs
+		}
+	}
 	text := idx.sourceText(spans, refs)
 	row["context"] = text
 	row["threshold_or_target"] = text

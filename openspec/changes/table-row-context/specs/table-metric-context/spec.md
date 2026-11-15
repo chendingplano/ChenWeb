@@ -30,6 +30,16 @@ For a metric whose spans cover a `table` line, the system SHALL replace `metric_
 - **WHEN** no row is cited, several rows tie on evidence, and the table has more than 5 data rows
 - **THEN** the LLM's `metric_context` is kept and a warning is logged with the metric ID, line and table size
 
+#### Scenario: Uncited full-width footnote
+- **WHEN** a large table has no row match by the existing evidence or cited-row rules, and exactly one full-width row contains both the scalar metric value with its unit and a condition clause
+- **THEN** that footnote row is selected as evidence, with a computed row hash
+- **AND** a digit inside a longer number does not count as the metric value
+- **AND** ambiguous footnotes remain unmatched
+
+#### Scenario: Simple extraction recovers omitted citations before truncation
+- **WHEN** simple extraction omits table row citations and deterministic row selection can recover them
+- **THEN** the recovered references are saved before building the source text for context and threshold evidence, so unrelated table rows do not displace the matched footnote at the text limit
+
 #### Scenario: Small table
 - **WHEN** no row can be matched and the table has 5 or fewer data rows
 - **THEN** all data rows are included
