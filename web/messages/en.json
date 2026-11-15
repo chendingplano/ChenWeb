@@ -1,4 +1,6 @@
 {
+	"chunk_mgmt_table_view": "Table",
+	"chunk_mgmt_table_unavailable": "No table structure available.",
 	"doc_processor_dashboard_pdf_window": "Window {index} of {total} · pages {start}–{end} of {pages}",
 	"context_shelf_provision_details": "Provision Details",
 	"context_shelf_product_details": "Product Details",

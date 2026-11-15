@@ -70,6 +70,11 @@
 	let linesCollapsed = $state(false);
 	let lineScrollPending = false;
 	let focusedLine = $state<DocStructureLine | null>(null);
+	let tableLine = $state<DocStructureLine | null>(null);
+	let tableRows = $state<Array<Array<{ text: string; rowSpan: number; colSpan: number; header: boolean }>>>([]);
+	let tableWindow = $state<HTMLDivElement | null>(null);
+	let tablePosition = $state({ left: 0, top: 0 });
+	let dragOffset: { x: number; y: number } | null = null;
 	let imageLoadFailed = $state(false);
 	let loadSequence = 0;
 	let selectedSeqNo = $state<number | null>(null);
@@ -228,6 +233,7 @@
 		linesError = '';
 		lines = [];
 		focusedLine = null;
+		tableLine = null;
 		loading = true;
 		chunks = [];
 		selectedSeqNo = null;
@@ -270,6 +276,7 @@
 	async function selectChunk(chunk: KbTopicChunkRecord) {
 		selectedSeqNo = chunk.seqno;
 		focusedLine = null;
+		tableLine = null;
 		highlightSelectionVersion += 1;
 		const first = (chunk.source_line_spans ?? [])[0];
 		if (first && first.page_number > 0) {
@@ -286,12 +293,34 @@
 		}
 	}
 
-	function selectLine(line: DocStructureLine) {
+	function selectLine(line: DocStructureLine, event: MouseEvent) {
 		focusedLine = line;
+		if ((line.corrected_line_type || line.line_type).toLowerCase() === 'table') {
+			const parsed = new DOMParser().parseFromString(line.content, 'text/html');
+			tableRows = Array.from(parsed.querySelectorAll('table tr')).map(row =>
+				Array.from(row.children).filter(cell => /^(TD|TH)$/.test(cell.tagName)).map(cell => ({
+					text: cell.textContent ?? '',
+					rowSpan: Math.max(1, Math.min(1000, Number(cell.getAttribute('rowspan')) || 1)),
+					colSpan: Math.max(1, Math.min(1000, Number(cell.getAttribute('colspan')) || 1)),
+					header: cell.tagName === 'TH'
+				}))
+			);
+			const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+			tablePosition = { left: Math.max(0, Math.min(rect.right + 8, window.innerWidth - Math.min(700, window.innerWidth))), top: Math.max(0, Math.min(rect.top, window.innerHeight - Math.min(480, window.innerHeight))) };
+			tableLine = line;
+		} else {
+			tableLine = null;
+		}
 		imageLoadFailed = false;
 		docPage = line.page_number;
 		highlightSelectionVersion += 1;
 		if (!isPdf) iframeRevision += 1;
+	}
+
+	function dragTable(event: PointerEvent) {
+		if (!dragOffset || !tableWindow) return;
+		const rect = tableWindow.getBoundingClientRect();
+		tablePosition = { left: Math.max(0, Math.min(event.clientX - dragOffset.x, window.innerWidth - rect.width)), top: Math.max(0, Math.min(event.clientY - dragOffset.y, window.innerHeight - rect.height)) };
 	}
 
 	async function toggleLines() {
@@ -571,15 +600,29 @@
 				{:else if !loading && lines.length === 0}<div class="empty">{m.doc_structure_no_lines_loaded()}</div>
 				{:else}
 					{#each lines as line, index (index)}
-						<button type="button" class="line-card" class:chunk-line={chunkLineKeys.has(`${line.page_number}:${line.line_number}`)} class:focused-line={focusedLine === line} onclick={() => selectLine(line)}>
+						<button type="button" class="line-card" class:chunk-line={chunkLineKeys.has(`${line.page_number}:${line.line_number}`)} class:focused-line={focusedLine === line} onclick={(event) => selectLine(line, event)}>
 							<span class="line-number">P{line.page_number} · L{line.line_number}</span>
 							<span class="line-type">{line.corrected_line_type || line.line_type}</span>
-							<span class="line-content">{line.content}</span>
+							<span class="line-content" class:expanded={focusedLine === line && (line.corrected_line_type || line.line_type).toLowerCase() !== 'table'}>{line.content}</span>
 						</button>
 					{/each}
 				{/if}
 			</div>
 		</aside>
+		{#if tableLine}
+			<div class="table-window" bind:this={tableWindow} role="dialog" aria-label={m.chunk_mgmt_table_view()} style:left="{tablePosition.left}px" style:top="{tablePosition.top}px" style:max-width="calc(100vw - {tablePosition.left}px)" style:max-height="calc(100vh - {tablePosition.top}px)" onkeydown={(event) => { if (event.key === 'Escape') tableLine = null; }}>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="table-window-head" onpointerdown={(event) => { if ((event.target as HTMLElement).closest('button')) return; const rect = tableWindow!.getBoundingClientRect(); dragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }} onpointermove={dragTable} onpointerup={() => dragOffset = null} onpointercancel={() => dragOffset = null}>
+					<strong>{m.chunk_mgmt_table_view()} · P{tableLine.page_number} · L{tableLine.line_number}</strong>
+					<button type="button" class="btn btn-ghost" onclick={() => tableLine = null}>{m.chunk_mgmt_close()}</button>
+				</div>
+				<div class="table-window-content">
+					{#if tableRows.length}
+						<table><tbody>{#each tableRows as row}<tr>{#each row as cell}{#if cell.header}<th rowspan={cell.rowSpan} colspan={cell.colSpan}>{cell.text}</th>{:else}<td rowspan={cell.rowSpan} colspan={cell.colSpan}>{cell.text}</td>{/if}{/each}</tr>{/each}</tbody></table>
+					{:else}<p>{m.chunk_mgmt_table_unavailable()}</p>{/if}
+				</div>
+			</div>
+		{/if}
 
 		<section class="right">
 			<div class="right-toolbar">
@@ -795,6 +838,13 @@
 	.line-image-view { min-height: 0; overflow: auto; padding: 20px; text-align: center; }
 	.line-image-view img { max-width: 100%; height: auto; }
 	.line-content { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+	.line-content.expanded { white-space: pre-wrap; overflow-wrap: anywhere; }
+	.table-window { position: fixed; z-index: 70; width: min(700px, 100vw); height: min(480px, 100vh); min-width: min(300px, 100vw); min-height: min(180px, 100vh); max-width: 100vw; max-height: 100vh; resize: both; overflow: auto; display: flex; flex-direction: column; background: var(--panel-bg); color: var(--text-primary); border: 1px solid var(--ink-line); border-radius: 10px; box-shadow: 0 16px 45px #0008; }
+	.table-window-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line); cursor: move; touch-action: none; user-select: none; }
+	.table-window-content { overflow: auto; flex: 1; padding: 14px; user-select: text; }
+	.table-window-content table { border-collapse: collapse; width: max-content; min-width: 100%; }
+	.table-window-content :is(td, th) { border: 1px solid var(--ink-line); padding: 7px 10px; white-space: pre-wrap; vertical-align: top; }
+	.table-window-content th { background: var(--panel-bg-alt); }
 	input {
 		width: 100%;
 		height: 38px;
