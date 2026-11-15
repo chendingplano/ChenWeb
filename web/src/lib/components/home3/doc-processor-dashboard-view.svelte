@@ -24,6 +24,7 @@
 		type ParseState
 	} from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
+	import SystemMonitorView from './system-monitor-view.svelte';
 	import {
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
@@ -1696,6 +1697,9 @@
 				</div>
 			</div>
 		{/if}
+		<div class="mt-4">
+			<SystemMonitorView {darkMode} sourceId="pdf-parser" />
+		</div>
 	</section>
 
 	<!-- ── Section divider ────────────────────────────────────── -->
