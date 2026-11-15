@@ -47,6 +47,37 @@
 		event_kind: string;
 	};
 
+
+	// Column settings are scoped to this page and browser tab.
+	const columnDefaults = {"started_at": 185, "model": 140, "prompt": 220, "metadata": 100, "call_reason": 180, "call_loc": 250, "run_id": 85, "in_tok": 90, "out_tok": 90, "cache_hit": 105, "cache_miss": 110, "latency": 90, "error": 120, "input_body": 110, "output_body": 110, "details": 100};
+	type ColumnKey = keyof typeof columnDefaults;
+	let columnWidths = $state<Record<ColumnKey, number>>({ ...columnDefaults });
+	let hiddenColumns = $state<ColumnKey[]>([]);
+	let columns = $derived([{ key: 'started_at' as const, label: m.llm_usage_logs_started_at() }, { key: 'model' as const, label: m.llm_usage_logs_model() }, { key: 'prompt' as const, label: m.llm_usage_logs_prompt() }, { key: 'metadata' as const, label: m.llm_usage_logs_metadata() }, { key: 'call_reason' as const, label: m.llm_usage_logs_call_reason() }, { key: 'call_loc' as const, label: m.llm_usage_logs_call_loc() }, { key: 'run_id' as const, label: m.llm_usage_logs_run_id() }, { key: 'in_tok' as const, label: m.llm_usage_logs_in_tok() }, { key: 'out_tok' as const, label: m.llm_usage_logs_out_tok() }, { key: 'cache_hit' as const, label: m.llm_usage_logs_cache_hit() }, { key: 'cache_miss' as const, label: m.llm_usage_logs_cache_miss() }, { key: 'latency' as const, label: m.llm_usage_logs_latency() }, { key: 'error' as const, label: m.llm_usage_logs_error() }, { key: 'input_body' as const, label: m.llm_usage_logs_input_body() }, { key: 'output_body' as const, label: m.llm_usage_logs_output_body() }, { key: 'details' as const, label: m.llm_usage_logs_details() }]);
+	let visibleColumns = $derived(columns.filter((column) => !hiddenColumns.includes(column.key)));
+	function saveColumns() {
+		try { sessionStorage.setItem('llmUsageLogsColumns', JSON.stringify({ widths: columnWidths, hidden: hiddenColumns })); } catch { /* storage unavailable */ }
+	}
+	function toggleColumn(key: ColumnKey) {
+		if (hiddenColumns.includes(key)) hiddenColumns = hiddenColumns.filter((item) => item !== key);
+		else if (visibleColumns.length > 1) hiddenColumns = [...hiddenColumns, key];
+		saveColumns();
+	}
+	function resizeColumn(key: ColumnKey, width: number) {
+		columnWidths[key] = Math.max(64, Math.min(1000, width));
+		saveColumns();
+	}
+	function startColumnResize(event: PointerEvent, key: ColumnKey) {
+		if (event.button !== 0) return;
+		event.preventDefault();
+		const startX = event.clientX, startWidth = columnWidths[key];
+		const move = (e: PointerEvent) => resizeColumn(key, startWidth + e.clientX - startX);
+		const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); };
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', stop);
+		window.addEventListener('pointercancel', stop);
+	}
+
 	// --- Filter state ---
 	let filterModel      = $state('');
 	let filterPrompt     = $state('');
@@ -158,6 +189,15 @@
 
 	onMount(() => {
 		try {
+			const settings = JSON.parse(sessionStorage.getItem('llmUsageLogsColumns') || '{}');
+			for (const key of Object.keys(columnDefaults) as ColumnKey[]) {
+				const width = settings.widths?.[key];
+				if (typeof width === 'number' && Number.isFinite(width)) columnWidths[key] = Math.max(64, Math.min(1000, width));
+			}
+			if (Array.isArray(settings.hidden)) {
+				const hidden = (Object.keys(columnDefaults) as ColumnKey[]).filter((key) => settings.hidden.includes(key));
+				if (hidden.length < columns.length) hiddenColumns = hidden;
+			}
 			const saved = Number(sessionStorage.getItem('llmUsageLogsPageSize'));
 			if ([20, 50, 100, 200].includes(saved)) pageSize = saved;
 		} catch { /* storage unavailable */ }
@@ -395,7 +435,7 @@
 	});
 </script>
 
-<div class="p-6 space-y-4 h-full flex flex-col overflow-hidden" style="background:{pageBg};">
+<div class="p-6 space-y-4 h-full flex flex-col overflow-hidden select-text" style="background:{pageBg};">
 
 	<!-- Header card -->
 	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
@@ -530,6 +570,14 @@
 				{#if total > 0} {m.llm_usage_logs_page_of({ page, totalPages })}{/if}
 			</span>
 			<div class="flex items-center gap-2">
+				<details class="column-menu">
+					<summary style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};">{m.llm_usage_logs_columns()}</summary>
+					<div class="column-options" style="background:{cardBg}; color:{textPrimary}; border:1px solid {borderColor};">
+						{#each columns as column (column.key)}
+							<label><input type="checkbox" checked={!hiddenColumns.includes(column.key)} disabled={visibleColumns.length === 1 && !hiddenColumns.includes(column.key)} onchange={() => toggleColumn(column.key)} /> {column.label}</label>
+						{/each}
+					</div>
+				</details>
 				<label class="flex items-center gap-2" style="color:{textSecondary}; font-size:12px;">
 					{m.alert_logs_page_size()}
 					<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading}
@@ -567,66 +615,55 @@
 			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">{m.llm_usage_logs_no_events_found()}</div>
 		{:else}
 			<div class="flex-1 min-h-0 overflow-auto" style="user-select:text;">
-				<table class="w-full text-sm" style="border-collapse:separate; border-spacing:0;">
-					<thead>
-						<tr style="background:{surface2};">
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_started_at()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_model()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_prompt()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_metadata()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_call_reason()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_call_loc()}</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_run_id()}</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_in_tok()}</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_out_tok()}</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_cache_hit()}</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_cache_miss()}</th>
-							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_latency()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_error()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_input_body()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_output_body()}</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">{m.llm_usage_logs_details()}</th>
-						</tr>
-					</thead>
+				<table class="usage-table text-sm" style="width:{visibleColumns.reduce((sum, column) => sum + columnWidths[column.key], 0)}px; border-collapse:separate; border-spacing:0; table-layout:fixed;">
+					<colgroup>{#each visibleColumns as column (column.key)}<col style="width:{columnWidths[column.key]}px;" />{/each}</colgroup>
+					<thead><tr style="background:{surface2};">
+						{#each visibleColumns as column (column.key)}
+							<th class="text-left px-4 py-3 sticky top-0 z-10 column-header" style="color:{textMuted}; background:{surface2}; border-bottom:1px solid {borderColor};">
+								<span>{column.label}</span>
+								<button class="column-resizer" type="button" aria-label={m.llm_usage_logs_resize_column({ label: column.label })} onpointerdown={(event) => startColumnResize(event, column.key)} onkeydown={(event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resizeColumn(column.key, columnWidths[column.key] + (event.key === 'ArrowLeft' ? -16 : 16)); } }}></button>
+							</th>
+						{/each}
+					</tr></thead>
 					<tbody>
 						{#each rows as row (row.id)}
 							<tr class="transition-colors hover:bg-white/5">
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
-									title={row.prompt_name}>{row.prompt_name || '—'}{#if eventKindLabel(row.event_kind)}<div style="color:{accent}; font-size:11px;">{eventKindLabel(row.event_kind)}</div>{/if}</td>
+								{#if !hiddenColumns.includes('started_at')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>{/if}
+								{#if !hiddenColumns.includes('model')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>{/if}
+								{#if !hiddenColumns.includes('prompt')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
+									title={row.prompt_name}>{row.prompt_name || '—'}{#if eventKindLabel(row.event_kind)}<div style="color:{accent}; font-size:11px;">{eventKindLabel(row.event_kind)}</div>{/if}</td>{/if}
 
 								<!-- Metadata -->
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
+								{#if !hiddenColumns.includes('metadata')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									<button
 										onclick={() => openMetadata(row)}
 										class="text-left rounded px-2 py-1 cursor-pointer"
 										style="background:{surface2}; color:{accent}; border:1px solid {borderColor}; font-size:11px; font-family:monospace;"
 										title={metadataText(row)}
 									>{'{ }'}</button>
-								</td>
+								</td>{/if}
 
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_reason || '—'}</td>
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_loc || '—'}</td>
-								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.run_id ?? '—'}</td>
+								{#if !hiddenColumns.includes('call_reason')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_reason || '—'}</td>{/if}
+								{#if !hiddenColumns.includes('call_loc')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_loc || '—'}</td>{/if}
+								{#if !hiddenColumns.includes('run_id')}<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.run_id ?? '—'}</td>{/if}
 
-								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>
-								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>
-								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.prompt_cache_hit_tokens.toLocaleString()}</td>
-								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.prompt_cache_miss_tokens.toLocaleString()}</td>
-								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textMuted}; font-size:12px; white-space:nowrap;">{formatLatency(row.latency_ms)}</td>
+								{#if !hiddenColumns.includes('in_tok')}<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>{/if}
+								{#if !hiddenColumns.includes('out_tok')}<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>{/if}
+								{#if !hiddenColumns.includes('cache_hit')}<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.prompt_cache_hit_tokens.toLocaleString()}</td>{/if}
+								{#if !hiddenColumns.includes('cache_miss')}<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.prompt_cache_miss_tokens.toLocaleString()}</td>{/if}
+								{#if !hiddenColumns.includes('latency')}<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textMuted}; font-size:12px; white-space:nowrap;">{formatLatency(row.latency_ms)}</td>{/if}
 
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; max-width:200px;">
+								{#if !hiddenColumns.includes('error')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.error_message}
 										<span style="color:{danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
 											title={row.error_message}>{row.error_message}</span>
 									{:else}
 										<span style="color:{success}; font-size:12px;">{m.llm_usage_logs_ok()}</span>
 									{/if}
-								</td>
+								</td>{/if}
 
 								<!-- Input Body -->
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
+								{#if !hiddenColumns.includes('input_body')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.input_body_ref}
 										<button
 											onclick={() => openBody(row, 'input')}
@@ -637,10 +674,10 @@
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
 									{/if}
-								</td>
+								</td>{/if}
 
 								<!-- Output Body -->
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
+								{#if !hiddenColumns.includes('output_body')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.output_body_ref}
 										<button
 											onclick={() => openBody(row, 'output')}
@@ -652,16 +689,16 @@
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
 									{/if}
-								</td>
+								</td>{/if}
 
 								<!-- Details -->
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
+								{#if !hiddenColumns.includes('details')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									<button
 										onclick={() => openDetails(row)}
 										class="rounded px-2 py-1 text-xs cursor-pointer"
 										style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
 									>{m.llm_usage_logs_details()}</button>
-								</td>
+								</td>{/if}
 							</tr>
 						{/each}
 					</tbody>
@@ -738,3 +775,15 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+.column-menu { position:relative; }
+.column-menu summary { cursor:pointer; border-radius:4px; padding:4px 10px; font-size:14px; list-style:none; }
+.column-options { position:absolute; z-index:30; right:0; top:calc(100% + 4px); min-width:190px; max-height:60vh; overflow:auto; padding:10px; border-radius:6px; box-shadow:0 8px 24px #0004; }
+.column-options label { display:flex; align-items:center; gap:8px; padding:4px; font-size:13px; white-space:nowrap; }
+.column-header { position:sticky; font-weight:500; white-space:nowrap; font-size:12px; }
+.column-header span { display:block; overflow:hidden; text-overflow:ellipsis; }
+.column-resizer { position:absolute; right:0; top:0; width:10px; height:100%; cursor:col-resize; touch-action:none; user-select:none; background:transparent; border:0; }
+.column-resizer:hover, .column-resizer:focus-visible { background:#818cf866; }
+.usage-table td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>

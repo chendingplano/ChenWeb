@@ -9052,5 +9052,7 @@
 	"cgv_governs": "Governs",
 	"cgv_topical": "Topical",
 	"cgv_unrelated": "Unrelated",
-	"cgv_ambiguous": "Ambiguous"
+	"cgv_ambiguous": "Ambiguous",
+	"llm_usage_logs_columns": "Columns",
+	"llm_usage_logs_resize_column": "Resize {label} column"
 }

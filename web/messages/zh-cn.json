@@ -9052,5 +9052,7 @@
 	"cgv_governs": "适用",
 	"cgv_topical": "主题相关",
 	"cgv_unrelated": "无关",
-	"cgv_ambiguous": "不明确"
+	"cgv_ambiguous": "不明确",
+	"llm_usage_logs_columns": "列",
+	"llm_usage_logs_resize_column": "调整{label}列宽"
 }
