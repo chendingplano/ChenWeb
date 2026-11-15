@@ -26,6 +26,13 @@ For a metric whose spans cover a `table` line, the system SHALL replace `metric_
 - **WHEN** the LLM cites no rows and exactly one data row contains the metric's name
 - **THEN** that row is used
 
+#### Scenario: Unique value under the metric header repairs an incorrect citation
+- **WHEN** exactly one non-full-width data row has the metric value in the column identified by the metric name
+- **THEN** that row takes precedence over text evidence and saved row citations, including citations with matching row hashes
+- **AND** the reference is narrowed to the value cell
+- **AND** missing values, ambiguous headers and duplicate column values do not override the existing selection rules
+- **AND** record 825 metric `825_mtc_307` selects `157#r7:c6` (wet-bulb temperature `1`) rather than notes row `r12`
+
 #### Scenario: Ambiguous evidence
 - **WHEN** no row is cited, several rows tie on evidence, and the table has more than 5 data rows
 - **THEN** the LLM's `metric_context` is kept and a warning is logged with the metric ID, line and table size

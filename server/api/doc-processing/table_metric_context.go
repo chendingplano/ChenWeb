@@ -275,7 +275,8 @@ type tableMetricContextResult struct {
 
 // buildTableMetricContext builds the stored metric_context for a metric whose
 // source_line_spans cover a table line: the caption plus each matched row rendered as
-// "[r1] column: value | …". Rows are chosen in this order (design D5): stored refs
+// "[r1] column: value | …". A unique value in the metric's named column takes
+// precedence, including over previously saved incorrect refs. Otherwise (design D5): stored refs
 // whose hashes still match → a single best evidence-matching row → LLM-cited rows that
 // exist → the whole table when it has ≤5 data rows → no match (the LLM context is kept).
 // When the spans also cover prose lines, the LLM context is kept and the table block
@@ -322,6 +323,9 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 	for _, n := range tableLines {
 		g, _ := idx.grid(n)
 		rows, outcome := selectTableRows(g, cited[n], evidence)
+		if row, ok := matchTableMetricCellValue(g, metric); ok {
+			rows, outcome = []TableRow{row}, tableRowsFromEvidence
+		}
 		if outcome == tableRowsUnmatched {
 			if note, ok := matchTableMetricFootnote(g, metric); ok {
 				rows, outcome = []TableRow{note}, tableRowsFromEvidence
@@ -406,6 +410,31 @@ func tableMetricCellIDs(g *TableGrid, rows []TableRow, outcome, metricName strin
 		}
 	}
 	return ids
+}
+
+// matchTableMetricCellValue uses the header to distinguish a value cell from notes
+// that mention the metric name. Only a unique exact value is sufficient to replace
+// saved refs; duplicate values and full-width footnotes cannot identify a row.
+func matchTableMetricCellValue(g *TableGrid, metric map[string]any) (TableRow, bool) {
+	want := normalizeTableMatchText(asString(metric["metric_value"]))
+	if want == "" {
+		return TableRow{}, false
+	}
+	var found TableRow
+	matched := false
+	for _, id := range tableMetricCellIDs(g, g.Rows, tableRowsFromEvidence, asString(metric["metric_name"])) {
+		rowID, colID, _ := strings.Cut(id, ":c")
+		row, _ := g.Row(rowID)
+		col, _ := strconv.Atoi(colID)
+		if _, fullWidth := row.FullWidthText(); fullWidth || normalizeTableMatchText(row.Cells[col-1]) != want {
+			continue
+		}
+		if matched {
+			return TableRow{}, false
+		}
+		found, matched = row, true
+	}
+	return found, matched
 }
 
 func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]TableRow, string) {

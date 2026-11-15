@@ -338,6 +338,58 @@ func TestTableMetricContext_Record825DefrostFootnote(t *testing.T) {
 	}
 }
 
+func TestTableMetricContext_Record825WetBulbValue(t *testing.T) {
+	body, err := os.ReadFile("testdata/record825-table-lines.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ParseInputLines(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := newTableLineIndex(lines)
+	g, _ := idx.grid(157)
+	note, _ := g.Row("r12")
+	for _, stored := range []bool{false, true} {
+		m := map[string]any{
+			"metric_name": "湿球温度", "metric_value": "1", "unit": "℃",
+			"condition":         "试验工况：融霜工况；类型：普通型/低温型；侧：热源侧(空气侧)",
+			"source_line_spans": []any{"157"},
+		}
+		if stored {
+			m["source_table_rows"] = []TableRowRef{{Line: 157, Rows: []string{"r12"}, Cells: []string{"r12:c6"}, RowHash: map[string]string{"r12": note.Hash}}}
+		}
+		res := buildTableMetricContext(idx, m)
+		if len(res.Refs) != 1 || strings.Join(res.Refs[0].Cells, ",") != "r7:c6" || strings.Join(res.Refs[0].Rows, ",") != "r7" {
+			t.Fatalf("stored=%v: refs = %+v, want r7:c6", stored, res.Refs)
+		}
+		if strings.Contains(res.Context, "运行期间至少融霜1次") {
+			t.Fatalf("context includes notes: %s", res.Context)
+		}
+	}
+}
+
+func TestTableMetricCellValueRequiresUniqueColumnValue(t *testing.T) {
+	g, err := ParseTableGrid(record804Table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, value string }{
+		{"最低遮光号", ""},
+		{"最低遮光号", "60"}, // occurs in another column only
+		{"遮光号", "7"},    // ambiguous header
+		{"不存在", "7"},
+	} {
+		if row, ok := matchTableMetricCellValue(g, map[string]any{"metric_name": tc.name, "metric_value": tc.value}); ok {
+			t.Fatalf("%+v: unexpected row %+v", tc, row)
+		}
+	}
+	g.Rows[1].Cells[4] = "7"
+	if row, ok := matchTableMetricCellValue(g, map[string]any{"metric_name": "最低遮光号", "metric_value": "7"}); ok {
+		t.Fatalf("duplicate column values must not pick a row: %+v", row)
+	}
+}
+
 func TestTableMetricFootnoteRequiresCorroboration(t *testing.T) {
 	for _, tc := range []struct {
 		name, note, condition, value, unit string
