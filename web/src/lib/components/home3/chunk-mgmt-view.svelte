@@ -67,6 +67,8 @@
 	let lines = $state<DocStructureLine[]>([]);
 	let linesError = $state('');
 	let lineListEl = $state<HTMLDivElement | null>(null);
+	let linesCollapsed = $state(false);
+	let lineScrollPending = false;
 	let focusedLine = $state<DocStructureLine | null>(null);
 	let loadSequence = 0;
 	let selectedSeqNo = $state<number | null>(null);
@@ -272,8 +274,12 @@
 		if (!isPdf) {
 			iframeRevision += 1;
 		}
-		await tick();
-		lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line')?.scrollIntoView({ block: 'nearest' });
+		if (linesCollapsed) {
+			lineScrollPending = true;
+		} else {
+			await tick();
+			lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line')?.scrollIntoView({ block: 'nearest' });
+		}
 	}
 
 	function selectLine(line: DocStructureLine) {
@@ -281,6 +287,15 @@
 		docPage = line.page_number;
 		highlightSelectionVersion += 1;
 		if (!isPdf) iframeRevision += 1;
+	}
+
+	async function toggleLines() {
+		linesCollapsed = !linesCollapsed;
+		if (!linesCollapsed && lineScrollPending) {
+			lineScrollPending = false;
+			await tick();
+			lineListEl?.querySelector<HTMLElement>('.line-card.chunk-line')?.scrollIntoView({ block: 'nearest' });
+		}
 	}
 
 	function startChunkListResize(event: PointerEvent) {
@@ -464,7 +479,7 @@
 
 	</header>
 
-	<div class="body" style={`grid-template-columns:auto ${chunkListWidth}px 14px minmax(260px, 340px) minmax(300px, 1fr);`}>
+	<div class="body" style={`grid-template-columns:auto ${chunkListWidth}px 14px ${linesCollapsed ? '42px' : 'minmax(260px, 340px)'} minmax(300px, 1fr);`}>
 		<KbInputRecordBrowser
 			{darkMode}
 			instanceKey="chunks-record-browser"
@@ -541,9 +556,12 @@
 		>
 			<span class="chunk-list-resizer-grip" aria-hidden="true"></span>
 		</button>
-		<aside class="lines-sidebar">
-			<div class="left-meta"><div class="left-meta-copy"><div class="left-meta-title">{m.doc_structure_lines()}</div><div class="left-meta-count">{lines.length}</div></div></div>
-			<div class="lines-list" bind:this={lineListEl}>
+		<aside class="lines-sidebar" class:collapsed={linesCollapsed}>
+			<div class="left-meta lines-header">
+				{#if !linesCollapsed}<div class="left-meta-copy"><div class="left-meta-title">{m.doc_structure_lines()}</div><div class="left-meta-count">{lines.length}</div></div>{/if}
+				<button type="button" class="lines-toggle" onclick={toggleLines} aria-expanded={!linesCollapsed} aria-controls="chunk-lines-list" aria-label={linesCollapsed ? m.chunk_mgmt_expand_lines() : m.chunk_mgmt_collapse_lines()} title={linesCollapsed ? m.chunk_mgmt_expand_lines() : m.chunk_mgmt_collapse_lines()}>{linesCollapsed ? '›' : '‹'}</button>
+			</div>
+			<div id="chunk-lines-list" class="lines-list" bind:this={lineListEl} hidden={linesCollapsed}>
 				{#if linesError}<div class="error">{linesError}</div>
 				{:else if !loading && lines.length === 0}<div class="empty">{m.doc_structure_no_lines_loaded()}</div>
 				{:else}
@@ -748,7 +766,14 @@
 		min-height: 0;
 	}
 	.lines-sidebar { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel-bg); border-right: 1px solid var(--ink-line); }
-	.lines-list { overflow-y: auto; padding: 10px; }
+	.lines-header { gap: 4px; }
+	.lines-sidebar.collapsed .lines-header { justify-content: center; padding: 10px 2px; }
+	.lines-toggle { flex: none; width: 28px; height: 32px; border: 1px solid var(--ink-line); border-radius: 8px; background: var(--panel-bg-alt); color: var(--text-secondary); cursor: pointer; font-size: 20px; line-height: 1; }
+	.lines-toggle:hover { color: var(--text-primary); }
+	.lines-list { min-height: 0; overflow-y: auto; padding: 10px; scrollbar-width: thin; scrollbar-color: var(--ink-line) transparent; }
+	.lines-list::-webkit-scrollbar { width: 6px; }
+	.lines-list::-webkit-scrollbar-thumb { background: var(--ink-line); border-radius: 999px; }
+	.lines-list::-webkit-scrollbar-track { background: transparent; }
 	.line-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; width: 100%; text-align: left; padding: 10px; margin-bottom: 6px; color: var(--text-primary); background: var(--panel-bg-alt); border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
 	.line-card.chunk-line { border-color: var(--brass); }
 	.line-card.focused-line { background: var(--chunk-selected-bg); color: white; }
@@ -1159,6 +1184,7 @@
 		.body { grid-template-columns: 1fr !important; overflow-y: auto; grid-template-rows: auto auto auto minmax(300px, 50vh); }
 		.chunk-sidebar { max-height: 44vh; border-right: none; border-bottom: 1px solid var(--ink-line); }
 		.lines-sidebar { height: 35vh; }
+		.lines-sidebar.collapsed { height: auto; }
 		.chunk-list-resizer { display: none; }
 	}
 	@media (max-width: 820px) {
