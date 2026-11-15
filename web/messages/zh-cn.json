@@ -9057,5 +9057,6 @@
 	"cgv_unrelated": "无关",
 	"cgv_ambiguous": "不明确",
 	"llm_usage_logs_columns": "列",
-	"llm_usage_logs_resize_column": "调整{label}列宽"
+	"llm_usage_logs_resize_column": "调整{label}列宽",
+  "chunk_mgmt_image_load_failed": "无法加载图片。"
 }

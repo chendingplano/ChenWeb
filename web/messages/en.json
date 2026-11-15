@@ -9057,5 +9057,6 @@
 	"cgv_unrelated": "Unrelated",
 	"cgv_ambiguous": "Ambiguous",
 	"llm_usage_logs_columns": "Columns",
-	"llm_usage_logs_resize_column": "Resize {label} column"
+	"llm_usage_logs_resize_column": "Resize {label} column",
+  "chunk_mgmt_image_load_failed": "Unable to load image."
 }

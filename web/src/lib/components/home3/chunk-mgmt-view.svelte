@@ -70,6 +70,7 @@
 	let linesCollapsed = $state(false);
 	let lineScrollPending = false;
 	let focusedLine = $state<DocStructureLine | null>(null);
+	let imageLoadFailed = $state(false);
 	let loadSequence = 0;
 	let selectedSeqNo = $state<number | null>(null);
 	let highlightSelectionVersion = $state(0);
@@ -86,6 +87,9 @@
 	let iframeRevision = $state(0);
 	let pdfNumPages = $state(0);
 
+	let imageUrl = $derived(focusedLine && currentInput && /(^|-)image$/i.test(focusedLine.corrected_line_type || focusedLine.line_type)
+		? `/api/v1/kb/inputs/${currentInput.id}/line-image?path=${encodeURIComponent(focusedLine.content.trim())}`
+		: '');
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	let fileUrl = $derived.by(() => {
 		if (!currentInput) return '';
@@ -284,6 +288,7 @@
 
 	function selectLine(line: DocStructureLine) {
 		focusedLine = line;
+		imageLoadFailed = false;
 		docPage = line.page_number;
 		highlightSelectionVersion += 1;
 		if (!isPdf) iframeRevision += 1;
@@ -591,7 +596,11 @@
 			{#if !currentInput}
 				<div class="doc-empty">{m.chunk_mgmt_retrieve_a_record_to_display()}</div>
 			{:else}
-				{#if isPdf}
+				{#if imageUrl}
+					<div class="line-image-view">
+						{#if imageLoadFailed}<div class="error">{m.chunk_mgmt_image_load_failed()}</div>{:else}<img src={imageUrl} alt={focusedLine?.content ?? ''} onerror={() => (imageLoadFailed = true)} />{/if}
+					</div>
+				{:else if isPdf}
 					<PdfViewWindow
 						inputId={currentInput.id}
 						{fileUrl}
@@ -780,6 +789,8 @@
 	.line-number, .line-type { font: 11px var(--font-mono); color: var(--text-secondary); }
 	.line-type { text-transform: uppercase; color: var(--brass); }
 	.focused-line .line-number, .focused-line .line-type { color: white; }
+	.line-image-view { min-height: 0; overflow: auto; padding: 20px; text-align: center; }
+	.line-image-view img { max-width: 100%; height: auto; }
 	.line-content { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 	input {
 		width: 100%;
