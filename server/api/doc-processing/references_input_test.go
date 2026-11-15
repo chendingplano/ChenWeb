@@ -1,6 +1,10 @@
 package docprocessing
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestReferencesChunkInputMatchesPromptVersion(t *testing.T) {
 	lines := []MarkedLine{{Mark: "o", Line: Line{LineNo: 7, PageNo: 2, LineType: "paragraph", Content: "ISO 9001"}}}
@@ -12,5 +16,22 @@ func TestReferencesChunkInputMatchesPromptVersion(t *testing.T) {
 	p.PromptRef = "prompt-extract-references-v1.md"
 	if got := p.referenceChunkInputText(lines, "doc"); got != canonicalChunkInputText(lines, "doc") {
 		t.Fatalf("legacy input changed: %s", got)
+	}
+}
+
+// The deployed fallback must explain exactly the same format as the disk prompt.
+func TestCompactExtractionEmbeddedPromptsMatchFiles(t *testing.T) {
+	for _, key := range []string{"EXTRACT_REFERENCES_PROMPT", "EXTRACT_METRICS_SIMPLE_PROMPT"} {
+		prompt, ok := embeddedPromptDefaults[key]
+		if !ok {
+			t.Fatalf("missing embedded prompt %s", key)
+		}
+		disk, err := os.ReadFile(filepath.Join("..", "..", "..", "prompts", prompt.Ref))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(disk) != prompt.Text {
+			t.Errorf("%s embedded and disk prompts differ", key)
+		}
 	}
 }
