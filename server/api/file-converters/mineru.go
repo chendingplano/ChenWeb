@@ -24,19 +24,21 @@ type mineruPage struct {
 }
 
 type mineruItem struct {
-	Type               string            `json:"type"`
-	Text               string            `json:"text"`
-	TextLevel          *int              `json:"text_level"`
-	ListItems          []string          `json:"list_items"`
-	ListItemBBoxes     []json.RawMessage `json:"list_item_bboxes"`
-	TableCaption       []string          `json:"table_caption"`
-	TableCaptionBBoxes []json.RawMessage `json:"table_caption_bboxes"`
-	TableFootnote      []string          `json:"table_footnote"`
-	TableBody          string            `json:"table_body"`
-	ImgPath            string            `json:"img_path"`
-	ImageCaption       []string          `json:"image_caption"`
-	ImageFootnote      []string          `json:"image_footnote"`
-	BBox               json.RawMessage   `json:"bbox"`
+	Type                string            `json:"type"`
+	Text                string            `json:"text"`
+	TextLevel           *int              `json:"text_level"`
+	ListItems           []string          `json:"list_items"`
+	ListItemBBoxes      []json.RawMessage `json:"list_item_bboxes"`
+	TableCaption        []string          `json:"table_caption"`
+	TableCaptionBBoxes  []json.RawMessage `json:"table_caption_bboxes"`
+	TableFootnote       []string          `json:"table_footnote"`
+	TableBody           string            `json:"table_body"`
+	ImgPath             string            `json:"img_path"`
+	ImageCaption        []string          `json:"image_caption"`
+	ImageCaptionBBoxes  []json.RawMessage `json:"image_caption_bboxes"`
+	ImageFootnote       []string          `json:"image_footnote"`
+	ImageFootnoteBBoxes []json.RawMessage `json:"image_footnote_bboxes"`
+	BBox                json.RawMessage   `json:"bbox"`
 }
 
 func ConvertMineruFile(inputPath string) (string, error) {
@@ -183,14 +185,7 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 				bbox := mineruBBoxStr(item.BBox)
 				for i, cap := range item.TableCaption {
 					if c := strings.TrimSpace(cap); c != "" {
-						captionBBox := bbox
-						if len(item.TableCaptionBBoxes) == len(item.TableCaption) {
-							var coords []float64
-							if err := json.Unmarshal(item.TableCaptionBBoxes[i], &coords); err == nil && len(coords) == 4 {
-								b := mineruBBoxStr(item.TableCaptionBBoxes[i])
-								captionBBox = b
-							}
-						}
+						captionBBox := mineruAnnotationBBox(item.TableCaptionBBoxes, len(item.TableCaption), i, bbox)
 						items = append(items, extractedOpenDataLine{
 							Page:    pageStr,
 							Type:    "table-caption",
@@ -228,12 +223,12 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 
 			case "image":
 				bbox := mineruBBoxStr(item.BBox)
-				for _, cap := range item.ImageCaption {
+				for i, cap := range item.ImageCaption {
 					if c := strings.TrimSpace(cap); c != "" {
 						items = append(items, extractedOpenDataLine{
 							Page:    pageStr,
 							Type:    "image-caption",
-							BBox:    bbox,
+							BBox:    mineruAnnotationBBox(item.ImageCaptionBBoxes, len(item.ImageCaption), i, bbox),
 							Content: c,
 						})
 					}
@@ -246,12 +241,12 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 						Content: imgPath,
 					})
 				}
-				for _, fn := range item.ImageFootnote {
+				for i, fn := range item.ImageFootnote {
 					if f := strings.TrimSpace(fn); f != "" {
 						items = append(items, extractedOpenDataLine{
 							Page:    pageStr,
 							Type:    "image-footnote",
-							BBox:    bbox,
+							BBox:    mineruAnnotationBBox(item.ImageFootnoteBBoxes, len(item.ImageFootnote), i, bbox),
 							Content: f,
 						})
 					}
@@ -273,6 +268,17 @@ func capRepeatedLatexDots(content string) string {
 		}
 		return strings.TrimSpace(strings.Repeat(`\dots `, maxConsecutiveLatexDots))
 	})
+}
+
+// Missing or unaligned annotation geometry retains compatibility with older parser output.
+func mineruAnnotationBBox(boxes []json.RawMessage, count, index int, fallback string) string {
+	if len(boxes) == count {
+		var coords []float64
+		if err := json.Unmarshal(boxes[index], &coords); err == nil && len(coords) == 4 {
+			return mineruBBoxStr(boxes[index])
+		}
+	}
+	return fallback
 }
 
 func mineruBBoxStr(raw json.RawMessage) string {

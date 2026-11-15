@@ -67,28 +67,37 @@ def _add_list_item_boxes(items: list[dict[str, Any]], middle: dict[str, Any]) ->
 
 
 def _add_caption_boxes(items: list[dict[str, Any]], middle: dict[str, Any]) -> None:
-    """Preserve caption geometry discarded by the Content List V1 renderer.
+    """Preserve caption and image-footnote geometry lost by Content List V1.
 
-    Match within the table, then within the page. Ambiguous or incomplete
+    Match annotation lists within one visual block on the page. Ambiguous or incomplete
     matches retain the legacy converter fallback rather than invent geometry.
     """
     for page in middle.get("pages", []):
-        tables = [block for block in page.get("blocks", []) if block.get("type") == "table"]
         for item in items:
-            captions = item.get("table_caption", [])
-            if item.get("page_idx") != page.get("page_idx") or item.get("type") != "table" or not captions:
+            kind = item.get("type")
+            if item.get("page_idx") != page.get("page_idx") or kind not in {"table", "image"}:
                 continue
+            fields = ["table_caption"] if kind == "table" else ["image_caption", "image_footnote"]
             matches = []
-            for table in tables:
-                annotations = [part for part in table.get("content", [])
-                               if isinstance(part, dict) and part.get("type") == "table_caption"]
-                if [_text(part.get("content")).strip() for part in annotations] != [text.strip() for text in captions]:
+            for block in page.get("blocks", []):
+                if block.get("type") != kind:
                     continue
-                boxes = [part.get("bbox") for part in annotations]
-                if all(isinstance(box, list) and len(box) == 4 for box in boxes):
-                    matches.append([[round(float(value) * 1000) for value in box] for box in boxes])
-            if len(matches) == 1:
-                item["table_caption_bboxes"] = matches[0]
+                annotations = {
+                    field: [part for part in block.get("content", [])
+                            if isinstance(part, dict) and part.get("type") == field]
+                    for field in fields
+                }
+                if all([_text(part.get("content")).strip() for part in annotations[field]]
+                       == [text.strip() for text in item.get(field, [])] for field in fields):
+                    matches.append(annotations)
+            if len(matches) != 1:
+                continue
+            for field in fields:
+                boxes = [part.get("bbox") for part in matches[0][field]]
+                if boxes and all(isinstance(box, list) and len(box) == 4 for box in boxes):
+                    item[field + "_bboxes"] = [
+                        [round(float(value) * 1000) for value in box] for box in boxes
+                    ]
 
 
 def _text_items(value: Any, bbox: Any) -> list[dict[str, Any]]:
@@ -182,8 +191,9 @@ def convert(middle_path: Path, output_path: Path) -> None:
         for item, normalized in zip(page_items, enriched):
             if "list_item_bboxes" in normalized:
                 item["list_item_bboxes"] = normalized["list_item_bboxes"]
-            if "table_caption_bboxes" in normalized:
-                item["table_caption_bboxes"] = normalized["table_caption_bboxes"]
+            for field in ("table_caption_bboxes", "image_caption_bboxes", "image_footnote_bboxes"):
+                if field in normalized:
+                    item[field] = normalized[field]
 
     page_count = max((page.get("page_idx", -1) for page in middle.get("pages", [])), default=-1) + 1
     page_count = max(page_count, max(pages_map, default=-1) + 1)
