@@ -416,3 +416,63 @@ func TestGluedCanonicalRowKeepsPhysicalBand(t *testing.T) {
 		t.Fatalf("glued row must keep the band box: %+v", r)
 	}
 }
+
+func TestGarbledTableUsesVerifiedStructure(t *testing.T) {
+	line, err := os.ReadFile("testdata/garbled-table.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/garbled-table.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var physical PhysicalDocument
+	if err := json.Unmarshal(data, &physical); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Build(line, physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tables) != 1 {
+		t.Fatalf("missing table: %+v", got.Tables)
+	}
+	for _, row := range got.Tables[0].Rows {
+		if row.ID == "r1" {
+			box := row.Cells[4].Boxes[0]
+			if box.Page != 8 || box.Coords[0] != 636 || box.Coords[1] != 295 || box.Coords[2] != 758 || box.Coords[3] != 318 {
+				t.Fatalf("wrong cell: %+v", box)
+			}
+			return
+		}
+	}
+	t.Fatal("missing r1")
+}
+
+func TestGarbledTableRejectsStructuralMismatch(t *testing.T) {
+	line, _ := os.ReadFile("testdata/garbled-table.txt")
+	data, _ := os.ReadFile("testdata/garbled-table.json")
+	for _, kind := range []string{"bounds", "rows", "span"} {
+		t.Run(kind, func(t *testing.T) {
+			var physical PhysicalDocument
+			if err := json.Unmarshal(data, &physical); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "bounds":
+				physical.Tables[0].Coords[0] += 30
+			case "rows":
+				physical.Tables[0].Rows = physical.Tables[0].Rows[1:]
+			case "span":
+				physical.Tables[0].Rows[0].Cells[0].Coords[2] -= 10
+			}
+			got, err := Build(line, physical)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Tables) != 0 {
+				t.Fatalf("mapped mismatched table: %+v", got.Tables)
+			}
+		})
+	}
+}

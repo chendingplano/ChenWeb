@@ -151,3 +151,8 @@ test('canonical geometry v5, written by the current server, resolves cell refere
 		{ page: 7, coords: [440, 270, 750, 398], line: 121, target: 'r3:c4' }
 	]);
 });
+
+ test('canonical geometry v6 resolves the cited cell', () => {
+ const current = { ...geometry, algorithm: 'canonical-table-geometry-v6' };
+ assert.equal(resolveTableReferences([{ line: 121, cells: ['r3:c1'] }], current).length, 1);
+ });

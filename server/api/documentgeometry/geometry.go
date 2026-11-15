@@ -20,7 +20,7 @@ import (
 )
 
 const Version = 1
-const Algorithm = "canonical-table-geometry-v5"
+const Algorithm = "canonical-table-geometry-v6"
 
 // Extractor is the id table_geometry.py writes today. Files from the previous extractor
 // (pymupdf-tables-v1, no sub-rows) still build; the file converter regenerates them.
@@ -291,6 +291,56 @@ type canonicalTable struct {
 	grid               *docprocessing.TableGrid
 }
 
+// structuralRows accepts a single-page table only when every physical band and
+// merged cell agrees with the expanded canonical grid. This handles broken font
+// encodings without estimating cell positions or splitting the table evenly.
+func structuralRows(c canonicalTable, t PhysicalTable) bool {
+	rows := append(append([]docprocessing.TableRow{}, c.grid.Headers...), c.grid.Rows...)
+	if t.Page != c.page || !validBox(c.coords) || !validBox(t.Coords) || len(rows) < 4 || len(rows) != len(t.Rows) {
+		return false
+	}
+	for i := range c.coords {
+		if math.Abs(c.coords[i]-t.Coords[i]) > 5 {
+			return false
+		}
+	}
+	for i, row := range rows {
+		band := t.Rows[i]
+		if !validBox(band.Coords) || len(band.SubRows) > 0 || len(row.Cells) != len(band.Cells) {
+			return false
+		}
+		for col, cell := range band.Cells {
+			if !validBox(cell.Coords) {
+				return false
+			}
+			// Horizontal spans must match exactly, including colspan copies.
+			start, end := col, col+1
+			for start > 0 && row.Spans[start] == 0 {
+				start--
+			}
+			end = start + row.Spans[start]
+			for j := range band.Cells {
+				same := slices.Equal(cell.Coords, band.Cells[j].Coords)
+				if same != (j >= start && j < end) && !(cell.Coords[1] < band.Coords[1] && row.Cells[j] == row.Cells[col] && same) {
+					return false
+				}
+			}
+			// A physical rowspan may cover only canonical copies of the same cell.
+			for j, other := range t.Rows {
+				if !validBox(other.Coords) {
+					return false
+				}
+				if other.Coords[1] >= cell.Coords[1] && other.Coords[3] <= cell.Coords[3] {
+					if len(other.Cells) != len(row.Cells) || rows[j].Cells[col] != row.Cells[col] || !slices.Equal(other.Cells[col].Coords, cell.Coords) {
+						return false
+					}
+				}
+			}
+		}
+	}
+	return true
+}
+
 func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 	physicalBytes, err := json.Marshal(physical)
 	if err != nil {
@@ -339,7 +389,7 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 					}
 				}
 			}
-			if !recognizable {
+			if !recognizable && !structuralRows(c, t) {
 				continue
 			}
 			d := 0.0
@@ -404,8 +454,9 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 			selected = append(selected, continuations[page][0])
 		}
 		var found []physicalMatch
+		structural := structuralRows(c, physical.Tables[c.anchor])
 		for _, t := range selected {
-			for _, band := range t.Rows {
+			for bandIndex, band := range t.Rows {
 				for _, pr := range matchUnits(rows, band) {
 					best, m := 0, physicalMatch{table: t, row: pr}
 					for i, r := range rows {
@@ -416,6 +467,9 @@ func Build(lineData []byte, physical PhysicalDocument) (*Document, error) {
 						} else if s > 0 && s == best {
 							m.candidates = append(m.candidates, i)
 						}
+					}
+					if structural && t.Page == c.page && len(m.candidates) == 0 {
+						m.candidates = []int{bandIndex}
 					}
 					if len(m.candidates) > 0 && validBox(pr.Coords) {
 						found = append(found, m)

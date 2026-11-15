@@ -62,7 +62,7 @@ export function resolveTableReferences(
 	if (
 		!geometry ||
 		geometry.version !== 1 ||
-		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5'].includes(geometry.algorithm) ||
+		!['canonical-table-geometry-v4', 'canonical-table-geometry-v5', 'canonical-table-geometry-v6'].includes(geometry.algorithm) ||
 		geometry.coordinate_space !== 'page-normalized-1000' ||
 		!Array.isArray(geometry.tables)
 	)
