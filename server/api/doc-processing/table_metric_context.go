@@ -343,7 +343,7 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 			continue
 		}
 		ref := TableRowRef{Line: n, RowHash: map[string]string{}}
-		ref.Cells = tableMetricCellIDs(g, rows, outcome, asString(metric["metric_name"]))
+		ref.Cells = tableMetricCellIDs(g, rows, outcome, metric)
 		var b strings.Builder
 		if c := idx.caption(n); c != "" {
 			b.WriteString(c)
@@ -393,38 +393,61 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 }
 
 // tableMetricCellIDs narrows the selected data rows to the metric's own column: the
-// header whose label equals the metric name, else the only header that contains it.
+// header path containing the metric name, preferring exact header components.
+// Repeated metric headers require a unique exact value within the selected row.
 // It returns nothing (the viewer then highlights the row) when no column matches, or
 // when the rows are only the whole-table fallback and so do not show where the value is.
-func tableMetricCellIDs(g *TableGrid, rows []TableRow, outcome, metricName string) []string {
+func tableMetricCellIDs(g *TableGrid, rows []TableRow, outcome string, metric map[string]any) []string {
 	if outcome == tableRowsWholeTable {
 		return nil
 	}
-	want := normalizeTableMatchText(metricName)
+	want := normalizeTableMatchText(asString(metric["metric_name"]))
 	if utf8.RuneCountInString(want) < 2 {
 		return nil
 	}
-	exact, partial := -1, []int{}
+	var exact, partial []int
 	for c, label := range g.Columns {
-		leaf := label[strings.LastIndex(label, "/")+1:]
-		text := normalizeTableMatchText(leaf)
-		switch {
-		case text == want:
-			exact = c
-		case strings.Contains(text, want):
+		isExact, isPartial := false, false
+		for _, part := range strings.Split(label, "/") {
+			text := normalizeTableMatchText(part)
+			isExact = isExact || text == want
+			isPartial = isPartial || strings.Contains(text, want)
+		}
+		if isExact {
+			exact = append(exact, c)
+		} else if isPartial {
 			partial = append(partial, c)
 		}
 	}
-	col := exact
-	if col < 0 && len(partial) == 1 {
-		col = partial[0]
+	cols := exact
+	if len(cols) == 0 {
+		// Several partial labels may name different properties (e.g. minimum
+		// and recommended values); a matching number cannot identify the property.
+		if len(partial) != 1 {
+			return nil
+		}
+		cols = partial
 	}
-	if col < 0 {
+	if len(cols) == 0 {
 		return nil
 	}
+	value := normalizeTableMatchText(asString(metric["metric_value"]))
 	var ids []string
 	for _, r := range rows {
-		if strings.HasPrefix(r.ID, "r") && col < len(r.Cells) {
+		col := cols[0]
+		if len(cols) > 1 {
+			col = -1
+			for _, c := range cols {
+				if value != "" && c < len(r.Cells) && normalizeTableMatchText(r.Cells[c]) == value {
+					if col >= 0 { // Equal values in multiple columns remain ambiguous.
+						col = -1
+						break
+					}
+					col = c
+				}
+			}
+		}
+		if strings.HasPrefix(r.ID, "r") && col >= 0 && col < len(r.Cells) {
 			ids = append(ids, fmt.Sprintf("%s:c%d", r.ID, col+1))
 		}
 	}
@@ -441,7 +464,7 @@ func matchTableMetricCellValue(g *TableGrid, metric map[string]any) (TableRow, b
 	}
 	var found TableRow
 	matched := false
-	for _, id := range tableMetricCellIDs(g, g.Rows, tableRowsFromEvidence, asString(metric["metric_name"])) {
+	for _, id := range tableMetricCellIDs(g, g.Rows, tableRowsFromEvidence, metric) {
 		rowID, colID, _ := strings.Cut(id, ":c")
 		row, _ := g.Row(rowID)
 		col, _ := strconv.Atoi(colID)

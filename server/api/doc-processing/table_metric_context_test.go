@@ -297,6 +297,48 @@ func TestBuildTableMetricContext_NoColumnMatchKeepsRowOnly(t *testing.T) {
 	}
 }
 
+func TestBuildTableMetricContext_Record825MultilevelMetricColumns(t *testing.T) {
+	body, err := os.ReadFile("testdata/record825-table-lines.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ParseInputLines(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := newTableLineIndex(lines)
+	for _, tc := range []struct{ name, value, cell string }{
+		{"COP", "2.90", "r1:c2"},
+		{"COP", "1.50", "r1:c3"},
+		{"COP", "4.20", "r1:c4"}, // 825_mtc_161
+		{"AHPF", "2.80", "r1:c5"},
+		{"AHPF", "2.40", "r1:c6"},
+		{"COP", "3.20", ""}, // repeated across rows: retain the saved row
+	} {
+		t.Run(tc.name+tc.value, func(t *testing.T) {
+			m := map[string]any{"metric_name": tc.name, "metric_value": tc.value,
+				"source_line_spans": []any{"169"},
+				"source_table_rows": []TableRowRef{{Line: 169, Rows: []string{"r1"}}}}
+			res := buildTableMetricContext(idx, m)
+			if len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "r1" || strings.Join(res.Refs[0].Cells, ",") != tc.cell {
+				t.Fatalf("refs = %+v, want r1 / %q", res.Refs, tc.cell)
+			}
+		})
+	}
+}
+
+func TestBuildTableMetricContext_RepeatedMetricHeadersRequireUniqueValue(t *testing.T) {
+	h := `<table><tr><td rowspan="2">类型</td><td colspan="2">COP</td></tr><tr><td>普通型</td><td>低温型</td></tr><tr><td>静态</td><td>3.20</td><td>3.20</td></tr></table>`
+	idx := newTableLineIndex([]Line{{LineNo: 1, LineType: "table", Content: h}})
+	for _, value := range []string{"3.20", "", "9.99"} {
+		res := buildTableMetricContext(idx, map[string]any{"metric_name": "COP", "metric_value": value,
+			"source_line_spans": []any{"1"}, "source_table_rows": []TableRowRef{{Line: 1, Rows: []string{"r1"}}}})
+		if len(res.Refs) != 1 || len(res.Refs[0].Cells) != 0 {
+			t.Fatalf("value %q: ambiguous columns should keep row: %+v", value, res.Refs)
+		}
+	}
+}
+
 func TestTableRowRefs_CellsParseAndMerge(t *testing.T) {
 	refs := tableRowRefsFromValue([]any{map[string]any{
 		"line": 123, "rows": []any{"r1"}, "cells": []any{"r1:c5", "r1:x9", "h0:c1"},
