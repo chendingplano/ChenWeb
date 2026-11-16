@@ -135,28 +135,88 @@ func fetchChangesPage(db *sql.DB, item TableSyncItem, since string, limit int) (
 	if sinceArg == "" {
 		sinceArg = "-infinity"
 	}
-	rows, err := db.Query(query, sinceArg, limit)
+	resp := changesResponse{ItemID: item.ID, NextCursor: since, Rows: []Row{}}
+	pageRows, lastCursor, err := queryChangeRows(db, item, query, sinceArg, limit)
 	if err != nil {
-		return changesResponse{}, fmt.Errorf("query changes for %s: %w", item.ID, err)
+		return changesResponse{}, err
+	}
+	resp.Rows = append(resp.Rows, pageRows...)
+	if len(pageRows) > 0 {
+		resp.NextCursor = lastCursor
+	}
+	resp.HasMore = len(pageRows) == limit
+
+	// The target resumes with `CursorCol > next_cursor`, so a page must never
+	// end inside a group of rows that share one cursor value: the rest of that
+	// group would be skipped for good. Bulk writes make such groups routine (an
+	// import or a release stamps thousands of rows with one NOW()), so a full
+	// page is completed with every remaining row at its final cursor value. The
+	// page may therefore exceed limit.
+	if len(pageRows) == limit && lastCursor != "" {
+		tieWhere := make([]string, 0, 2)
+		if item.Filter != "" {
+			tieWhere = append(tieWhere, "("+item.Filter+")")
+		}
+		tieWhere = append(tieWhere, fmt.Sprintf("%s = $1", item.CursorCol))
+		tieQuery := fmt.Sprintf(
+			"SELECT %s FROM %s WHERE %s ORDER BY %s",
+			strings.Join(selectCols, ", "),
+			item.Table,
+			strings.Join(tieWhere, " AND "),
+			strings.Join(orderBy, ", "),
+		)
+		tieRows, _, err := queryChangeRows(db, item, tieQuery, lastCursor)
+		if err != nil {
+			return changesResponse{}, err
+		}
+		seen := make(map[string]bool, len(pageRows))
+		for _, row := range pageRows {
+			seen[naturalKeyID(item, row)] = true
+		}
+		for _, row := range tieRows {
+			if !seen[naturalKeyID(item, row)] {
+				resp.Rows = append(resp.Rows, row)
+			}
+		}
+	}
+	return resp, nil
+}
+
+// queryChangeRows runs one change query and scans every row, also returning
+// the cursor value of the last row.
+func queryChangeRows(db *sql.DB, item TableSyncItem, query string, args ...any) ([]Row, string, error) {
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("query changes for %s: %w", item.ID, err)
 	}
 	defer rows.Close()
 
-	resp := changesResponse{ItemID: item.ID, NextCursor: since, Rows: []Row{}}
-	rowCount := 0
+	var (
+		out        []Row
+		lastCursor string
+	)
 	for rows.Next() {
 		row, cursorValue, err := scanRow(rows, item)
 		if err != nil {
-			return changesResponse{}, fmt.Errorf("scan row for %s: %w", item.ID, err)
+			return nil, "", fmt.Errorf("scan row for %s: %w", item.ID, err)
 		}
-		resp.Rows = append(resp.Rows, row)
-		resp.NextCursor = cursorValue
-		rowCount++
+		out = append(out, row)
+		lastCursor = cursorValue
 	}
 	if err := rows.Err(); err != nil {
-		return changesResponse{}, fmt.Errorf("iterate changes for %s: %w", item.ID, err)
+		return nil, "", fmt.Errorf("iterate changes for %s: %w", item.ID, err)
 	}
-	resp.HasMore = rowCount == limit
-	return resp, nil
+	return out, lastCursor, nil
+}
+
+// naturalKeyID identifies a scanned row by its natural-key values, as sent on
+// the wire.
+func naturalKeyID(item TableSyncItem, row Row) string {
+	parts := make([]string, len(item.NaturalKey))
+	for i, col := range item.NaturalKey {
+		parts[i] = string(row[col])
+	}
+	return strings.Join(parts, "\x00")
 }
 
 // referenceSelectExpr selects a reference column's parent natural key as a
@@ -185,7 +245,10 @@ func referenceSelectExpr(item TableSyncItem, ref SyncReference) (string, error) 
 // round trip).
 func scanRow(rows *sql.Rows, item TableSyncItem) (Row, string, error) {
 	dests := make([]any, len(item.Columns))
-	jsonDests := make([]json.RawMessage, len(item.Columns))
+	// []byte, not json.RawMessage: database/sql cannot scan a NULL into a
+	// *json.RawMessage, but a nil []byte is how a NULL jsonb value (or a NULL
+	// reference) arrives here, and is turned into JSON null below.
+	jsonDests := make([][]byte, len(item.Columns))
 	strDests := make([]sql.NullString, len(item.Columns))
 	for i, col := range item.Columns {
 		if _, isRef := item.referenceFor(col); isRef || item.isJSONColumn(col) {
@@ -204,9 +267,15 @@ func scanRow(rows *sql.Rows, item TableSyncItem) (Row, string, error) {
 		var value json.RawMessage
 		if _, isRef := item.referenceFor(col); isRef || item.isJSONColumn(col) {
 			if len(jsonDests[i]) == 0 {
+				if item.isJSONColumn(col) {
+					// SQL NULL in a JSON column is sent as an absent key, so it
+					// stays distinguishable from the jsonb value `null`, which
+					// is sent as the JSON literal null (see rowArgs).
+					continue
+				}
 				value = nullJSON
 			} else {
-				value = jsonDests[i]
+				value = json.RawMessage(jsonDests[i])
 			}
 		} else {
 			if strDests[i].Valid {

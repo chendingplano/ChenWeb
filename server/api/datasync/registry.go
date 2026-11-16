@@ -162,7 +162,203 @@ var Registry = []TableSyncItem{
 		NaturalKey: []string{"id"},
 		Columns:    []string{"id", "country", "updated_at"},
 	},
+
+	// External terminology resources (QUDT, UCUM, BIPM SIRP, Wikidata). Only
+	// the dev machine downloads and imports them; deployments pull the same
+	// rows, so every machine uses exactly the data the releasing machine does.
+	// Sync order: keyword_sources first, then everything that references a
+	// source/release, in the order listed (the catalog child tables reference
+	// keyword_catalog_entries).
+	//
+	// These tables are immutable, so created_at is an insert-time cursor. Only
+	// approved releases travel: an unreviewed or rejected source release is a
+	// local staging artifact, not data the releasing machine stands behind.
+	// Rows are keyed by the same (source, release, ...) identity as the
+	// primary key; no surrogate id exists to leave out.
+	{
+		ID:         "keyword_sources",
+		Table:      "kb.keyword_sources",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release"},
+		Columns: []string{
+			"source", "release", "license", "retrieved_at", "notes", "provider_id",
+			"source_subset", "content_checksum", "license_review_status", "authority_role",
+			"authoritative_relations", "allowed_scopes", "languages", "adapter_version",
+			"provenance_locator", "approved_by", "approved_at", "identity_authority", "created_at",
+		},
+		Filter: "license_review_status = 'approved'",
+	},
+	{
+		ID:         "keyword_source_artifacts",
+		Table:      "kb.keyword_source_artifacts",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release", "artifact_id"},
+		Columns: []string{
+			"source", "release", "artifact_id", "content_checksum", "media_type",
+			"provenance_locator", "payload", "created_at",
+		},
+		JSONColumns: []string{"payload"},
+		Filter:      approvedKeywordSourceFilter,
+	},
+	{
+		ID:         "keyword_catalog_entries",
+		Table:      "kb.keyword_catalog_entries",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release", "external_id"},
+		Columns: []string{
+			"source", "release", "external_id", "entry_status", "provenance_locator",
+			"native_payload", "created_at",
+		},
+		JSONColumns: []string{"native_payload"},
+		Filter:      approvedKeywordSourceFilter,
+	},
+	{
+		ID:         "keyword_catalog_labels",
+		Table:      "kb.keyword_catalog_labels",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release", "external_id", "language", "label_role", "label"},
+		Columns: []string{
+			"source", "release", "external_id", "language", "label_role", "label",
+			"provenance_locator", "native_payload", "created_at",
+		},
+		JSONColumns: []string{"native_payload"},
+		Filter:      approvedKeywordSourceFilter,
+	},
+	{
+		ID:         "keyword_catalog_relations",
+		Table:      "kb.keyword_catalog_relations",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release", "subject_external_id", "relation", "object_source", "object_release", "object_external_id"},
+		Columns: []string{
+			"source", "release", "subject_external_id", "relation", "object_source",
+			"object_release", "object_external_id", "provenance_locator", "native_payload", "created_at",
+		},
+		JSONColumns: []string{"native_payload"},
+		Filter:      approvedKeywordSourceFilter,
+	},
+	{
+		ID:         "keyword_catalog_negative_decisions",
+		Table:      "kb.keyword_catalog_negative_decisions",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release", "subject_external_id", "object_source", "object_release", "object_external_id", "relation"},
+		Columns: []string{
+			"source", "release", "subject_external_id", "object_source", "object_release",
+			"object_external_id", "relation", "reason", "provenance_locator", "native_payload", "created_at",
+		},
+		JSONColumns: []string{"native_payload"},
+		Filter:      approvedKeywordSourceFilter,
+	},
+	{
+		ID:         "keyword_ucum_codes",
+		Table:      "kb.keyword_ucum_codes",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"source", "release", "code"},
+		Columns: []string{
+			"source", "release", "code", "print_symbol", "dimension", "provenance_locator",
+			"native_payload", "created_at",
+		},
+		JSONColumns: []string{"native_payload"},
+		Filter:      approvedKeywordSourceFilter,
+	},
+
+	// The governed `quantity` ontology module that the QUDT approve flow
+	// writes from the downloaded TTL. The TTL is a transient download, so a
+	// deployment cannot re-derive these rows; it must receive them. Sync order:
+	// module, release, then everything that points at the release (terms,
+	// labels, mappings, active pointer). kb.ontology_term_headers and
+	// kb.ontology_term_revisions are filled by a trigger when a term row is
+	// inserted, so they are not synced.
+	//
+	// Surrogate ids (id, released_in_release_id, release_id) never cross the
+	// wire: releases are addressed by (module_id, version). source_candidate_id
+	// is a local candidate-queue id and is left out. superseded_by_release_id
+	// is left out too: it points at a newer release that is not yet on the
+	// target when the older row is applied, so it stays NULL on a deployment.
+	{
+		ID:         "ontology_quantity_module",
+		Table:      "kb.ontology_modules",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"module_id"},
+		Columns: []string{
+			"module_id", "title", "owner", "description", "depends_on", "status",
+			"create_time", "create_by", "modify_time", "modify_by",
+		},
+		Filter: "module_id = 'quantity'",
+	},
+	{
+		ID:         "ontology_quantity_releases",
+		Table:      "kb.ontology_module_releases",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"module_id", "version"},
+		Columns: []string{
+			"module_id", "version", "title", "payload", "content_checksum",
+			"dependency_releases", "released_by", "released_at", "create_time", "modify_time",
+		},
+		JSONColumns: []string{"payload", "dependency_releases"},
+		Filter:      "module_id = 'quantity'",
+	},
+	{
+		ID:         "ontology_quantity_terms",
+		Table:      "kb.ontology_terms",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"term_id", "version"},
+		Columns: []string{
+			"term_id", "version", "term_kind", "module_id", "status", "definition", "scope",
+			"create_time", "create_by", "modify_time", "modify_by", "released_in_release_id", "properties",
+		},
+		JSONColumns: []string{"properties"},
+		Filter:      "module_id = 'quantity'",
+		References:  []SyncReference{{Column: "released_in_release_id", ItemID: "ontology_quantity_releases"}},
+	},
+	{
+		ID:         "ontology_quantity_term_labels",
+		Table:      "kb.ontology_term_labels",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"term_id", "version", "lang", "label_role", "label"},
+		Columns: []string{
+			"term_id", "version", "label", "lang", "label_role", "status",
+			"create_time", "create_by", "modify_time", "modify_by", "released_in_release_id",
+		},
+		Filter:     "term_id IN (SELECT term_id FROM kb.ontology_terms WHERE module_id = 'quantity')",
+		References: []SyncReference{{Column: "released_in_release_id", ItemID: "ontology_quantity_releases"}},
+	},
+	{
+		ID:         "ontology_quantity_mappings",
+		Table:      "kb.ontology_mappings",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"mapping_id", "version"},
+		Columns: []string{
+			"mapping_id", "version", "from_term_id", "to_term_id", "to_iri", "relation",
+			"evidence", "approval_status", "module_id", "status", "create_time", "create_by",
+			"modify_time", "modify_by", "released_in_release_id",
+		},
+		JSONColumns: []string{"evidence"},
+		Filter:      "module_id = 'quantity'",
+		References:  []SyncReference{{Column: "released_in_release_id", ItemID: "ontology_quantity_releases"}},
+	},
+	// The pointer is a history (a release can be activated again later), so an
+	// activation is keyed by when it happened too. Replacing a release sets
+	// deactivated_at on the old row (modify_time = transaction time) and then
+	// inserts the new row (modify_time = clock_timestamp(), later), so the pull
+	// delivers the deactivation first and the one-active-release-per-module
+	// index never rejects the new row.
+	{
+		ID:         "ontology_quantity_active_releases",
+		Table:      "kb.ontology_active_releases",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"module_id", "release_id", "activated_at"},
+		Columns: []string{
+			"module_id", "release_id", "activated_at", "activated_by", "deactivated_at",
+			"deactivated_by", "modify_time",
+		},
+		Filter:     "module_id = 'quantity'",
+		References: []SyncReference{{Column: "release_id", ItemID: "ontology_quantity_releases"}},
+	},
 }
+
+// approvedKeywordSourceFilter scopes a keyword catalog table to rows whose
+// (source, release) is an approved release in kb.keyword_sources.
+const approvedKeywordSourceFilter = "(source, release) IN (SELECT source, release FROM kb.keyword_sources WHERE license_review_status = 'approved')"
 
 // ItemByID looks up a registered sync item by its stable id.
 func ItemByID(id string) (TableSyncItem, bool) {

@@ -177,13 +177,19 @@ func rowArgs(item TableSyncItem, row Row) ([]any, error) {
 	args := make([]any, len(item.Columns))
 	for i, col := range item.Columns {
 		raw, ok := row[col]
-		if !ok || isNullJSON(raw) {
-			args[i] = nil
+		if item.isJSONColumn(col) {
+			// An absent key is SQL NULL; the literal null is the jsonb value
+			// `null`, a different value that must survive the transfer.
+			// Postgres accepts JSON text for a jsonb parameter directly.
+			if !ok || len(raw) == 0 {
+				args[i] = nil
+			} else {
+				args[i] = string(raw)
+			}
 			continue
 		}
-		if item.isJSONColumn(col) {
-			// Postgres accepts JSON text for a jsonb parameter directly.
-			args[i] = string(raw)
+		if !ok || isNullJSON(raw) {
+			args[i] = nil
 			continue
 		}
 		var decoded string

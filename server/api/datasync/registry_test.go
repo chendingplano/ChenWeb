@@ -23,3 +23,61 @@ func TestProductNamesSyncIncludesMechanicalImports(t *testing.T) {
 		}
 	}
 }
+
+// Every compiled item must pass the same shape validation a UI-created item
+// does, use a unique id, and reference only parents registered before it: the
+// Sync Data page lists items in Registry order and a child synced before its
+// parent cannot resolve the parent's natural key.
+func TestRegistryItemsAreWellFormedAndOrdered(t *testing.T) {
+	position := map[string]int{}
+	for i, item := range Registry {
+		if _, dup := position[item.ID]; dup {
+			t.Errorf("duplicate sync item id %q", item.ID)
+		}
+		position[item.ID] = i
+		if err := validateItem(item); err != nil {
+			t.Errorf("item %q is not well formed: %v", item.ID, err)
+		}
+	}
+	for i, item := range Registry {
+		for _, ref := range item.References {
+			parent, ok := position[ref.ItemID]
+			if !ok {
+				t.Errorf("item %q references unknown item %q", item.ID, ref.ItemID)
+				continue
+			}
+			if parent >= i {
+				t.Errorf("item %q references %q, which is registered after it; sync order would fail", item.ID, ref.ItemID)
+			}
+			if !containsString(item.Columns, ref.Column) {
+				t.Errorf("item %q reference column %q is not in Columns", item.ID, ref.Column)
+			}
+		}
+	}
+}
+
+// The keyword catalog tables carry only approved source releases, and every
+// child table must be scoped by the same filter as its parent so a release
+// that is not approved can never leak through a child.
+func TestKeywordCatalogItemsOnlySyncApprovedReleases(t *testing.T) {
+	sources, ok := ItemByID("keyword_sources")
+	if !ok {
+		t.Fatal("keyword_sources is not registered")
+	}
+	if sources.Filter != "license_review_status = 'approved'" {
+		t.Fatalf("keyword_sources Filter = %q, want approved releases only", sources.Filter)
+	}
+	for _, id := range []string{
+		"keyword_source_artifacts", "keyword_catalog_entries", "keyword_catalog_labels",
+		"keyword_catalog_relations", "keyword_catalog_negative_decisions", "keyword_ucum_codes",
+	} {
+		item, ok := ItemByID(id)
+		if !ok {
+			t.Errorf("%s is not registered", id)
+			continue
+		}
+		if item.Filter != approvedKeywordSourceFilter {
+			t.Errorf("%s Filter = %q, want the approved-release filter", id, item.Filter)
+		}
+	}
+}

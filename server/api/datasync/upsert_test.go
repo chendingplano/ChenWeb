@@ -112,3 +112,23 @@ func TestRowArgsNullColumnBecomesNilArg(t *testing.T) {
 		t.Fatalf("notes arg = %v, want nil", args[12])
 	}
 }
+
+// A JSON column keeps SQL NULL (absent key) and the jsonb value null (JSON
+// literal) apart: they are different values and must arrive as sent.
+func TestRowArgsJSONColumnKeepsSQLNullAndJSONNullApart(t *testing.T) {
+	item := testItem()
+	row := testRow(t)
+	delete(row, "aliases")     // SQL NULL
+	row["keywords"] = nullJSON // jsonb value null
+	args, err := rowArgs(item, row)
+	if err != nil {
+		t.Fatalf("rowArgs() error = %v", err)
+	}
+	// aliases is index 9 and keywords index 10 in item.Columns.
+	if args[9] != nil {
+		t.Errorf("aliases arg = %v, want nil (SQL NULL)", args[9])
+	}
+	if args[10] != "null" {
+		t.Errorf("keywords arg = %v, want the JSON text null", args[10])
+	}
+}
