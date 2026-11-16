@@ -64,10 +64,13 @@
 
 ## 9. China box rollout (needs the user: root password or root SSH key)
 
-- [ ] 9.1 Release this change once with the manual procedure; confirm the tables exist on the box and `deploy-runner-linux` is installed
+- [x] 9.1 Release this change once with the manual procedure; confirm the tables exist on the box and `deploy-runner-linux` is installed
+  (2026-11-16: build 20261116122029 deployed as root the old way, then again by hand as `gui` with the new script; every step passed, including migrations.)
 - [x] 9.2 Read the existing sudoers lines (exact `/bin/systemctl <verb> <unit>` entries; `pdf-parser` missing) and `PROJECT_WORKSPACE_DIR` (in the box's `.env`); write `scripts/chenweb-deploy.service` (User=gui, Type=simple, chenweb's EnvironmentFile and `SHARED_LIB_CONFIG_DIR`)
 - [ ] 9.3 Root setup: install the unit, add `pdf-parser` (start/stop/restart/status) and `start chenweb-deploy` to `/etc/sudoers.d/gui-chenweb-services`, `visudo -c`, `daemon-reload`; `chown -R gui:gui` the directories earlier root deploys created (`ChenWeb/chenweb-deploy`, `ChenWeb/deploy_staging`, `~/Workspace/deploy`)
-- [ ] 9.4 Authorize `gui`'s SSH key on the relay; test `ssh -p 8896 cding@47.189.245.217 true` as `gui`
+  (2026-11-16: sudoers for pdf-parser and the chown are done; the by-hand `gui` deploy passed. Unit install and `start chenweb-deploy` not yet confirmed.)
+- [x] 9.4 Authorize `gui`'s SSH key on the relay; test `ssh -p 8896 cding@47.189.245.217 true` as `gui`
+  (2026-11-16: `ssh -o BatchMode=yes` as `gui` succeeded.)
 - [ ] 9.5 Set `[deployment] role = "deploy"` in the box's `config.local.toml`; restart `chenweb`
 - [ ] 9.6 Restart ChenWeb from its own page and confirm the page reloads when it is back
 - [ ] 9.7 First button deploy, watched against `journalctl -u chenweb-deploy`; confirm the row, the steps across the `chenweb` restart, and the pdf-parser step
@@ -79,4 +82,4 @@
 - [x] 10.2 New devdoc for the Deployment page with the `create-devdoc` skill (runner, markers, tables, failure handling)
 - [x] 10.3 Register `system-monitor-view.svelte` (embedded log window with `sourceId`) with the `create-reusable-module` skill; run the catalogue check
   (It was already catalogued as `20261115-01`; updated its row and doc to 1.2.0 instead.)
-- [ ] 10.4 Answer the workspace "Coding Best Practice" questions in the final summary; commit ChenWeb and KnowledgeStore changes separately with `jj commit <paths>`
+- [x] 10.4 Answer the workspace "Coding Best Practice" questions in the final summary; commit ChenWeb and KnowledgeStore changes separately with `jj commit <paths>`
