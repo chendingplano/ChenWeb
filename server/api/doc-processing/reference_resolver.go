@@ -178,7 +178,7 @@ func resolveAndApply(ctx context.Context, db *sql.DB, r ReferenceResolver, m Ref
 		return "", fmt.Errorf("(MID_26101111) %s apply %s: %w", r.Family(), m.RefID, err)
 	}
 	if logger != nil && out.State != "resolved" {
-		logger.Warn("reference not resolved with confidence", "family", r.Family(), "ref_id", m.RefID,
+		logger.Warn("reference not resolved with confidence (ChenWeb#19)", "family", r.Family(), "ref_id", m.RefID,
 			"citing_record", m.InputRecordID, "target_record", target, "state", out.State,
 			"candidates", len(out.Candidates), "notes", out.Notes)
 	}

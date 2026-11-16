@@ -334,7 +334,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	if docStore, err := docbuilder.NewStoreFromEnv(context.Background(), ApiTypes.ProjectDBHandle, ApiTypes.SharedDBHandle,
 		"chenweb-docgroups", func(f string, a ...any) { docLogger.Error(fmt.Sprintf(f, a...)) }); err != nil {
 		// Document groups are optional: without a document root the menu stays empty.
-		docLogger.Error("document groups disabled", "error", err)
+		docLogger.Error("document groups disabled (ChenWeb#14)", "error", err)
 	} else {
 		(&docbuilder.API{
 			Store:      docStore,

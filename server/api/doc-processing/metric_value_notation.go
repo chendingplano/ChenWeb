@@ -624,7 +624,7 @@ func (p *MetricsProcessor) logMultiValueMetricRows(ctx context.Context, recordID
 	if len(rows) == 0 {
 		return
 	}
-	p.Logger.Warn("metric value semantics remain unresolved", "record_id", recordID, "num_rows", len(rows))
+	p.Logger.Warn("metric value semantics remain unresolved (ChenWeb#19)", "record_id", recordID, "num_rows", len(rows))
 	artifactBytes, _ := json.Marshal(map[string]any{"multi_value_rows": rows})
 	artifactStr := string(artifactBytes)
 	extraBytes, _ := json.Marshal(map[string]any{"num_rows": len(rows)})

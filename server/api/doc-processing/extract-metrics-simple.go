@@ -170,7 +170,7 @@ func (p *MetricsProcessor) processSimpleChunk(ctx context.Context, chunkIdx int)
 		return ErrPipelineStopped
 	}
 	if err != nil {
-		p.Logger.Warn("extract metrics simple: chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		p.Logger.Warn("extract metrics simple: chunk failed (ChenWeb#19)", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
 		return nil
 	}
 	p.batchMu.Lock()

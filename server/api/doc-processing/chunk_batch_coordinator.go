@@ -230,11 +230,15 @@ func (s *ControlService) runProcessorsChunkBatched(
 			}
 			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "failed", "")
 			if s.Logger != nil {
-				s.Logger.Error("chunk batch: finalize failed",
-					"record_id", recordID,
-					"processor", bp.Name(),
-					"error", err,
-				)
+				if shutdownInterrupted(ctx, err) {
+					s.Logger.Info("chunk batch: finalize interrupted by shutdown (ChenWeb#13)", "record_id", recordID, "processor", bp.Name())
+				} else {
+					s.Logger.Error("chunk batch: finalize failed (ChenWeb#13)",
+						"record_id", recordID,
+						"processor", bp.Name(),
+						"error", err,
+					)
+				}
 			}
 			if batchFirstErr == nil {
 				batchFirstErr = fmt.Errorf("(MID_26062709) %s finalize: %w", bp.Name(), err)
