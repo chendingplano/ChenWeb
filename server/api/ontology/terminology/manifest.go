@@ -99,6 +99,15 @@ func ParseAndVerifyManifest(path string) (Manifest, []VerifiedArtifact, error) {
 	if strings.TrimSpace(m.Policy.Release) == "" {
 		return Manifest{}, nil, errors.New("manifest policy release/revision is required")
 	}
+	// A freshly downloaded draft says pending_review; in the database (and for
+	// every consumer) that is the unreviewed state, which is importable. The
+	// draft copies identity_authority from the resource definition, but an
+	// unreviewed release cannot be an identity authority, so it is read as false
+	// until the release is approved. The file is left as written.
+	if strings.TrimSpace(m.Policy.LicenseReviewStatus) == LicenseReviewPending {
+		m.Policy.LicenseReviewStatus = keywords.LicenseReviewUnreviewed
+		m.Policy.IdentityAuthority = false
+	}
 	if err := m.Policy.SourcePolicy().Validate(); err != nil {
 		return Manifest{}, nil, fmt.Errorf("manifest policy: %w", err)
 	}

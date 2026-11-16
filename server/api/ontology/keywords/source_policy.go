@@ -80,11 +80,17 @@ type SourcePolicy struct {
 // Validate rejects incomplete governance and authority shortcuts. Stage 1
 // recognizes exact identity authority only; conditional policies remain
 // explicitly non-authorizing until their conditions have a governed design.
+//
+// A release may be unreviewed or approved; a rejected release (or any other
+// value) is refused. Unreviewed releases are imported and used as dictionary
+// data like approved ones, but only an approved release can be an identity
+// authority: that is what lets a source authorize an automatic concept merge,
+// so it keeps requiring a named approver (and the database enforces the same).
 func (p SourcePolicy) Validate() error {
 	for name, value := range map[string]string{
 		"provider_id": p.ProviderID, "source": p.Source, "source_subset": p.SourceSubset,
 		"license": p.License, "adapter_version": p.AdapterVersion,
-		"provenance_locator": p.ProvenanceLocator, "approved_by": p.ApprovedBy,
+		"provenance_locator": p.ProvenanceLocator,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("source policy %s is required", name)
@@ -96,8 +102,9 @@ func (p SourcePolicy) Validate() error {
 	if !sha256Pattern.MatchString(p.ContentChecksum) {
 		return errors.New("source policy content_checksum must be 64 lowercase SHA-256 hex characters")
 	}
-	if p.LicenseReviewStatus != LicenseReviewApproved {
-		return errors.New("source policy license review must be approved")
+	approved := p.LicenseReviewStatus == LicenseReviewApproved
+	if !approved && p.LicenseReviewStatus != LicenseReviewUnreviewed {
+		return fmt.Errorf("source policy license review must be approved or unreviewed, got %q", p.LicenseReviewStatus)
 	}
 	if !allowedAuthorityRoles[p.AuthorityRole] {
 		return fmt.Errorf("unknown source authority role %q", p.AuthorityRole)
@@ -123,15 +130,20 @@ func (p SourcePolicy) Validate() error {
 			return errors.New("source policy languages cannot contain blank values")
 		}
 	}
-	if p.ApprovedAt == nil || p.ApprovedAt.IsZero() {
-		return errors.New("source policy approved_at is required")
+	if approved {
+		if strings.TrimSpace(p.ApprovedBy) == "" {
+			return errors.New("source policy approved_by is required")
+		}
+		if p.ApprovedAt == nil || p.ApprovedAt.IsZero() {
+			return errors.New("source policy approved_at is required")
+		}
 	}
 
 	hasExact := containsString(p.AuthoritativeRelations, "exact_equivalent")
 	if p.AuthorityRole == ExactIdentityAuthority && !hasExact {
 		return errors.New("exact identity authority requires exact_equivalent relation")
 	}
-	wantCompatibilityAuthority := p.AuthorityRole == ExactIdentityAuthority && hasExact
+	wantCompatibilityAuthority := approved && p.AuthorityRole == ExactIdentityAuthority && hasExact
 	if p.IdentityAuthority != wantCompatibilityAuthority {
 		return errors.New("identity_authority is inconsistent with structured source policy")
 	}

@@ -50,7 +50,8 @@ func TestSourcePolicyValidateRejectsIncompleteAndUnsafePolicies(t *testing.T) {
 		{"bad checksum", func(p *SourcePolicy) { p.ContentChecksum = "sha256:not-a-digest" }},
 		{"missing license", func(p *SourcePolicy) { p.License = "" }},
 		{"unknown license review", func(p *SourcePolicy) { p.LicenseReviewStatus = "pending" }},
-		{"unapproved license", func(p *SourcePolicy) { p.LicenseReviewStatus = LicenseReviewUnreviewed }},
+		{"unreviewed release claiming identity authority", func(p *SourcePolicy) { p.LicenseReviewStatus = LicenseReviewUnreviewed }},
+		{"rejected license", func(p *SourcePolicy) { p.LicenseReviewStatus = LicenseReviewRejected; p.IdentityAuthority = false }},
 		{"unknown role", func(p *SourcePolicy) { p.AuthorityRole = "trusted" }},
 		{"unknown relation", func(p *SourcePolicy) { p.AuthoritativeRelations = []string{"same_as"} }},
 		{"missing scope", func(p *SourcePolicy) { p.AllowedScopes = nil }},
@@ -389,4 +390,47 @@ func sourcePolicyRows(p SourcePolicy) *sqlmock.Rows {
 		p.LicenseReviewStatus, p.AuthorityRole, "{exact_equivalent}", "{display-metric}", `{"en","zh-CN"}`,
 		p.AdapterVersion, p.ProvenanceLocator, p.ApprovedBy, *p.ApprovedAt, p.IdentityAuthority, p.Notes,
 	)
+}
+
+// An unreviewed release is usable as dictionary data: it needs no approver and
+// carries no identity authority, whatever its role. Naming an approver or a
+// time on it is harmless, but claiming identity authority is not allowed.
+func TestSourcePolicyValidateAcceptsUnreviewedReleaseWithoutIdentityAuthority(t *testing.T) {
+	t.Parallel()
+
+	for _, role := range []AuthorityRole{ExactIdentityAuthority, ProposalOnly, ContextOnly} {
+		p := validExactSourcePolicy()
+		p.AuthorityRole = role
+		p.LicenseReviewStatus = LicenseReviewUnreviewed
+		p.ApprovedBy, p.ApprovedAt = "", nil
+		p.IdentityAuthority = false
+		if err := p.Validate(); err != nil {
+			t.Errorf("role %s: unreviewed release without approver should validate: %v", role, err)
+		}
+	}
+
+	p := validExactSourcePolicy()
+	p.LicenseReviewStatus = LicenseReviewUnreviewed
+	p.ApprovedBy, p.ApprovedAt = "", nil
+	p.IdentityAuthority = true
+	if err := p.Validate(); err == nil {
+		t.Error("an unreviewed release must not be an identity authority")
+	}
+}
+
+// Approval still needs a named approver and a time, and still makes an exact
+// authority an identity authority.
+func TestSourcePolicyValidateApprovedReleaseStillNeedsApprover(t *testing.T) {
+	t.Parallel()
+
+	p := validExactSourcePolicy()
+	p.ApprovedBy = ""
+	if err := p.Validate(); err == nil {
+		t.Error("approved release without approver must be refused")
+	}
+	p = validExactSourcePolicy()
+	p.ApprovedAt = nil
+	if err := p.Validate(); err == nil {
+		t.Error("approved release without approval time must be refused")
+	}
 }

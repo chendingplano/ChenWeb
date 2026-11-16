@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -153,9 +154,17 @@ func TestParseAndVerifyManifestRejectsInvalidAuthorityCombinations(t *testing.T)
 			want: "identity_authority",
 		},
 		{
-			name: "unapproved license review",
+			name: "unreviewed release claiming identity authority",
 			mutate: func(m *Manifest) {
 				m.Policy.LicenseReviewStatus = "unreviewed"
+			},
+			want: "identity_authority",
+		},
+		{
+			name: "rejected license review",
+			mutate: func(m *Manifest) {
+				m.Policy.LicenseReviewStatus = "disapproved"
+				m.Policy.IdentityAuthority = false
 			},
 			want: "license review",
 		},
@@ -339,5 +348,58 @@ func TestCanonicalManifestJSONIsDeterministic(t *testing.T) {
 	}
 	if got.Artifacts[0].ID != "a.json" || got.Artifacts[1].ID != "b.json" {
 		t.Fatalf("artifacts=%v, want sorted by id", got.Artifacts)
+	}
+}
+
+// A freshly downloaded draft (pending_review, no approver) must parse as an
+// unreviewed release so it can be imported without a manual approval, and it
+// must not carry identity authority.
+func TestParseAndVerifyManifestAcceptsPendingReviewDraftAsUnreviewed(t *testing.T) {
+	dir := t.TempDir()
+	artifact := []byte("snapshot")
+	if err := os.WriteFile(filepath.Join(dir, "snapshot.jsonl"), artifact, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(artifact)
+	digest := hex.EncodeToString(sum[:])
+	manifest := fmt.Sprintf(`{"adapter":"wikidata","policy":{"provider_id":"wikimedia","source":"wikidata","source_subset":"pilot","release":"dump-2026-11-11","retrieved_at":"2026-11-11T22:05:08Z","content_checksum":%q,"license":"CC0-1.0","license_review_status":"pending_review","authority_role":"proposal_only","authoritative_relations":[],"allowed_scopes":["_"],"languages":["en","zh"],"adapter_version":"wikidata-adapter/v1","provenance_locator":"https://www.wikidata.org/","identity_authority":false},"artifacts":[{"id":"snapshot.jsonl","path":"snapshot.jsonl","sha256":%q,"media_type":"application/x-ndjson","provenance_locator":"https://www.wikidata.org/"}]}`, digest, digest)
+	path := filepath.Join(dir, "manifest.draft.json")
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := ParseAndVerifyManifest(path)
+	if err != nil {
+		t.Fatalf("pending_review draft should be importable: %v", err)
+	}
+	if m.Policy.LicenseReviewStatus != "unreviewed" {
+		t.Errorf("license_review_status = %q, want unreviewed", m.Policy.LicenseReviewStatus)
+	}
+	if m.Policy.IdentityAuthority {
+		t.Error("an unreviewed release must not carry identity authority")
+	}
+}
+
+// A pending draft of an exact identity authority copies identity_authority=true
+// from the resource definition. It must still import (as unreviewed, without
+// authority) rather than be refused; authority comes with approval.
+func TestParseAndVerifyManifestPendingExactAuthorityDraftReadsWithoutAuthority(t *testing.T) {
+	dir := t.TempDir()
+	artifact := []byte("quantity kinds")
+	if err := os.WriteFile(filepath.Join(dir, "qudt-all.ttl"), artifact, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(artifact)
+	digest := hex.EncodeToString(sum[:])
+	manifest := fmt.Sprintf(`{"adapter":"qudt","policy":{"provider_id":"qudt","source":"qudt","source_subset":"catalog","release":"3.5.0","retrieved_at":"2026-11-11T22:05:08Z","content_checksum":%q,"license":"CC-BY-4.0","license_review_status":"pending_review","authority_role":"exact_identity_authority","authoritative_relations":["exact_equivalent"],"allowed_scopes":["_"],"languages":["en"],"adapter_version":"qudt-adapter/v1","provenance_locator":"https://qudt.org/","identity_authority":true},"artifacts":[{"id":"qudt-all.ttl","path":"qudt-all.ttl","sha256":%q,"media_type":"text/turtle","provenance_locator":"https://qudt.org/"}]}`, digest, digest)
+	path := filepath.Join(dir, "manifest.draft.json")
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := ParseAndVerifyManifest(path)
+	if err != nil {
+		t.Fatalf("pending exact-authority draft should be importable: %v", err)
+	}
+	if m.Policy.LicenseReviewStatus != "unreviewed" || m.Policy.IdentityAuthority {
+		t.Errorf("status=%q identity_authority=%v, want unreviewed and false", m.Policy.LicenseReviewStatus, m.Policy.IdentityAuthority)
 	}
 }

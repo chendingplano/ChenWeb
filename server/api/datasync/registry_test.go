@@ -56,16 +56,16 @@ func TestRegistryItemsAreWellFormedAndOrdered(t *testing.T) {
 	}
 }
 
-// The keyword catalog tables carry only approved source releases, and every
-// child table must be scoped by the same filter as its parent so a release
-// that is not approved can never leak through a child.
-func TestKeywordCatalogItemsOnlySyncApprovedReleases(t *testing.T) {
+// The keyword catalog tables carry every source release except a rejected one,
+// and every child table must be scoped by the same filter as its parent so a
+// rejected release can never leak through a child.
+func TestKeywordCatalogItemsSyncEverythingExceptRejectedReleases(t *testing.T) {
 	sources, ok := ItemByID("keyword_sources")
 	if !ok {
 		t.Fatal("keyword_sources is not registered")
 	}
-	if sources.Filter != "license_review_status = 'approved'" {
-		t.Fatalf("keyword_sources Filter = %q, want approved releases only", sources.Filter)
+	if sources.Filter != "license_review_status <> 'rejected'" {
+		t.Fatalf("keyword_sources Filter = %q, want every release except rejected ones", sources.Filter)
 	}
 	for _, id := range []string{
 		"keyword_source_artifacts", "keyword_catalog_entries", "keyword_catalog_labels",
@@ -76,15 +76,15 @@ func TestKeywordCatalogItemsOnlySyncApprovedReleases(t *testing.T) {
 			t.Errorf("%s is not registered", id)
 			continue
 		}
-		if item.Filter != approvedKeywordSourceFilter {
-			t.Errorf("%s Filter = %q, want the approved-release filter", id, item.Filter)
+		if item.Filter != usableKeywordSourceFilter {
+			t.Errorf("%s Filter = %q, want the usable-release filter", id, item.Filter)
 		}
 	}
 }
 
 // The dictionary is mirrored in full: concepts and surfaces carry no filter
 // (every row, whatever created it, must reach a deployment), and the two
-// identity tables that point at kb.keyword_sources carry the approved-release
+// identity tables that point at kb.keyword_sources carry the usable-release
 // filter so no row can reference a source release the target does not hold.
 // Items also have to be registered after the tables their foreign keys point
 // at, since those foreign keys are plain text ids, not SyncReferences.
@@ -109,8 +109,8 @@ func TestKeywordDictionaryItemsMirrorEverythingInDependencyOrder(t *testing.T) {
 			t.Errorf("%s is not registered", id)
 			continue
 		}
-		if item.Filter != approvedKeywordSourceFilter {
-			t.Errorf("%s Filter = %q, want the approved-release filter", id, item.Filter)
+		if item.Filter != usableKeywordSourceFilter {
+			t.Errorf("%s Filter = %q, want the usable-release filter", id, item.Filter)
 		}
 	}
 	for child, parents := range map[string][]string{

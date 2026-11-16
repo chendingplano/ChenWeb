@@ -170,9 +170,10 @@ var Registry = []TableSyncItem{
 	// source/release, in the order listed (the catalog child tables reference
 	// keyword_catalog_entries).
 	//
-	// These tables are immutable, so created_at is an insert-time cursor. Only
-	// approved releases travel: an unreviewed or rejected source release is a
-	// local staging artifact, not data the releasing machine stands behind.
+	// These tables are immutable, so created_at is an insert-time cursor. Every
+	// release travels except a rejected one: an unreviewed release is used as
+	// dictionary data on the releasing machine, so it is used the same way on a
+	// deployment. (Only an approved release can be an identity authority.)
 	// Rows are keyed by the same (source, release, ...) identity as the
 	// primary key; no surrogate id exists to leave out.
 	{
@@ -186,7 +187,7 @@ var Registry = []TableSyncItem{
 			"authoritative_relations", "allowed_scopes", "languages", "adapter_version",
 			"provenance_locator", "approved_by", "approved_at", "identity_authority", "created_at",
 		},
-		Filter: "license_review_status = 'approved'",
+		Filter: "license_review_status <> 'rejected'",
 	},
 	{
 		ID:         "keyword_source_artifacts",
@@ -198,7 +199,7 @@ var Registry = []TableSyncItem{
 			"provenance_locator", "payload", "created_at",
 		},
 		JSONColumns: []string{"payload"},
-		Filter:      approvedKeywordSourceFilter,
+		Filter:      usableKeywordSourceFilter,
 	},
 	{
 		ID:         "keyword_catalog_entries",
@@ -210,7 +211,7 @@ var Registry = []TableSyncItem{
 			"native_payload", "created_at",
 		},
 		JSONColumns: []string{"native_payload"},
-		Filter:      approvedKeywordSourceFilter,
+		Filter:      usableKeywordSourceFilter,
 	},
 	{
 		ID:         "keyword_catalog_labels",
@@ -222,7 +223,7 @@ var Registry = []TableSyncItem{
 			"provenance_locator", "native_payload", "created_at",
 		},
 		JSONColumns: []string{"native_payload"},
-		Filter:      approvedKeywordSourceFilter,
+		Filter:      usableKeywordSourceFilter,
 	},
 	{
 		ID:         "keyword_catalog_relations",
@@ -234,7 +235,7 @@ var Registry = []TableSyncItem{
 			"object_release", "object_external_id", "provenance_locator", "native_payload", "created_at",
 		},
 		JSONColumns: []string{"native_payload"},
-		Filter:      approvedKeywordSourceFilter,
+		Filter:      usableKeywordSourceFilter,
 	},
 	{
 		ID:         "keyword_catalog_negative_decisions",
@@ -246,7 +247,7 @@ var Registry = []TableSyncItem{
 			"object_external_id", "relation", "reason", "provenance_locator", "native_payload", "created_at",
 		},
 		JSONColumns: []string{"native_payload"},
-		Filter:      approvedKeywordSourceFilter,
+		Filter:      usableKeywordSourceFilter,
 	},
 	{
 		ID:         "keyword_ucum_codes",
@@ -258,7 +259,7 @@ var Registry = []TableSyncItem{
 			"native_payload", "created_at",
 		},
 		JSONColumns: []string{"native_payload"},
-		Filter:      approvedKeywordSourceFilter,
+		Filter:      usableKeywordSourceFilter,
 	},
 
 	// The keyword dictionary, mirrored as it is on the releasing machine: the
@@ -315,7 +316,7 @@ var Registry = []TableSyncItem{
 		CursorCol:  "modify_time",
 		NaturalKey: []string{"source", "external_id", "release"},
 		Columns:    []string{"source", "external_id", "release", "concept_id", "modify_time"},
-		Filter:     approvedKeywordSourceFilter,
+		Filter:     usableKeywordSourceFilter,
 	},
 	{
 		ID:         "keyword_surface_evidence",
@@ -325,7 +326,7 @@ var Registry = []TableSyncItem{
 		Columns: []string{
 			"surface_id", "source", "external_id", "evidence", "confidence", "release", "modify_time",
 		},
-		Filter: approvedKeywordSourceFilter,
+		Filter: usableKeywordSourceFilter,
 	},
 
 	// The governed `quantity` ontology module that the QUDT approve flow
@@ -423,9 +424,9 @@ var Registry = []TableSyncItem{
 	},
 }
 
-// approvedKeywordSourceFilter scopes a keyword catalog table to rows whose
-// (source, release) is an approved release in kb.keyword_sources.
-const approvedKeywordSourceFilter = "(source, release) IN (SELECT source, release FROM kb.keyword_sources WHERE license_review_status = 'approved')"
+// usableKeywordSourceFilter scopes a keyword catalog table to rows whose
+// (source, release) is a release in kb.keyword_sources that has not been rejected.
+const usableKeywordSourceFilter = "(source, release) IN (SELECT source, release FROM kb.keyword_sources WHERE license_review_status <> 'rejected')"
 
 // ItemByID looks up a registered sync item by its stable id.
 func ItemByID(id string) (TableSyncItem, bool) {

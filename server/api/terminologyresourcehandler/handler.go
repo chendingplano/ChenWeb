@@ -166,6 +166,11 @@ func ApproveResource(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{false, "approved_by is required"})
 	}
 	comments := strings.TrimSpace(c.FormValue("comments"))
+	if release, imported := importedUnreviewedRelease(c.Request().Context(), dir, id); imported {
+		msg := "release " + release + " was already imported as unreviewed and is in use; approving an imported release is not supported yet"
+		logger.Warn("approve refused: release already imported as unreviewed", "source", string(id), "release", release)
+		return c.JSON(http.StatusConflict, errorResponse{false, msg})
+	}
 	st, err := terminology.ApproveDraft(dir, id, approvedBy, comments, time.Now().UTC())
 	if err != nil {
 		code := http.StatusInternalServerError
@@ -180,11 +185,30 @@ func ApproveResource(c echo.Context) error {
 	}
 	logger.Info("approved terminology draft", "source", string(id), "approved_by", approvedBy)
 
+	outcome, governance, hasGovernance := importDraft(c.Request().Context(), dir, id, st, approvedBy, logger)
+	res, _ := terminology.ResourceByID(id)
+	respBody := map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome}
+	if hasGovernance {
+		respBody["ontology"] = governance
+	}
+	return c.JSON(http.StatusOK, respBody)
+}
+
+// autoImportBy is the actor recorded for an import that follows a download
+// without a person approving it.
+const autoImportBy = "auto-import"
+
+// importDraft imports one resource's draft manifest into the database: the
+// keyword catalog and, for QUDT, the governed quantity module (terms, release,
+// activation), then starts keyword auto-promotion. It does not look at the
+// manifest's review state beyond what the manifest parser enforces, so the same
+// code serves an approval and an unreviewed download. by is the actor recorded
+// on rows the import writes.
+func importDraft(ctx context.Context, dir string, id terminology.ResourceID, st terminology.FetchStatus, by string, logger ApiTypes.JimoLogger) (importOutcome, qudtGovernanceOutcome, bool) {
 	outcome := importOutcome{}
 	var governance qudtGovernanceOutcome
 	hasGovernance := false
 	manifestPath := filepath.Join(dir, string(id), "manifest.draft.json")
-	ctx := c.Request().Context()
 	if db := ApiTypes.ProjectDBHandle; db != nil {
 		isQUDT := id == terminology.ResourceQUDT
 		if alreadyImportedIdentical(ctx, db, manifestPath) {
@@ -195,7 +219,7 @@ func ApproveResource(c echo.Context) error {
 			logger.Info("approved terminology release already imported with identical content", "source", string(id))
 			if isQUDT {
 				hasGovernance = true
-				governance = writeQUDTTermsReplay(ctx, db, manifestPath, approvedBy)
+				governance = writeQUDTTermsReplay(ctx, db, manifestPath, by)
 				if !governance.OK {
 					outcome.OK = false
 					outcome.Error = governance.Error
@@ -205,7 +229,7 @@ func ApproveResource(c echo.Context) error {
 		} else if isQUDT {
 			hasGovernance = true
 			var result terminology.ImportResult
-			result, governance = writeQUDTTermsFresh(ctx, db, manifestPath, approvedBy)
+			result, governance = writeQUDTTermsFresh(ctx, db, manifestPath, by)
 			if governance.OK {
 				outcome.OK = true
 				outcome.Result = &result
@@ -227,7 +251,7 @@ func ApproveResource(c echo.Context) error {
 		}
 
 		if hasGovernance && governance.OK {
-			version, relErr := releaseQUDTIfPending(ctx, db, approvedBy)
+			version, relErr := releaseQUDTIfPending(ctx, db, by)
 			if relErr != nil {
 				governance.Error = relErr.Error()
 				outcome.OK = false
@@ -247,12 +271,31 @@ func ApproveResource(c echo.Context) error {
 	} else {
 		outcome.Error = "database handle is not configured; run terminology-import import manually"
 	}
-	res, _ := terminology.ResourceByID(id)
-	respBody := map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome}
-	if hasGovernance {
-		respBody["ontology"] = governance
+	return outcome, governance, hasGovernance
+}
+
+// importedUnreviewedRelease reports whether the draft manifest's release is
+// already in kb.keyword_sources as an unreviewed release. kb.keyword_sources is
+// immutable, so such a release cannot be turned into an approved one in place.
+// It reads the source and release from the manifest, as alreadyImportedIdentical
+// does, so the two checks always look at the same row.
+func importedUnreviewedRelease(ctx context.Context, dir string, id terminology.ResourceID) (string, bool) {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return "", false
 	}
-	return c.JSON(http.StatusOK, respBody)
+	manifest, _, err := terminology.ParseAndVerifyManifest(filepath.Join(dir, string(id), "manifest.draft.json"))
+	if err != nil {
+		return "", false
+	}
+	var status string
+	if err := db.QueryRowContext(ctx,
+		`SELECT license_review_status FROM kb.keyword_sources WHERE source = $1 AND release = $2`,
+		manifest.Policy.Source, manifest.Policy.Release,
+	).Scan(&status); err != nil {
+		return "", false
+	}
+	return manifest.Policy.Release, status == keywords.LicenseReviewUnreviewed
 }
 
 // alreadyImportedIdentical reports whether the approved local manifest is an
@@ -347,5 +390,17 @@ func DownloadResource(c echo.Context) error {
 		}
 		return c.JSON(code, errorResponse{false, err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "resource": viewFor(dir, res, st)})
+
+	// Dictionary data does not wait for a license review. A download is imported
+	// at once as an unreviewed release: it feeds the dictionary and syncs to
+	// deployments like any other release, but it cannot be an identity authority
+	// (see keywords.SourcePolicy.Validate). Importing again is an idempotent replay.
+	rc := EchoFactory.NewFromEcho(c, "CWB_TER_004")
+	defer rc.Close()
+	outcome, governance, hasGovernance := importDraft(c.Request().Context(), dir, id, st, autoImportBy, rc.GetLogger())
+	body := map[string]any{"status": true, "resource": viewFor(dir, res, st), "import": outcome}
+	if hasGovernance {
+		body["ontology"] = governance
+	}
+	return c.JSON(http.StatusOK, body)
 }

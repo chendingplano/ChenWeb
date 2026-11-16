@@ -733,3 +733,65 @@ func TestAlreadyImportedIdenticalRejectsDrift(t *testing.T) {
 		t.Fatalf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+// A release already imported as unreviewed cannot be approved in place
+// (kb.keyword_sources is immutable). Approve must refuse before it touches the
+// manifest, so the file and the table never disagree about the review state.
+func TestApproveResourceRefusesReleaseImportedAsUnreviewed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TERMINOLOGY_DIR", dir)
+	sourceDir := filepath.Join(dir, string(terminology.ResourceQUDT))
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "status.json"), []byte(`{"source":"qudt","release":"3.5.0","downloaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeQUDTDraftFromFixture(t, sourceDir)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT license_review_status FROM kb.keyword_sources WHERE source = $1 AND release = $2")).
+		WithArgs("qudt-quantity-kind", "3.5.0").
+		WillReturnRows(sqlmock.NewRows([]string{"license_review_status"}).AddRow("unreviewed"))
+
+	before, err := terminology.DraftReviewStatus(dir, terminology.ResourceQUDT)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/terminology-resources/qudt/approve", nil)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c := e.NewContext(req, rec)
+	c.SetParamNames("source")
+	c.SetParamValues("qudt")
+	if err := c.Request().ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	c.Request().Form.Set("approved_by", "alice@example.test")
+
+	if err := ApproveResource(c); err != nil {
+		t.Fatalf("ApproveResource: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body = %s", rec.Code, rec.Body.String())
+	}
+	after, err := terminology.DraftReviewStatus(dir, terminology.ResourceQUDT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("manifest review status changed from %q to %q although approval was refused", before, after)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
