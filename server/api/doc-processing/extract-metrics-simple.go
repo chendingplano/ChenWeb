@@ -1,7 +1,8 @@
 package docprocessing
 
 // extract_metrics_simple (openspec change extract-metrics-simple): the metrics of a chunk in one
-// LLM call, with the instructions as a cacheable system message and a compact output. Everything
+// LLM call for ordinary chunks, with output-sized calls for dense tables. Instructions are a
+// cacheable system message and the output is compact. Everything
 // after the calls (finishMetricRows, replacement save, indexing) uses extract_metrics' code.
 
 import (
@@ -33,6 +34,7 @@ type metricSimpleResult struct {
 	tagged   []map[string]any
 	dropped  []droppedMetricRow
 	language string
+	calls    int
 }
 
 func (r metricSimpleResult) empty() bool {
@@ -40,6 +42,7 @@ func (r metricSimpleResult) empty() bool {
 }
 
 func (r *metricSimpleResult) add(o metricSimpleResult) {
+	r.calls += o.calls
 	r.rows = append(r.rows, o.rows...)
 	r.tagged = append(r.tagged, o.tagged...)
 	r.dropped = append(r.dropped, o.dropped...)
@@ -90,7 +93,7 @@ func (p *MetricsProcessor) setSimpleModel(ref, cfgPath string, cfg structureMode
 	p.RelationModelRef, p.RelationModelCfgPath, p.RelationModelCfg, p.RelationModelErr = ref, cfgPath, cfg, err
 	p.RelationModelName = cfg.ModelName
 	p.ModelRef, p.ModelCfgPath, p.ModelErr, p.ModelName = ref, cfgPath, err, cfg.ModelName
-	// The halves retry (extractSimpleChunk) replaces the candidate pass's fallback model.
+	// Output-sized segments and bounded split retries replace the candidate pass's fallback model.
 	p.FallbackMentionModelRef, p.FallbackMentionModelName, p.FallbackMentionModelErr = "", "", nil
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 }
@@ -111,7 +114,7 @@ func metricProcessorConflict(processors []Processor) error {
 	return nil
 }
 
-// extractMetricsSimple is the sequential path's extraction: one call per chunk, the warm-up gate
+// extractMetricsSimple is the sequential path's extraction: planned calls per chunk, the warm-up gate
 // first, then the steps shared with extract_metrics.
 func (p *MetricsProcessor) extractMetricsSimple(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) (metricExtractionResult, error) {
 	maxTasks := max(p.MaxTasks, 1)
@@ -150,12 +153,12 @@ func (p *MetricsProcessor) extractMetricsSimple(ctx context.Context, recordID in
 		Metrics:      metrics,
 		Dropped:      dropped,
 		ModelName:    p.RelationModelName,
-		LLMCallCount: len(chunks),
+		LLMCallCount: all.calls,
 	}, nil
 }
 
 // processSimpleChunk is ProcessChunk in simple mode. Like a failed candidate-pass chunk, a chunk
-// whose call and halves retry both fail is logged and skipped.
+// whose planned calls and bounded split retries fail is logged and skipped.
 func (p *MetricsProcessor) processSimpleChunk(ctx context.Context, chunkIdx int) error {
 	chunk := p.batchChunks[chunkIdx]
 	var res metricSimpleResult
@@ -183,28 +186,32 @@ func (p *MetricsProcessor) simpleCacheWarm() bool {
 	return hit+miss > 0 && 2*hit >= hit+miss
 }
 
-// extractSimpleChunk makes the chunk's call and turns the response into rows and set-aside
-// items. A failed call is retried once as two calls, each extracting from one half of the normal
-// lines with the other half shown as overlap (design D5).
+// extractSimpleChunk plans output-sized segments before the first call. Results become
+// visible only when every segment succeeds; source chunks and row IDs stay unchanged.
 func (p *MetricsProcessor) extractSimpleChunk(ctx context.Context, recordID int64, chunk Chunk, docCtx string, total int) (metricSimpleResult, error) {
-	res, err := p.callSimpleChunk(ctx, recordID, chunk, chunk.Lines, docCtx, total, "")
-	if err != nil && !isCtxStopped(ctx) {
-		first, second, ok := splitChunkHalves(chunk.Lines)
-		if ok {
-			p.Logger.Warn("extract metrics simple: chunk call failed; retrying as two halves",
-				"record_id", recordID, "chunk", chunk.SeqNo, "error", err)
-			a, errA := p.callSimpleChunk(ctx, recordID, chunk, first, docCtx, total, "_h1")
-			b, errB := p.callSimpleChunk(ctx, recordID, chunk, second, docCtx, total, "_h2")
-			if errA == nil && errB == nil {
-				a.add(b)
-				res, err = a, nil
-			} else {
-				err = fmt.Errorf("(MID-20261101-06) %w; halves retry: %v %v", err, errA, errB)
-			}
-		}
+	work := newMetricSimpleWork(chunk.Lines)
+	segments, budget := work.plan(p.RelationModelCfg.MaxOutputTokens)
+	if len(segments) > 1 {
+		p.Logger.Info("extract metrics simple: preflight split", "record_id", recordID,
+			"chunk", chunk.SeqNo, "segments", len(segments), "output_budget", budget,
+			"max_output_tokens", p.RelationModelCfg.MaxOutputTokens)
 	}
-	if err != nil {
-		return metricSimpleResult{}, err
+	var res metricSimpleResult
+	for i, segment := range segments {
+		suffix := ""
+		if len(segments) > 1 {
+			suffix = fmt.Sprintf("_s%d", i+1)
+		}
+		if len(segments) > 1 || segment.estimate() > budget {
+			p.Logger.Info("extract metrics simple: planned segment", "record_id", recordID, "chunk", chunk.SeqNo,
+				"segment", i+1, "estimated_output_tokens", segment.estimate(), "output_budget", budget,
+				"units", len(segment.units), "indivisible_over_budget", len(segment.units) == 1 && segment.estimate() > budget)
+		}
+		part, err := p.extractSimpleSelection(ctx, recordID, chunk, segment, docCtx, total, 0, suffix)
+		if err != nil {
+			return metricSimpleResult{}, err
+		}
+		res.add(part)
 	}
 	n := 0
 	for _, row := range res.rows {
@@ -219,9 +226,12 @@ func (p *MetricsProcessor) extractSimpleChunk(ctx context.Context, recordID int6
 	return res, nil
 }
 
-// callSimpleChunk makes one call over lines (the chunk's, or a halves-retry copy of them) and
-// parses its response; callSuffix tells the halves' log entries apart.
+// callSimpleChunk makes one unsegmented call. callSuffix distinguishes call log entries.
 func (p *MetricsProcessor) callSimpleChunk(ctx context.Context, recordID int64, chunk Chunk, lines []MarkedLine, docCtx string, total int, callSuffix string) (metricSimpleResult, error) {
+	return p.callSimpleChunkSelection(ctx, recordID, chunk, lines, docCtx, total, callSuffix, nil)
+}
+
+func (p *MetricsProcessor) callSimpleChunkSelection(ctx context.Context, recordID int64, chunk Chunk, lines []MarkedLine, docCtx string, total int, callSuffix string, selection *metricSimpleSelection) (metricSimpleResult, error) {
 	start := p.Now()
 	input := canonicalChunkInputText(lines, docCtx)
 	if filepath.Base(p.RelationPromptRef) == "prompt-extract-metric-simple-v2.md" {
@@ -233,8 +243,12 @@ func (p *MetricsProcessor) callSimpleChunk(ctx context.Context, recordID int64, 
 	if err != nil {
 		return metricSimpleResult{}, err
 	}
-	idx := newSimpleChunkLines(lines)
-	res := metricSimpleResult{language: normalizeMetricSimpleLang(asString(payload["lang"]))}
+	sourceLines := lines
+	if selection != nil {
+		sourceLines = selection.sourceLines(lines)
+	}
+	idx := newSimpleChunkLines(sourceLines)
+	res := metricSimpleResult{language: normalizeMetricSimpleLang(asString(payload["lang"])), calls: 1}
 	discarded := 0
 	rows, _ := payload["m"].([]any)
 	for _, item := range rows {
@@ -242,8 +256,19 @@ func (p *MetricsProcessor) callSimpleChunk(ctx context.Context, recordID int64, 
 		if !ok {
 			continue
 		}
+		spans := normalizeSourceLineSpans(raw["l"])
+		if selection != nil && idx.hasNormalLine(spans) {
+			accept, err := selection.accepts(raw, spans)
+			if err != nil {
+				return metricSimpleResult{}, fmt.Errorf("(MID-20261116-703) metric: %w", err)
+			}
+			if !accept {
+				discarded++
+				continue
+			}
+		}
 		row := expandSimpleMetricRow(raw, idx)
-		spans, _ := row["source_line_spans"].([]string)
+		spans, _ = row["source_line_spans"].([]string)
 		switch {
 		case asString(row["metric_name"]) == "" || len(spans) == 0:
 			res.dropped = append(res.dropped, newDroppedMetricRow(row, metricDropStageEnrich, "invalid_row"))
@@ -264,14 +289,25 @@ func (p *MetricsProcessor) callSimpleChunk(ctx context.Context, recordID int64, 
 			discarded++
 			continue
 		}
+		if selection != nil && idx.hasNormalLine(spans) {
+			accept, err := selection.accepts(raw, spans)
+			if err != nil {
+				return metricSimpleResult{}, fmt.Errorf("(MID-20261116-704) set-aside: %w", err)
+			}
+			if !accept {
+				discarded++
+				continue
+			}
+		}
 		res.dropped = append(res.dropped, newDroppedMetricRow(map[string]any{
 			"metric_name":         strings.TrimSpace(asString(raw["n"])),
 			"source_line_spans":   spans,
-			"threshold_or_target": idx.sourceText(spans, nil),
+			"source_table_rows":   tableRowRefsFromValue(raw["t"]),
+			"threshold_or_target": idx.sourceText(spans, tableRowRefsFromValue(raw["t"])),
 		}, metricDropStageEnrich, firstNonEmptyTrimmed(asString(raw["r"]), "unspecified")))
 	}
 	if discarded > 0 {
-		p.Logger.Info("extract metrics simple: discarded rows on overlap lines only",
+		p.Logger.Info("extract metrics simple: discarded rows outside segment ownership",
 			"record_id", recordID, "chunk", chunk.SeqNo, "discarded", discarded)
 	}
 	return res, nil
@@ -311,30 +347,6 @@ func normalizeMetricSimpleLang(raw string) string {
 		return "zh"
 	}
 	return lang
-}
-
-// splitChunkHalves returns two copies of lines; each keeps one half of the normal lines and
-// marks the other half overlap. ok is false when there are fewer than two normal lines.
-func splitChunkHalves(lines []MarkedLine) (first, second []MarkedLine, ok bool) {
-	var normal []int
-	for i, l := range lines {
-		if normalizeChunkFlag(l.Mark) == "n" {
-			normal = append(normal, i)
-		}
-	}
-	if len(normal) < 2 {
-		return nil, nil, false
-	}
-	first = append([]MarkedLine(nil), lines...)
-	second = append([]MarkedLine(nil), lines...)
-	for k, i := range normal {
-		if k < len(normal)/2 {
-			second[i].Mark = "o"
-		} else {
-			first[i].Mark = "o"
-		}
-	}
-	return first, second, true
 }
 
 // expandSimpleMetricRow turns a compact row (spec metric-simple-extraction) into the long-named

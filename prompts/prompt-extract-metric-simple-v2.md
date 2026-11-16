@@ -11,9 +11,13 @@ each following row supplies the values in that order.
 - `flag` `n` = a normal line of this chunk; `o` = an overlap line shown only as context. Emit rows
   and set-aside items only for statements on normal lines. A statement that starts on a normal
   line may cite overlap lines too.
-- A line with `line_type` `table` holds a whole table, one row per text line labelled
+- A line with `line_type` `table` holds a table or a selected segment, one row per text line labelled
   `<line_number>#<row id>` (`116#h0: 序号 | 指标 | 要求` header, `116#r1: 1 | 总砷 | ≤15` data). Cells
   are separated by ` | `; merged cells are already copied into every row they cover.
+  Segments retain original row IDs. The same table line number may appear in a normal segment
+  and an overlap-only context segment containing notes. Extract only the normal segment's rows;
+  overlap notes may qualify those rows but must not produce independent assertions. Every table
+  metric and table set-aside item must cite its data rows in `t`, including statements in note rows.
 
 ## What A Metric Is
 
@@ -270,7 +274,8 @@ rows, `vs` value structure, `lo` / `hi` range endpoints (only for a range not wr
 two English snake_case category keys for the kind of quantity (`permitted_error`, `drug_dose`,
 `test_setting`).
 
-`x` items: `l` lines, `n` a short name of the statement, `r` one reason from "Set Aside"; only for
+`x` items: `l` lines, `t` table rows when applicable (same format as metric rows),
+`n` a short name of the statement, `r` one reason from "Set Aside"; only for
 statements with a number or a named quantity.
 
 Rules:
