@@ -618,7 +618,7 @@
 			</div>
 		</aside>
 		{#if tableLine}
-			<div class="table-window" bind:this={tableWindow} role="dialog" aria-label={m.chunk_mgmt_table_view()} style:left="{tablePosition.left}px" style:top="{tablePosition.top}px" style:max-width="calc(100vw - {tablePosition.left}px)" style:max-height="calc(100vh - {tablePosition.top}px)" onkeydown={(event) => { if (event.key === 'Escape') tableLine = null; }}>
+			<div class="table-window" bind:this={tableWindow} role="dialog" tabindex="-1" aria-label={m.chunk_mgmt_table_view()} style:left="{tablePosition.left}px" style:top="{tablePosition.top}px" style:max-width="calc(100vw - {tablePosition.left}px)" style:max-height="calc(100vh - {tablePosition.top}px)" onkeydown={(event) => { if (event.key === 'Escape') tableLine = null; }}>
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="table-window-head" onpointerdown={(event) => { if ((event.target as HTMLElement).closest('button')) return; const rect = tableWindow!.getBoundingClientRect(); dragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }} onpointermove={dragTable} onpointerup={() => dragOffset = null} onpointercancel={() => dragOffset = null}>
 					<strong>{m.chunk_mgmt_table_view()} · P{tableLine.page_number} · L{tableLine.line_number}</strong>
@@ -976,7 +976,6 @@
 	.type { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.06em; }
 	.chunk-topic { font-weight: 700; margin-bottom: 4px; }
 	.chunk-keywords { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-	.muted { color: var(--text-muted); }
 	.right { min-width: 0; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 	.right-toolbar {
 		display: flex;
