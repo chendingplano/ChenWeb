@@ -4772,6 +4772,7 @@
 	"sync_data_item": "条目",
 	"sync_data_origin": "来源",
 	"sync_data_last_synced": "上次同步",
+	"sync_data_table_row_count": "表行数",
 	"sync_data_last_row_count": "上次行数",
 	"sync_data_status": "状态",
 	"sync_data_action": "操作",

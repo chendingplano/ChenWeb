@@ -16,6 +16,7 @@ export type SyncItem = {
 	file_dir_default_subdir?: string;
 	last_synced_at?: string;
 	last_row_count: number;
+	target_row_count: number | null;
 	last_error?: string;
 };
 
@@ -34,6 +35,7 @@ export type ApplySyncResponse = {
 	ok: boolean;
 	item_id: string;
 	synced_row_count: number;
+	target_row_count: number | null;
 	last_synced_at: string;
 };
 

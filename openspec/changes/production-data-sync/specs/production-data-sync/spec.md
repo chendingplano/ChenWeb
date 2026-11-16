@@ -104,7 +104,7 @@ The admin page SHALL provide individual selection checkboxes, a select/deselect-
 - **THEN** the items run in displayed order, the failure is shown for its item, later selected items still run, and the page reports the number of successful items
 
 ### Requirement: Preserve sync page state
-Successful sync SHALL update only that item's displayed sync timestamp, row count and error state from the apply response. The response SHALL include `last_synced_at` from the persisted server state. Sync SHALL NOT request a fresh item list or source discovery. Menu navigation within the same dashboard/tab SHALL retain selection, preview results, open forms and scroll positions.
+Successful sync SHALL update only that item's displayed sync timestamp, row count and error state from the apply response. The response SHALL include `last_synced_at` from the persisted server state and a separate `target_row_count` calculated from the entire destination table. Sync SHALL NOT request a fresh item list or source discovery. Menu navigation within the same dashboard/tab SHALL retain selection, preview results, open forms and scroll positions.
 
 #### Scenario: Apply from a scrolled list
 - **WHEN** a sysadmin syncs an item after scrolling down the list
@@ -112,3 +112,15 @@ Successful sync SHALL update only that item's displayed sync timestamp, row coun
 
 ### Requirement: Batched database apply
 A multi-row apply without ordering-sensitive constraints SHALL transfer rows into a transaction-local typed staging table via COPY, then issue set-based INSERT and UPDATE statements. Tables with partial/expression unique indexes, unique indexes on transferred mutable columns, or self references SHALL retain cursor-ordered row writes so earlier updates can free values needed by later inserts. It SHALL preserve local primary keys, the existing skip behavior on secondary unique conflicts, JSON null versus SQL NULL, and the newer-source-cursor update guard. Failure SHALL roll back the batch without advancing the stored cursor. Reference lookups MAY be reused within the batch, but SHALL NOT persist across applies.
+
+
+### Requirement: Distinguish destination size from latest transfer size
+The list and apply APIs SHALL return `target_row_count`, the exact local table count without source filters or cursor predicates. The UI SHALL label this value "Table row count". `last_row_count` in sync state and `synced_row_count` in the apply response SHALL continue to describe the latest transfer, which may legitimately be zero. Destination counts SHALL be calculated when listing and after a successful apply; a count error SHALL be logged and returned as null, displayed as an em dash, without marking a committed sync as failed.
+
+#### Scenario: No-change sync of a nonempty destination
+- **WHEN** a table has 7,046 destination rows and an incremental sync fetches no new changes
+- **THEN** the apply response reports `synced_row_count: 0` and `target_row_count: 7046`, and the table count stays 7,046 both immediately and after Refresh
+
+#### Scenario: Destination contains rows outside the source filter
+- **WHEN** the destination contains both approved synced rows and locally created proposed rows
+- **THEN** its displayed table count includes both, matching `SELECT count(*) FROM <destination table>`

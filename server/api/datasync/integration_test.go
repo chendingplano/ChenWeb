@@ -445,3 +445,25 @@ func TestSyncPreservesOrderWhenUpdatesFreeUniqueValues(t *testing.T) {
 		})
 	}
 }
+
+func TestTargetRowCountAgainstRealPostgres(t *testing.T) {
+	db := testDB(t)
+	table := fmt.Sprintf("public.datasync_count_%d", time.Now().UnixNano())
+	scratchProductNamesTable(t, db, table)
+	item := scratchItem(table)
+	item.Filter = "status = 'approved'"
+	if _, err := db.Exec("INSERT INTO " + table + " (seq_no, product_name, source, status) VALUES (1,'approved','test','approved'), (2,'local draft','test','proposed')"); err != nil {
+		t.Fatal(err)
+	}
+	count := targetRowCount(context.Background(), db, item)
+	if count == nil || *count != 2 {
+		t.Fatalf("destination count=%v; should include both synced and local rows", count)
+	}
+	if _, err := db.Exec("TRUNCATE " + table); err != nil {
+		t.Fatal(err)
+	}
+	count = targetRowCount(context.Background(), db, item)
+	if count == nil || *count != 0 {
+		t.Fatalf("empty table count=%v; want known zero", count)
+	}
+}

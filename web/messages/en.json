@@ -4772,6 +4772,7 @@
 	"sync_data_item": "Item",
 	"sync_data_origin": "Origin",
 	"sync_data_last_synced": "Last Synced",
+	"sync_data_table_row_count": "Table row count",
 	"sync_data_last_row_count": "Last Row Count",
 	"sync_data_status": "Status",
 	"sync_data_action": "Action",

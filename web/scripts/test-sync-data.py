@@ -18,7 +18,7 @@ with sync_playwright() as p:
         lists = []
         items = [{'item_id': f'item_{i}', 'table': f'public.table_{i}', 'kind': 'table',
                   'origin': 'compiled', 'cursor_col': 'update_time', 'natural_key': ['name'],
-                  'columns': ['name', 'update_time'], 'json_columns': [], 'last_row_count': 1}
+                  'columns': ['name', 'update_time'], 'json_columns': [], 'last_row_count': 0, 'target_row_count': 41}
                  for i in range(30)]
 
         def sync_api(route):
@@ -35,7 +35,7 @@ with sync_playwright() as p:
                     route.fulfill(status=502, json={'message': 'Fixture source error'})
                 else:
                     route.fulfill(json={'ok': True, 'item_id': item_id, 'changed_row_count': 7,
-                                        'synced_row_count': 7, 'last_synced_at': '2026-11-16T12:00:00Z'})
+                                        'synced_row_count': 0 if item_id == 'item_0' else 7, 'target_row_count': 41, 'last_synced_at': '2026-11-16T12:00:00Z'})
             else:
                 raise AssertionError(path)
 
@@ -47,6 +47,7 @@ with sync_playwright() as p:
         expect(root.locator('tbody tr')).to_have_count(30, timeout=30000)
         preview = root.get_by_role('button', name='Preview selected' if locale == 'en' else '预览所选项', exact=True)
         sync = root.get_by_role('button', name='Sync selected' if locale == 'en' else '同步所选项', exact=True)
+        expect(root.locator('tbody tr').first.locator('td').nth(6)).to_have_text('41')
         checkboxes = root.get_by_role('checkbox')
         expect(preview).to_be_disabled()
         checkboxes.first.check()
@@ -70,12 +71,13 @@ with sync_playwright() as p:
         row.get_by_role('button', name='Sync' if locale == 'en' else '同步', exact=True).click()
         expect(row.get_by_role('button', name='Sync' if locale == 'en' else '同步', exact=True)).to_be_enabled()
         expect(row).to_have_attribute('data-sync-test', 'preserved')
-        expect(row.locator('td').nth(6)).to_have_text('7')
+        expect(row.locator('td').nth(6)).to_have_text('41')
         assert len(lists) == 1, lists
         assert abs(row.bounding_box()['y'] - row_top) <= 2, (row_top, row.bounding_box()['y'])
         sync.click()
         expect(sync).to_be_enabled()
         assert calls[-3:] == [('item_0', 'apply'), ('item_1', 'apply'), ('item_2', 'apply')]
+        expect(root.locator('tbody tr').first.locator('td').nth(6)).to_have_text('41')
         assert len(lists) == 1
         expect(root.locator('tbody input:checked')).to_have_count(3)
         root.get_by_role('button', name='+ New Data Syncher' if locale == 'en' else '+ 新建数据同步器', exact=True).click()
@@ -93,6 +95,10 @@ with sync_playwright() as p:
         expect(root.locator('form input').first).to_have_value('unsaved-sync-item')
         assert root.evaluate('(el) => el.closest("main").scrollTop') == menu_scroll
         assert len(lists) == 1, lists
+        with page.expect_response(lambda response: urlparse(response.url).path == '/api/v1/data-sync/items'):
+            root.get_by_role('button', name='Refresh' if locale == 'en' else '刷新', exact=True).click()
+        expect(root.locator('tbody tr').first.locator('td').nth(6)).to_have_text('41')
+        assert len(lists) == 2, lists
         assert not errors, errors
         print(f'PASS {locale}: selection, ordered batch, partial errors, row/scroll preservation, menu return')
         context.close()

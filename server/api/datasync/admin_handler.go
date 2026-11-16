@@ -1,6 +1,8 @@
 package datasync
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"strings"
@@ -36,6 +38,7 @@ type syncItemView struct {
 	FileDirDefaultSubdir string   `json:"file_dir_default_subdir,omitempty"`
 	LastSyncedAt         string   `json:"last_synced_at,omitempty"`
 	LastRowCount         int      `json:"last_row_count"`
+	TargetRowCount       *int64   `json:"target_row_count"`
 	LastError            string   `json:"last_error,omitempty"`
 }
 
@@ -116,7 +119,9 @@ func HandleListSyncItems(c echo.Context) error {
 			adminLogger.Error("failed to load sync state", "item_id", item.ID, "error", err)
 			return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load sync state"})
 		}
-		views = append(views, toSyncItemView(item, originCompiled, state))
+		view := toSyncItemView(item, originCompiled, state)
+		view.TargetRowCount = targetRowCount(ctx, db, item)
+		views = append(views, view)
 	}
 	for _, item := range dbItems {
 		if _, compiled := ItemByID(item.ID); compiled {
@@ -128,7 +133,9 @@ func HandleListSyncItems(c echo.Context) error {
 			adminLogger.Error("failed to load sync state", "item_id", item.ID, "error", err)
 			return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load sync state"})
 		}
-		views = append(views, toSyncItemView(item, string(item.Origin), state))
+		view := toSyncItemView(item, string(item.Origin), state)
+		view.TargetRowCount = targetRowCount(ctx, db, item)
+		views = append(views, view)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "items": views})
 }
@@ -243,11 +250,29 @@ func HandleApplySync(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "sync applied but failed to read state"})
 	}
+	targetCount := targetRowCount(ctx, db, item)
 	adminLogger.Info("sync completed", "item_id", item.ID, "rows", len(rows), "fetch_duration", fetched.Sub(started), "files_duration", filesDone.Sub(fetched), "upsert_duration", applied.Sub(filesDone), "total_duration", time.Since(started))
 	return c.JSON(http.StatusOK, map[string]any{
 		"last_synced_at":   updatedState.LastSyncedAt.String,
+		"target_row_count": targetCount,
 		"ok":               true,
 		"item_id":          item.ID,
 		"synced_row_count": len(rows),
 	})
+}
+
+// targetRowCount counts the entire local table, independently of source filters,
+// the stored cursor and the most recent transfer size. A failed count is unknown,
+// never a misleading zero, and does not turn an already committed sync into an error.
+func targetRowCount(ctx context.Context, db *sql.DB, item TableSyncItem) *int64 {
+	if err := validateTable(item.Table); err != nil {
+		adminLogger.Warn("invalid sync table for destination count", "item_id", item.ID, "error", err)
+		return nil
+	}
+	var count int64
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+item.Table).Scan(&count); err != nil {
+		adminLogger.Warn("failed to count destination sync table", "item_id", item.ID, "table", item.Table, "error", err)
+		return nil
+	}
+	return &count
 }

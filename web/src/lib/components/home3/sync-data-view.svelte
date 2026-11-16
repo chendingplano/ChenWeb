@@ -234,6 +234,7 @@
 										...item,
 										last_synced_at: result.last_synced_at,
 										last_row_count: result.synced_row_count,
+										target_row_count: result.target_row_count,
 										last_error: undefined
 									}
 								: item
@@ -635,7 +636,7 @@
 							<th>{m.sync_data_kind()}</th>
 							<th>{m.sync_data_origin()}</th>
 							<th>{m.sync_data_last_synced()}</th>
-							<th>{m.sync_data_last_row_count()}</th>
+							<th>{m.sync_data_table_row_count()}</th>
 							<th>{m.sync_data_status()}</th>
 							<th>{m.sync_data_action()}</th>
 						</tr>
@@ -657,7 +658,7 @@
 								<td class="cell-secondary">{item.kind}</td>
 								<td class="cell-secondary">{item.origin}</td>
 								<td>{fmtDate(item.last_synced_at)}</td>
-								<td>{item.last_row_count}</td>
+								<td>{item.target_row_count ?? '—'}</td>
 								<td>
 									{#if operationErrors[item.item_id]}
 										<span class="status-error">{operationErrors[item.item_id]}</span>
