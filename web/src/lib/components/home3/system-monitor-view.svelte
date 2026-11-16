@@ -9,7 +9,7 @@
  let error=$state(false), popup=$state<string|null>(null), popupLeft=$state(0), popupTop=$state(0);
  let drag:{x:number;y:number;left:number;top:number}|null=null, loading=false;
  let bodies:Record<string,HTMLElement>={};
- let windowsMenu: HTMLDetailsElement;
+ let windowsMenu = $state<HTMLDetailsElement>();
  let topZ=0;
  let interaction: { id:string; type:'move'|'resize'; pointer:number; startX:number; startY:number; x:number; y:number; width:number; height:number } | null = null;
  function dismissMenu(event:PointerEvent) { if(windowsMenu?.open && event.target instanceof Node && !windowsMenu.contains(event.target)) windowsMenu.open=false; }

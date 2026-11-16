@@ -6,7 +6,7 @@
  let models = $state<string[]>([]), prompts = $state<Record<string,string[]>>({});
  let loading = $state(true), loaded = $state(false), saving = $state(false), error = $state(false), saved = $state(false);
  let viewport: HTMLDivElement;
- const draftKey = `extractor-config-${extractor}-draft`, scrollKey = `extractor-config-${extractor}-scroll`;
+ let draftKey = $derived(`extractor-config-${extractor}-draft`), scrollKey = $derived(`extractor-config-${extractor}-scroll`);
  let title = $derived(extractor === 'metrics-simple' ? m.nav_sysadmin_doc_process_config_metrics_simple() : extractor === 'references' ? m.nav_sysadmin_doc_process_config_references() : m.nav_sysadmin_doc_process_config_provisions());
  let fields = $derived(extractor === 'metrics-simple' ? [
   { key:'EXTRACT_METRICS_SIMPLE_MODEL_NAME', label:m.extractor_config_model(), type:'model' },
