@@ -11,6 +11,7 @@ def test_staged_worker_has_every_module_the_mineru_parser_imports(tmp_path):
     worker, adapters, mineru = tmp_path / 'worker', tmp_path / 'adapters', tmp_path / 'mineru'
     worker.mkdir()
     (worker / 'pdf_parser.py').write_text('make_ocr_parser(_ocr_fallback_lang())\n')
+    (worker / 'process_health.py').write_text('# worker health reporter\n')
     adapters.mkdir()
     for name in ADAPTERS:
         (adapters / name).write_text(f'# {name}\n')
@@ -22,3 +23,7 @@ def test_staged_worker_has_every_module_the_mineru_parser_imports(tmp_path):
                     '--mineru', str(mineru), '--output', str(out)], check=True)
     for name in ADAPTERS:
         assert (out / 'worker' / name).read_text() == f'# {name}\n'
+    # The archive puts worker entrypoints/health modules at the worker root,
+    # while container/mineru-v4 contains only the six MinerU overrides.
+    assert (out / 'worker' / 'pdf_parser.py').read_text() == 'make_ocr_parser()\n'
+    assert (out / 'worker' / 'process_health.py').read_text() == '# worker health reporter\n'

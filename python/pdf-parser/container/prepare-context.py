@@ -17,8 +17,10 @@ worker.mkdir(parents=True, exist_ok=True)
 mineru.mkdir(parents=True, exist_ok=True)
 for path in args.worker.glob("*.py"):
     shutil.copy2(str(path), str(worker / path.name))
+# Worker entrypoints and process_health.py come from --worker above. Only
+# MinerU integration modules are packaged under container/mineru-v4.
 for name in ("parser_mineru.py", "mineru_v4_adapter.py", "mineru_table_repair.py",
-             "mineru_cell_repair.py", "stacked_cells.py", "table_geometry.py", "pdf_parser.py", "process_health.py"):
+             "mineru_cell_repair.py", "stacked_cells.py", "table_geometry.py"):
     shutil.copy2(str(args.adapters / name), str(worker / name))
 # The September worker passed a language argument removed by the MinerU 4 API.
 main = worker / "pdf_parser.py"
