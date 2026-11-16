@@ -4,7 +4,7 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-Environment=SHARED_LIB_CONFIG_DIR=/home/gui/Workspace/shared/libconfig.toml
+Environment=SHARED_LIB_CONFIG_DIR=/etc/chenweb/process-monitor-libconfig.toml
 Environment=FILE_LOGGER=lumberjack
 Environment=LOG_FILE_DIR=/home/gui/Workspace/ChenWeb/Data/ProcessHealth/monitor/logs
 Environment=MAX_AGE_IN_DAYS=7

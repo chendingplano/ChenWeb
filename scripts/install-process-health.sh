@@ -9,6 +9,11 @@ HEALTH_ROOT="$CHENWEB_DIR/Data/ProcessHealth"
 install -d -m 0755 -o gui -g gui "$HEALTH_ROOT" "$HEALTH_ROOT/reports"
 install -d -m 0755 -o root -g root "$HEALTH_ROOT/monitor" /etc/chenweb
 install -m 0644 "$SOURCE_DIR/process-monitor.json" /etc/chenweb/process-monitor.json
+# The supervisor's logger must not depend on application configuration files.
+if [ ! -e /etc/chenweb/process-monitor-libconfig.toml ]; then
+  printf '# Independent monitor logger; defaults are sufficient.\n' > /etc/chenweb/process-monitor-libconfig.toml
+  chmod 0644 /etc/chenweb/process-monitor-libconfig.toml
+fi
 for task in process-monitor doc-recovery; do
   [ -x "$CHENWEB_DIR/$task-linux" ] || { echo "Missing $task-linux" >&2; exit 1; }
   install -m 0644 "$SOURCE_DIR/$task.service" "$SOURCE_DIR/$task.timer" /etc/systemd/system/
