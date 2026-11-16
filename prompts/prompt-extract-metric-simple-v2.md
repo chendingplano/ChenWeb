@@ -256,15 +256,14 @@ own number and cites a document only for the test method is a `requirement`.
 ## Output
 
 ```json
-{"lang":"zh","m":[{"n":"总砷","ne":"Total arsenic","s":"肥料","se":"Fertilizer","v":"15","u":"mg/kg","r":"upper_bound","k":"requirement","l":["12"],"cat":["heavy_metal_limit"]},
-{"n":"葡萄糖静推剂量","ne":"Glucose IV push dose","s":"低血糖患者","se":"Hypoglycaemic patient","v":"40","u":"ml","r":"exact","k":"requirement","c":"适用人群：成人；药物：50％葡萄糖；给药途径：静脉推注","ce":"Population: adults; Drug: 50% glucose; Route: IV push","l":["88"],"cat":["drug_dose"]}],
+{"lang":"zh","m":[{"n":"总砷","s":"肥料","v":"15","u":"mg/kg","r":"upper_bound","k":"requirement","l":["12"],"cat":["heavy_metal_limit"]},
+{"n":"葡萄糖静推剂量","s":"低血糖患者","v":"40","u":"ml","r":"exact","k":"requirement","c":"适用人群：成人；药物：50％葡萄糖；给药途径：静脉推注","l":["88"],"cat":["drug_dose"]}],
 "x":[{"l":["30"],"n":"量热计压力","r":"term_definition"}]}
 ```
 
 Keys of a row: `n` metric name (concise, close to the source; generic columns named after the
-parent property), `ne` English name, `s` subject (the object only), `se` English subject, `v`
-value, `u` unit, `r`, `k`, `c` condition, `ce` English condition (same parts, `<Kind>: <value>`
-joined by `; `), `l` source lines (non-empty; `"12"` or `"13:15"`, plain line numbers), `t` table
+parent property), `s` subject (the object only), `v` value, `u` unit, `r`, `k`, `c` condition,
+`l` source lines (non-empty; `"12"` or `"13:15"`, plain line numbers), `t` table
 rows, `vs` value structure, `lo` / `hi` range endpoints (only for a range not written `a~b`, `a-b` or
 `a±b`), `g` tags (`test_condition`, `strict_bound`, `interpretation_bound`, `data_format`,
 `occurrence_count`), `d` the metric's definition or formula when the source states one, `cat` one or
@@ -276,7 +275,6 @@ statements with a number or a named quantity.
 
 Rules:
 - Leave out every key whose value would be empty, null, `[]` or `false`. Write no other keys.
-- `ne`, `se`, `ce` only when the document is not English; then always give `ne` and `se`, and `ce`
-  whenever there is `c`.
+- Keep `n`, `s` and `c` in the source language. Do not translate them or emit `ne`, `se` or `ce`.
 - Emit each assertion once. No row without `v`.
 - `lang` is the document language (`zh`, `en`, …). With no metrics, return `{"lang":"zh","m":[],"x":[]}`.
