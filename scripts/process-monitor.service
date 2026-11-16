@@ -1,0 +1,21 @@
+[Unit]
+Description=Check functional process health and raise throttled alarms
+After=local-fs.target
+
+[Service]
+Type=oneshot
+Environment=SHARED_LIB_CONFIG_DIR=/home/gui/Workspace/shared/libconfig.toml
+Environment=FILE_LOGGER=lumberjack
+Environment=LOG_FILE_DIR=/home/gui/Workspace/ChenWeb/Data/ProcessHealth/monitor/logs
+Environment=MAX_AGE_IN_DAYS=7
+Environment=MAX_SIZE_IN_MB=10
+Environment=NUM_LOG_FILES=3
+ExecStart=/home/gui/Workspace/ChenWeb/process-monitor-linux --reports /home/gui/Workspace/ChenWeb/Data/ProcessHealth/reports --state /home/gui/Workspace/ChenWeb/Data/ProcessHealth/monitor --services /etc/chenweb/process-monitor.json
+TimeoutStartSec=120
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/gui/Workspace/ChenWeb/Data/ProcessHealth/monitor
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

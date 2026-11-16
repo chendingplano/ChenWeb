@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/llmrun"
@@ -40,14 +41,17 @@ type ControlService struct {
 	BlockingProcessor Processor // always runs before Processors, regardless of requested operations
 	// Production processors hold mutable batch state and LLM clients. Build a
 	// separate graph per admitted run; Processors remains the configured catalog.
-	newRunProcessors func() ([]Processor, Processor, error)
-	Logger           ApiTypes.JimoLogger
-	InputStore       DocMetadataStore
-	EventStore       EventStore
-	StopStore        StopRequestStore
-	RunStore         DocProcessRunStore
-	PlanStore        DocProcessPlanStore
-	FacetStore       DocFacetStore
+	newRunProcessors    func() ([]Processor, Processor, error)
+	runtimeHealthMu     sync.Mutex
+	runtimeFault        error
+	runtimeFaultVersion uint64
+	Logger              ApiTypes.JimoLogger
+	InputStore          DocMetadataStore
+	EventStore          EventStore
+	StopStore           StopRequestStore
+	RunStore            DocProcessRunStore
+	PlanStore           DocProcessPlanStore
+	FacetStore          DocFacetStore
 	// Facets persists tier-1/tier-2 facet observations (spec 2026072901
 	// S16.1 "Facet tiers 1-2"). Deliberately independent of Resolver.Facets:
 	// Resolver is nil whenever the tier-3 LLM classifier isn't configured
@@ -89,6 +93,9 @@ type ControlService struct {
 	// should wait on this via WaitForInFlightPipelines before closing the
 	// DB pool the pipelines still write to.
 	inFlightPipelines sync.WaitGroup
+	activePipelines   atomic.Int64
+	// LeaseDB enables cross-process work exclusion in production.
+	LeaseDB *sql.DB
 }
 
 // WaitForInFlightPipelines blocks until every pipeline dispatched via
@@ -119,47 +126,71 @@ func (s *ControlService) RunEvent(ctx context.Context, payload []byte) error {
 	return s.handleEvent(ctx, payload)
 }
 
+// InFlightPipelines includes queued slot acquisition and intentional off-peak waits.
+func (s *ControlService) InFlightPipelines() int64 { return s.activePipelines.Load() }
+
+// HandleJetStreamEvent preserves the asynchronous API for embedded callers.
+// Production subscriptions use HandleJetStreamEventSync so ACK follows completion.
 func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject string, payload []byte) error {
+	s.activePipelines.Add(1)
+	release, err := s.acquirePipelineSlot(ctx)
+	if err != nil {
+		s.activePipelines.Add(-1)
+		return err
+	}
+	admitted := newPipelineSlotLease(s.acquirePipelineSlot, release)
+	s.inFlightPipelines.Go(func() {
+		defer s.activePipelines.Add(-1)
+		_ = s.processJetStreamEvent(ctx, subject, payload, admitted)
+	})
+	return nil
+}
+
+func (s *ControlService) HandleJetStreamEventSync(ctx context.Context, subject string, payload []byte) error {
+	s.activePipelines.Add(1)
+	defer s.activePipelines.Add(-1)
+	return s.processJetStreamEvent(ctx, subject, payload, nil)
+}
+
+func (s *ControlService) processJetStreamEvent(ctx context.Context, subject string, payload []byte, admitted *pipelineSlotLease) (procErr error) {
+	if admitted != nil {
+		defer admitted.Release()
+	}
 	eventID := ""
 	if s.EventStore != nil {
 		id, err := s.insertReceivedEvent(ctx, subject, payload)
 		if err != nil {
-			if s.Logger != nil {
-				s.Logger.Error("failed inserting kb.events received record", "subject", subject, "error", err)
-			}
-		} else {
-			eventID = id
+			return fmt.Errorf("persist received event: %w", err)
 		}
+		eventID = id
 	}
-
-	releaseSlot, err := s.acquirePipelineSlot(ctx)
-	if err != nil {
-		return err
-	}
-	lease := newPipelineSlotLease(s.acquirePipelineSlot, releaseSlot)
-	s.inFlightPipelines.Go(func() {
+	lease := admitted
+	if lease == nil {
+		releaseSlot, err := s.acquirePipelineSlot(ctx)
+		if err != nil {
+			return err
+		}
+		lease = newPipelineSlotLease(s.acquirePipelineSlot, releaseSlot)
 		defer lease.Release()
-		procStart := s.now()
-		var procErr error
-		procCtx := withPipelineSlotLease(withEventID(ctx, eventID), lease)
-		if strings.TrimSpace(subject) == DefaultEventSubject {
-			procErr = s.handleDefaultSubjectEvent(procCtx, payload)
-		} else {
-			var spanEnd func(error)
-			if evt, err := ParseLineFileGeneratedEvent(payload); err == nil {
-				procCtx, spanEnd = s.startPipelineTrace(procCtx, subject, eventID, evt)
-				defer func() { spanEnd(procErr) }()
+	}
+	procStart := s.now()
+	if s.EventStore != nil && eventID != "" {
+		defer func() {
+			if err := s.EventStore.UpsertConsumedStatus(context.Background(), eventID, procStart, time.Since(procStart).Milliseconds(), procErr); err != nil && s.Logger != nil {
+				s.Logger.Error("failed upserting kb.events consumed status", "event_id", eventID, "error", err)
 			}
-			procErr = s.handleEvent(procCtx, payload)
-		}
-		if s.EventStore == nil || strings.TrimSpace(eventID) == "" {
-			return
-		}
-		if err := s.EventStore.UpsertConsumedStatus(context.Background(), eventID, procStart, time.Since(procStart).Milliseconds(), procErr); err != nil && s.Logger != nil {
-			s.Logger.Error("failed upserting kb.events consumed status", "event_id", eventID, "error", err)
-		}
-	})
-	return nil
+		}()
+	}
+	procCtx := withPipelineSlotLease(withEventID(ctx, eventID), lease)
+	if strings.TrimSpace(subject) == DefaultEventSubject {
+		return s.handleDefaultSubjectEvent(procCtx, payload)
+	}
+	if evt, err := ParseLineFileGeneratedEvent(payload); err == nil {
+		var end func(error)
+		procCtx, end = s.startPipelineTrace(procCtx, subject, eventID, evt)
+		defer func() { end(procErr) }()
+	}
+	return s.handleEvent(procCtx, payload)
 }
 
 const (
@@ -674,11 +705,51 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		return err
 	}
+	if s.LeaseDB != nil {
+		leaseCtx, cancelLease := context.WithCancel(ctx)
+		defer cancelLease()
+		release, acquired, err := acquireDocumentLease(leaseCtx, s.LeaseDB, evt.RecordID, cancelLease)
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			return ErrDocumentBusy
+		}
+		defer release()
+		ctx = leaseCtx
+		// A recovered event may have waited behind a normal event. Recheck after
+		// acquiring the lease, before routing or any destructive processor work.
+		var marker struct {
+			Recovery bool `json:"doc_recovery"`
+		}
+		_ = json.Unmarshal(payload, &marker)
+		if marker.Recovery {
+			var eligible bool
+			if err := s.LeaseDB.QueryRowContext(ctx, `SELECT parse_state='parsed_success' AND pipeline_state IN ('pending','running') AND processing_mode IN ('auto','auto_offpeak') FROM kb.inputs WHERE id=$1`, evt.RecordID).Scan(&eligible); err != nil {
+				return err
+			}
+			if !eligible {
+				return nil
+			}
+		}
+	}
 	// Resolve before routing, which may itself make LLM calls. Queued commands
 	// carry a stable identity, including a distinct suffix per batch document.
 	executionID, err := llmrun.Resolve(ctx, ApiTypes.ProjectDBHandle, llmrun.Key(payload, evt.RecordID))
 	if err != nil {
 		return err
+	}
+	if s.LeaseDB != nil && executionID > 0 {
+		// Redelivery of the same execution after an ACK was lost must not rerun
+		// completed processors. A new manual request has its own execution key.
+		var completed bool
+		err := s.LeaseDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kb.doc_process_runs WHERE record_id=$1 AND llm_run_id=$2 AND status IN ('success','failed','stopped'))`, evt.RecordID, executionID).Scan(&completed)
+		if err != nil {
+			return err
+		}
+		if completed {
+			return nil
+		}
 	}
 	ctx = withLLMRunID(ctx, executionID)
 	// Tag ctx with the event's user_id as early as possible so every LLM
@@ -786,6 +857,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	ctx = s.applyCrossPeakRule(ctx, cancelTask, evt.RecordID, peakMode)
 	if s.newRunProcessors != nil {
 		processors, blockingProcessor, err = s.newRunProcessors()
+		s.recordRuntimeFault(err)
 		if err != nil {
 			err = fmt.Errorf("(MID-20261106-01) build processors for record_id=%d: %w", evt.RecordID, err)
 			if s.Logger != nil {
@@ -2458,4 +2530,31 @@ func requiresChunkingDependency(op string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *ControlService) recordRuntimeFault(err error) {
+	s.runtimeHealthMu.Lock()
+	defer s.runtimeHealthMu.Unlock()
+	s.runtimeFaultVersion++
+	s.runtimeFault = err
+}
+
+// CheckRuntimeHealth revalidates a failed per-run graph without pretending that
+// database/broker connectivity proves the worker can construct its processors.
+// Healthy processes do not rebuild graphs on every health check.
+func (s *ControlService) CheckRuntimeHealth() error {
+	s.runtimeHealthMu.Lock()
+	fault, version := s.runtimeFault, s.runtimeFaultVersion
+	s.runtimeHealthMu.Unlock()
+	if fault == nil || s.newRunProcessors == nil {
+		return fault
+	}
+	_, _, err := s.newRunProcessors()
+	s.runtimeHealthMu.Lock()
+	defer s.runtimeHealthMu.Unlock()
+	if s.runtimeFaultVersion == version {
+		s.runtimeFault = err
+		s.runtimeFaultVersion++
+	}
+	return s.runtimeFault
 }

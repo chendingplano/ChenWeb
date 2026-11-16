@@ -1,0 +1,15 @@
+[Unit]
+Description=Recover stranded document processing events
+After=network.target nats-server.service doc-processor.service
+
+[Service]
+Type=oneshot
+User=gui
+WorkingDirectory=/home/gui/Workspace/ChenWeb
+Environment=SHARED_LIB_CONFIG_DIR=/home/gui/Workspace/shared/libconfig.toml
+EnvironmentFile=/home/gui/Workspace/ChenWeb/.env
+ExecStart=/home/gui/Workspace/ChenWeb/doc-recovery-linux --config ./config.toml
+TimeoutStartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+

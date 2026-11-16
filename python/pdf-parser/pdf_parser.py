@@ -35,6 +35,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from process_health import Reporter, writable_directory
+
 from shared import (
     TIME_FORMAT,
     pg_connect,
@@ -80,6 +82,82 @@ logging.basicConfig(
     datefmt="%Y%m%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
+_health = None
+
+
+def _report_health(state, reason="", resource="", message="", recovery="none"):
+    if _health is None:
+        return
+    try:
+        _health.set(state, reason, resource, message, recovery)
+    except OSError:
+        log.error("failed writing process health report")
+
+
+def _check_storage_and_backend(repo_dirs, backup_dir, backend_cache):
+    for directory in [*repo_dirs, backup_dir]:
+        try:
+            writable_directory(directory)
+        except OSError:
+            return ("blocked", "storage_unavailable", directory,
+                    "Required parser output directory is not readable and writable", "operator_action")
+    # Executable/JAR loss is a process fault, unlike an individual invalid PDF.
+    for name, backend in list(backend_cache.items()):
+        for attribute in ("_cli", "_python", "_jar_path"):
+            path = getattr(backend, attribute, "")
+            if isinstance(path, str) and path and (not os.path.isfile(path) or not os.access(path, os.R_OK) or (attribute in ("_cli", "_python") and not os.access(path, os.X_OK))):
+                return ("blocked", "parser_resource_missing", name,
+                        "Required parser executable or JAR is missing", "operator_action")
+    if "mineru" in backend_cache:
+        config_path = _env("MINERU_CONFIG")
+        if config_path and (not os.path.isfile(config_path) or not os.access(config_path, os.R_OK)):
+            return ("blocked", "parser_configuration_missing", "MINERU_CONFIG",
+                    "Configured MinerU resource configuration is not readable", "operator_action")
+    return None
+
+
+def _check_pdf_dependencies(dsn, repo_dirs, backup_dir, backend_cache):
+    issue = _check_storage_and_backend(repo_dirs, backup_dir, backend_cache)
+    if issue:
+        return issue
+    probe = None
+    try:
+        probe = pg_connect(dict(dsn, connect_timeout=5, options="-c statement_timeout=5000"))
+        with probe.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception:
+        return ("degraded", "database_unavailable", "project database",
+                "PDF parser cannot access its database", "restart")
+    finally:
+        if probe is not None:
+            probe.close()
+    return None
+
+
+async def _run_pdf_health(stop, bus, sub, dsn, repo_dirs, backup_dir, backend_cache):
+    if _health is None or _health.path is None:
+        return
+    while not stop.is_set():
+        # Running on the same event loop verifies it is responsive; blocking
+        # PDF parsing runs separately and may legitimately take hours.
+        issue = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: _check_pdf_dependencies(dsn, repo_dirs, backup_dir, backend_cache))
+        if issue is None and (bus._nc is None or not bus._nc.is_connected):
+            issue = ("degraded", "subscription_unavailable", "NATS",
+                     "PDF parser broker connection is unavailable", "restart")
+        if issue is None:
+            try:
+                await asyncio.wait_for(sub.consumer_info(), timeout=5)
+            except Exception:
+                issue = ("degraded", "subscription_unavailable", "NATS consumer",
+                         "PDF parser consumer is unavailable", "restart")
+        _report_health(*(issue or ("healthy", "", "", "Functional checks passed", "none")))
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=15)
+        except asyncio.TimeoutError:
+            pass
+
 
 
 class ParseStopped(Exception):
@@ -937,6 +1015,13 @@ async def run_jetstream() -> None:
     Path(backup_dir).mkdir(parents=True, exist_ok=True)
 
     backend_cache: dict[str, ParserBackend] = {}
+    try:
+        get_backend(_forced_parser() or default_parser, backend_cache)
+    except Exception:
+        _report_health("blocked", "parser_configuration_invalid", "PDF_PARSER_NAME/PDF_DEFAULT_PARSER",
+                       "Configured parser dependencies or settings are unavailable; inspect startup logs", "operator_action")
+        log.exception("configured parser initialization failed")
+        raise SystemExit(78)
     conn = pg_connect(dsn)
     bus = JetStreamBus()
     await bus.connect()
@@ -958,6 +1043,7 @@ async def run_jetstream() -> None:
             signal.signal(_sig, lambda s, f: _handle_signal())
 
     sub = await bus._js.pull_subscribe(_stage_subject(), durable=_stage_durable())
+    health_task = asyncio.create_task(_run_pdf_health(stop, bus, sub, dsn, repo_dirs, backup_dir, backend_cache))
 
     try:
         while not stop.is_set():
@@ -1034,6 +1120,12 @@ async def run_jetstream() -> None:
                     else:
                         await msg.nak()
     finally:
+        stop.set()
+        health_task.cancel()
+        try:
+            await health_task
+        except asyncio.CancelledError:
+            pass
         log.info("(MID_2026040715) closing NATS connection")
         try:
             await asyncio.wait_for(bus.close(), timeout=3.0)
@@ -1067,6 +1159,13 @@ def run() -> None:
     Path(backup_dir).mkdir(parents=True, exist_ok=True)
 
     backend_cache: dict[str, ParserBackend] = {}
+    try:
+        get_backend(_forced_parser() or default_parser, backend_cache)
+    except Exception:
+        _report_health("blocked", "parser_configuration_invalid", "PDF_PARSER_NAME/PDF_DEFAULT_PARSER",
+                       "Configured parser dependencies or settings are unavailable; inspect startup logs", "operator_action")
+        log.exception("configured parser initialization failed")
+        raise SystemExit(78)
 
     def _stop(_sig, _frame):
         log.info("(MID_2026040704) shutdown signal received")
@@ -1082,6 +1181,9 @@ def run() -> None:
                 conn = pg_connect(dsn)
                 log.info("(MID_2026040705) connected to postgres")
 
+            if _health is not None and _health.path is not None:
+                issue = _check_pdf_dependencies(dsn, repo_dirs, backup_dir, backend_cache)
+                _report_health(*(issue or ("healthy", "", "", "Functional checks passed", "none")))
             scan_staging_once(conn, staging_dir, backup_dir)
             # Atomic claim: each returned record is locked (FOR UPDATE SKIP LOCKED)
             # and already stamped proc_status=active in a committed transaction, so
@@ -1102,6 +1204,8 @@ def run() -> None:
                             log.error("(MID_2026040714) failed to publish parsed event id=%s error=%s", rec["id"], exc)
 
         except psycopg2.Error as exc:
+            _report_health("degraded", "database_unavailable", "project database",
+                           "PDF parser cannot access its database", "restart")
             log.error("(MID_2026040707) postgres error: %s — reconnecting", exc)
             try:
                 if conn is not None:
@@ -1118,7 +1222,21 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    if _pipeline_mode() == "jetstream":
-        asyncio.run(run_jetstream())
-    else:
-        run()
+    try:
+        _health = Reporter()
+    except (OSError, ValueError):
+        log.exception("cannot initialize process health reporter")
+    try:
+        if _pipeline_mode() == "jetstream":
+            asyncio.run(run_jetstream())
+        else:
+            run()
+    except (ValueError, FileNotFoundError, PermissionError, ImportError):
+        _report_health("blocked", "parser_configuration_invalid", "parser configuration",
+                       "Required parser configuration or filesystem resources are invalid; inspect startup logs", "operator_action")
+        log.exception("PDF parser configuration prevents startup")
+        raise SystemExit(78)
+    except Exception:
+        _report_health("degraded", "parser_startup_failed", "parser dependencies",
+                       "PDF parser could not initialize its dependencies; inspect startup logs", "restart")
+        raise

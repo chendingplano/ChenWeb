@@ -1,0 +1,11 @@
+[
+  {"name":"chenweb","unit":"chenweb.service","requires_report":true},
+  {"name":"doc-processor","unit":"doc-processor.service","requires_report":true},
+  {"name":"doc-service","unit":"doc-service.service","requires_report":true},
+  {"name":"parser-result-converter","unit":"parser-result-converter.service","requires_report":true},
+  {"name":"pdf-parser","unit":"pdf-parser.service","requires_report":true},
+  {"name":"nats","unit":"nats-server.service","requires_report":false},
+  {"name":"kratos","unit":"kratos.service","requires_report":false},
+  {"name":"docker","unit":"docker.service","requires_report":false},
+  {"name":"nginx","unit":"nginx.service","requires_report":false}
+]

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check process health every 15 seconds
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15s
+AccuracySec=1s
+Unit=process-monitor.service
+
+[Install]
+WantedBy=timers.target

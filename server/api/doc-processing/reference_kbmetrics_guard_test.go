@@ -16,6 +16,7 @@ var kbMetricsReaderAllowlist = map[string]string{
 	"api/kbhandler/metric_wiki_handler.go":              "display lookup of one metric by id",
 	"api/kbhandler/metric_ontology_analysis_handler.go": "predicate is in the shared where clause",
 	"api/doc-processing/reference_metric_resolver.go":   "copies one target row by primary key, chosen from own rows only",
+	"api/compliance-eval/snapshot.go":                   "fingerprints the exact source row each index artifact was built from; excluding resolved reference rows would hide their changes from the manifest",
 }
 
 // TestKBMetricsReadersExcludeResolvedRows enforces the reader default of openspec change

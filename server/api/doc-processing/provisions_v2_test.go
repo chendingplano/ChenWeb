@@ -28,6 +28,30 @@ func TestProvisionsV2AcceptsEmptyExtraction(t *testing.T) {
 	}
 }
 
+func TestProvisionsV2IgnoresEmptyRootCategories(t *testing.T) {
+	if _, err := decodeProvisionV2(map[string]any{"v": 2.0, "l": "zh", "p": []any{}, "g": []any{}}); err != nil {
+		t.Fatalf("empty root g should be ignored, got %v", err)
+	}
+}
+
+func TestProvisionsV2RejectsNonEmptyRootCategories(t *testing.T) {
+	if _, err := decodeProvisionV2(map[string]any{"v": 2.0, "l": "zh", "p": []any{}, "g": []any{"x"}}); err == nil {
+		t.Fatal("non-empty root g should be rejected")
+	}
+}
+
+func TestProvisionsV2IgnoresEmptyRootObjects(t *testing.T) {
+	if _, err := decodeProvisionV2(map[string]any{"v": 2.0, "l": "zh", "p": []any{}, "o": []any{}}); err != nil {
+		t.Fatalf("empty root o should be ignored, got %v", err)
+	}
+}
+
+func TestProvisionsV2RejectsNonEmptyRootObjects(t *testing.T) {
+	if _, err := decodeProvisionV2(map[string]any{"v": 2.0, "l": "zh", "p": []any{}, "o": []any{"x"}}); err == nil {
+		t.Fatal("non-empty root o should be rejected")
+	}
+}
+
 func TestProvisionsV2DecodesSourceOnlyFields(t *testing.T) {
 	got := extractProvisionTestPayload(t, provisionV2Example)
 	p := got["provisions"].([]any)[0].(map[string]any)

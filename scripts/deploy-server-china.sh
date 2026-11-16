@@ -64,7 +64,7 @@ systemctl_cmd() { if [ "$IS_ROOT" = 1 ]; then systemctl "$@"; else sudo -n /bin/
 list_sql() { (cd "$1" 2>/dev/null && ls -1 ./*.sql 2>/dev/null) | sed 's|^\./||' | sort; }
 
 # --- valid binary -> systemd service (empty = CLI tool, install only) ---------
-valid_names="server doc-processor parser-result-converter doc-service create-admin deploy-runner"
+valid_names="server doc-processor parser-result-converter doc-service create-admin deploy-runner process-monitor doc-recovery"
 svc_for() {
   case "$1" in
     server)                   printf 'chenweb' ;;
@@ -72,6 +72,7 @@ svc_for() {
     parser-result-converter)  printf 'parser-result-converter' ;;
     doc-service)              printf 'doc-service' ;;
     create-admin)             printf '' ;;
+    process-monitor|doc-recovery) printf '' ;; # systemd timer commands
     deploy-runner)            printf '' ;;   # run by chenweb-deploy.service on demand
     *)                        printf '__invalid__' ;;
   esac
@@ -327,6 +328,13 @@ for n in "${NAMES[@]}"; do
   journalctl -u "$svc" -n 12 --no-pager || true
   deployed+=("$n")
 done
+
+# Initial root provisioning is explicit; retain installation files for subsequent
+# operator policy changes without granting the application broad root access.
+if [ -d "$SRC_DIR/process-health-install" ]; then
+  run mkdir -p "$CHENWEB_DIR/scripts/process-health-install"
+  run cp -a "$SRC_DIR/process-health-install/." "$CHENWEB_DIR/scripts/process-health-install/"
+fi
 
 echo
 echo "== done: ${deployed[*]:-<none>} =="

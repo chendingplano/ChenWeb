@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -212,6 +213,9 @@ func TestBuildProductionProcessorPlanFromFactsGateConflictAlwaysErrors(t *testin
 }
 
 func TestNewProductionRuntimeSuccessfulExplicitAndDefaultSelection(t *testing.T) {
+	// Point the pipeline-defaults lookup at an empty directory so a local
+	// doc-pipeline-defaults.json cannot override the viper defaults set below.
+	t.Setenv("KB_CONFIG_FILE", filepath.Join(t.TempDir(), "config.toml"))
 	original := buildProductionRuntimeComponents
 	buildProductionRuntimeComponents = func(ApiTypes.JimoLogger) productionRuntimeComponents {
 		return productionRuntimeComponents{

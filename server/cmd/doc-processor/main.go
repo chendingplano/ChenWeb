@@ -19,6 +19,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
 	"github.com/chendingplano/deepdoc/server/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/deepdoc/server/processhealth"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
@@ -193,13 +194,40 @@ func main() {
 
 	logger := loggerutil.CreateDefaultLogger("MID-20261112-01")
 	defer logger.Close()
+	health, healthErr := processhealth.NewReporter("doc-processor")
+	if healthErr != nil {
+		fmt.Fprintln(os.Stderr, "cannot publish process health report:", healthErr)
+	}
+	healthFail := func(reason, resource, message string, recovery processhealth.Recovery) {
+		// Schema/bootstrap failures can be caused by a temporary database outage.
+		// Do not latch an operator-only failure when the dependency is unreachable.
+		if recovery == processhealth.OperatorAction && reason != "configuration_invalid" && ApiTypes.ProjectDBHandle != nil {
+			checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			dbErr := ApiTypes.ProjectDBHandle.PingContext(checkCtx)
+			cancel()
+			if dbErr != nil {
+				reason, resource, message, recovery = "database_unavailable", "project database", "Service cannot access its database during initialization", processhealth.Restart
+			}
+		}
+		if err := health.Set(processhealth.Blocked, reason, resource, message, recovery); err != nil {
+			fmt.Fprintln(os.Stderr, "cannot publish blocked health report:", err)
+		}
+		if recovery == processhealth.OperatorAction {
+			os.Exit(processhealth.ExitOperatorAction)
+		}
+		os.Exit(1)
+	}
+	defer health.CapturePanic()
+	if issue := processhealth.ApplicationEnvironment(); issue != nil {
+		healthFail(issue.Reason, issue.Resource, issue.Message, issue.Recovery)
+	}
 	ApiUtils.LoadLibConfig("CWB_DOCPROC_002")
 
 	obsCfg := observability.ConfigFromEnv("chenweb-doc-processor")
 	obsShutdown, err := observability.Init(ctx, obsCfg)
 	if err != nil {
 		logger.Error("failed to initialize observability", "error", err, "enabled", obsCfg.Enabled)
-		os.Exit(1)
+		healthFail("observability_unavailable", "observability", "Observability initialization failed", processhealth.OperatorAction)
 	}
 	defer func() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -224,19 +252,19 @@ func main() {
 	loadCtx := context.WithValue(ctx, ApiTypes.CallFlowKey, "CWB_DOCPROC_003")
 	if err := config.LoadConfig(loadCtx, logger, configPath); err != nil {
 		logger.Error("failed loading config", "error", err, "config", configPath)
-		os.Exit(1)
+		healthFail("configuration_invalid", "config.toml", "Required service configuration could not be loaded", processhealth.OperatorAction)
 	}
 	config.NormalizeMigrationPaths(logger, configPath)
 
 	if err := databaseutil.InitDB(loadCtx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("failed to initialize db", "error", err)
-		os.Exit(1)
+		healthFail("database_unavailable", "project database", "Project database could not be initialized", processhealth.Restart)
 	}
 	defer databaseutil.CloseDatabase(ApiTypes.CommonConfig)
 
 	if err := config.RunMigrations(ctx, logger); err != nil {
 		logger.Error("migrations failed", "error", err)
-		os.Exit(1)
+		healthFail("migration_failed", "database schema", "Database migrations failed; inspect migration logs", processhealth.OperatorAction)
 	}
 	stopBuildInfo, buildInfoErr := buildinfo.StartResponder("doc-processor")
 	if buildInfoErr != nil {
@@ -247,7 +275,7 @@ func main() {
 	warnings, err := seed.EnsureCuratedModules(ctx, ApiTypes.ProjectDBHandle)
 	if err != nil {
 		logger.Error("failed to ensure curated ontology modules", "error", err)
-		os.Exit(1)
+		healthFail("startup_failed", "doc-processor", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	for _, warning := range warnings {
 		args := []any{"warning_kind", warning.Kind, "module_id", warning.ModuleID}
@@ -258,7 +286,7 @@ func main() {
 	}
 	if err := ensureLLMUsageSink(); err != nil {
 		logger.Error("failed to install default llm usage sink", "error", err)
-		os.Exit(1)
+		healthFail("startup_failed", "doc-processor", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 
 	natsURL := envOrDefault("NATS_URL", "nats://127.0.0.1:4222")
@@ -269,20 +297,20 @@ func main() {
 	docProcessorMode, err := docprocessing.DocProcessorModeFromEnv()
 	if err != nil {
 		logger.Error("invalid DOC_PROCESSOR_MODE", "error", err)
-		os.Exit(1)
+		healthFail("configuration_invalid", "DOC_PROCESSOR_MODE", "Invalid document processor mode", processhealth.OperatorAction)
 	}
 
 	ns, err := fileconverters.NewNATSSubscriber(natsURL)
 	if err != nil {
 		logger.Error("failed creating nats subscriber", "error", err, "nats_url", natsURL)
-		os.Exit(1)
+		healthFail("broker_unavailable", "NATS", "Message broker connection could not be established", processhealth.Restart)
 	}
 	defer ns.Close()
 	for _, subSubject := range subjects {
 		subStream := docProcessorStream(subject, streamName, subSubject)
 		if err := ns.EnsureStream(subStream, subSubject); err != nil {
 			logger.Error("failed to ensure stream", "error", err, "stream", subStream, "subject", subSubject)
-			os.Exit(1)
+			healthFail("stream_unavailable", "NATS stream", "Required message stream could not be initialized", processhealth.Restart)
 		}
 	}
 
@@ -290,7 +318,7 @@ func main() {
 	runtime, err := docprocessing.NewProductionRuntime(logger)
 	if err != nil {
 		logger.Error("failed to build doc processor runtime", "error", err)
-		os.Exit(1)
+		healthFail("processor_runtime_invalid", "processor configuration", "Required processor configuration, prompt or model could not be loaded; inspect the startup log", processhealth.OperatorAction)
 	}
 	control := runtime.Control
 
@@ -329,9 +357,10 @@ func main() {
 		subjectForHandler := subSubject
 		durableForSubject := docProcessorDurable(subject, durable, subSubject)
 		wg.Go(func() {
-			if err := ns.Subscribe(ctx, subjectForHandler, durableForSubject, func(msgCtx context.Context, payload []byte) error {
-				return control.HandleJetStreamEvent(msgCtx, subjectForHandler, payload)
+			if err := ns.SubscribeConcurrent(ctx, subjectForHandler, durableForSubject, control.MaxDocProcessPipelines, func(msgCtx context.Context, payload []byte) error {
+				return control.HandleJetStreamEventSync(msgCtx, subjectForHandler, payload)
 			}); err != nil && ctx.Err() == nil {
+				_ = health.Set(processhealth.Degraded, "subscription_exited", subjectForHandler, "Document processor subscription exited unexpectedly", processhealth.Restart)
 				logger.Error("doc processor subscription exited with error",
 					"error", err,
 					"subject", subjectForHandler,
@@ -350,12 +379,12 @@ func main() {
 	drNS, err := fileconverters.NewNATSSubscriber(natsURL)
 	if err != nil {
 		logger.Error("failed creating nats subscriber for doc-review", "error", err, "nats_url", natsURL)
-		os.Exit(1)
+		healthFail("broker_unavailable", "doc-review subscription", "Message broker connection could not be established", processhealth.Restart)
 	}
 	defer drNS.Close()
 	if err := drNS.EnsureStream(docReviewStream, docReviewSubject); err != nil {
 		logger.Error("failed to ensure doc-review stream", "error", err, "stream", docReviewStream, "subject", docReviewSubject)
-		os.Exit(1)
+		healthFail("stream_unavailable", "doc-review stream", "Required review message stream could not be initialized", processhealth.Restart)
 	}
 
 	logger.Info("doc-review subscription starting",
@@ -387,6 +416,7 @@ func main() {
 			ctrl.RunReviewAndReport(docprocessing.WithLLMUserID(msgCtx, userID), evt.RequestID, evt.RunID)
 			return nil
 		}); err != nil && ctx.Err() == nil {
+			_ = health.Set(processhealth.Degraded, "subscription_exited", docReviewSubject, "Document review subscription exited unexpectedly", processhealth.Restart)
 			logger.Error("doc-review subscription exited with error", "error", err)
 			cancel()
 		}
@@ -412,6 +442,21 @@ func main() {
 		})
 	}
 
+	health.GoCheck(ctx, 15*time.Second, func(checkCtx context.Context) *processhealth.Issue {
+		if control.CheckRuntimeHealth() != nil {
+			return &processhealth.Issue{Reason: "processor_runtime_invalid", Resource: "processor configuration", Message: "Required processor configuration, prompt or model could not be loaded; inspect processor logs", Recovery: processhealth.OperatorAction}
+		}
+		if ApiTypes.ProjectDBHandle == nil || ApiTypes.ProjectDBHandle.PingContext(checkCtx) != nil {
+			return &processhealth.Issue{Reason: "database_unavailable", Resource: "project database", Message: "Document processor cannot access its database", Recovery: processhealth.Restart}
+		}
+		if issue := processhealth.WritableDirectory(strings.TrimSpace(os.Getenv("DATA_HOME_DIR"))); issue != nil {
+			return issue
+		}
+		if ns.CheckHealth(checkCtx) != nil || drNS.CheckHealth(checkCtx) != nil {
+			return &processhealth.Issue{Reason: "subscription_unavailable", Resource: "NATS", Message: "Document processor subscriptions are unavailable", Recovery: processhealth.Restart}
+		}
+		return nil
+	}, func(err error) { logger.Error("failed writing process health", "error", err) })
 	<-ctx.Done()
 	logger.Info("shutdown: waiting for in-flight subscriptions and pipelines to finish")
 	grace := shutdownGrace()

@@ -18,12 +18,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/buildinfo"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/deepdoc/server/processhealth"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
@@ -378,23 +380,50 @@ func main() {
 	_ = godotenv.Load("./.env")
 	_ = godotenv.Load()
 
+	health, healthErr := processhealth.NewReporter("doc-service")
+	if healthErr != nil {
+		fmt.Fprintln(os.Stderr, "cannot publish process health report:", healthErr)
+	}
+	healthFail := func(reason, resource, message string, recovery processhealth.Recovery) {
+		// Schema/bootstrap failures can be caused by a temporary database outage.
+		// Do not latch an operator-only failure when the dependency is unreachable.
+		if recovery == processhealth.OperatorAction && reason != "configuration_invalid" && ApiTypes.ProjectDBHandle != nil {
+			checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			dbErr := ApiTypes.ProjectDBHandle.PingContext(checkCtx)
+			cancel()
+			if dbErr != nil {
+				reason, resource, message, recovery = "database_unavailable", "project database", "Service cannot access its database during initialization", processhealth.Restart
+			}
+		}
+		if err := health.Set(processhealth.Blocked, reason, resource, message, recovery); err != nil {
+			fmt.Fprintln(os.Stderr, "cannot publish blocked health report:", err)
+		}
+		if recovery == processhealth.OperatorAction {
+			os.Exit(processhealth.ExitOperatorAction)
+		}
+		os.Exit(1)
+	}
+	defer health.CapturePanic()
+	if issue := processhealth.ApplicationEnvironment(); issue != nil {
+		healthFail(issue.Reason, issue.Resource, issue.Message, issue.Recovery)
+	}
 	ApiUtils.LoadLibConfig("CWB_PDF_003")
 	if err := config.LoadConfig(newCtx, logger, configPath); err != nil {
 		logger.Error("failed loading config", "error", err, "config", configPath)
-		os.Exit(1)
+		healthFail("configuration_invalid", "config.toml", "Required service configuration could not be loaded", processhealth.OperatorAction)
 	}
 
 	config.NormalizeMigrationPaths(logger, configPath)
 
 	if err := databaseutil.InitDB(newCtx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("failed to initialize database", "error", err)
-		os.Exit(1)
+		healthFail("database_unavailable", "project database", "Project database could not be initialized", processhealth.Restart)
 	}
 	defer databaseutil.CloseDatabase(ApiTypes.CommonConfig)
 
 	if err := config.RunMigrations(ctx, logger); err != nil {
 		logger.Error("migrations failed", "error", err)
-		os.Exit(1)
+		healthFail("migration_failed", "database schema", "Database migrations failed; inspect migration logs", processhealth.OperatorAction)
 	}
 	stopBuildInfo, buildInfoErr := buildinfo.StartResponder("doc-service")
 	if buildInfoErr != nil {
@@ -405,7 +434,7 @@ func main() {
 
 	if err := verifyResultFilenameColumn(ctx); err != nil {
 		logger.Error("schema verification failed", "error", err)
-		os.Exit(1)
+		healthFail("schema_invalid", "kb.inputs", "Required document input schema is unavailable", processhealth.OperatorAction)
 	}
 	logger.Info("schema verification passed", "table", "kb.inputs", "column", "result_filename")
 
@@ -422,7 +451,7 @@ func main() {
 			"DATA_BACKUP_DIR", backupDir,
 			"DATA_HOME_DIR", homeDir,
 		)
-		os.Exit(1)
+		healthFail("staging_configuration_invalid", "UPLOAD_FILE_STAGING_DIR/DATA_BACKUP_DIR/DATA_HOME_DIR", "Required document staging directories are not configured", processhealth.OperatorAction)
 	}
 
 	ctx, cancelStaging := context.WithCancel(context.Background())
@@ -430,7 +459,8 @@ func main() {
 
 	publisher, err := newStageEventPublisher(logger)
 	if err != nil {
-		logger.Error("failed to initialize JetStream publisher; stage events disabled", "error", err)
+		logger.Error("failed to initialize JetStream publisher", "error", err)
+		healthFail("broker_unavailable", "NATS publisher", "Document service cannot publish staged documents", processhealth.Restart)
 	}
 	if publisher != nil {
 		defer publisher.Close()
@@ -443,9 +473,30 @@ func main() {
 	}
 	logger.Info("docx parse workers started", "count", numDocWorkers)
 
-	go runStagingThread(ctx, logger, ApiTypes.ProjectDBHandle, stagingDir, backupDir, homeDir, publisher, docParseCh)
+	var stagingLoopExited atomic.Bool
+	go func() {
+		defer stagingLoopExited.Store(true)
+		runStagingThread(ctx, logger, ApiTypes.ProjectDBHandle, stagingDir, backupDir, homeDir, publisher, docParseCh)
+	}()
 	logger.Info("staging thread started", "staging_dir", stagingDir, "backup_dir", backupDir, "home_dir", homeDir)
 
+	health.GoCheck(ctx, 15*time.Second, func(checkCtx context.Context) *processhealth.Issue {
+		if stagingLoopExited.Load() {
+			return &processhealth.Issue{Reason: "staging_loop_exited", Resource: "staging watcher", Message: "Document staging control loop exited unexpectedly", Recovery: processhealth.Restart}
+		}
+		if ApiTypes.ProjectDBHandle == nil || ApiTypes.ProjectDBHandle.PingContext(checkCtx) != nil {
+			return &processhealth.Issue{Reason: "database_unavailable", Resource: "project database", Message: "Document service cannot access its database", Recovery: processhealth.Restart}
+		}
+		if publisher == nil || publisher.conn == nil || !publisher.conn.IsConnected() {
+			return &processhealth.Issue{Reason: "publisher_unavailable", Resource: "NATS", Message: "Document service cannot publish staged documents", Recovery: processhealth.Restart}
+		}
+		for _, dir := range []string{stagingDir, backupDir, homeDir} {
+			if issue := processhealth.WritableDirectory(dir); issue != nil {
+				return issue
+			}
+		}
+		return nil
+	}, func(err error) { logger.Error("failed writing process health", "error", err) })
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

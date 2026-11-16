@@ -21,9 +21,11 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
+	"github.com/chendingplano/deepdoc/server/api/processhealthalarms"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/deepdoc/server/processhealth"
 	shared_api "github.com/chendingplano/shared/go/api"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -36,6 +38,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"net/http"
 )
 
 func main() {
@@ -50,6 +53,33 @@ func main() {
 	env_path := "./.env"
 	err := godotenv.Load(env_path)
 
+	health, healthErr := processhealth.NewReporter("chenweb")
+	if healthErr != nil {
+		fmt.Fprintln(os.Stderr, "cannot publish process health report:", healthErr)
+	}
+	healthFail := func(reason, resource, message string, recovery processhealth.Recovery) {
+		// Schema/bootstrap failures can be caused by a temporary database outage.
+		// Do not latch an operator-only failure when the dependency is unreachable.
+		if recovery == processhealth.OperatorAction && reason != "configuration_invalid" && ApiTypes.ProjectDBHandle != nil {
+			checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			dbErr := ApiTypes.ProjectDBHandle.PingContext(checkCtx)
+			cancel()
+			if dbErr != nil {
+				reason, resource, message, recovery = "database_unavailable", "project database", "Service cannot access its database during initialization", processhealth.Restart
+			}
+		}
+		if err := health.Set(processhealth.Blocked, reason, resource, message, recovery); err != nil {
+			fmt.Fprintln(os.Stderr, "cannot publish blocked health report:", err)
+		}
+		if recovery == processhealth.OperatorAction {
+			os.Exit(processhealth.ExitOperatorAction)
+		}
+		os.Exit(1)
+	}
+	defer health.CapturePanic()
+	if issue := processhealth.ApplicationEnvironment(); issue != nil {
+		healthFail(issue.Reason, issue.Resource, issue.Message, issue.Recovery)
+	}
 	ApiUtils.LoadLibConfig("CWB_0207150500")
 	var logger = loggerutil.CreateDefaultLogger("CWB_MAN_032")
 	logger.Info("load .env", "loc", "(CWB_DDM_198)")
@@ -80,6 +110,7 @@ func main() {
 	err = config.LoadConfig(new_ctx, logger, configPath)
 	if err != nil {
 		logger.Error("failed loading config 'config.toml'", "error", err)
+		healthFail("configuration_invalid", "config.toml", "Required server configuration could not be loaded", processhealth.OperatorAction)
 	}
 	config.NormalizeMigrationPaths(logger, configPath)
 
@@ -101,7 +132,7 @@ func main() {
 	obsShutdown, err := observability.Init(ctx, obsCfg)
 	if err != nil {
 		logger.Error("failed to initialize observability", "error", err, "enabled", obsCfg.Enabled)
-		os.Exit(1)
+		healthFail("observability_unavailable", "observability", "Observability initialization failed", processhealth.OperatorAction)
 	}
 	defer func() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -133,7 +164,7 @@ func main() {
 	db_type := ApiTypes.CommonConfig.AppInfo.DatabaseType
 	if err := databaseutil.InitDB(new_ctx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("Failed to initialize database", "error", err)
-		os.Exit(2)
+		healthFail("database_unavailable", "project database", "Project database could not be initialized", processhealth.Restart)
 	}
 
 	logger.Info("To Init DB ... Finished",
@@ -144,7 +175,7 @@ func main() {
 	var db = ApiTypes.ProjectDBHandle
 	if db == nil {
 		logger.Error("ProjectDBHandle is nil", "db_type", db_type)
-		os.Exit(1)
+		healthFail("database_unavailable", "project database", "Project database handle is unavailable", processhealth.Restart)
 	}
 
 	// Create tables
@@ -153,13 +184,13 @@ func main() {
 		err = sysdatastores.CreateSysTables(logger)
 		if err != nil {
 			logger.Error("failed creating system tables", "error", err)
-			os.Exit(1)
+			healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 		}
 
 		err = database.CreateTables(logger)
 		if err != nil {
 			logger.Error("failed creating tables", "error", err)
-			os.Exit(1)
+			healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 		}
 	} else {
 		logger.Warn("Not creating tables")
@@ -171,13 +202,13 @@ func main() {
 	// Currently, only PG is supported
 	if dbType != ApiTypes.PgName {
 		logger.Error("unsupported db type. System exit!!!!", "db_type", dbType)
-		os.Exit(1)
+		healthFail("configuration_invalid", "database type", "Only PostgreSQL is supported", processhealth.OperatorAction)
 	}
 
 	project_db = ApiTypes.ProjectDBHandle
 	if project_db == nil {
 		logger.Error("project db is not set. System exit!!!!", "db_type", dbType)
-		os.Exit(1)
+		healthFail("database_unavailable", "project database", "Project database handle is unavailable", processhealth.Restart)
 	}
 
 	logger.Info("Start Project Migrations")
@@ -186,7 +217,7 @@ func main() {
 	err = config.RunMigrations(migrationCtx, logger)
 	if err != nil {
 		logger.Error("failed to run migrations. System exit!!!!", "error", err)
-		os.Exit(1)
+		healthFail("migration_failed", "database schema", "Database migrations failed; inspect migration logs", processhealth.OperatorAction)
 	}
 	logger.Info("migrations completed successfully")
 
@@ -195,13 +226,13 @@ func main() {
 	logger.Info("Register api Routes", "loc", "CWB_DDM_052")
 	if err := api.RegisterRoutes(e); err != nil {
 		logger.Error("failed to register API routes", "error", err)
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 
 	monitorLoc, err := time.LoadLocation(config.GetLLMConfig().WorkspaceTimezone)
 	if err != nil {
 		logger.Error("failed to load code monitor timezone", "error", err)
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	monitorStore := codemonitor.Store{DB: project_db}
 	monitorProjects := config.AppConfig.Frontend.ProjectsToMonitor
@@ -215,7 +246,7 @@ func main() {
 	warnings, err := seed.EnsureCuratedModules(bootstrapCtx, project_db)
 	if err != nil {
 		logger.Error("failed to ensure curated ontology modules", "error", err)
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	for _, warning := range warnings {
 		args := []any{"warning_kind", warning.Kind, "module_id", warning.ModuleID}
@@ -240,14 +271,14 @@ func main() {
 	if err := llmusage.InstallDefaultSink(); err != nil {
 		logger.Error("failed to install default llm usage sink",
 			"error", err, "loc", "CWB_DDM_202")
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	llmCfg := config.GetLLMConfig()
 	llmLoc, err := time.LoadLocation(llmCfg.WorkspaceTimezone)
 	if err != nil {
 		logger.Error("failed to load llm workspace timezone",
 			"error", err, "timezone", llmCfg.WorkspaceTimezone, "loc", "CWB_DDM_203")
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	llmusage.StartBackgroundRetention(
 		context.Background(),
@@ -287,7 +318,7 @@ func main() {
 
 	if err := kbhandler.CheckSearchBackend(project_db); err != nil {
 		logger.Error("search backend check failed; system exit", "error", err, "loc", "CWB_DDM_200")
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	logger.Info("search backend verified", "loc", "CWB_DDM_201")
 	kbhandler.RegisterIconSearchEmbedder()
@@ -299,12 +330,12 @@ func main() {
 	if err != nil {
 		logger.Error("failed to load PROMPT_OPTIMIZER_ENCRYPTION_KEY",
 			"error", err, "loc", "CWB_DDM_165")
-		os.Exit(1)
+		healthFail("configuration_invalid", "PROMPT_OPTIMIZER_ENCRYPTION_KEY", "Required prompt encryption key is missing or invalid", processhealth.OperatorAction)
 	}
 	if err := promptoptimizerhandler.Init(poEncKey); err != nil {
 		logger.Error("failed to init promptoptimizerhandler",
 			"error", err, "loc", "CWB_DDM_166")
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 
 	// Agent-platform background workers (M1b). No-op unless
@@ -313,7 +344,7 @@ func main() {
 	if err := agentplatformhandler.StartWorkers(context.Background(), logger, 2); err != nil {
 		logger.Error("failed to start agent-platform workers",
 			"error", err, "loc", "CWB_DDM_169")
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	// Scheduled backlog-drain jobs (entity object resolution, ambiguous object
 	// resolution, search embedding backfill — see ADR 2026070101 "Repeatable
@@ -359,7 +390,7 @@ func main() {
 			pdfService, err := pdfparser.NewService(parserServiceCfg)
 			if err != nil {
 				logger.Error("failed to initialize PDF parser service", "error", err)
-				os.Exit(1)
+				healthFail("startup_failed","deepdoc","Service initialization failed; inspect startup logs",processhealth.OperatorAction)
 			}
 			go func() {
 				if runErr := pdfService.Run(context.Background(), logger); runErr != nil {
@@ -385,7 +416,7 @@ func main() {
 		logger.Error("",
 			"message", "missing SERVER_PORT env var",
 			"loc", "CWB_MAN_145")
-		os.Exit(1)
+		healthFail("startup_failed", "deepdoc", "Service initialization failed; inspect startup logs", processhealth.OperatorAction)
 	}
 	var pp = fmt.Sprintf(":%d", server_port)
 
@@ -405,5 +436,29 @@ func main() {
 	logger.Info("doc gen worker pool started", "workers", workerCount)
 
 	logger.Info("[API] ⇨ http server started on", "server_port", pp)
-	e.Logger.Fatal(e.Start(pp))
+	healthCtx, cancelHealth := context.WithCancel(context.Background())
+	defer cancelHealth()
+	go processhealthalarms.Run(healthCtx, ApiTypes.ProjectDBHandle, logger)
+	health.GoCheck(healthCtx, 15*time.Second, func(checkCtx context.Context) *processhealth.Issue {
+		if project_db.PingContext(checkCtx) != nil {
+			return &processhealth.Issue{Reason: "database_unavailable", Resource: "project database", Message: "Server cannot access its database", Recovery: processhealth.Restart}
+		}
+		req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api/v1/health", server_port), nil)
+		if err != nil {
+			return &processhealth.Issue{Reason: "http_unavailable", Resource: "HTTP listener", Message: "Server health request is invalid", Recovery: processhealth.OperatorAction}
+		}
+		resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+		if err != nil {
+			return &processhealth.Issue{Reason: "http_unavailable", Resource: "HTTP listener", Message: "Server is not responding to HTTP health checks", Recovery: processhealth.Restart}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return &processhealth.Issue{Reason: "http_unavailable", Resource: "HTTP listener", Message: "Server HTTP health check did not succeed", Recovery: processhealth.Restart}
+		}
+		return nil
+	}, func(err error) { logger.Error("failed writing process health", "error", err) })
+	if err := e.Start(pp); err != nil && err != http.ErrServerClosed {
+		logger.Error("HTTP server exited", "error", err)
+		healthFail("http_listener_failed", "HTTP listener", "Server HTTP listener could not run", processhealth.OperatorAction)
+	}
 }

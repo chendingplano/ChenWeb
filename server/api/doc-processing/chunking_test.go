@@ -1078,7 +1078,7 @@ func TestFixedSizeChunkingService_GenerateSummaryLogsReasonWhenSummaryMissing(t 
 	if strings.TrimSpace(result.Summary) == "" {
 		t.Fatal("expected fallback summary to be populated")
 	}
-	entry, ok := findInfoLog(logger.errors, "failed retrieving summary")
+	entry, ok := findInfoLog(logger.errors, "failed retrieving summary (MID-20261112-21)")
 	if !ok {
 		t.Fatalf("expected failed retrieving summary log, got errors=%v", logger.errors)
 	}

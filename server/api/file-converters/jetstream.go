@@ -18,9 +18,14 @@ import (
 )
 
 type NATSSubscriber struct {
-	conn   *nats.Conn
-	logger ApiTypes.JimoLogger
+	conn      *nats.Conn
+	logger    ApiTypes.JimoLogger
+	subsMu    sync.Mutex
+	subs      []*nats.Subscription
+	consumers map[*nats.Subscription]consumerRef
 }
+
+type consumerRef struct{ stream, name string }
 
 var invalidConsumerNameCharsRE = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
@@ -172,6 +177,12 @@ func (s *NATSSubscriber) Publish(ctx context.Context, subject string, payload []
 }
 
 func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable string, handler func(context.Context, []byte) error) error {
+	return s.SubscribeConcurrent(ctx, subject, durable, 1, handler)
+}
+
+// SubscribeConcurrent acknowledges only after handler completion and renews the
+// acknowledgement deadline while long-running handlers or slot waits are active.
+func (s *NATSSubscriber) SubscribeConcurrent(ctx context.Context, subject string, durable string, concurrency int, handler func(context.Context, []byte) error) error {
 	if s.conn == nil {
 		return fmt.Errorf("nats connection is nil")
 	}
@@ -199,15 +210,30 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 	ackWait := envDurationSeconds(5*time.Minute, "DOC_PROCESSOR_ACK_WAIT_SEC", "FILE_CONVERTER_ACK_WAIT_SEC", "JETSTREAM_ACK_WAIT_SEC")
 	allowFallbackDurable := envEnabled("NATS_ALLOW_FALLBACK_DURABLE", "JETSTREAM_ALLOW_FALLBACK_DURABLE")
 
-	opts := []nats.SubOpt{
-		nats.ManualAck(),
-		nats.AckExplicit(),
-		nats.DeliverNew(),
-		nats.AckWait(ackWait),
-	}
+	// Explicit creation and binding leaves durable state owned by the server,
+	// rather than allowing Unsubscribe to delete an implicitly created consumer.
+	opts := []nats.SubOpt{nats.ManualAck(), nats.AckExplicit(), nats.AckWait(ackWait)}
 	if normalizedDurable != "" {
-		opts = append(opts, nats.Durable(normalizedDurable))
+		stream, err := js.StreamNameBySubject(subject)
+		if err != nil {
+			return fmt.Errorf("find stream for %s: %w", subject, err)
+		}
+		if _, err := js.ConsumerInfo(stream, normalizedDurable); errors.Is(err, nats.ErrConsumerNotFound) {
+			_, err = js.AddConsumer(stream, &nats.ConsumerConfig{Durable: normalizedDurable, DeliverSubject: nats.NewInbox(), FilterSubject: subject, DeliverPolicy: nats.DeliverNewPolicy, AckPolicy: nats.AckExplicitPolicy, AckWait: ackWait, MaxAckPending: 1000})
+			if err != nil {
+				return fmt.Errorf("create durable %s: %w", normalizedDurable, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("inspect durable %s: %w", normalizedDurable, err)
+		}
+		opts = append(opts, nats.Bind(stream, normalizedDurable))
+	} else {
+		opts = append(opts, nats.DeliverNew())
 	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	slots := make(chan struct{}, concurrency)
 
 	// inFlight tracks message handlers currently running so shutdown can wait
 	// for them instead of abandoning them mid-pipeline (they can run LLM
@@ -215,22 +241,54 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 	// closes right after ctx is canceled).
 	var inFlight sync.WaitGroup
 	cb := func(msg *nats.Msg) {
-		inFlight.Add(1)
-		defer inFlight.Done()
-		payload := msg.Data
-		if metadata, err := msg.Metadata(); err == nil {
-			payload = llmrun.QueuePayload(payload, metadata.Stream, metadata.Sequence.Stream)
+		// Start deadline renewal before waiting for capacity. Long LLM operations
+		// must not redeliver the same event while their worker is still active.
+		done := make(chan struct{})
+		interval := ackWait / 3
+		if interval <= 0 {
+			interval = time.Second
 		}
-		if err := handler(ctx, payload); err != nil {
-			s.logger.Error("(MID_26041120) converter message failed", "subject", msg.Subject, "error", err)
-			if shouldAckOnHandlerError(err) {
-				_ = msg.Ack()
-				return
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					_ = msg.InProgress()
+				}
 			}
-			_ = msg.Nak()
+		}()
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			close(done)
+			_ = msg.NakWithDelay(30 * time.Second)
 			return
 		}
-		_ = msg.Ack()
+		inFlight.Add(1)
+		go func() {
+			defer inFlight.Done()
+			defer func() { <-slots }()
+			defer close(done)
+			payload := msg.Data
+			if metadata, err := msg.Metadata(); err == nil {
+				payload = llmrun.QueuePayload(payload, metadata.Stream, metadata.Sequence.Stream)
+			}
+			if err := handler(ctx, payload); err != nil {
+				if s.logger != nil {
+					s.logger.Error("(MID_26041120) converter message failed", "subject", msg.Subject, "error", err)
+				}
+				if shouldAckOnHandlerError(err) {
+					_ = msg.Ack()
+					return
+				}
+				_ = msg.NakWithDelay(30 * time.Second)
+				return
+			}
+			_ = msg.Ack()
+		}()
 	}
 
 	sub, err := js.Subscribe(subject, cb, opts...)
@@ -275,6 +333,16 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 			"fallback_durable_enabled", allowFallbackDurable,
 		)
 	}
+	info, infoErr := sub.ConsumerInfo()
+	s.subsMu.Lock()
+	if s.consumers == nil {
+		s.consumers = map[*nats.Subscription]consumerRef{}
+	}
+	if infoErr == nil {
+		s.consumers[sub] = consumerRef{info.Stream, info.Name}
+	}
+	s.subs = append(s.subs, sub)
+	s.subsMu.Unlock()
 	<-ctx.Done()
 	_ = sub.Unsubscribe()
 
@@ -409,4 +477,41 @@ func isNonFatalEnsureStreamErr(err error) bool {
 	// Non-fatal cases:
 	// 1) Target stream already exists.
 	return strings.Contains(msg, "already in use")
+}
+
+// CheckHealth reports transport and bound subscription health without inspecting
+// job duration; intentional off-peak waits and slow providers remain legitimate.
+func (s *NATSSubscriber) CheckHealth(ctx context.Context) error {
+	if s.conn == nil || !s.conn.IsConnected() {
+		return errors.New("NATS is not connected")
+	}
+	if err := s.conn.FlushWithContext(ctx); err != nil {
+		return fmt.Errorf("NATS round trip: %w", err)
+	}
+	s.subsMu.Lock()
+	defer s.subsMu.Unlock()
+	if len(s.subs) == 0 {
+		return errors.New("NATS subscriptions are not ready")
+	}
+	js, err := s.conn.JetStream()
+	if err != nil {
+		return err
+	}
+	for _, sub := range s.subs {
+		if !sub.IsValid() {
+			return errors.New("NATS subscription is not active")
+		}
+		ref, ok := s.consumers[sub]
+		if !ok {
+			return errors.New("NATS consumer identity unavailable")
+		}
+		info, err := js.ConsumerInfo(ref.stream, ref.name, nats.Context(ctx))
+		if err != nil {
+			return fmt.Errorf("NATS consumer unavailable: %w", err)
+		}
+		if !info.PushBound {
+			return errors.New("NATS consumer is not bound to its worker")
+		}
+	}
+	return nil
 }

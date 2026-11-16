@@ -114,7 +114,7 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all six."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all eight."
 run = '''
 set -euo pipefail
 
@@ -160,7 +160,7 @@ SQL
 }
 
 # binary name -> cmd package
-ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin deploy-runner:./server/cmd/deploy-runner"
+ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin deploy-runner:./server/cmd/deploy-runner process-monitor:./server/cmd/process-monitor doc-recovery:./server/cmd/doc-recovery"
 SELECT="${BINS:-}"   # e.g. BINS="server,doc-processor"
 
 SELECTED=""
@@ -170,7 +170,7 @@ for pair in $ALL; do
     SELECTED="$SELECTED $pair"
   fi
 done
-[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,doc-service,create-admin,deploy-runner" >&2; exit 1; }
+[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,doc-service,create-admin,deploy-runner,process-monitor,doc-recovery" >&2; exit 1; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -225,6 +225,11 @@ chmod +x "$OUT/deploy-server-china.sh"
 # The box runs shell_server_deploy.sh from its ChenWeb dir; each deploy installs this copy.
 cp "$REPO/shell_server_deploy.sh" "$OUT/"
 chmod +x "$OUT/shell_server_deploy.sh"
+
+# Keep independently scheduled supervision/recovery deployable with the binaries.
+mkdir -p "$OUT/process-health-install"
+cp "$REPO/scripts/"process-monitor.* "$REPO/scripts/"doc-recovery.* \
+  "$REPO/scripts/install-process-health.sh" "$OUT/process-health-install/"
 
 # Ship the migration files too. config.RunMigrations reads these from DISK at
 # service startup (sharedgoose -> os.DirFS on PROJECT_MIGRATION_DIR), not from a

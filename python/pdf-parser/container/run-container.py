@@ -17,7 +17,8 @@ args = [
     "--mount", "type=bind,src=/home/gui/.mineru,dst=/home/gui/.mineru",
     "--mount", "type=bind,src=/home/gui/.cache,dst=/home/gui/.cache",
 ]
-for key in sorted(os.environ.keys() - excluded):
+args += ["--env", f"PROCESS_HEALTH_PID={os.getpid()}"]
+for key in sorted(os.environ.keys() - excluded - {"PROCESS_HEALTH_PID"}):
     args += ["--env", key]
 args += ["chenweb-pdf-parser:mineru-4.0.9"]
 os.execv(args[0], args)

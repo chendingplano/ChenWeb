@@ -51,6 +51,10 @@ func provisionV2Schema() map[string]any {
 		"type": "object", "required": []string{"v", "l", "p"}, "additionalProperties": false,
 		"properties": map[string]any{
 			"v": map[string]any{"type": "integer", "const": 2}, "l": text, "p": provisions,
+			// Root-level "g" and "o" are tolerated only as empty arrays; non-empty
+			// values belong inside a provision.
+			"g": map[string]any{"type": "array", "maxItems": 0},
+			"o": map[string]any{"type": "array", "maxItems": 0},
 		},
 	}
 }
