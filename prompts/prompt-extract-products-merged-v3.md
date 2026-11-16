@@ -343,10 +343,20 @@ row.
 Every row MUST contain a nonempty `s` array citing the input lines that support
 that row. Copy actual input line numbers; never guess them.
 
-- A single line is an integer: `[143]`, not `["143"]`.
-- An inclusive range is a string: `["150-151"]`.
-- A table row is a string with its label exactly as shown: `["116#r3"]`. Cite
-  the rows that mention the product, not the whole table line.
+Span tokens are written in exactly one of three forms, and nothing else:
+
+1. A single line number as a bare integer, with no quotes: `143`.
+2. An inclusive line range as a string with the whole range inside one pair of
+   quotes: `"150-151"`. A bare range such as `150-151` is invalid JSON.
+3. A table row as a string with its label exactly as shown: `"116#r3"`.
+
+Rules for every `s` array:
+
+- Each token is complete before the next comma. Never open a quote you do not
+  close in the same token. `[492,493,494]` is correct; `[492,"493,"494]` is
+  invalid and is rejected.
+- Never quote a bare integer: `["143"]` is invalid, `[143]` is correct.
+- Cite the rows that mention the product, not the whole table line.
 - Spans may be mixed: `[143,"150-151","116#r3"]`.
 - Never omit `s`, use null or an empty array, or cite a line or row that is not
   in the input. A response with invalid evidence is rejected.
