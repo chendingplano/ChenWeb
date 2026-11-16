@@ -261,6 +261,73 @@ var Registry = []TableSyncItem{
 		Filter:      approvedKeywordSourceFilter,
 	},
 
+	// The keyword dictionary, mirrored as it is on the releasing machine: the
+	// concepts and surfaces, a surface's derived lookup keys, the normalization
+	// rewrite rules, and the identity mappings from external sources. Every row is
+	// synced, whatever created it; concept_id, surface_id and rule_id are stable
+	// text ids (never surrogates). The sync only adds and updates, so a row that
+	// exists only on a deployment is left alone. Sync order: concepts, surfaces,
+	// then the tables that point at them; external_ids and surface_evidence also
+	// need keyword_sources.
+	{
+		ID:         "keyword_concepts",
+		Table:      "kb.keyword_concepts",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"concept_id"},
+		Columns: []string{
+			"concept_id", "pref_label", "gloss", "scope", "status", "merged_into",
+			"gloss_source", "create_time", "modify_time",
+		},
+	},
+	{
+		ID:         "keyword_surfaces",
+		Table:      "kb.keyword_surfaces",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"surface_id"},
+		Columns: []string{
+			"surface_id", "concept_id", "surface", "norm_key", "norm_version", "label_role",
+			"alias_type", "lang", "scope", "confidence", "provenance", "locked", "evidence",
+			"create_time", "modify_time", "origin_concept",
+		},
+	},
+	// The application never edits a key row: it replaces all keys of a surface, so
+	// created_at is a complete cursor.
+	{
+		ID:         "keyword_surface_keys",
+		Table:      "kb.keyword_surface_keys",
+		CursorCol:  "created_at",
+		NaturalKey: []string{"surface_id", "key_kind"},
+		Columns:    []string{"surface_id", "key_kind", "key_value", "norm_version", "created_at"},
+	},
+	{
+		ID:         "keyword_rewrite_rules",
+		Table:      "kb.keyword_rewrite_rules",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"rule_id"},
+		Columns: []string{
+			"rule_id", "pattern", "replacement", "scope", "enabled", "provenance",
+			"create_time", "modify_time",
+		},
+	},
+	{
+		ID:         "keyword_external_ids",
+		Table:      "kb.keyword_external_ids",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"source", "external_id", "release"},
+		Columns:    []string{"source", "external_id", "release", "concept_id", "modify_time"},
+		Filter:     approvedKeywordSourceFilter,
+	},
+	{
+		ID:         "keyword_surface_evidence",
+		Table:      "kb.keyword_surface_evidence",
+		CursorCol:  "modify_time",
+		NaturalKey: []string{"surface_id", "source", "external_id", "release"},
+		Columns: []string{
+			"surface_id", "source", "external_id", "evidence", "confidence", "release", "modify_time",
+		},
+		Filter: approvedKeywordSourceFilter,
+	},
+
 	// The governed `quantity` ontology module that the QUDT approve flow
 	// writes from the downloaded TTL. The TTL is a transient download, so a
 	// deployment cannot re-derive these rows; it must receive them. Sync order:

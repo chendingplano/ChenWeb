@@ -60,6 +60,7 @@ func TestUpsertRowsAppliesInsertOrUpdate(t *testing.T) {
 
 	item := testItem()
 	mock.ExpectBegin()
+	mock.ExpectExec("SET CONSTRAINTS ALL DEFERRED").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(wantUpsertQuery)).
 		WithArgs(
 			"1", "Cat A", "L1", "L2", "desc", "use", "Widget", "Widget EN", "Class II",

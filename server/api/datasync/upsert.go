@@ -90,6 +90,13 @@ func upsertRows(ctx context.Context, db *sql.DB, item TableSyncItem, rows []Row)
 	}
 	defer tx.Rollback()
 
+	// A page is applied in cursor order, which need not put a row after the row it
+	// points at (a concept merged into another concept, say). Constraints declared
+	// DEFERRABLE are therefore checked at commit; others are unaffected.
+	if _, err := tx.ExecContext(ctx, "SET CONSTRAINTS ALL DEFERRED"); err != nil {
+		return fmt.Errorf("defer constraints for %s: %w", item.ID, err)
+	}
+
 	for _, sourceRow := range rows {
 		row, err := resolveReferences(ctx, tx, item, sourceRow)
 		if err != nil {

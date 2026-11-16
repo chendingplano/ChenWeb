@@ -81,3 +81,48 @@ func TestKeywordCatalogItemsOnlySyncApprovedReleases(t *testing.T) {
 		}
 	}
 }
+
+// The dictionary is mirrored in full: concepts and surfaces carry no filter
+// (every row, whatever created it, must reach a deployment), and the two
+// identity tables that point at kb.keyword_sources carry the approved-release
+// filter so no row can reference a source release the target does not hold.
+// Items also have to be registered after the tables their foreign keys point
+// at, since those foreign keys are plain text ids, not SyncReferences.
+func TestKeywordDictionaryItemsMirrorEverythingInDependencyOrder(t *testing.T) {
+	position := map[string]int{}
+	for i, item := range Registry {
+		position[item.ID] = i
+	}
+	for _, id := range []string{"keyword_concepts", "keyword_surfaces", "keyword_surface_keys", "keyword_rewrite_rules"} {
+		item, ok := ItemByID(id)
+		if !ok {
+			t.Errorf("%s is not registered", id)
+			continue
+		}
+		if item.Filter != "" {
+			t.Errorf("%s Filter = %q, want none (mirror every row)", id, item.Filter)
+		}
+	}
+	for _, id := range []string{"keyword_external_ids", "keyword_surface_evidence"} {
+		item, ok := ItemByID(id)
+		if !ok {
+			t.Errorf("%s is not registered", id)
+			continue
+		}
+		if item.Filter != approvedKeywordSourceFilter {
+			t.Errorf("%s Filter = %q, want the approved-release filter", id, item.Filter)
+		}
+	}
+	for child, parents := range map[string][]string{
+		"keyword_surfaces":         {"keyword_concepts"},
+		"keyword_surface_keys":     {"keyword_surfaces"},
+		"keyword_external_ids":     {"keyword_sources", "keyword_concepts"},
+		"keyword_surface_evidence": {"keyword_sources", "keyword_surfaces"},
+	} {
+		for _, parent := range parents {
+			if position[parent] >= position[child] {
+				t.Errorf("%s must be registered after %s (foreign key)", child, parent)
+			}
+		}
+	}
+}
