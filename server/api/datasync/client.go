@@ -30,7 +30,7 @@ func fetchChangesPageFromSource(ctx context.Context, sourceURL, sharedSecret str
 	}
 	req.Header.Set("Authorization", "Bearer "+sharedSecret)
 
-	resp, err := httpClient.Do(req)
+	resp, err := fileTransferClient.Do(req)
 	if err != nil {
 		return changesResponse{}, fmt.Errorf("data sync source unreachable: %w", err)
 	}
@@ -101,10 +101,10 @@ func fetchSourceItemDefinitions(ctx context.Context, sourceURL, sharedSecret str
 	return items, nil
 }
 
-// fileTransferClient has no fixed timeout, unlike httpClient's 30s (which
-// bounds a whole request including the body read, too short for a large
-// video file over a slow link) -- the caller's context is what bounds a
-// file fetch instead.
+// fileTransferClient serves both change pages and files without a fixed total
+// timeout. httpClient's 30s includes reading the whole response body, which
+// can be too short for either a large JSON page or a video over a slow link.
+// The caller's context bounds these transfers; discovery still uses httpClient.
 var fileTransferClient = &http.Client{}
 
 // fetchItemFile calls another ChenWeb instance's per-file endpoint
