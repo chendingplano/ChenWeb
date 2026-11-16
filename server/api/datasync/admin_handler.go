@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -133,7 +134,7 @@ func HandleListSyncItems(c echo.Context) error {
 }
 
 // HandlePreviewSync serves POST /api/v1/data-sync/items/:itemId/preview. It
-// fetches changes from the source but never writes to the target database
+// counts changes at the source but never writes to the target database
 // and never advances the stored cursor.
 func HandlePreviewSync(c echo.Context) error {
 	if ApiTypes.ProjectDBHandle == nil {
@@ -158,16 +159,18 @@ func HandlePreviewSync(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load sync state"})
 	}
 
-	rows, _, err := fetchAllChanges(ctx, sourceURL, secret, item, state.LastCursor.String)
+	started := time.Now()
+	count, err := fetchChangeCount(ctx, sourceURL, secret, item, state.LastCursor.String)
 	if err != nil {
 		adminLogger.Error("preview fetch failed", "item_id", item.ID, "error", err)
 		return c.JSON(http.StatusBadGateway, map[string]any{"ok": false, "message": err.Error()})
 	}
 
+	adminLogger.Info("preview completed", "item_id", item.ID, "rows", count, "duration", time.Since(started))
 	return c.JSON(http.StatusOK, map[string]any{
 		"ok":                true,
 		"item_id":           item.ID,
-		"changed_row_count": len(rows),
+		"changed_row_count": count,
 	})
 }
 
@@ -202,6 +205,7 @@ func HandleApplySync(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load sync state"})
 	}
 
+	started := time.Now()
 	rows, nextCursor, err := fetchAllChanges(ctx, sourceURL, secret, item, state.LastCursor.String)
 	if err != nil {
 		adminLogger.Error("apply fetch failed", "item_id", item.ID, "error", err)
@@ -209,6 +213,7 @@ func HandleApplySync(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]any{"ok": false, "message": err.Error()})
 	}
 
+	fetched := time.Now()
 	if item.Kind == KindTableWithFiles {
 		if err := materializeFiles(ctx, item, sourceURL, secret, rows); err != nil {
 			adminLogger.Error("apply file materialization failed", "item_id", item.ID, "error", err)
@@ -217,12 +222,14 @@ func HandleApplySync(c echo.Context) error {
 		}
 	}
 
+	filesDone := time.Now()
 	if err := upsertRows(ctx, db, item, rows); err != nil {
 		adminLogger.Error("apply upsert failed", "item_id", item.ID, "error", err)
 		_ = saveSyncError(ctx, db, item.ID, err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": err.Error()})
 	}
 
+	applied := time.Now()
 	finalCursor := nextCursor
 	if finalCursor == "" {
 		finalCursor = state.LastCursor.String
@@ -232,7 +239,13 @@ func HandleApplySync(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "sync applied but failed to persist state"})
 	}
 
+	updatedState, err := getSyncState(ctx, db, item.ID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "sync applied but failed to read state"})
+	}
+	adminLogger.Info("sync completed", "item_id", item.ID, "rows", len(rows), "fetch_duration", fetched.Sub(started), "files_duration", filesDone.Sub(fetched), "upsert_duration", applied.Sub(filesDone), "total_duration", time.Since(started))
 	return c.JSON(http.StatusOK, map[string]any{
+		"last_synced_at":   updatedState.LastSyncedAt.String,
 		"ok":               true,
 		"item_id":          item.ID,
 		"synced_row_count": len(rows),

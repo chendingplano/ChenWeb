@@ -33,6 +33,16 @@
 	let applyingID = $state<string | null>(null);
 	let deletingID = $state<string | null>(null);
 	let previewCounts = $state<Record<string, number>>({});
+	let selectedIDs = $state<string[]>([]);
+	let operation = $state<'preview' | 'sync' | null>(null);
+	let operationErrors = $state<Record<string, string>>({});
+	const selectedItems = $derived(items.filter((item) => selectedIDs.includes(item.item_id)));
+	const allSelected = $derived(items.length > 0 && selectedItems.length === items.length);
+	const busy = $derived(operation !== null || deletingID !== null || submitting);
+
+	function toggleSelection(itemID: string, checked: boolean) {
+		selectedIDs = checked ? [...selectedIDs, itemID] : selectedIDs.filter((id) => id !== itemID);
+	}
 
 	// New Data Syncher: one form, shared between create (editingID === null)
 	// and edit (editingID === the item being edited -- always origin=local,
@@ -183,6 +193,7 @@
 		try {
 			const response = await listSyncItems();
 			items = response.items;
+			selectedIDs = selectedIDs.filter((id) => items.some((item) => item.item_id === id));
 		} catch (err) {
 			error = String((err as Error).message ?? err);
 		} finally {
@@ -190,35 +201,63 @@
 		}
 	}
 
-	async function runPreview(itemID: string) {
-		previewingID = itemID;
+	// Use a snapshot in displayed order, retaining compiled parent-before-child
+	// order. Each result updates only its row; one failure does not hide others.
+	async function runItems(itemIDs: string[], mode: 'preview' | 'sync') {
+		if (busy || loading || itemIDs.length === 0) return;
+		operation = mode;
 		error = null;
 		info = null;
+		let succeeded = 0;
+		const failures: string[] = [];
 		try {
-			const result = await previewSync(itemID);
-			previewCounts = { ...previewCounts, [itemID]: result.changed_row_count };
-			info = m.sync_data_row_s_changed_since_the({ itemID, changed_row_count: result.changed_row_count });
-		} catch (err) {
-			error = String((err as Error).message ?? err);
+			for (const itemID of itemIDs) {
+				if (mode === 'preview') previewingID = itemID;
+				else applyingID = itemID;
+				const { [itemID]: _oldError, ...remainingErrors } = operationErrors;
+				operationErrors = remainingErrors;
+				try {
+					if (mode === 'preview') {
+						const result = await previewSync(itemID);
+						previewCounts = { ...previewCounts, [itemID]: result.changed_row_count };
+						info = m.sync_data_row_s_changed_since_the({
+							itemID,
+							changed_row_count: result.changed_row_count
+						});
+					} else {
+						const result = await applySync(itemID);
+						const { [itemID]: _discard, ...rest } = previewCounts;
+						previewCounts = rest;
+						items = items.map((item) =>
+							item.item_id === itemID
+								? {
+										...item,
+										last_synced_at: result.last_synced_at,
+										last_row_count: result.synced_row_count,
+										last_error: undefined
+									}
+								: item
+						);
+						info = m.sync_data_synced_row_s({ itemID, synced_row_count: result.synced_row_count });
+					}
+					succeeded++;
+				} catch (err) {
+					const message = String((err as Error).message ?? err);
+					operationErrors = { ...operationErrors, [itemID]: message };
+					failures.push(`${itemID}: ${message}`);
+				}
+			}
+			if (itemIDs.length > 1) {
+				info =
+					mode === 'preview'
+						? m.sync_data_preview_completed({ succeeded, total: itemIDs.length })
+						: m.sync_data_sync_completed({ succeeded, total: itemIDs.length });
+			}
+			error = failures.length ? failures.join('\n') : null;
 		} finally {
 			previewingID = null;
-		}
-	}
-
-	async function runApply(itemID: string) {
-		applyingID = itemID;
-		error = null;
-		info = null;
-		try {
-			const result = await applySync(itemID);
-			const { [itemID]: _discard, ...rest } = previewCounts;
-			previewCounts = rest;
-			info = m.sync_data_synced_row_s({ itemID, synced_row_count: result.synced_row_count });
-			await loadItems();
-		} catch (err) {
-			error = String((err as Error).message ?? err);
-		} finally {
 			applyingID = null;
+			operation = null;
 		}
 	}
 
@@ -288,7 +327,10 @@
 	}
 
 	async function runDelete(item: SyncItem) {
-		const question = item.origin === 'learned' ? m.sync_data_delete_cached_sync_item_confirm : m.sync_data_delete_sync_item_confirm;
+		const question =
+			item.origin === 'learned'
+				? m.sync_data_delete_cached_sync_item_confirm
+				: m.sync_data_delete_sync_item_confirm;
 		if (!confirm(question({ item_id: item.item_id }))) {
 			return;
 		}
@@ -342,11 +384,37 @@
 			</p>
 		</div>
 		<div class="toolbar-actions">
-			<button class="ghost" onclick={loadItems} disabled={loading}>
+			<span class="selection-count"
+				>{m.sync_data_selected_count({ count: selectedItems.length })}</span
+			>
+			<button
+				class="ghost"
+				onclick={() =>
+					runItems(
+						selectedItems.map((item) => item.item_id),
+						'preview'
+					)}
+				disabled={loading || busy || selectedItems.length === 0}
+			>
+				{m.sync_data_preview_selected()}
+			</button>
+			<button
+				class="alt-btn"
+				onclick={() =>
+					runItems(
+						selectedItems.map((item) => item.item_id),
+						'sync'
+					)}
+				disabled={loading || busy || selectedItems.length === 0}
+			>
+				{m.sync_data_sync_selected()}
+			</button>
+			<button class="ghost" onclick={loadItems} disabled={loading || busy}>
 				{loading ? m.sync_data_refreshing() : m.sync_data_refresh()}
 			</button>
 			<button
 				class="primary"
+				disabled={busy}
 				onclick={() => (showForm ? closeForm() : openCreateForm())}
 			>
 				{showForm ? m.sync_data_cancel() : m.sync_data_new_data_syncher()}
@@ -356,7 +424,8 @@
 
 	{#if error}
 		<div class="error" role="alert">{error}</div>
-	{:else if info}
+	{/if}
+	{#if info}
 		<div class="info" role="status">{info}</div>
 	{/if}
 
@@ -431,15 +500,15 @@
 					<span>{m.sync_data_cursor_column()}</span>
 					<select bind:value={formDraft.cursor_col} required disabled={tableColumns.length === 0}>
 						<option value="" disabled>
-							{tableColumns.length ? m.sync_data_select_a_column() : m.sync_data_select_a_table_first()}
+							{tableColumns.length
+								? m.sync_data_select_a_column()
+								: m.sync_data_select_a_table_first()}
 						</option>
 						{#each tableColumns as col}
 							<option value={col.name}>{col.name} ({col.data_type})</option>
 						{/each}
 					</select>
-					<span class="hint"
-						>{m.sync_data_required_a_timestamp_column_bumped()}</span
-					>
+					<span class="hint">{m.sync_data_required_a_timestamp_column_bumped()}</span>
 				</label>
 				<label>
 					<span>{m.sync_data_natural_key()}</span>
@@ -480,7 +549,9 @@
 							disabled={tableColumns.length === 0}
 						>
 							<option value="" disabled>
-								{tableColumns.length ? m.sync_data_select_a_column() : m.sync_data_select_a_table_first()}
+								{tableColumns.length
+									? m.sync_data_select_a_column()
+									: m.sync_data_select_a_table_first()}
 							</option>
 							{#each tableColumns as col}
 								<option value={col.name}>{col.name} ({col.data_type})</option>
@@ -491,12 +562,18 @@
 					<div class="row two">
 						<label>
 							<span>{m.sync_data_file_dir_env_var()}</span>
-							<input bind:value={formDraft.file_dir_env} placeholder={m.sync_data_e_g_video_dir()} />
+							<input
+								bind:value={formDraft.file_dir_env}
+								placeholder={m.sync_data_e_g_video_dir()}
+							/>
 							<span class="hint">{m.sync_data_where_this_instance_stores_synced()}</span>
 						</label>
 						<label>
 							<span>{m.sync_data_file_dir_default_subdir()}</span>
-							<input bind:value={formDraft.file_dir_default_subdir} placeholder={m.sync_data_e_g_videos()} />
+							<input
+								bind:value={formDraft.file_dir_default_subdir}
+								placeholder={m.sync_data_e_g_videos()}
+							/>
 							<span class="hint">{m.sync_data_fallback_subdirectory_if_the_env()}</span>
 						</label>
 					</div>
@@ -504,11 +581,7 @@
 				</div>
 			{/if}
 
-			<button
-				type="button"
-				class="advanced-toggle"
-				onclick={() => (showAdvanced = !showAdvanced)}
-			>
+			<button type="button" class="advanced-toggle" onclick={() => (showAdvanced = !showAdvanced)}>
 				{m.sync_data_advanced_optional_most_syncers_don({ value: showAdvanced ? '▾' : '▸' })}
 			</button>
 			{#if showAdvanced}
@@ -516,23 +589,25 @@
 					<label>
 						<span>{m.sync_data_filter_raw_sql_where_fragment()}</span>
 						<input bind:value={formDraft.filter} placeholder={m.sync_data_e_g_status_approved()} />
-						<span class="hint"
-							>{m.sync_data_this_is_the_one_field()}</span
-						>
+						<span class="hint">{m.sync_data_this_is_the_one_field()}</span>
 					</label>
 				</div>
 			{/if}
 
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting}>
-					{submitting ? m.sync_data_saving() : editingID ? m.sync_data_save_changes() : m.sync_data_create()}
+					{submitting
+						? m.sync_data_saving()
+						: editingID
+							? m.sync_data_save_changes()
+							: m.sync_data_create()}
 				</button>
 			</div>
 		</form>
 	{/if}
 
 	<div class="panel">
-		{#if loading}
+		{#if loading && items.length === 0}
 			<div class="empty">{m.sync_data_loading_sync_items()}</div>
 		{:else if items.length === 0}
 			<div class="empty">{m.sync_data_no_sync_items_registered()}</div>
@@ -541,6 +616,20 @@
 				<table>
 					<thead>
 						<tr>
+							<th class="selection-cell">
+								<input
+									type="checkbox"
+									aria-label={m.sync_data_select_all()}
+									checked={allSelected}
+									indeterminate={selectedItems.length > 0 && !allSelected}
+									disabled={loading || busy}
+									onchange={(event) => {
+										selectedIDs = event.currentTarget.checked
+											? items.map((item) => item.item_id)
+											: [];
+									}}
+								/>
+							</th>
 							<th>{m.sync_data_item()}</th>
 							<th>{m.sync_data_table_2()}</th>
 							<th>{m.sync_data_kind()}</th>
@@ -554,6 +643,15 @@
 					<tbody>
 						{#each items as item (item.item_id)}
 							<tr>
+								<td class="selection-cell">
+									<input
+										type="checkbox"
+										aria-label={m.sync_data_select_item({ itemID: item.item_id })}
+										checked={selectedIDs.includes(item.item_id)}
+										disabled={loading || busy}
+										onchange={(event) => toggleSelection(item.item_id, event.currentTarget.checked)}
+									/>
+								</td>
 								<td class="cell-primary">{item.item_id}</td>
 								<td>{item.table}</td>
 								<td class="cell-secondary">{item.kind}</td>
@@ -561,11 +659,15 @@
 								<td>{fmtDate(item.last_synced_at)}</td>
 								<td>{item.last_row_count}</td>
 								<td>
-									{#if item.last_error}
+									{#if operationErrors[item.item_id]}
+										<span class="status-error">{operationErrors[item.item_id]}</span>
+									{:else if item.last_error}
 										<span class="status-error">{item.last_error}</span>
 									{:else if item.item_id in previewCounts}
 										<span class="cell-secondary"
-											>{m.sync_data_row_s_pending({ previewCounts: previewCounts[item.item_id] })}</span
+											>{m.sync_data_row_s_pending({
+												previewCounts: previewCounts[item.item_id]
+											})}</span
 										>
 									{:else}
 										<span class="cell-secondary">{m.sync_data_ok()}</span>
@@ -575,20 +677,26 @@
 									<div class="row-actions">
 										<button
 											class="ghost compact-btn"
-											onclick={() => runPreview(item.item_id)}
-											disabled={previewingID === item.item_id || applyingID === item.item_id}
+											onclick={() => runItems([item.item_id], 'preview')}
+											disabled={loading || busy}
 										>
-											{previewingID === item.item_id ? m.sync_data_previewing() : m.sync_data_preview()}
+											{previewingID === item.item_id
+												? m.sync_data_previewing()
+												: m.sync_data_preview()}
 										</button>
 										<button
 											class="alt-btn compact-btn"
-											onclick={() => runApply(item.item_id)}
-											disabled={previewingID === item.item_id || applyingID === item.item_id}
+											onclick={() => runItems([item.item_id], 'sync')}
+											disabled={loading || busy}
 										>
 											{applyingID === item.item_id ? m.sync_data_syncing() : m.sync_data_sync()}
 										</button>
 										{#if item.origin === 'local'}
-											<button class="ghost compact-btn" onclick={() => openEditForm(item)}>
+											<button
+												class="ghost compact-btn"
+												onclick={() => openEditForm(item)}
+												disabled={loading || busy}
+											>
 												{m.sync_data_edit_2()}
 											</button>
 										{/if}
@@ -596,9 +704,11 @@
 											<button
 												class="ghost compact-btn"
 												onclick={() => runDelete(item)}
-												disabled={deletingID === item.item_id}
+												disabled={loading || busy}
 											>
-												{deletingID === item.item_id ? m.sync_data_deleting() : m.sync_data_delete()}
+												{deletingID === item.item_id
+													? m.sync_data_deleting()
+													: m.sync_data_delete()}
 											</button>
 										{/if}
 									</div>
@@ -630,8 +740,32 @@
 		gap: 12px;
 	}
 	.toolbar-actions {
+		flex-wrap: wrap;
+		align-items: center;
 		display: flex;
 		gap: 10px;
+	}
+	.selection-count {
+		color: var(--sub);
+		font-size: 13px;
+	}
+	.selection-cell {
+		width: 34px;
+	}
+	input[type='checkbox'] {
+		width: 16px;
+		height: 16px;
+		padding: 0;
+		accent-color: var(--alt-btn);
+		cursor: pointer;
+	}
+	.error {
+		white-space: pre-line;
+	}
+	@media (max-width: 900px) {
+		.toolbar {
+			flex-wrap: wrap;
+		}
 	}
 	h2 {
 		margin: 0;

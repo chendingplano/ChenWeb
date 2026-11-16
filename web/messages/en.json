@@ -9164,5 +9164,12 @@
 	"dep_step_deploy_binary": "Install and restart {name}",
 	"dep_step_deploy_install": "Install {name}",
 	"dep_step_deploy_pdf_parser": "Rebuild and restart pdf-parser",
-	"dep_step_unknown": "Step {key}"
+	"dep_step_unknown": "Step {key}",
+	"sync_data_selected_count": "{count} selected",
+	"sync_data_preview_selected": "Preview selected",
+	"sync_data_sync_selected": "Sync selected",
+	"sync_data_select_all": "Select or deselect all sync items",
+	"sync_data_select_item": "Select {itemID}",
+	"sync_data_preview_completed": "Previewed {succeeded} of {total} selected items.",
+	"sync_data_sync_completed": "Synced {succeeded} of {total} selected items."
 }

@@ -232,6 +232,7 @@
 
 	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
 	const retainedPages = [
+		{ id: 'sysadmin-resources-sync-data', component: SyncDataView },
 		{ id: 'sysadmin-llm-compliance-gold', component: ComplianceGoldView },
 		{ id: 'sysadmin-jetstream-events', component: JetStreamEventsView },
 		{ id: 'sysadmin-jetstream-subjects', component: JetStreamSubjectsView },
@@ -637,8 +638,6 @@
 			<ExternalTerminologyResourcesView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-review-external-terminology'}
 			<ReviewExternalResourcesView {darkMode} />
-		{:else if activeMenu?.childId === 'sysadmin-resources-sync-data'}
-			<SyncDataView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-resources-china-mechanical-product-names'}
 			<MechanicalProductNamesImportView {darkMode} />
 		{:else if activeMenu?.childId === 'videos-training'}

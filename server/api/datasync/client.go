@@ -136,3 +136,35 @@ func fetchItemFile(ctx context.Context, sourceURL, sharedSecret, itemID string, 
 	}
 	return resp.Body, nil
 }
+
+// fetchChangeCount transfers only the count; preview never fetches row payloads.
+func fetchChangeCount(ctx context.Context, sourceURL, secret string, item TableSyncItem, since string) (int64, error) {
+	base := strings.TrimRight(sourceURL, "/") + "/api/internal/data-sync/items/" + url.PathEscape(item.ID) + "/count"
+	q := url.Values{}
+	if since != "" {
+		q.Set("since", since)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("data sync source unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("data sync count returned %s (source must support the count endpoint)", resp.Status)
+	}
+	var out struct {
+		Count *int64 `json:"changed_row_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("decode data sync count: %w", err)
+	}
+	if out.Count == nil || *out.Count < 0 {
+		return 0, fmt.Errorf("invalid data sync count response")
+	}
+	return *out.Count, nil
+}

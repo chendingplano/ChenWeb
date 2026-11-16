@@ -286,6 +286,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// exists for that caller, so access is a shared-secret header instead
 	// (checked inside the handler, mirrors sms_relay.go).
 	e.GET("/api/internal/data-sync/items/:itemId/changes", datasync.HandlePullChanges)
+	e.GET("/api/internal/data-sync/items/:itemId/count", datasync.HandleCountChanges)
 	// configurable-data-sync-items: per-row file transfer for table_with_files
 	// items, and item-definition discovery so a target can learn about items
 	// only this source knows about (runtime-created, not compiled in).

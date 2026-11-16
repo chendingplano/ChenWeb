@@ -55,6 +55,12 @@ func scratchProductNamesTable(t *testing.T, db *sql.DB, name string) {
 			notes            TEXT NOT NULL DEFAULT '',
 			extra_info       JSONB NOT NULL DEFAULT '{}'::jsonb,
 			status           TEXT NOT NULL DEFAULT 'proposed',
+            code_group TEXT NOT NULL DEFAULT '',
+            child_code_group TEXT NOT NULL DEFAULT '',
+            industry_code TEXT NOT NULL DEFAULT '',
+            cpc TEXT NOT NULL DEFAULT '',
+            entry_no TEXT NOT NULL DEFAULT '',
+            entry_no_new TEXT NOT NULL DEFAULT '',
 			update_time      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			UNIQUE (source, seq_no, product_name)
 		)`, name))
@@ -252,5 +258,190 @@ func TestUpsertRowsSkipsExistingLogicalRowWhenNaturalKeyDiffers(t *testing.T) {
 	}
 	if count != 1 || uid != "00000000-0000-0000-0000-000000000002" || title != "current" {
 		t.Fatalf("target row after equal-cursor apply = (count=%d, uid=%q, title=%q), want the existing row unchanged", count, uid, title)
+	}
+}
+
+// Covers a deployment-sized batch, including cursor guards and JSON nulls.
+func TestBulkSyncAgainstRealPostgres(t *testing.T) {
+	db := testDB(t)
+	table := fmt.Sprintf("public.datasync_bulk_%d", time.Now().UnixNano())
+	scratchProductNamesTable(t, db, table)
+	item := scratchItem(table)
+	if _, err := db.Exec("ALTER TABLE " + table + " ALTER COLUMN keywords DROP NOT NULL"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Exec(fmt.Sprintf(`INSERT INTO %s (seq_no, product_name, source, aliases, keywords, update_time)
+ SELECT n, 'Widget '||n, 'bulk', 'null'::jsonb, NULL, '2026-11-01'::timestamptz FROM generate_series(1,6000) n`, table))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := fetchChangesPage(db, item, "", 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("TRUNCATE " + table); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := upsertRows(context.Background(), db, item, page.Rows); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("6000 row initial apply: %s", time.Since(start))
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM " + table + " WHERE aliases = 'null'::jsonb AND keywords IS NULL").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 6000 {
+		t.Fatalf("JSON null / SQL NULL roundtrip: %d rows", count)
+	}
+	if _, err := db.Exec("UPDATE " + table + " SET product_name_en = 'target-newer', update_time = '2026-11-03' WHERE seq_no = 1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range page.Rows {
+		row["product_name_en"] = json.RawMessage(`"source-newer"`)
+		row["update_time"] = json.RawMessage(`"2026-11-02T00:00:00Z"`)
+	}
+	start = time.Now()
+	if err := upsertRows(context.Background(), db, item, page.Rows); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("6000 row repeated apply: %s", time.Since(start))
+	if err := db.QueryRow("SELECT count(*) FROM " + table + " WHERE product_name_en = 'source-newer'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 5999 {
+		t.Fatalf("updated %d rows, want 5999", count)
+	}
+	// A bad final row must roll back the whole batch.
+	page.Rows[0]["notes"] = json.RawMessage(`"should roll back"`)
+	page.Rows[0]["update_time"] = json.RawMessage(`"2026-11-04T00:00:00Z"`)
+	page.Rows[len(page.Rows)-1]["seq_no"] = json.RawMessage(`"not an integer"`)
+	if err := upsertRows(context.Background(), db, item, page.Rows); err == nil {
+		t.Fatal("expected invalid integer failure")
+	}
+	if err := db.QueryRow("SELECT count(*) FROM " + table + " WHERE notes = 'should roll back'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("partial batch survived rollback")
+	}
+}
+
+func TestBulkSyncResolvesLocalReferences(t *testing.T) {
+	db := testDB(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	parentTable := "public.datasync_parent_" + suffix
+	childTable := "public.datasync_child_" + suffix
+	if _, err := db.Exec("CREATE TABLE " + parentTable + " (id bigint PRIMARY KEY, name text UNIQUE)"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("DROP TABLE IF EXISTS " + parentTable) })
+	if _, err := db.Exec("CREATE TABLE " + childTable + " (id bigserial PRIMARY KEY, name text UNIQUE, parent_id bigint REFERENCES " + parentTable + "(id), update_time timestamptz)"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("DROP TABLE IF EXISTS " + childTable) })
+	if _, err := db.Exec("INSERT INTO " + parentTable + " VALUES (987, 'parent')"); err != nil {
+		t.Fatal(err)
+	}
+	oldRegistry := Registry
+	parent := TableSyncItem{ID: "test-parent", Table: parentTable, NaturalKey: []string{"name"}}
+	Registry = append(append([]TableSyncItem{}, Registry...), parent)
+	t.Cleanup(func() { Registry = oldRegistry })
+	item := TableSyncItem{ID: "test-child", Table: childTable, CursorCol: "update_time", NaturalKey: []string{"name"}, Columns: []string{"name", "parent_id", "update_time"}, References: []SyncReference{{Column: "parent_id", ItemID: parent.ID}}}
+	rows := []Row{
+		{"name": json.RawMessage(`"child1"`), "parent_id": json.RawMessage(`["parent"]`), "update_time": json.RawMessage(`"2026-11-01T00:00:00Z"`)},
+		{"name": json.RawMessage(`"child2"`), "parent_id": json.RawMessage(`["parent"]`), "update_time": json.RawMessage(`"2026-11-01T00:00:00Z"`)},
+		{"name": json.RawMessage(`"child3"`), "parent_id": nullJSON, "update_time": json.RawMessage(`"2026-11-01T00:00:00Z"`)},
+	}
+	if err := upsertRows(context.Background(), db, item, rows); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM " + childTable + " WHERE parent_id = 987").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("resolved %d references, want 2", count)
+	}
+	if string(rows[0]["parent_id"]) != `["parent"]` {
+		t.Fatal("source row mutated")
+	}
+	rows[0]["name"] = json.RawMessage(`"child4"`)
+	rows[1]["parent_id"] = json.RawMessage(`["missing"]`)
+	if err := upsertRows(context.Background(), db, item, rows); err == nil {
+		t.Fatal("expected missing parent error")
+	}
+	if err := db.QueryRow("SELECT count(*) FROM " + childTable).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("partial batch persisted: %d rows", count)
+	}
+}
+
+func TestBulkSyncSkipsOtherUniqueConflicts(t *testing.T) {
+	db := testDB(t)
+	table := fmt.Sprintf("public.datasync_conflict_%d", time.Now().UnixNano())
+	if _, err := db.Exec("CREATE TABLE " + table + " (uid text UNIQUE, code text UNIQUE, update_time timestamptz)"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("DROP TABLE IF EXISTS " + table) })
+	if _, err := db.Exec("INSERT INTO " + table + " VALUES ('target-uid','existing','2026-11-01')"); err != nil {
+		t.Fatal(err)
+	}
+	item := TableSyncItem{ID: "test-conflict", Table: table, CursorCol: "update_time", NaturalKey: []string{"uid"}, Columns: []string{"uid", "code", "update_time"}}
+	rows := []Row{
+		{"uid": json.RawMessage(`"source-uid"`), "code": json.RawMessage(`"existing"`), "update_time": json.RawMessage(`"2026-11-02T00:00:00Z"`)},
+		{"uid": json.RawMessage(`"new-uid"`), "code": json.RawMessage(`"new"`), "update_time": json.RawMessage(`"2026-11-02T00:00:00Z"`)},
+	}
+	if err := upsertRows(context.Background(), db, item, rows); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM " + table + " WHERE uid IN ('target-uid','new-uid')").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("target identity or new insert lost: %d", count)
+	}
+}
+
+// Updating an earlier row can free a unique value needed by a later INSERT.
+// The ontology active-release history uses precisely this transition pattern.
+func TestSyncPreservesOrderWhenUpdatesFreeUniqueValues(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprint(partial), func(t *testing.T) {
+			db := testDB(t)
+			table := fmt.Sprintf("public.datasync_order_%d", time.Now().UnixNano())
+			if _, err := db.Exec("CREATE TABLE " + table + " (name text UNIQUE, code text, active boolean, update_time timestamptz)"); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = db.Exec("DROP TABLE IF EXISTS " + table) })
+			index := "CREATE UNIQUE INDEX ON " + table + " (code)"
+			if partial {
+				index = "CREATE UNIQUE INDEX ON " + table + " (active) WHERE active"
+			}
+			if _, err := db.Exec(index); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("INSERT INTO " + table + " VALUES ('A','original',true,'2026-11-01')"); err != nil {
+				t.Fatal(err)
+			}
+			item := TableSyncItem{ID: "test-order", Table: table, CursorCol: "update_time", NaturalKey: []string{"name"}, Columns: []string{"name", "code", "active", "update_time"}}
+			rows := []Row{
+				{"name": json.RawMessage(`"A"`), "code": json.RawMessage(`"archived"`), "active": json.RawMessage(`"false"`), "update_time": json.RawMessage(`"2026-11-02T00:00:00Z"`)},
+				{"name": json.RawMessage(`"B"`), "code": json.RawMessage(`"original"`), "active": json.RawMessage(`"true"`), "update_time": json.RawMessage(`"2026-11-03T00:00:00Z"`)},
+			}
+			if err := upsertRows(context.Background(), db, item, rows); err != nil {
+				t.Fatal(err)
+			}
+			var active string
+			if err := db.QueryRow("SELECT name FROM " + table + " WHERE active").Scan(&active); err != nil {
+				t.Fatal(err)
+			}
+			if active != "B" {
+				t.Fatalf("active row=%s want B", active)
+			}
+		})
 	}
 }

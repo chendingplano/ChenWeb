@@ -78,7 +78,7 @@ The system SHALL provide a System Admin → Resources → Sync Data page listing
 
 #### Scenario: Previewing a sync
 - **WHEN** a sysadmin clicks "Preview" for a sync item on the Sync Data page
-- **THEN** the target queries the source for changes since the item's current stored cursor and displays the count of changed rows found, without upserting any data or advancing the cursor
+- **THEN** the target requests a source-side SQL count since the item's current stored cursor, using the same filter as the change feed, without downloading row payloads, upserting data or advancing the cursor
 
 #### Scenario: Applying a sync
 - **WHEN** a sysadmin clicks "Sync" (apply) for a sync item on the Sync Data page
@@ -87,3 +87,28 @@ The system SHALL provide a System Admin → Resources → Sync Data page listing
 #### Scenario: Source unreachable
 - **WHEN** a sysadmin triggers a preview or apply while the source (dev Mac) is unreachable
 - **THEN** the page displays an error message and the item's stored cursor and last-synced state remain unchanged
+
+
+### Requirement: Count-only source API
+The source SHALL expose `GET /api/internal/data-sync/items/:itemId/count?since=` with the same shared-secret authentication as the change feed. It SHALL run one SQL aggregate using the item's filter and strict cursor predicate and return `{item_id, changed_row_count}`. It SHALL NOT sort rows, expand references or transfer row payloads. An empty cursor SHALL count all matching rows.
+
+#### Scenario: Target upgraded before source
+- **WHEN** the source does not support the count endpoint
+- **THEN** preview reports an error identifying the source endpoint requirement and does not fall back to downloading rows
+
+### Requirement: Selected item actions
+The admin page SHALL provide individual selection checkboxes, a select/deselect-all checkbox with an indeterminate state, a selected count, and Preview selected and Sync selected actions. Selection actions SHALL be disabled while an operation runs; batch actions SHALL be disabled when no item is selected.
+
+#### Scenario: A selected item fails
+- **WHEN** preview or sync is requested for multiple selected items and one fails
+- **THEN** the items run in displayed order, the failure is shown for its item, later selected items still run, and the page reports the number of successful items
+
+### Requirement: Preserve sync page state
+Successful sync SHALL update only that item's displayed sync timestamp, row count and error state from the apply response. The response SHALL include `last_synced_at` from the persisted server state. Sync SHALL NOT request a fresh item list or source discovery. Menu navigation within the same dashboard/tab SHALL retain selection, preview results, open forms and scroll positions.
+
+#### Scenario: Apply from a scrolled list
+- **WHEN** a sysadmin syncs an item after scrolling down the list
+- **THEN** the existing row remains mounted, its status updates in place, and the table remains at the user's reading position
+
+### Requirement: Batched database apply
+A multi-row apply without ordering-sensitive constraints SHALL transfer rows into a transaction-local typed staging table via COPY, then issue set-based INSERT and UPDATE statements. Tables with partial/expression unique indexes, unique indexes on transferred mutable columns, or self references SHALL retain cursor-ordered row writes so earlier updates can free values needed by later inserts. It SHALL preserve local primary keys, the existing skip behavior on secondary unique conflicts, JSON null versus SQL NULL, and the newer-source-cursor update guard. Failure SHALL roll back the batch without advancing the stored cursor. Reference lookups MAY be reused within the batch, but SHALL NOT persist across applies.

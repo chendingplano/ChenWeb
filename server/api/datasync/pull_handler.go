@@ -1,6 +1,7 @@
 package datasync
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -294,4 +296,45 @@ func scanRow(rows *sql.Rows, item TableSyncItem) (Row, string, error) {
 		row[col] = value
 	}
 	return row, cursorValue, nil
+}
+
+// HandleCountChanges runs a single aggregate SELECT, with the same cursor and
+// filter as the change feed. No sorting, reference expansion or row transfer.
+func HandleCountChanges(c echo.Context) error {
+	if !authenticatePullRequest(c) {
+		return nil
+	}
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "project database is not initialized"})
+	}
+	ctx := c.Request().Context()
+	item, ok, err := ResolveItem(ctx, db, c.Param("itemId"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to resolve sync item"})
+	}
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "unknown sync item"})
+	}
+	start := time.Now()
+	count, err := countChanges(ctx, db, item, c.QueryParam("since"))
+	if err != nil {
+		pullLogger.Error("count changes failed", "item_id", item.ID, "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to count changes"})
+	}
+	pullLogger.Info("counted sync changes", "item_id", item.ID, "rows", count, "duration", time.Since(start))
+	return c.JSON(http.StatusOK, map[string]any{"item_id": item.ID, "changed_row_count": count})
+}
+
+func countChanges(ctx context.Context, db *sql.DB, item TableSyncItem, since string) (int64, error) {
+	where := fmt.Sprintf("%s > $1", item.CursorCol)
+	if item.Filter != "" {
+		where = "(" + item.Filter + ") AND " + where
+	}
+	if since == "" {
+		since = "-infinity"
+	}
+	var count int64
+	err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+item.Table+" WHERE "+where, since).Scan(&count)
+	return count, err
 }

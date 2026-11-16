@@ -34,6 +34,7 @@ export type ApplySyncResponse = {
 	ok: boolean;
 	item_id: string;
 	synced_row_count: number;
+	last_synced_at: string;
 };
 
 // SyncItemDraft is what the New Data Syncher form submits. Deliberately has

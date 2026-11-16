@@ -9164,5 +9164,12 @@
 	"dep_step_deploy_binary": "安装并重启 {name}",
 	"dep_step_deploy_install": "安装 {name}",
 	"dep_step_deploy_pdf_parser": "重建并重启 pdf-parser",
-	"dep_step_unknown": "步骤 {key}"
+	"dep_step_unknown": "步骤 {key}",
+	"sync_data_selected_count": "已选择 {count} 项",
+	"sync_data_preview_selected": "预览所选项",
+	"sync_data_sync_selected": "同步所选项",
+	"sync_data_select_all": "选择或取消选择所有同步项",
+	"sync_data_select_item": "选择 {itemID}",
+	"sync_data_preview_completed": "已预览 {total} 个所选项中的 {succeeded} 项。",
+	"sync_data_sync_completed": "已同步 {total} 个所选项中的 {succeeded} 项。"
 }

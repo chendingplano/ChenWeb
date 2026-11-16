@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 // upsertRows applies rows to item's table by NaturalKey: inserting new rows,
@@ -95,6 +97,21 @@ func upsertRows(ctx context.Context, db *sql.DB, item TableSyncItem, rows []Row)
 	// DEFERRABLE are therefore checked at commit; others are unaffected.
 	if _, err := tx.ExecContext(ctx, "SET CONSTRAINTS ALL DEFERRED"); err != nil {
 		return fmt.Errorf("defer constraints for %s: %w", item.ID, err)
+	}
+
+	// Keep the single-row path lightweight. Larger pulls use COPY and two
+	// set-based writes instead of one or two database round trips per row.
+	if len(rows) > 1 {
+		ordered, err := requiresOrderedApply(ctx, tx, item)
+		if err != nil {
+			return fmt.Errorf("check sync ordering for %s: %w", item.ID, err)
+		}
+		if !ordered {
+			if err := bulkUpsertRows(ctx, tx, item, rows); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}
 	}
 
 	for _, sourceRow := range rows {
@@ -206,4 +223,125 @@ func rowArgs(item TableSyncItem, row Row) ([]any, error) {
 		args[i] = decoded
 	}
 	return args, nil
+}
+
+// bulkUpsertRows stages values with their real PostgreSQL types. COPY preserves
+// the distinction between SQL NULL and a JSON column containing literal null.
+// The staging table has no constraints/defaults: only the final target writes
+// run its triggers, unique constraints and foreign-key checks.
+func bulkUpsertRows(ctx context.Context, tx *sql.Tx, item TableSyncItem, rows []Row) error {
+	const stage = "_datasync_rows"
+	columns := strings.Join(item.Columns, ", ")
+	if _, err := tx.ExecContext(ctx, "CREATE TEMP TABLE "+stage+" ON COMMIT DROP AS SELECT "+columns+" FROM "+item.Table+" WITH NO DATA"); err != nil {
+		return fmt.Errorf("create sync staging table for %s: %w", item.ID, err)
+	}
+	// Resolve before entering COPY mode: lib/pq cannot execute a lookup while
+	// its connection is receiving a COPY stream.
+	resolvedRows := make([]Row, len(rows))
+	referenceCache := make(map[string]json.RawMessage)
+	for i, row := range rows {
+		resolved, err := resolveReferencesCached(ctx, tx, item, row, referenceCache)
+		if err != nil {
+			return err
+		}
+		resolvedRows[i] = resolved
+	}
+	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(stage, item.Columns...))
+	if err != nil {
+		return fmt.Errorf("prepare sync copy for %s: %w", item.ID, err)
+	}
+	defer stmt.Close()
+	for _, row := range resolvedRows {
+		args, err := rowArgs(item, row)
+		if err != nil {
+			return fmt.Errorf("build sync copy args for %s: %w", item.ID, err)
+		}
+		if _, err := stmt.ExecContext(ctx, args...); err != nil {
+			return fmt.Errorf("copy rows for %s: %w", item.ID, err)
+		}
+	}
+	if _, err := stmt.ExecContext(ctx); err != nil {
+		return fmt.Errorf("flush sync copy for %s: %w", item.ID, err)
+	}
+	if err := stmt.Close(); err != nil {
+		return err
+	}
+	// DO NOTHING intentionally covers *all* unique constraints, including a
+	// pre-existing logical row whose portable UUID differs between deployments.
+	insert := "INSERT INTO " + item.Table + " (" + columns + ") SELECT " + columns + " FROM " + stage + " WHERE true ON CONFLICT DO NOTHING"
+	if _, err := tx.ExecContext(ctx, insert); err != nil {
+		return fmt.Errorf("bulk insert for %s: %w", item.ID, err)
+	}
+	var sets, keys []string
+	for _, col := range item.Columns {
+		if !item.isNaturalKeyColumn(col) {
+			sets = append(sets, col+" = source."+col)
+		}
+	}
+	for _, col := range item.NaturalKey {
+		keys = append(keys, "target."+col+" = source."+col)
+	}
+	update := "UPDATE " + item.Table + " AS target SET " + strings.Join(sets, ", ") + " FROM " + stage + " AS source WHERE " + strings.Join(keys, " AND ") + " AND target." + item.CursorCol + " < source." + item.CursorCol
+	if _, err := tx.ExecContext(ctx, update); err != nil {
+		return fmt.Errorf("bulk update for %s: %w", item.ID, err)
+	}
+	return nil
+}
+
+// Cache within one apply only. A frequently referenced parent needs one lookup,
+// while missing-parent errors still abort the transaction and keep the cursor.
+func resolveReferencesCached(ctx context.Context, tx *sql.Tx, item TableSyncItem, row Row, cache map[string]json.RawMessage) (Row, error) {
+	if len(item.References) == 0 {
+		return row, nil
+	}
+	resolved := make(Row, len(row))
+	for col, raw := range row {
+		resolved[col] = raw
+	}
+	for _, ref := range item.References {
+		raw, ok := row[ref.Column]
+		if !ok || isNullJSON(raw) {
+			continue
+		}
+		key := ref.ItemID + "\x00" + string(raw)
+		if value, ok := cache[key]; ok {
+			resolved[ref.Column] = value
+			continue
+		}
+		single := item
+		single.References = []SyncReference{ref}
+		result, err := resolveReferences(ctx, tx, single, resolved)
+		if err != nil {
+			return nil, err
+		}
+		resolved[ref.Column] = result[ref.Column]
+		cache[key] = result[ref.Column]
+	}
+	return resolved, nil
+}
+
+// A prior UPDATE may free a unique value needed by the next INSERT (notably
+// deactivating an ontology release before activating its replacement). Keep
+// cursor order for partial/expression unique indexes and unique indexes on
+// transferred, mutable columns. Surrogate primary keys are not transferred and
+// do not require the ordered path. This also covers runtime-defined sync items.
+func requiresOrderedApply(ctx context.Context, tx *sql.Tx, item TableSyncItem) (bool, error) {
+	for _, ref := range item.References {
+		if parent, ok := ItemByID(ref.ItemID); ok && parent.Table == item.Table {
+			return true, nil
+		}
+	}
+	var ordered bool
+	err := tx.QueryRowContext(ctx, `
+  SELECT EXISTS (
+   SELECT 1 FROM pg_index i
+   WHERE i.indrelid = $1::regclass AND i.indisunique
+    AND (i.indpred IS NOT NULL OR i.indexprs IS NOT NULL OR EXISTS (
+     SELECT 1 FROM unnest(i.indkey::smallint[]) WITH ORDINALITY AS k(attnum, pos)
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+     WHERE k.pos <= i.indnkeyatts AND a.attname = ANY($2)
+      AND NOT (a.attname = ANY($3))
+    ))
+  )`, item.Table, pq.Array(item.Columns), pq.Array(item.NaturalKey)).Scan(&ordered)
+	return ordered, err
 }

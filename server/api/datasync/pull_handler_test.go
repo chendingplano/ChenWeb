@@ -1,6 +1,7 @@
 package datasync
 
 import (
+	"context"
 	"encoding/json"
 	"regexp"
 	"testing"
@@ -229,5 +230,29 @@ func TestFetchChangesPageDistinguishesSQLNullFromJSONNull(t *testing.T) {
 	}
 	if string(resp.Rows[0]["extra_info"]) != "{}" {
 		t.Errorf("extra_info = %s, want {}", resp.Rows[0]["extra_info"])
+	}
+}
+
+func TestCountChangesOnlySelectsCount(t *testing.T) {
+	for _, since := range []string{"", "2026-11-16T00:00:00Z"} {
+		t.Run(since, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			arg := since
+			if arg == "" {
+				arg = "-infinity"
+			}
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT count(*) FROM kb.product_names WHERE (status = 'approved') AND update_time > $1")).WithArgs(arg).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(7000))
+			count, err := countChanges(context.Background(), db, testItem(), since)
+			if err != nil || count != 7000 {
+				t.Fatalf("count=%d error=%v", count, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
