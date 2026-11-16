@@ -374,6 +374,8 @@ func CanonicalMetricValueRangeType(raw string) string {
 	vrt = strings.ReplaceAll(vrt, "-", "_")
 	vrt = strings.ReplaceAll(vrt, " ", "_")
 	switch vrt {
+	case "multi_ranges":
+		return "multi-ranges"
 	// Additions below were found by surveying production kb.metrics.value_range_type
 	// (2026-08-14): 309 distinct strings across 7,036 rows, confirming extract_metrics
 	// treats this as free text rather than a fixed enum. Each group here covers only

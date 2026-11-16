@@ -27,7 +27,7 @@ export type MetricStatementFields = {
 	reasoning_tags?: unknown;
 };
 
-const NUMERIC_RANGE_TYPES = new Set(['lower_bound', 'upper_bound', 'exact', 'range']);
+const NUMERIC_RANGE_TYPES = new Set(['lower_bound', 'upper_bound', 'exact', 'range', 'multi-ranges']);
 
 const GROUP_OF: Record<StatementKind, StatementGroup> = {
 	requirement_with_criterion: 'requirement',

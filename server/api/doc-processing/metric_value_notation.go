@@ -483,12 +483,20 @@ func metricRowUnit(m map[string]any) string {
 	return firstNonEmptyTrimmed(asString(m["unit"]), asString(m["metric_unit"]))
 }
 
+var metricDisjointBoundsRe = regexp.MustCompile(`(?i)^\s*(?:≥|≤|>=|<=|>|<)\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*(?:或|or)\s*(?:≥|≤|>=|<=|>|<)\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*$`)
+
 // normalizeMetricValueNotation applies design D3 to rows whose range types are already
 // canonical: unit and comparator out of metric_value, ±x as upper_bound, range endpoints.
 func normalizeMetricValueNotation(metrics []map[string]any) {
 	dropConditionPropertyRepeats(metrics)
 	for _, m := range metrics {
 		value := strings.TrimSpace(asString(m["metric_value"]))
+		if metricDisjointBoundsRe.MatchString(value) {
+			m["value_range_type"] = "multi-ranges"
+			m["value_structure"] = map[string]any{"kind": "expression"}
+			m["value_min"], m["value_max"] = nil, nil
+			continue
+		}
 		if metricvalue.IsNonScalar(m["value_structure"]) {
 			m["value_min"], m["value_max"] = nil, nil
 			continue

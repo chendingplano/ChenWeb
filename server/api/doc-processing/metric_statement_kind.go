@@ -23,7 +23,7 @@ const (
 )
 
 var statementNumericRangeTypes = map[string]bool{
-	"lower_bound": true, "upper_bound": true, "exact": true, "range": true,
+	"lower_bound": true, "upper_bound": true, "exact": true, "range": true, "multi-ranges": true,
 }
 
 // metricStatementKind classifies one metric row from value_class,

@@ -389,3 +389,12 @@ func TestMetricRowHoldsSeveralValuesPairedNotation(t *testing.T) {
 		}
 	}
 }
+
+func TestDisjointRangesPreserveTheWholeExpression(t *testing.T) {
+	m := map[string]any{"metric_value": "≥5.5 或 ≤-7", "value_range_type": "range", "value_min": -7.0, "value_max": 5.5}
+	canonicalizeMetricValueRangeTypes([]map[string]any{m})
+	normalizeMetricValueNotation([]map[string]any{m})
+	if m["metric_value"] != "≥5.5 或 ≤-7" || m["value_range_type"] != "multi-ranges" || m["value_min"] != nil || m["value_max"] != nil || metricRowNeedsValueReview(m) {
+		t.Fatalf("disjoint ranges must remain a single classified expression: %#v", m)
+	}
+}

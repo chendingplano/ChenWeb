@@ -395,7 +395,7 @@ func expandSimpleMetricRow(raw map[string]any, idx simpleChunkLines) map[string]
 	return row
 }
 
-var metricSimpleExplicitRangeTypes = map[string]bool{"lower_bound": true, "upper_bound": true, "exact": true, "range": true}
+var metricSimpleExplicitRangeTypes = map[string]bool{"lower_bound": true, "upper_bound": true, "exact": true, "range": true, "multi-ranges": true}
 
 func distinctNonEmpty(values ...string) []string {
 	out := []string{}

@@ -81,6 +81,7 @@ dependency or a stated condition. Do not invent qualifiers to force a split.
 | 可选直径10、20或30 mm | one row, `v` `10、20、30`, `vs` `{"kind":"alternatives","values":["10","20","30"]}` |
 | 在10 mm、30 mm和50 mm处均检验 | one row, `vs` kind `required_points` |
 | 250 mm×200 mm 的面, 长300 mm×宽 300 mm | one size row, `v` `250×200`, `vs` kind `composite` (ordered); its tolerance is one row |
+| ≥5.5 °C 或 ≤−7 °C | one row, `r` `multi-ranges`, `v` `≥5.5 或 ≤-7`, `vs` `{"kind":"expression"}`; no `lo`/`hi` |
 | 10~30, ±2, 65±5 | one row each, no `vs` |
 | 1:10, 1/10 倍, 70+年龄×2 | one row, `vs` `{"kind":"expression"}` |
 | 量程的20%、80%及中间区段任意2个～3个数值 | two rows: positions 20、80 % (`required_points`) and the count 2~3 个 (`range`) |
@@ -237,10 +238,11 @@ measurement is done ("连续测量 3 次的平均值", "餐后 2 小时采血") 
   the ±); precision, accuracy and error whatever the verb ("精度不低于 10 mm" → `upper_bound` 10)
 - `exact`: one stated value ("为", "取3个值，分别测量3次" → exact 3 and exact 3); an accuracy stated with 为
 - `range`: both ends stated (`5~25`) or a centre with tolerance `a±b` (`65±5`, never `upper_bound`)
+- `multi-ranges`: a union of ranges joined by OR; keep every comparator and the OR in `v`, use `vs` kind `expression`, and omit `lo`/`hi`. Never split the alternatives into separate requirements.
 - `qualitative`: an observed property described in words; never a requirement
 - `limit_absent`: never in a row; such quantities go to `x` as `no_value`
 
-`v` (metric_value): the complete value without unit or comparator (`5~25`, not `5 s~25 s`; `500`, not
+`v` (metric_value): for `multi-ranges`, preserve every comparator and OR; otherwise the complete value without unit or comparator (`5~25`, not `5 s~25 s`; `500`, not
 `≥500`). Keep a sign only when the source writes it; never add ± to a plain "不大于". A strict
 comparator (>, <, 大于, 小于, 超过) adds the tag `strict_bound`.
 

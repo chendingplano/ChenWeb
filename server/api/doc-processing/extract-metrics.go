@@ -3774,6 +3774,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 				"reasoning_tags", m["reasoning_tags"],
 			)
 		}
+		normalizeMetricValueNotation(result.metrics)
 		result.metrics = p.recoverMultiValueMetricRows(concCtx, recordID, enrichCallID,
 			batch.chunkIdx, len(batches), inputText, batch.candidates, result.metrics)
 		if isCtxStopped(concCtx) {

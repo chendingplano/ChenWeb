@@ -64,6 +64,7 @@ an alternative, grouping, dependency or condition in the source. If not, keep th
   collection (20 and 80 %, kind required_points) and a separate intermediate point count
   (2~3 个, range, value_min 2, value_max 3). The percentage positions and point count are different
   properties. The middle region names the count property, not a fabricated condition.
+- Disjoint ranges joined by OR: ≥5.5 °C 或 ≤-7 °C -> ONE row, `metric_value` "≥5.5 或 ≤-7", `value_range_type` `multi-ranges`, `value_structure` {"kind":"expression"}, unit °C, no min/max. Preserve every comparator and OR; never split into separate requirements.
 - Ranges and tolerances: 10~30, ±2 and 65±5 remain supported value forms, value_structure null.
 - Composite size: "250 mm×200 mm 的面" -> ONE size row, metric_value "250×200", unit mm,
   value_structure {"kind":"composite","values":["250","200"]}. Preserve component order.
@@ -687,7 +688,7 @@ A sign is kept only when the source writes it. "误差不大于 0.01 s", "精度
 `0.01` / `10`, `upper_bound`, no `±`; "允许误差 ±5 mm" → `±5`. Never add `±` to a plain "不大于" limit.
 
 Never use `min`, `minimum`, `max`, `maximum`, or `threshold` — those are not valid values
-for this field. Map them to `lower_bound`, `upper_bound`, `exact`, `range`, `qualitative`,
+for this field. Map them to `lower_bound`, `upper_bound`, `exact`, `range`, `multi-ranges`, `qualitative`,
 or `limit_absent` instead.
 
 ### Minimum for what a product must withstand or complete
@@ -722,7 +723,7 @@ stays `upper_bound`: errors, accuracy, deviations.
 
 ### `is_explicit_metric` (required, boolean)
 
-- `true` only when `value_range_type` is one of `lower_bound`, `upper_bound`, `exact`, or `range`, and a genuine numeric value is present in `metric_value`.
+- `true` only when `value_range_type` is one of `lower_bound`, `upper_bound`, `exact`, `range`, or `multi-ranges`, and a genuine numeric value is present in `metric_value`.
 - `false` when `value_range_type` is `qualitative` or `limit_absent`. In that case, leave `metric_value` and `unit` empty; do not paraphrase the requirement into `metric_value`.
 
 ### `value_class`
@@ -931,7 +932,7 @@ never combine or discard them. Use the same score/band mapping in both languages
       "unit_en": "string",
       "metric_value": "string",
       "value_structure": null,
-      "value_range_type": "lower_bound|upper_bound|exact|range|qualitative|limit_absent",
+      "value_range_type": "lower_bound|upper_bound|exact|range|multi-ranges|qualitative|limit_absent",
       "value_class": "observation|requirement|target|reference|design_capability|definition",
       "value_class_en": "string",
       "value_min": 0.0,
