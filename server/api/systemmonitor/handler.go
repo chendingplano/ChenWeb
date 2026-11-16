@@ -108,14 +108,7 @@ func List(c echo.Context) error {
 	if user == nil {
 		return c.JSON(http.StatusUnauthorized, map[string]any{"status": false})
 	}
-	admin := user.Admin || user.IsOwner
-	for _, role := range user.Roles {
-		role = strings.ToLower(strings.TrimSpace(role))
-		if role == "admin" || role == "root" {
-			admin = true
-		}
-	}
-	if !admin {
+	if !isAdmin(user) {
 		return c.JSON(http.StatusForbidden, map[string]any{"status": false})
 	}
 	selected, ok := selectSources(c.QueryParam("source"))
@@ -132,7 +125,8 @@ func List(c echo.Context) error {
 			state = "error"
 			rc.GetLogger().Error("system monitor log read failed", "source", s.id, "error", err)
 		}
-		rows = append(rows, map[string]any{"id": s.id, "content": content, "truncated": truncated, "state": state})
+		_, restartable := restartTargets[s.id]
+		rows = append(rows, map[string]any{"id": s.id, "content": content, "truncated": truncated, "state": state, "restartable": restartable})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "sources": rows})
 }

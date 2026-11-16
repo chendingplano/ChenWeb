@@ -515,6 +515,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Release notes admin (System Admin > System > Releases).
 	apiGroup.GET("/system-admin/build-info", buildinfohandler.List)
 	apiGroup.GET("/system-admin/system-monitor", systemmonitor.List)
+	apiGroup.POST("/system-admin/system-monitor/:source/restart", systemmonitor.Restart)
 	// Deployment page (System Admin > System > Deployment).
 	apiGroup.GET("/system-admin/deployment/status", deployment.Status)
 	apiGroup.GET("/system-admin/deployment/builds/:id", deployment.GetBuild)
