@@ -26,15 +26,15 @@ type Metadata struct {
 }
 
 type Process struct {
-	Executable    string    `json:"executable"`
-	Status        string    `json:"status"`
-	PID           int       `json:"pid,omitempty"`
-	BuildNumber   string    `json:"build_number,omitempty"`
-	BuildName     string    `json:"build_name,omitempty"`
-	TargetMachine string    `json:"target_machine,omitempty"`
-	OSInfo        string    `json:"os_info,omitempty"`
-	Description   string    `json:"description,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
+	Executable    string     `json:"executable"`
+	Status        string     `json:"status"`
+	PID           int        `json:"pid,omitempty"`
+	BuildNumber   string     `json:"build_number,omitempty"`
+	BuildName     string     `json:"build_name,omitempty"`
+	TargetMachine string     `json:"target_machine,omitempty"`
+	OSInfo        string     `json:"os_info,omitempty"`
+	Description   string     `json:"description,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
 }
 
 func EmbeddedMetadata() (Metadata, error) {
@@ -57,15 +57,19 @@ func Subject(executable string) string {
 }
 
 func CurrentProcess(executable string) (Process, error) {
-	metadata, err := EmbeddedMetadata()
-	if err != nil {
-		return Process{}, err
+	var metadata Metadata
+	if EmbeddedMetadataBase64 != "" {
+		var err error
+		metadata, err = EmbeddedMetadata()
+		if err != nil {
+			return Process{}, err
+		}
 	}
 	return Process{
 		Executable: executable, Status: "running", PID: os.Getpid(),
 		BuildNumber: metadata.BuildNumber, BuildName: metadata.BuildName,
 		TargetMachine: metadata.TargetMachine, OSInfo: metadata.OSInfo,
-		Description: metadata.Description, StartedAt: processStartedAt,
+		Description: metadata.Description, StartedAt: &processStartedAt,
 	}, nil
 }
 
@@ -92,10 +96,7 @@ func connectNATS() (*nats.Conn, error) {
 
 // StartResponder serves this executable's embedded build metadata on NATS.
 func StartResponder(executable string) (func(), error) {
-	if EmbeddedMetadataBase64 == "" {
-		return func() {}, nil
-	}
-	if _, err := EmbeddedMetadata(); err != nil {
+	if _, err := CurrentProcess(executable); err != nil {
 		return func() {}, err
 	}
 	nc, err := connectNATS()
@@ -143,7 +144,7 @@ func ListProcesses(ctx context.Context, executables []string) []Process {
 				return
 			}
 			var process Process
-			if json.Unmarshal(msg.Data, &process) != nil || process.BuildNumber == "" {
+			if json.Unmarshal(msg.Data, &process) != nil || process.Executable != executable || process.Status != "running" {
 				return
 			}
 			processes[i] = process
