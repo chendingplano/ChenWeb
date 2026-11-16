@@ -174,7 +174,7 @@
 </script>
 
 <div
-	class="flex h-full flex-col overflow-y-auto"
+	class="flex h-full select-text flex-col overflow-y-auto"
 	style="background:transparent; scrollbar-width:thin;"
 >
 	<!-- Header -->
