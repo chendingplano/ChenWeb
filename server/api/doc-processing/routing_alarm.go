@@ -40,7 +40,7 @@ const (
 	// cut the response short before it finished writing JSON. This is a
 	// configuration problem (max_output_tokens too low for the model in
 	// .models.toml), not transient, so it always warrants an operator look;
-	// see MID_26092201/MID_26092202 in shared/go/api/llm.
+	// see MID_26092201/MID-20260922-02 in shared/go/api/llm.
 	RoutingAlarmKindLLMResponseTruncated = "llm_response_truncated"
 )
 

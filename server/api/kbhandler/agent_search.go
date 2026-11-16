@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 // AgentKnowledgeSearchResult is the bounded evidence shape exposed to ChenWeb's
@@ -44,7 +46,7 @@ func SearchAgentKnowledge(ctx context.Context, db *sql.DB, query, storeID, docum
 		filters.InputRecordID = &id
 	}
 	cfg := loadRegistrySearchConfig()
-	cfg.call = newSearchCall(ctx, db, "")
+	cfg.call = newSearchCall(ctx, db, docprocessing.LLMUserIDFromContext(ctx))
 	hits, err := queryRegistrySearchResults(db, strings.TrimSpace(artifactType), strings.TrimSpace(query), filters, 1, limit, cfg)
 	if err != nil {
 		return nil, err

@@ -176,7 +176,7 @@ type productCandidate struct {
 
 func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *ProductsProcessor {
 	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26052001")
+		logger = loggerutil.CreateDefaultLogger("MID-20260520-01")
 	}
 	settings, configErr := LoadProductsConfig(ProductsConfigPath())
 	if configErr != nil {
@@ -390,26 +390,26 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
-		return fmt.Errorf("(MID_26052002) parse event payload: %w", err)
+		return fmt.Errorf("parse event payload: %w (MID-20260520-30)", err)
 	}
 	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
 	if p.MentionPromptErr != nil {
-		return fmt.Errorf("(MID_26052003) load product mentions prompt %q: %w", p.MentionPromptRef, p.MentionPromptErr)
+		return fmt.Errorf("load product mentions prompt %q: %w (MID-20260520-31)", p.MentionPromptRef, p.MentionPromptErr)
 	}
 	if p.RelationPromptErr != nil {
-		return fmt.Errorf("(MID_26052003) load product relations prompt %q: %w", p.RelationPromptRef, p.RelationPromptErr)
+		return fmt.Errorf("load product relations prompt %q: %w (MID-20260520-32)", p.RelationPromptRef, p.RelationPromptErr)
 	}
 	if p.MergedPass && p.MergedPromptErr != nil {
-		return fmt.Errorf("(MID_26092204) load merged products prompt %q: %w", p.MergedPromptRef, p.MergedPromptErr)
+		return fmt.Errorf("load merged products prompt %q: %w (MID-20260520-33)", p.MergedPromptRef, p.MergedPromptErr)
 	}
 	if p.InputStore == nil {
-		return errors.New("(MID_26052004) input store is nil")
+		return errors.New("input store is nil (MID-20261116-01)")
 	}
 	if p.Store == nil {
-		return errors.New("(MID_26052005) products store is nil")
+		return errors.New("products store is nil (MID-20261116-02)")
 	}
 
 	rec, err := p.InputStore.GetInputRecord(ctx, evt.RecordID)
@@ -418,7 +418,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 			p.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
 			return nil
 		}
-		return fmt.Errorf("(MID_26052006) load kb.inputs record %d: %w", evt.RecordID, err)
+		return fmt.Errorf("load kb.inputs record %d: %w (MID-20261116-03)", evt.RecordID, err)
 	}
 	if p.MentionModelErr != nil {
 		p.Logger.Warn("products extraction skipped: mention model config error",
@@ -462,7 +462,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		return nil
 	}
 	if len(blocks) == 0 {
-		err := fmt.Errorf("(MID_26052007) no chunks found for record_id=%d", evt.RecordID)
+		err := fmt.Errorf("no chunks found for record_id=%d (MID-20261116-04)", evt.RecordID)
 		p.persistProductsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -539,23 +539,23 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 func (p *ProductsProcessor) resolveProductChunkBlocks(evt LineFileGeneratedEvent, rec DocMetadataInputRecord) ([]Block, []Chunk, error) {
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if err != nil {
-		return nil, nil, fmt.Errorf("(MID_26052010) resolve input file for record_id=%d: %w", evt.RecordID, err)
+		return nil, nil, fmt.Errorf("resolve input file for record_id=%d: %w (MID-20261116-05)", evt.RecordID, err)
 	}
 	body, err := os.ReadFile(inputPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("(MID_26052011) input file not exist: %s", inputPath)
+			return nil, nil, fmt.Errorf("input file not exist: %s (MID-20261116-06)", inputPath)
 		}
-		return nil, nil, fmt.Errorf("(MID_26052012) read input file: %w", err)
+		return nil, nil, fmt.Errorf("read input file: %w (MID-20261116-07)", err)
 	}
 	lines, err := ParseInputLines(body)
 	if err != nil {
-		return nil, nil, fmt.Errorf("(MID_26052014) parse line file for record_id=%d: %w", evt.RecordID, err)
+		return nil, nil, fmt.Errorf("parse line file for record_id=%d: %w (MID-20261116-08)", evt.RecordID, err)
 	}
 	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
 	chunks, err := loadChunksFromArtifactFile(p.ArtifactDir, evt.RecordID, artifactBase+".chunks", lines)
 	if err != nil {
-		return nil, nil, fmt.Errorf("(MID_26052013) load chunks for record_id=%d: %w", evt.RecordID, err)
+		return nil, nil, fmt.Errorf("load chunks for record_id=%d: %w (MID-20261116-09)", evt.RecordID, err)
 	}
 	return chunksToBlocks(chunks), chunks, nil
 }
@@ -565,13 +565,13 @@ func (p *ProductsProcessor) resolveProductChunkBlocks(evt LineFileGeneratedEvent
 // per-run batch state. It must not make LLM calls.
 func (p *ProductsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
 	if p.MentionPromptErr != nil {
-		return fmt.Errorf("(MID_26091210) %s mention prompt error: %w", p.Name(), p.MentionPromptErr)
+		return fmt.Errorf("%s mention prompt error: %w (MID-20261116-10)", p.Name(), p.MentionPromptErr)
 	}
 	if p.RelationPromptErr != nil {
-		return fmt.Errorf("(MID_26091211) %s relation prompt error: %w", p.Name(), p.RelationPromptErr)
+		return fmt.Errorf("%s relation prompt error: %w (MID-20261116-11)", p.Name(), p.RelationPromptErr)
 	}
 	if p.MergedPass && p.MergedPromptErr != nil {
-		return fmt.Errorf("(MID_26092203) %s merged prompt error: %w", p.Name(), p.MergedPromptErr)
+		return fmt.Errorf("%s merged prompt error: %w (MID-20261116-12)", p.Name(), p.MergedPromptErr)
 	}
 	p.batchSkip = false
 	if p.MentionModelErr != nil {
@@ -592,7 +592,7 @@ func (p *ProductsProcessor) InitChunkBatch(ctx context.Context, recordID int64, 
 	if !force {
 		exists, err := p.Store.ProductsExist(ctx, recordID)
 		if err != nil {
-			return fmt.Errorf("(MID_26091212) %s check products exist: %w", p.Name(), err)
+			return fmt.Errorf("%s check products exist: %w (MID-20261116-13)", p.Name(), err)
 		}
 		if exists {
 			p.Logger.Info("products extraction skipped", "record_id", recordID, "reason", "products already exist and force=false")
@@ -625,7 +625,7 @@ func (p *ProductsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) erro
 		return nil
 	}
 	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
-		return fmt.Errorf("(MID_26091213) %s chunk index %d out of range (len=%d)", p.Name(), chunkIdx, len(p.batchChunks))
+		return fmt.Errorf("%s chunk index %d out of range (len=%d) (MID-20261116-14)", p.Name(), chunkIdx, len(p.batchChunks))
 	}
 	if isCtxStopped(ctx) {
 		return ErrPipelineStopped
@@ -687,7 +687,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	}
 	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
 	if err != nil {
-		return fmt.Errorf("(MID_26091214) %s load kb.inputs record %d: %w", p.Name(), p.batchRecordID, err)
+		return fmt.Errorf("%s load kb.inputs record %d: %w (MID-20261116-15)", p.Name(), p.batchRecordID, err)
 	}
 	eventID := eventIDFromContext(ctx)
 	maxTasks := p.MaxTasks
@@ -738,7 +738,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		})
 		if err != nil {
 			p.persistProductsStatus(ctx, rec, p.batchStart, err)
-			return fmt.Errorf("(MID_26092101) %s save products (pass-1-only): %w", p.Name(), err)
+			return fmt.Errorf("%s save products (pass-1-only): %w (MID-20261116-16)", p.Name(), err)
 		}
 		runID, _ := runIDFromContext(ctx)
 		p.Logger.Info("products extracted (pass-1-only)",
@@ -768,7 +768,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		// deleted, 0 inserted, proc_status=success) when the merged pass was
 		// sending the wrong output schema.
 		if len(p.batchChunks) > 0 && p.batchMergedFailures == len(p.batchChunks) {
-			mergedErr := fmt.Errorf("(MID_26092206) %s merged pass: all %d chunks failed; refusing to overwrite record %d with an empty result", p.Name(), len(p.batchChunks), p.batchRecordID)
+			mergedErr := fmt.Errorf("%s merged pass: all %d chunks failed; refusing to overwrite record %d with an empty result (MID-20261116-17)", p.Name(), len(p.batchChunks), p.batchRecordID)
 			p.persistProductsStatus(ctx, rec, p.batchStart, mergedErr)
 			return mergedErr
 		}
@@ -787,7 +787,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 				return ErrPipelineStopped
 			}
 			p.persistProductsStatus(ctx, rec, p.batchStart, pass2Err)
-			return fmt.Errorf("(MID_26091215) %s enrich product relations: %w", p.Name(), pass2Err)
+			return fmt.Errorf("%s enrich product relations: %w (MID-20261116-18)", p.Name(), pass2Err)
 		}
 
 		products = make([]map[string]any, 0, len(candidates))
@@ -820,7 +820,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		products, translateErr = p.translateProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
 		if translateErr != nil {
 			p.persistProductsStatus(ctx, rec, p.batchStart, translateErr)
-			return fmt.Errorf("(MID_26091216) %s translate products: %w", p.Name(), translateErr)
+			return fmt.Errorf("%s translate products: %w (MID-20261116-19)", p.Name(), translateErr)
 		}
 	}
 	p.Logger.Info("Starting product name resolution + catalog categorization",
@@ -830,7 +830,7 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	products, resolveErr = p.resolveProductNamesAndCategories(ctx, products)
 	if resolveErr != nil {
 		p.persistProductsStatus(ctx, rec, p.batchStart, resolveErr)
-		return fmt.Errorf("(MID_26091217) %s resolve product names: %w", p.Name(), resolveErr)
+		return fmt.Errorf("%s resolve product names: %w (MID-20261116-20)", p.Name(), resolveErr)
 	}
 
 	result = productExtractionResult{
@@ -854,15 +854,15 @@ func (p *ProductsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	})
 	if err != nil {
 		p.persistProductsStatus(ctx, rec, p.batchStart, err)
-		return fmt.Errorf("(MID_26091218) %s save products: %w", p.Name(), err)
+		return fmt.Errorf("%s save products: %w (MID-20261116-21)", p.Name(), err)
 	}
 	if err := p.indexProductsInTree(p.batchRecordID, outputRows); err != nil {
 		p.persistProductsStatus(ctx, rec, p.batchStart, err)
-		return fmt.Errorf("(MID_26091219) %s index products tree: %w", p.Name(), err)
+		return fmt.Errorf("%s index products tree: %w (MID-20261116-22)", p.Name(), err)
 	}
 	if err := p.writeProductsArtifact(p.batchRecordID, rec, outputRows); err != nil {
 		p.persistProductsStatus(ctx, rec, p.batchStart, err)
-		return fmt.Errorf("(MID_26091220) %s write products artifact: %w", p.Name(), err)
+		return fmt.Errorf("%s write products artifact: %w (MID-20261116-23)", p.Name(), err)
 	}
 	if reindexErr := ReindexProductSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex product search registry failed", "record_id", p.batchRecordID, "error", reindexErr)
@@ -956,7 +956,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			}
 			chunk, ok := chunksBySeq[block.Index]
 			if !ok {
-				return productPass1Result{}, fmt.Errorf("(MID_26052040) extract product mentions: no chunk with seq %d (chunks=%d)", block.Index, len(chunks))
+				return productPass1Result{}, fmt.Errorf("extract product mentions: no chunk with seq %d (chunks=%d) (MID-20261116-24)", block.Index, len(chunks))
 			}
 			mentions, modelName, didFallback, err := p.extractProductMentionsForChunk(concCtx, eventID, idx, len(blocks), block, chunk, docCtx)
 			if err != nil {
@@ -964,7 +964,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 					return productPass1Result{}, ErrPipelineStopped
 				}
 				p.Logger.Error("failed extracting product mentions", "error", err)
-				return productPass1Result{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
+				return productPass1Result{}, fmt.Errorf("extract product mentions via llm: %w (MID-20261116-25)", err)
 			}
 			return productPass1Result{
 				mentions:    mentions,
@@ -1169,7 +1169,7 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 	if _, ok := payload["products"]; !ok {
 		if mentionsRaw, hasMentions := payload["mentions"]; hasMentions {
 			items, _ := normalizeProductItems(mentionsRaw)
-			return nil, modelName, false, fmt.Errorf("(MID_26092205) merged pass returned a mention-shaped payload (%d mentions, no \"products\" key) for block %d: prompt %q and its task schema disagree on the output shape", len(items), block.Index, p.MergedPromptRef)
+			return nil, modelName, false, fmt.Errorf("merged pass returned a mention-shaped payload (%d mentions, no \"products\" key) for block %d: prompt %q and its task schema disagree on the output shape (MID-20261116-26)", len(items), block.Index, p.MergedPromptRef)
 		}
 	}
 	raw, _ := payload["products"].([]any)
@@ -1387,7 +1387,7 @@ func (p *ProductsProcessor) runMergedPassOverBlocks(
 		}
 		chunk, ok := chunksBySeq[block.Index]
 		if !ok {
-			return productPass2Result{}, fmt.Errorf("(MID_26092201) extract products merged: no chunk with seq %d (chunks=%d)", block.Index, len(chunksBySeq))
+			return productPass2Result{}, fmt.Errorf("extract products merged: no chunk with seq %d (chunks=%d) (MID-20261116-27)", block.Index, len(chunksBySeq))
 		}
 		rows, modelName, didFallback, callErr := p.extractProductsMergedForChunk(concCtx, eventID, idx, len(blocks), block, chunk, docCtx)
 		if callErr != nil {
@@ -1395,7 +1395,7 @@ func (p *ProductsProcessor) runMergedPassOverBlocks(
 				return productPass2Result{}, ErrPipelineStopped
 			}
 			p.Logger.Error("failed extracting products (merged pass)", "error", callErr)
-			return productPass2Result{}, fmt.Errorf("(MID_26092202) extract products merged via llm: %w", callErr)
+			return productPass2Result{}, fmt.Errorf("extract products merged via llm: %w (MID-20260922-02)", callErr)
 		}
 		return productPass2Result{rows: rows, modelName: strings.TrimSpace(modelName), didFallback: didFallback}, nil
 	})
@@ -1475,7 +1475,7 @@ func (p *ProductsProcessor) enrichProductCandidatesWithLLM(
 				return productPass2Result{}, ErrPipelineStopped
 			}
 			p.Logger.Error("failed enriching product relations", "error", err, "candidate_id", candidate.CandidateID)
-			return productPass2Result{}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
+			return productPass2Result{}, fmt.Errorf("enrich product relations via llm: %w (MID-20261116-28)", err)
 		}
 		raw, _ := payload["products"].([]any)
 		normalized := normalizeProductList(raw)
@@ -1547,10 +1547,10 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
 		return nil, strings.TrimSpace(modelName),
-			fmt.Errorf("(MID_26052021) extract products failed and fallback model not available, err:%w, model_name:%s", err, modelName)
+			fmt.Errorf("extract products failed and fallback model not available, err:%w, model_name:%s (MID-20261116-29)", err, modelName)
 	}
 	if p.FallbackModelErr != nil {
-		return nil, fallbackModelName, fmt.Errorf("(MID_26052022) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
+		return nil, fallbackModelName, fmt.Errorf("primary extraction failed and fallback model %q is unavailable: %w (MID-20261116-30)", p.FallbackModelRef, err)
 	}
 
 	p.Logger.Warn("primary products; retrying fallback model",
@@ -1571,7 +1571,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 			)
 			return map[string]any{"products": []any{}, "mentions": []any{}}, fallbackModelName, nil
 		}
-		return nil, fallbackModelName, fmt.Errorf("(MID_26052023) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
+		return nil, fallbackModelName, fmt.Errorf("primary extraction failed: %w; fallback extraction failed: %v (MID-20261116-31)", err, fallbackErr)
 	}
 	return payload, fallbackModelName, nil
 }
@@ -1645,7 +1645,7 @@ func (p *ProductsProcessor) extractProductPayload(
 	if callReason == "" {
 		callReason = "extract_products"
 	}
-	in := newLLMJSONInput(ctx, promptRef, promptText, modelName, inputText, callReason, "MID-CWB-EXTRACT-PRODUCTS")
+	in := newLLMJSONInput(ctx, promptRef, promptText, modelName, inputText, callReason, "MID-20261116-32")
 	if callReason == "extract products merged" {
 		in.DocumentFirst = false
 	}
@@ -1668,14 +1668,14 @@ func (p *ProductsProcessor) extractProductPayload(
 	}
 	if err != nil {
 		if payload == nil {
-			return nil, fmt.Errorf("(MID_26052030) failed extracting products, error:%w", err)
+			return nil, fmt.Errorf("failed extracting products, error:%w (MID-20261116-33)", err)
 		}
-		return nil, fmt.Errorf("(MID_26052031) failed extracting products, error:%w, payload:%v", err, payload)
+		return nil, fmt.Errorf("failed extracting products, error:%w, payload:%v (MID-20261116-34)", err, payload)
 	}
 
 	if sourceLines != nil {
 		if _, ok := payload["v"]; !ok {
-			return nil, errors.New("(MID_20261107_844) compact merged product prompt requires a v2 response")
+			return nil, errors.New("compact merged product prompt requires a v2 response (MID-20261116-35)")
 		}
 		if payload, err = decodeProductMergedV2(payload, sourceLines); err != nil {
 			return nil, err
@@ -1683,23 +1683,23 @@ func (p *ProductsProcessor) extractProductPayload(
 	}
 	payload = normalizeProductPayload(payload)
 	if len(payload) == 0 {
-		return nil, errors.New("(MID_26052032) empty llm json object")
+		return nil, errors.New("empty llm json object (MID-20261116-36)")
 	}
 	if raw, ok := payload["mentions"]; ok {
 		items, ok := normalizeProductItems(raw)
 		if !ok {
-			return nil, fmt.Errorf("(MID_26052034) llm output field 'mentions' must be an array, JSON:%v", payload)
+			return nil, fmt.Errorf("llm output field 'mentions' must be an array, JSON:%v (MID-20261116-37)", payload)
 		}
 		payload["mentions"] = items
 		return payload, nil
 	}
 	raw, ok := payload["products"]
 	if !ok {
-		return nil, fmt.Errorf("(MID_26052033) llm output must contain 'products' or 'mentions', JSON:%v", payload)
+		return nil, fmt.Errorf("llm output must contain 'products' or 'mentions', JSON:%v (MID-20261116-38)", payload)
 	}
 	items, ok := normalizeProductItems(raw)
 	if !ok {
-		return nil, fmt.Errorf("(MID_26052034) llm output field 'products' must be an array, JSON:%v", payload)
+		return nil, fmt.Errorf("llm output field 'products' must be an array, JSON:%v (MID-20261116-39)", payload)
 	}
 	payload["products"] = items
 
@@ -2302,7 +2302,7 @@ func (p *ProductsProcessor) logLLMCall(
 		PromptCacheHitTokens:  cacheHit,
 		PromptCacheMissTokens: cacheMiss,
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052810"); err != nil {
+	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-20260528-10"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -2345,7 +2345,7 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 		PromptName:    promptName,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
-	}, "MID-26052810"); err != nil {
+	}, "MID-20260528-20"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }
@@ -2624,16 +2624,16 @@ func (p *ProductsProcessor) indexProductsInTree(recordID int64, products []map[s
 		dir = strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 	}
 	if dir == "" {
-		return errors.New("(MID_26052040) missing ARTIFACT_WEB_DIR")
+		return errors.New("missing ARTIFACT_WEB_DIR (MID-20261116-41)")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26052041) invalid record_id: %d", recordID)
+		return fmt.Errorf("invalid record_id: %d (MID-20261116-42)", recordID)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("(MID_26052042) create artifact web dir: %w", err)
+		return fmt.Errorf("create artifact web dir: %w (MID-20261116-43)", err)
 	}
 	if err := removeProductTreeRecord(dir, recordID); err != nil {
-		return fmt.Errorf("(MID_26052043) remove old product tree entries for record %d: %w", recordID, err)
+		return fmt.Errorf("remove old product tree entries for record %d: %w (MID-20261116-44)", recordID, err)
 	}
 	now := p.Now()
 	for _, product := range products {
@@ -2643,7 +2643,7 @@ func (p *ProductsProcessor) indexProductsInTree(recordID int64, products []map[s
 		}
 		for _, pair := range pairCategoryPathEntries(product["category_paths"], product["category_paths_en"]) {
 			if err := writeProductTreeEntry(p.Logger, dir, productRelID, pair.Index, pair.Original, now); err != nil {
-				return fmt.Errorf("(MID_26052044) index product %s path: %w", productRelID, err)
+				return fmt.Errorf("index product %s path: %w (MID-20261116-45)", productRelID, err)
 			}
 		}
 	}
@@ -2715,10 +2715,10 @@ func (p *ProductsProcessor) writeProductsArtifact(recordID int64, rec DocMetadat
 		artifactDir = strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
 	}
 	if artifactDir == "" {
-		return errors.New("(MID_26052050) missing ARTIFACT_DIR")
+		return errors.New("missing ARTIFACT_DIR (MID-20261116-46)")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26052051) invalid record_id: %d", recordID)
+		return fmt.Errorf("invalid record_id: %d (MID-20261116-47)", recordID)
 	}
 
 	groupID := recordID / 1000
@@ -2734,7 +2734,7 @@ func (p *ProductsProcessor) writeProductsArtifact(recordID int64, rec DocMetadat
 
 	outDir := filepath.Join(artifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("(MID_26052052) create artifact dir: %w", err)
+		return fmt.Errorf("create artifact dir: %w (MID-20261116-48)", err)
 	}
 
 	outPath := filepath.Join(outDir, filenameRoot+"_"+parserName+".products")
@@ -2744,10 +2744,10 @@ func (p *ProductsProcessor) writeProductsArtifact(recordID int64, rec DocMetadat
 	}
 	bs, err := json.MarshalIndent(fileRecords, "", "  ")
 	if err != nil {
-		return fmt.Errorf("(MID_26052053) marshal products: %w", err)
+		return fmt.Errorf("marshal products: %w (MID-20261116-49)", err)
 	}
 	if err := os.WriteFile(outPath, bs, 0o644); err != nil {
-		return fmt.Errorf("(MID_26052054) write products artifact: %w", err)
+		return fmt.Errorf("write products artifact: %w (MID-20261116-50)", err)
 	}
 	return nil
 }
@@ -2840,15 +2840,15 @@ func (p *ProductsProcessor) stopAndPersistProducts(ctx context.Context, rec DocM
 		ProcStatus:    "stopped",
 	})
 	if err != nil {
-		p.Logger.Error("(MID_26052841) failed building products stopped status", "record_id", rec.ID, "error", err)
+		p.Logger.Error("failed building products stopped status (MID-20261116-51)", "record_id", rec.ID, "error", err)
 		return
 	}
 	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
 		StatusRaw: statusRaw,
 	}); updateErr != nil {
-		p.Logger.Error("(MID_26052842) failed persisting products stopped status", "record_id", rec.ID, "error", updateErr)
+		p.Logger.Error("failed persisting products stopped status (MID-20261116-52)", "record_id", rec.ID, "error", updateErr)
 	}
-	p.Logger.Info("(MID_26052843) extract_products stopped by user request", "record_id", rec.ID)
+	p.Logger.Info("extract_products stopped by user request (MID-20261116-53)", "record_id", rec.ID)
 }
 
 func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
@@ -2908,7 +2908,7 @@ func loadProductPromptFromEnvKeys(envKeys []string, defaultRef string) (promptTe
 func loadPromptByRef(promptRef string) (promptText string, promptRefOut string, promptPath string, promptErr error) {
 	promptRef = strings.TrimSpace(promptRef)
 	if promptRef == "" {
-		return "", "", "", fmt.Errorf("(MID_26052064) empty prompt ref")
+		return "", "", "", fmt.Errorf("empty prompt ref (MID-20261116-54)")
 	}
 
 	paths := make([]string, 0, 8)
@@ -2941,19 +2941,19 @@ func loadPromptByRef(promptRef string) (promptText string, promptRefOut string, 
 	for _, candidate := range paths {
 		bs, err := readPromptCandidate(candidate)
 		if err != nil {
-			lastErr = fmt.Errorf("(MID_26052060) failed reading file. Path:%s, error:%w", candidate, err)
+			lastErr = fmt.Errorf("failed reading file. Path:%s, error:%w (MID-20261116-55)", candidate, err)
 			continue
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, fmt.Errorf("(MID_26052061) prompt file is empty")
+			return "", promptRef, candidate, fmt.Errorf("prompt file is empty (MID-20261116-56)")
 		}
 		return text, promptRef, candidate, nil
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("(MID_26052062) no candidate path available")
+		lastErr = fmt.Errorf("no candidate path available (MID-20261116-57)")
 	}
-	return "", promptRef, "", fmt.Errorf("(MID_26052063) prompt file not found: %w", lastErr)
+	return "", promptRef, "", fmt.Errorf("prompt file not found: %w (MID-20261116-58)", lastErr)
 }
 
 func loadModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (modelRef string, modelPath string, cfg structureModelConfig, err error) {
@@ -2980,7 +2980,7 @@ func loadModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (mo
 func loadModelConfigByRef(modelRef, modelsFileEnv string) (modelRefOut string, modelPath string, cfg structureModelConfig, err error) {
 	modelRef = strings.TrimSpace(modelRef)
 	if modelRef == "" {
-		return "", "", structureModelConfig{}, fmt.Errorf("(MID_26042109) empty model ref")
+		return "", "", structureModelConfig{}, fmt.Errorf("empty model ref (MID-20261116-59)")
 	}
 	modelPath, err = resolveModelsFilePath(modelsFileEnv)
 	if err != nil {
@@ -2988,18 +2988,18 @@ func loadModelConfigByRef(modelRef, modelsFileEnv string) (modelRefOut string, m
 	}
 	raw, err := os.ReadFile(modelPath)
 	if err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042103) read %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("read %s failed: %w (MID-20261116-60)", modelPath, err)
 	}
 	parsed := ApiTypes.LLMModelsFile{}
 	if err := parseTOMLMap(raw, &parsed); err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042104) parse %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("parse %s failed: %w (MID-20261116-61)", modelPath, err)
 	}
 	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042105) model %q not found in %s", modelRef, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("model %q not found in %s (MID-20261116-62)", modelRef, modelPath)
 	}
 	if strings.TrimSpace(modelDef.ModelName) == "" {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042106) model %q in %s missing model_name", modelRef, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("model %q in %s missing model_name (MID-20261116-63)", modelRef, modelPath)
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
@@ -3030,7 +3030,7 @@ func loadOptionalModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv str
 
 func (s ProductsSQLStore) ensureReady() error {
 	if s.DB == nil {
-		return fmt.Errorf("(MID_26052070) db is nil")
+		return fmt.Errorf("db is nil (MID-20261116-64)")
 	}
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -577,7 +578,7 @@ func (s *KnowledgeToolService) Execute(ctx context.Context, claims RunCapability
 	if err := s.access.CheckKnowledgeAccess(ctx, req); err != nil {
 		return ToolOutput{}, ErrKnowledgeAccessDenied
 	}
-	out, err := s.backend.Execute(ctx, tool, input)
+	out, err := s.backend.Execute(docprocessing.WithLLMUserID(ctx, claims.UserID), tool, input)
 	if err != nil {
 		return ToolOutput{}, err
 	}
