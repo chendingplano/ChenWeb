@@ -35,7 +35,7 @@
 
  async function refresh() {
   if(loading)return; loading=true;
-  try { const res=await fetch('/api/v1/system-admin/system-monitor',{credentials:'same-origin'}); if(!res.ok)throw new Error(); const data:{sources:Log[]}=await res.json();
+  try { const res=await fetch(sourceId ? `/api/v1/system-admin/system-monitor?source=${encodeURIComponent(sourceId)}` : '/api/v1/system-admin/system-monitor',{credentials:'same-origin'}); if(!res.ok)throw new Error(); const data:{sources:Log[]}=await res.json();
    const follow=new Set(windows.filter(w=>{const el=bodies[w.id];return el && el.scrollHeight-el.scrollTop-el.clientHeight<32}).map(w=>w.id));
    for(const log of data.sources){const w=windows.find(item=>item.id===log.id);if(w&&!w.paused){w.text=log.content;w.state=log.state;w.truncated=log.truncated}}
    error=false;await tick();for(const id of follow){const el=bodies[id];if(el)el.scrollTop=el.scrollHeight}

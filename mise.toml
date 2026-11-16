@@ -114,13 +114,16 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all five."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all six."
 run = '''
 set -euo pipefail
 
 OUT=/tmp/chenweb-deploy
 REPO="$(git rev-parse --show-toplevel)"
 cd "$REPO"
+
+# One marker line per step; the Deployment page (deploy-runner) turns them into step rows.
+step() { if [ $# -gt 1 ]; then printf '::step::%s::%s\n' "$1" "$2"; else printf '::step::%s\n' "$1"; fi; }
 
 BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M%S)}"
 BUILD_NAME="${BUILD_NAME:-chenweb}"
@@ -157,7 +160,7 @@ SQL
 }
 
 # binary name -> cmd package
-ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin"
+ALL="server:./server/cmd/deepdoc doc-processor:./server/cmd/doc-processor parser-result-converter:./server/cmd/parser-result-converter doc-service:./server/cmd/doc-service create-admin:./server/cmd/create-admin deploy-runner:./server/cmd/deploy-runner"
 SELECT="${BINS:-}"   # e.g. BINS="server,doc-processor"
 
 SELECTED=""
@@ -167,7 +170,7 @@ for pair in $ALL; do
     SELECTED="$SELECTED $pair"
   fi
 done
-[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,doc-service,create-admin" >&2; exit 1; }
+[ -n "$SELECTED" ] || { echo "BINS=$SELECT selected nothing; valid: server,doc-processor,parser-result-converter,doc-service,create-admin,deploy-runner" >&2; exit 1; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -177,6 +180,7 @@ mkdir -p "$OUT"
 # -- the committed server/api/webbuild is stale.
 case " $SELECTED " in
   *" server:"*)
+    step web
     echo "==> rebuilding embedded frontend"
     ( cd web && bun run build )
     rsync -a --delete ./web/build/ ./server/api/webbuild/
@@ -188,11 +192,13 @@ DOC_PROMPT_REFS=/tmp/chenweb-doc-processor-prompt-refs.txt
 DOC_PROMPT_PREFIXES=/tmp/chenweb-excluded-prompt-prefixes.txt
 rm -f "$DOC_PROMPT_REFS"
 rm -f "$DOC_PROMPT_PREFIXES"
+step prompt-defaults
 python3 "$REPO/scripts/generate-doc-processor-prompt-defaults.py" \
   --refs-out "$DOC_PROMPT_REFS" \
   --exclude-prefixes-out "$DOC_PROMPT_PREFIXES"
 for pair in $SELECTED; do
   name="${pair%%:*}"; pkg="${pair##*:}"
+  step binary "$name"
   echo "==> building $name-linux  ($pkg)"
   ldflags="-s -w"
   case "$name" in
@@ -212,9 +218,13 @@ for pair in $SELECTED; do
   built="$built $name-linux"
 done
 
+step stage
 # self-contained: ship the on-box deploy script alongside the binaries
 cp "$REPO/scripts/deploy-server-china.sh" "$OUT/"
 chmod +x "$OUT/deploy-server-china.sh"
+# The box runs shell_server_deploy.sh from its ChenWeb dir; each deploy installs this copy.
+cp "$REPO/shell_server_deploy.sh" "$OUT/"
+chmod +x "$OUT/shell_server_deploy.sh"
 
 # Ship the migration files too. config.RunMigrations reads these from DISK at
 # service startup (sharedgoose -> os.DirFS on PROJECT_MIGRATION_DIR), not from a

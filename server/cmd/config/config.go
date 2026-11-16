@@ -286,6 +286,14 @@ type AppConfigDef struct {
 	// from the map default to enabled. When empty, the full workspace page
 	// content is shown.
 	WorkspaceContent map[string]bool `mapstructure:"workspace-content"`
+	// Deployment configures the Deployment page for this machine. Set it only in the
+	// machine's config.local.toml: [deployment] role = "build" on the build machine,
+	// "deploy" on the deployment machine. Unset offers neither Build nor Deploy.
+	Deployment DeploymentConfigSection `mapstructure:"deployment"`
+}
+
+type DeploymentConfigSection struct {
+	Role string `mapstructure:"role"`
 }
 
 type PDFParserConfig struct {

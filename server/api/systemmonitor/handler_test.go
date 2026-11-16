@@ -34,3 +34,17 @@ func TestSourcePathUsesConfiguredRotatingFile(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, p)
 	}
 }
+
+func TestSelectSources(t *testing.T) {
+	all, ok := selectSources("")
+	if !ok || len(all) != len(sources) {
+		t.Fatalf("all sources: %d, %v", len(all), ok)
+	}
+	one, ok := selectSources("nats")
+	if !ok || len(one) != 1 || one[0].id != "nats" {
+		t.Fatalf("nats: %v, %v", one, ok)
+	}
+	if _, ok := selectSources("nope"); ok {
+		t.Fatal("unknown source accepted")
+	}
+}

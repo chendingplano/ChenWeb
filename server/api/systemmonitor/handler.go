@@ -87,6 +87,20 @@ func sourcePath(s source) string {
 	return p
 }
 
+// selectSources returns every source, or only the one named by id (an embedded
+// window asks for its own log only); ok is false for an unknown id.
+func selectSources(id string) ([]source, bool) {
+	if id == "" {
+		return sources, true
+	}
+	for _, s := range sources {
+		if s.id == id {
+			return []source{s}, true
+		}
+	}
+	return nil, false
+}
+
 func List(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "20261113-421")
 	defer rc.Close()
@@ -104,8 +118,12 @@ func List(c echo.Context) error {
 	if !admin {
 		return c.JSON(http.StatusForbidden, map[string]any{"status": false})
 	}
-	rows := make([]map[string]any, 0, len(sources))
-	for _, s := range sources {
+	selected, ok := selectSources(c.QueryParam("source"))
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "unknown source"})
+	}
+	rows := make([]map[string]any, 0, len(selected))
+	for _, s := range selected {
 		content, truncated, err := readTail(sourcePath(s), maxBytes)
 		state := "ok"
 		if os.IsNotExist(err) {

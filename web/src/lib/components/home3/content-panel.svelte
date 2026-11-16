@@ -5,6 +5,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import BuildInfoView from '$lib/components/home3/build-info-view.svelte';
 	import SystemMonitorView from '$lib/components/home3/system-monitor-view.svelte';
+	import DeploymentView from '$lib/components/home3/deployment-view.svelte';
 	import CodeMonitorView from '$lib/components/home3/code-monitor-view.svelte';
 	import ReusableModulesView from '$lib/components/home3/reusable-modules-view.svelte';
 	import type { SiteConfig } from '$lib/services/siteConfigService';
@@ -237,7 +238,8 @@
 		{ id: 'sysadmin-alert-logs', component: AlertLogsView },
 		{ id: 'sysadmin-db-maint-log', component: DbMaintLogView },
 		{ id: 'sysadmin-system-build-info', component: BuildInfoView },
-		{ id: 'sysadmin-system-monitor', component: SystemMonitorView }
+		{ id: 'sysadmin-system-monitor', component: SystemMonitorView },
+		{ id: 'sysadmin-system-deployment', component: DeploymentView }
 	];
 	let visitedPages = $state<string[]>([]);
 	let contentMain: HTMLElement;

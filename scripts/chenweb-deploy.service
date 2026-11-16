@@ -1,0 +1,25 @@
+# chenweb-deploy.service -- runs one deployment for the Deployment page (openspec deployment-page).
+#
+# Install once on the deployment machine, as root:
+#   install -m 0644 chenweb-deploy.service /etc/systemd/system/chenweb-deploy.service
+#   systemctl daemon-reload
+# and allow gui to start it: add "/bin/systemctl start chenweb-deploy" (plus the pdf-parser
+# start/stop/restart/status commands) to /etc/sudoers.d/gui-chenweb-services, then `visudo -c`.
+#
+# chenweb queues a kb.deployments row and runs `sudo -n /bin/systemctl start chenweb-deploy`.
+# deploy-runner claims the row and runs shell_server_deploy.sh as gui. It is its own unit so
+# that the deploy restarting chenweb does not stop it. Not enabled: it only runs on demand.
+
+[Unit]
+Description=ChenWeb deployment runner (Deployment page)
+After=network.target
+
+[Service]
+Type=simple
+User=gui
+WorkingDirectory=/home/gui/Workspace/ChenWeb
+# Read before .env is loaded, so it must be set here (as in chenweb.service).
+Environment=SHARED_LIB_CONFIG_DIR=/home/gui/Workspace/shared/libconfig.toml
+EnvironmentFile=/home/gui/Workspace/ChenWeb/.env
+ExecStart=/home/gui/Workspace/ChenWeb/deploy-runner-linux deploy
+Restart=no

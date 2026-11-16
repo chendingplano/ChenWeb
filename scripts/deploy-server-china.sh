@@ -30,7 +30,7 @@
 #   <dir>   directory holding <name>-linux + <name>-linux.sha256
 #           (default: the directory this script lives in)
 #   name    one or more of:
-#             server  doc-processor  parser-result-converter  doc-service  create-admin
+#             server  doc-processor  parser-result-converter  doc-service  create-admin  deploy-runner
 #           (default: every *-linux found in <dir>)
 #
 # Env overrides:
@@ -54,6 +54,8 @@ SKIP_MIGRATIONS=${SKIP_MIGRATIONS:-0}
 DRY_RUN=${DRY_RUN:-0}
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+# One marker line per step; the Deployment page (deploy-runner) turns them into step rows.
+step() { if [ $# -gt 1 ]; then printf '::step::%s::%s\n' "$1" "$2"; else printf '::step::%s\n' "$1"; fi; }
 run() { if [ "$DRY_RUN" = 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
 # systemctl needs root; run it directly if we already are root (su -), else
 # through the scoped sudoers rule for gui -- see the header comment above.
@@ -62,7 +64,7 @@ systemctl_cmd() { if [ "$IS_ROOT" = 1 ]; then systemctl "$@"; else sudo -n /bin/
 list_sql() { (cd "$1" 2>/dev/null && ls -1 ./*.sql 2>/dev/null) | sed 's|^\./||' | sort; }
 
 # --- valid binary -> systemd service (empty = CLI tool, install only) ---------
-valid_names="server doc-processor parser-result-converter doc-service create-admin"
+valid_names="server doc-processor parser-result-converter doc-service create-admin deploy-runner"
 svc_for() {
   case "$1" in
     server)                   printf 'chenweb' ;;
@@ -70,6 +72,7 @@ svc_for() {
     parser-result-converter)  printf 'parser-result-converter' ;;
     doc-service)              printf 'doc-service' ;;
     create-admin)             printf '' ;;
+    deploy-runner)            printf '' ;;   # run by chenweb-deploy.service on demand
     *)                        printf '__invalid__' ;;
   esac
 }
@@ -120,6 +123,7 @@ echo
 # The archive carries these paths relative to the workspace. Do not delete
 # destination files: other document groups or local files may also live there.
 if [ -d "$SRC_DIR/document-workspace" ]; then
+  step documents
   echo "== Document Builder files =="
   echo "  installing into $PROJECT_WORKSPACE_DIR"
   if [ "$IS_ROOT" = 1 ]; then
@@ -138,6 +142,7 @@ fi
 # applied is never yanked out from under goose's tracking table.
 # NOTE: the per-binary auto-rollback below does NOT roll migrations back; goose
 # down-migrations are not run here. Review the "new file(s)" list before deploying.
+step migrations
 echo "== migrations =="
 if [ "$SKIP_MIGRATIONS" = 1 ]; then
   echo "  SKIP_MIGRATIONS=1 -- migration files left untouched"
@@ -172,6 +177,7 @@ echo
 # on the box (there's no "already applied" tracking to protect, unlike goose).
 # This bit onto.bzton.cn for real (2026-09-22: stale product-mention /
 # product-extraction prompts after a rename went undeployed for days).
+step prompts
 echo "== prompts =="
 src="$SRC_DIR/prompts"; dst="$CHENWEB_DIR/prompts"
 if [ ! -d "$src" ]; then
@@ -195,6 +201,7 @@ echo
 # Verbatim copy, no per-box translation needed (only symbolic model/prompt refs
 # inside). Always synced regardless of which binaries are named on the command
 # line, same as migrations above.
+step configs
 echo "== reviewer configs =="
 for f in doc-review.local.toml product-review.local.toml; do
   src="$SRC_DIR/$f"; dst="$CHENWEB_DIR/$f"
@@ -255,6 +262,7 @@ for n in "${NAMES[@]}"; do
   dst="$CHENWEB_DIR/$n-linux"
   svc=$(svc_for "$n")
 
+  step binary "$n"
   echo "== $n-linux =="
   [ -f "$bin" ] || die "missing $bin"
   [ -f "$SRC_DIR/$n-linux.sha256" ] || die "missing $SRC_DIR/$n-linux.sha256"
@@ -277,7 +285,9 @@ for n in "${NAMES[@]}"; do
   fi
 
   if [ -z "$svc" ]; then
-    run install -m 0755 -o "$RUN_USER" -g "$RUN_USER" "$bin" "$dst"
+    # Rename into place: deploy-runner-linux is the running deploy's own executable.
+    run install -m 0755 -o "$RUN_USER" -g "$RUN_USER" "$bin" "$dst.new"
+    run mv -f "$dst.new" "$dst"
     echo "  installed (CLI tool, no service)"
     deployed+=("$n")
     continue

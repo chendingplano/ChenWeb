@@ -39,6 +39,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/datasync"
 	"github.com/chendingplano/deepdoc/server/api/dbmainthandler"
+	"github.com/chendingplano/deepdoc/server/api/deployment"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docbenchmarkadminhandler"
@@ -513,6 +514,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Release notes admin (System Admin > System > Releases).
 	apiGroup.GET("/system-admin/build-info", buildinfohandler.List)
 	apiGroup.GET("/system-admin/system-monitor", systemmonitor.List)
+	// Deployment page (System Admin > System > Deployment).
+	apiGroup.GET("/system-admin/deployment/status", deployment.Status)
+	apiGroup.GET("/system-admin/deployment/builds/:id", deployment.GetBuild)
+	apiGroup.POST("/system-admin/deployment/builds", deployment.StartBuild)
+	apiGroup.GET("/system-admin/deployment/next-archive", deployment.NextArchive)
+	apiGroup.GET("/system-admin/deployment/deployments/:id", deployment.GetDeployment)
+	apiGroup.POST("/system-admin/deployment/deployments", deployment.StartDeployment)
+	apiGroup.GET("/system-admin/deployment/processes", deployment.Processes)
+	apiGroup.POST("/system-admin/deployment/processes/:id/restart", deployment.RestartProcess)
 	apiGroup.GET("/releases", releaseshandler.ListReleases)
 	apiGroup.POST("/releases", releaseshandler.CreateRelease)
 	apiGroup.PUT("/releases/:id", releaseshandler.UpdateRelease)

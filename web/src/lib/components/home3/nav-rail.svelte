@@ -532,6 +532,7 @@
 									}
 								]),
 						...(pageKey === 'development' ? [{ id: 'sysadmin-system-monitor', label: m.nav_sysadmin_system_monitor() }] : []),
+						...(pageKey === 'development' ? [{ id: 'sysadmin-system-deployment', label: m.nav_sysadmin_system_deployment() }] : []),
 						{ id: 'sysadmin-system-build-info', label: m.nav_sysadmin_system_build_info() },
 						{ id: 'sysadmin-system-calendar', label: m.nav_sysadmin_system_calendar() },
 						{ id: 'sysadmin-system-peak-hours', label: m.nav_sysadmin_system_peak_hours() },
