@@ -14,6 +14,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/chendingplano/deepdoc/server/api/deployment"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -93,6 +94,9 @@ func waitGone(ctx context.Context, pid int) error {
 
 // restartService stops the service, waits for its old process to exit and starts it again.
 func restartService(ctx context.Context, root string, t restartTarget) ([]byte, error) {
+	if strings.TrimSpace(appconfig.AppConfig.Deployment.Role) == deployment.RoleDeploy {
+		return deployment.RestartUnit(ctx, t.name)
+	}
 	dir := filepath.Join(root, t.dir)
 	old := readPID(filepath.Join(root, ".cache", t.name+".pid"))
 	out, err := runMise(ctx, dir, t.name+"-stop")

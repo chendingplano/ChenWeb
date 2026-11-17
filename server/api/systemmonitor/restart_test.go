@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 )
 
 func TestRestartService(t *testing.T) {
@@ -78,5 +80,24 @@ func TestRestartTargetsAreNotTheWholeList(t *testing.T) {
 		if target.name != id {
 			t.Errorf("%q: task prefix %q must match the source id", id, target.name)
 		}
+	}
+}
+
+func TestRestartServiceOnDeploymentMachine(t *testing.T) {
+	dir := t.TempDir()
+	sudo := filepath.Join(dir, "sudo")
+	if err := os.WriteFile(sudo, []byte("#!/bin/sh\nprintf '%s\n' \"$*\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	oldRole := appconfig.AppConfig.Deployment.Role
+	appconfig.AppConfig.Deployment.Role = "deploy"
+	t.Cleanup(func() { appconfig.AppConfig.Deployment.Role = oldRole })
+	out, err := restartService(context.Background(), t.TempDir(), restartTargets["doc-processor"])
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if string(out) != "-n /bin/systemctl restart doc-processor\n" {
+		t.Fatalf("output = %q", out)
 	}
 }
