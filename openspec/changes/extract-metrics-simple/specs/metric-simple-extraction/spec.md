@@ -34,7 +34,9 @@ and the items it set aside. It SHALL NOT make candidate-pass, enrich-batch, cove
 multi-value-review calls. When that call fails and the chunk has at least two normal lines, the
 processor SHALL retry once as two calls, each extracting from one half of the chunk's normal lines
 with the other half marked as overlap context. When the retry also fails, the chunk SHALL count as
-failed exactly as a failed candidate-pass chunk does in `extract_metrics`.
+failed exactly as a failed candidate-pass chunk does in `extract_metrics`. A provider rejection of
+the account (HTTP 401, 402, 403 or 404) SHALL NOT be split: the chunk fails at once, and the
+processor's later chunks in the run SHALL fail without a call.
 
 #### Scenario: Normal chunk
 
@@ -46,6 +48,12 @@ failed exactly as a failed candidate-pass chunk does in `extract_metrics`.
 - **WHEN** the call for a chunk with 30 normal lines fails
 - **THEN** the processor SHALL call once for lines 1–15 (lines 16–30 marked overlap) and once for
   lines 16–30 (lines 1–15 marked overlap), and use both results
+
+#### Scenario: Provider rejects the account
+
+- **WHEN** the first call of a run returns HTTP 403 with an exhausted free-tier quota
+- **THEN** the processor SHALL make no further extraction calls in that run
+- **AND** every chunk SHALL count as failed
 
 ### Requirement: Cacheable request layout
 
@@ -64,7 +72,7 @@ version.
 Within one run, the processor SHALL send its first extraction call alone. Other calls SHALL wait
 until that call has returned and either its cache-hit input tokens are at least half of its input
 tokens, or 60 seconds have passed since it started. A failed first call SHALL release the others
-under the same rule.
+under the same rule, except that a provider rejection of the account releases them at once.
 
 #### Scenario: Cold cache
 
@@ -201,6 +209,11 @@ multi-value value SHALL stay `unresolved` with tag `value_review_unresolved`, wi
 - **THEN** it SHALL delete the record’s existing metrics and save the newly extracted rows
 - **AND** it SHALL NOT invoke metric merge resolution, including when no rows are extracted
 - **AND** a deletion error SHALL fail the run without saving replacement rows
+
+#### Scenario: Failed chunks and no rows
+
+- **WHEN** at least one chunk failed and no rows or set-aside items were extracted
+- **THEN** the processor SHALL fail the run and keep the record's existing metrics
 
 ### Requirement: Prompt and model configuration
 

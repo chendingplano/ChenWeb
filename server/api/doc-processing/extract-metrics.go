@@ -113,12 +113,18 @@ type MetricsProcessor struct {
 	batchSkip            bool
 	batchForceClear      bool
 	batchExistingMetrics []map[string]any
+	// batchFailedChunks counts chunks whose calls failed (under batchMu). An empty result
+	// with failed chunks is not "no metrics", so Finalize must not wipe on it.
+	batchFailedChunks int
 
 	// extract_metrics_simple batch state: rows, drop-tagged rows and set-aside items of the
 	// chunks processed so far (under batchMu), and the run's warm-up gate.
 	batchSimple      metricSimpleResult
 	simpleWarmup     *metricWarmupGate
 	simpleWarmupWait time.Duration
+	// simpleAccountErr is the first provider rejection of the account in this batch (under
+	// batchMu); later chunks skip their calls, which would be rejected the same way.
+	simpleAccountErr error
 }
 
 type metricsProgressTracker struct {
@@ -3885,7 +3891,7 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 		return fmt.Errorf("(MID_26062750) %s candidate prompt error: %w", p.Name(), p.MentionPromptErr)
 	}
 	if p.ModelErr != nil {
-		p.Logger.Warn("%s skipped: model config error", p.Name(), "record_id", recordID, "error", p.ModelErr)
+		p.Logger.Warn(p.Name()+" skipped: model config error", "record_id", recordID, "error", p.ModelErr)
 		return nil
 	}
 
@@ -3893,6 +3899,8 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 	p.batchForceClear = forceClear || p.simple
 	p.batchSkip = false
 	p.batchExistingMetrics = nil
+	p.batchFailedChunks = 0
+	p.simpleAccountErr = nil
 
 	p.Logger.Info("metrics InitChunkBatch", "record_id", recordID,
 		"force", force, "force_clear", forceClear, "record_stage", "init_batch")
@@ -3967,7 +3975,10 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 		if isCtxStopped(ctx) {
 			return ErrPipelineStopped
 		}
-		p.Logger.Warn("%s chunk failed", p.Name(), "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		p.batchMu.Lock()
+		p.batchFailedChunks++
+		p.batchMu.Unlock()
+		p.Logger.Warn(p.Name()+" chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
 		return nil
 	}
 	lang := ApiUtils.NormalizeLang(asString(payload["language"]))
@@ -4007,6 +4018,10 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	}
 	candidates := mentionsAsCandidates(p.batchMentions)
 	if (!p.simple && len(candidates) == 0) || (p.simple && p.batchSimple.empty()) {
+		if p.batchFailedChunks > 0 {
+			return fmt.Errorf("(MID-20261118-01) %s: %d of %d chunks failed and the rest found no metrics; existing metrics kept",
+				p.Name(), p.batchFailedChunks, len(p.batchChunks))
+		}
 		if p.batchForceClear {
 			deleted, err := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
 			if err != nil {
@@ -4016,7 +4031,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 				"deleted_rows", deleted, "new_count", 0)
 			p.resolveIncomingReferences(ctx, p.batchRecordID)
 		}
-		p.Logger.Info("%s batch: no candidates", p.Name(), "record_id", p.batchRecordID)
+		p.Logger.Info(p.Name()+" batch: no candidates", "record_id", p.batchRecordID)
 		return nil
 	}
 	if isCtxStopped(ctx) {

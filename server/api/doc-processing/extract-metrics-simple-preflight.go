@@ -303,7 +303,8 @@ func (p *MetricsProcessor) extractSimpleSelection(ctx context.Context, recordID 
 		return res, nil
 	}
 	truncated := errors.Is(err, llmclients.ErrStructuredOutputTruncated) || errors.Is(err, llmclients.ErrLLMResponseTruncated)
-	if len(s.units) < 2 || depth >= metricSimpleMaxSplitDepth || (!truncated && depth > 0) || errors.Is(err, errMetricSimpleRowCitation) {
+	if len(s.units) < 2 || depth >= metricSimpleMaxSplitDepth || (!truncated && depth > 0) ||
+		errors.Is(err, errMetricSimpleRowCitation) || isProviderAccountError(err) {
 		return metricSimpleResult{}, err
 	}
 	p.Logger.Warn("extract metrics simple: splitting failed segment", "record_id", recordID,

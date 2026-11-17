@@ -7,6 +7,7 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -164,12 +166,28 @@ func (p *MetricsProcessor) processSimpleChunk(ctx context.Context, chunkIdx int)
 	var res metricSimpleResult
 	var err error
 	if !p.simpleWarmup.do(ctx, func() bool {
+		p.batchMu.Lock()
+		rejected := p.simpleAccountErr
+		p.batchMu.Unlock()
+		if rejected != nil {
+			err = fmt.Errorf("(MID-20261118-02) skipped: the provider rejected the account: %w", rejected)
+			return true
+		}
 		res, err = p.extractSimpleChunk(ctx, p.batchRecordID, chunk, p.batchDocCtx, len(p.batchChunks))
+		if isProviderAccountError(err) {
+			p.batchMu.Lock()
+			p.simpleAccountErr = err
+			p.batchMu.Unlock()
+			return true // a rejected call builds no prompt cache, so there is nothing to wait for
+		}
 		return err == nil && p.simpleCacheWarm()
 	}) || isCtxStopped(ctx) {
 		return ErrPipelineStopped
 	}
 	if err != nil {
+		p.batchMu.Lock()
+		p.batchFailedChunks++
+		p.batchMu.Unlock()
 		p.Logger.Warn("extract metrics simple: chunk failed (ChenWeb#19)", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
 		return nil
 	}
@@ -177,6 +195,15 @@ func (p *MetricsProcessor) processSimpleChunk(ctx context.Context, chunkIdx int)
 	p.batchSimple.add(res)
 	p.batchMu.Unlock()
 	return nil
+}
+
+// providerAccountStatus matches the status in the shared client's provider error (MID_26050141).
+// 401, 402, 403 and 404 reject the key, balance, quota or model: every call fails the same way
+// until the account or configuration changes, so splitting or more chunks cannot help.
+var providerAccountStatus = regexp.MustCompile(`request failed with status 40[1-4]\b`)
+
+func isProviderAccountError(err error) bool {
+	return errors.Is(err, llmclients.ErrStructuredOutputProvider) && providerAccountStatus.MatchString(err.Error())
 }
 
 // simpleCacheWarm reports whether the last call got at least half of its input from the cache.

@@ -2431,3 +2431,34 @@ func TestResolvingMetricsStorePropagatesBatchError(t *testing.T) {
 		t.Fatalf("inner store must not be reached on resolver error, saveCalled=%d", inner.saveCalled)
 	}
 }
+
+func TestMetricsFailedCandidateChunksKeepExistingMetrics(t *testing.T) {
+	logger := &fakeLogger{}
+	ext := &simpleMetricsExtractor{respond: func(int, llmclients.JSONExtractionInput) (map[string]any, error) {
+		return nil, errors.New("timeout")
+	}}
+	store := &fakeMetricsStore{exists: true, existingMetrics: []map[string]any{{"metric_id": "401_mtc_1"}}}
+	p := makeTestMetricsProcessor(ext, 1)
+	p.Logger, p.Store, p.InputStore = logger, store, &fakeDocMetadataStore{}
+	chunks := metricsBlocksToChunks([]Block{makeMetricsBlock(0, 10), makeMetricsBlock(1, 20)})
+	ctx := withDocProcessorFlags(context.Background(), true, true)
+	if err := p.InitChunkBatch(ctx, 401, chunks, ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := range chunks {
+		if err := p.ProcessChunk(ctx, i); err != nil {
+			t.Fatalf("ProcessChunk(%d): %v", i, err)
+		}
+	}
+	if err := p.FinalizeChunkBatch(ctx); err == nil || !strings.Contains(err.Error(), "chunks failed") {
+		t.Fatalf("err=%v, want the task to fail naming the failed chunks", err)
+	}
+	if store.deleteCalled != 0 || store.saveCalled != 0 {
+		t.Fatalf("delete=%d save=%d: force_clear must not wipe metrics when extraction failed", store.deleteCalled, store.saveCalled)
+	}
+	for _, e := range logger.warns {
+		if strings.Contains(e.message, "%s") {
+			t.Errorf("log message holds an unformatted verb: %q", e.message)
+		}
+	}
+}

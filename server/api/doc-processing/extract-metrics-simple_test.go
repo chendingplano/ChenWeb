@@ -486,3 +486,146 @@ func TestSimpleChunkInputMatchesPromptVersion(t *testing.T) {
 		}
 	}
 }
+
+// quotaRejection is the error the shared client returns when the provider refuses the account
+// (production run 2670: an exhausted free-tier quota).
+func quotaRejection() error {
+	return &llmclients.StructuredOutputError{Kind: llmclients.ErrStructuredOutputProvider, Err: errors.New(
+		`(MID_26050141) openai request failed with status 403: {"error":{"code":"AllocationQuota.FreeTierOnly"}}`)}
+}
+
+func TestIsProviderAccountError(t *testing.T) {
+	provider := func(status string) error {
+		return &llmclients.StructuredOutputError{Kind: llmclients.ErrStructuredOutputProvider,
+			Err: errors.New("(MID_26050141) openai request failed with status " + status + ": {}")}
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"bad key", provider("401"), true},
+		{"no balance", provider("402"), true},
+		{"quota", quotaRejection(), true},
+		{"unknown model", provider("404"), true},
+		{"rate limit is transient", provider("429"), false},
+		{"bad request can depend on the input", provider("400"), false},
+		{"status text outside a provider failure", errors.New("status 403"), false},
+		{"nil", nil, false},
+	} {
+		if got := isProviderAccountError(tc.err); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestSimpleAccountProviderErrorIsNotSplit(t *testing.T) {
+	ext := &simpleMetricsExtractor{respond: func(int, llmclients.JSONExtractionInput) (map[string]any, error) {
+		return nil, quotaRejection()
+	}}
+	p := makeTestSimpleMetricsProcessor(ext, &fakeMetricsStore{}, nil)
+	chunk := Chunk{SeqNo: 2, Lines: []MarkedLine{
+		simpleLine("n", 1, "paragraph", "a"), simpleLine("n", 2, "paragraph", "b"),
+		simpleLine("n", 3, "paragraph", "c"), simpleLine("n", 4, "paragraph", "d"),
+	}}
+	if _, err := p.extractSimpleChunk(context.Background(), 7, chunk, "", 1); err == nil {
+		t.Fatal("want the provider rejection")
+	}
+	if len(ext.inputs) != 1 {
+		t.Fatalf("calls=%d, want 1: each half would get the same rejection", len(ext.inputs))
+	}
+}
+
+func TestSimpleAccountProviderErrorStopsTheBatch(t *testing.T) {
+	ext := &simpleMetricsExtractor{respond: func(int, llmclients.JSONExtractionInput) (map[string]any, error) {
+		return nil, quotaRejection()
+	}}
+	p := makeTestSimpleMetricsProcessor(ext, &fakeMetricsStore{}, &fakeDocMetadataStore{})
+	p.simpleWarmupWait = time.Hour
+	chunks := metricsBlocksToChunks([]Block{makeMetricsBlock(0, 10), makeMetricsBlock(1, 20), makeMetricsBlock(2, 30)})
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 401, chunks, ""); err != nil {
+		t.Fatal(err)
+	}
+	var slept time.Duration
+	p.simpleWarmup.sleep = func(_ context.Context, d time.Duration) { slept = d }
+	for i := range chunks {
+		if err := p.ProcessChunk(ctx, i); err != nil {
+			t.Fatalf("ProcessChunk(%d): %v", i, err)
+		}
+	}
+	if len(ext.inputs) != 1 {
+		t.Errorf("calls=%d, want 1: later chunks would get the same rejection", len(ext.inputs))
+	}
+	if slept != 0 {
+		t.Errorf("waited %v for a prompt cache the rejected call never built", slept)
+	}
+}
+
+func TestMetricsSimpleFailedChunksKeepExistingMetrics(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		respond func(n int, in llmclients.JSONExtractionInput) (map[string]any, error)
+	}{
+		{"every chunk fails", func(int, llmclients.JSONExtractionInput) (map[string]any, error) {
+			return nil, errors.New("timeout")
+		}},
+		{"one chunk fails and the other finds nothing", func(_ int, in llmclients.JSONExtractionInput) (map[string]any, error) {
+			if strings.Contains(in.InputText, "metric text 10") {
+				return nil, errors.New("timeout")
+			}
+			return map[string]any{"lang": "zh", "m": []any{}}, nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeMetricsStore{exists: true, existingMetrics: []map[string]any{{"metric_id": "401_mtc_1"}}}
+			p := makeTestSimpleMetricsProcessor(&simpleMetricsExtractor{respond: tc.respond}, store, &fakeDocMetadataStore{})
+			p.simpleWarmupWait = 0
+			chunks := metricsBlocksToChunks([]Block{makeMetricsBlock(0, 10), makeMetricsBlock(1, 20)})
+			ctx := withDocProcessorFlags(context.Background(), false, false)
+			if err := p.InitChunkBatch(ctx, 401, chunks, ""); err != nil {
+				t.Fatal(err)
+			}
+			for i := range chunks {
+				if err := p.ProcessChunk(ctx, i); err != nil {
+					t.Fatalf("ProcessChunk(%d): %v", i, err)
+				}
+			}
+			if err := p.FinalizeChunkBatch(ctx); err == nil || !strings.Contains(err.Error(), "chunks failed") {
+				t.Fatalf("err=%v, want the task to fail naming the failed chunks", err)
+			}
+			if store.deleteCalled != 0 || store.saveCalled != 0 {
+				t.Fatalf("delete=%d save=%d: a failed extraction must not replace existing metrics", store.deleteCalled, store.saveCalled)
+			}
+		})
+	}
+}
+
+func TestMetricsBatchLogMessagesNameTheProcessor(t *testing.T) {
+	logger := &fakeLogger{}
+	p := makeTestSimpleMetricsProcessor(&simpleMetricsExtractor{}, &fakeMetricsStore{}, &fakeDocMetadataStore{})
+	p.Logger = logger
+	if err := p.InitChunkBatch(context.Background(), 173, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	p.ModelErr = errors.New("no model")
+	if err := p.InitChunkBatch(context.Background(), 173, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	var messages []string
+	for _, e := range append(logger.infos, logger.warns...) {
+		messages = append(messages, e.message)
+	}
+	joined := strings.Join(messages, "\n")
+	if strings.Contains(joined, "%s") {
+		t.Fatalf("log message holds an unformatted verb:\n%s", joined)
+	}
+	for _, want := range []string{"extract_metrics_simple batch: no candidates", "extract_metrics_simple skipped: model config error"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+}
