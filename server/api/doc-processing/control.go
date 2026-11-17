@@ -80,6 +80,8 @@ type ControlService struct {
 	// The zero value disables it.
 	TaskPolicy taskEnginePolicy
 	Now        func() time.Time
+	// NextLLMRunID allocates each processor invocation's llm_run_id; nil uses llmrun.Next.
+	NextLLMRunID func(context.Context) int64
 
 	DocProcessorMode       string
 	MaxDocProcessPipelines int
@@ -752,6 +754,13 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}
 	ctx = withLLMRunID(ctx, executionID)
+	// executionID identifies this pipeline run (kb.doc_process_runs.llm_run_id, redelivery);
+	// each processor it invokes gets its own llm_run_id (withProcessorLLMRunID).
+	nextLLMRunID := s.NextLLMRunID
+	if nextLLMRunID == nil {
+		nextLLMRunID = llmrun.Next
+	}
+	ctx = withProcessorLLMRuns(ctx, nextLLMRunID)
 	// Tag ctx with the event's user_id as early as possible so every LLM
 	// call made anywhere in this run (routing/facets/resolver, not just the
 	// processors below) stamps llm_usage_event.user_id -- mirrors withRunID,
@@ -1323,10 +1332,11 @@ func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors 
 			}
 
 			startTime := time.Now()
+			procCtx := withProcessorLLMRunID(ctx, name)
 			if s.Logger != nil {
-				s.Logger.Info("post-process indexing start", "record_id", recordID, "processor", name)
+				s.Logger.Info("post-process indexing start", "record_id", recordID, "processor", name, "llm_run_id", llmRunIDFromContext(procCtx))
 			}
-			indexCtx, indexSpan := otel.Tracer(docProcessorTracerName).Start(ctx, "doc_processor.post_process_index",
+			indexCtx, indexSpan := otel.Tracer(docProcessorTracerName).Start(procCtx, "doc_processor.post_process_index",
 				trace.WithAttributes(
 					attribute.Int64("doc.record_id", recordID),
 					attribute.String("processor.name", name),
@@ -1389,6 +1399,7 @@ type procResult struct {
 func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload []byte, p Processor, recordID int64) procResult {
 	procStart := s.now()
 	processorName := processorLogName(p)
+	ctx = withProcessorLLMRunID(ctx, processorName)
 	ctx, span := startProcessorSpan(ctx, p, processorPhase(p), recordID)
 	defer span.End()
 	if s.Logger != nil {
@@ -1396,6 +1407,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 		s.Logger.Info("start running processor",
 			"record_id", recordID,
 			"run_id", runID,
+			"llm_run_id", llmRunIDFromContext(ctx),
 			"processor", processorName,
 		)
 	}

@@ -758,4 +758,9 @@ func TestPeakWaitingFilterIncludesAdmissionAndUnclosedCallHolds(t *testing.T) {
 			t.Errorf("peak waiting filter missing %q: %s", part, where)
 		}
 	}
+	// A hold inside a processor carries that processor's llm_run_id, not the pipeline's, so
+	// holds since the record's latest run started match whatever their run_id.
+	if strings.Contains(where, "h.run_id IS NULL AND") {
+		t.Errorf("peak waiting filter matches holds by time only when run_id is NULL: %s", where)
+	}
 }

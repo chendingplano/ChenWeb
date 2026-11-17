@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"strings"
+	"sync"
 
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
@@ -39,6 +40,40 @@ func llmRunIDFromContext(ctx context.Context) int64 {
 	}
 	runID, _ := ctx.Value(llmRunIDKey{}).(int64)
 	return runID
+}
+
+// processorLLMRuns holds the llm_run_id of each processor invoked by one pipeline run. A
+// processor's ID is allocated when it starts and kept for all its phases (B and C), so one
+// processor invocation's calls share an ID and different processors' calls do not. LLM calls
+// outside any processor (routing, classification) keep the pipeline's ID.
+type processorLLMRuns struct {
+	mu       sync.Mutex
+	ids      map[string]int64
+	allocate func(context.Context) int64
+}
+
+type processorLLMRunsKey struct{}
+
+func withProcessorLLMRuns(ctx context.Context, allocate func(context.Context) int64) context.Context {
+	return context.WithValue(ctx, processorLLMRunsKey{}, &processorLLMRuns{ids: map[string]int64{}, allocate: allocate})
+}
+
+// withProcessorLLMRunID tags ctx with processor's own llm_run_id. Without a pipeline run's
+// processorLLMRuns on ctx it returns ctx unchanged. A failed allocation (0) is kept for the
+// processor's remaining phases, like a failed pipeline allocation.
+func withProcessorLLMRunID(ctx context.Context, processor string) context.Context {
+	runs, _ := ctx.Value(processorLLMRunsKey{}).(*processorLLMRuns)
+	if runs == nil {
+		return ctx
+	}
+	runs.mu.Lock()
+	id, ok := runs.ids[processor]
+	if !ok {
+		id = runs.allocate(ctx)
+		runs.ids[processor] = id
+	}
+	runs.mu.Unlock()
+	return withLLMRunID(ctx, id)
 }
 
 type llmUserIDKey struct{}

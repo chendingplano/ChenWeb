@@ -169,7 +169,7 @@ func (s *ControlService) runProcessorsChunkBatched(
 			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "stopped", "")
 			return
 		}
-		recCtx := withLLMRecordID(ctx, recordID)
+		recCtx := withLLMRecordID(withProcessorLLMRunID(ctx, processorName), recordID)
 		if err := bp.InitChunkBatch(recCtx, recordID, chunks, docCtx); err != nil {
 			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "failed", "")
 			if s.Logger != nil {
@@ -221,7 +221,7 @@ func (s *ControlService) runProcessorsChunkBatched(
 			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "stopped", "")
 			return
 		}
-		recCtx := withLLMRecordID(ctx, recordID)
+		recCtx := withLLMRecordID(withProcessorLLMRunID(ctx, processorName), recordID)
 		if err := bp.FinalizeChunkBatch(recCtx); err != nil {
 			if errors.Is(err, ErrPipelineStopped) {
 				*requestStopped = true
@@ -297,7 +297,11 @@ func (s *ControlService) scheduleChunkBatch(
 			record(ErrPipelineStopped)
 			return
 		}
-		recCtx := withLLMRecordID(ctx, recordID)
+		name := bp.Name()
+		if p, ok := bp.(Processor); ok {
+			name = processorLogName(p) // the key InitChunkBatch's llm_run_id was allocated under
+		}
+		recCtx := withLLMRecordID(withProcessorLLMRunID(ctx, name), recordID)
 		if err := bp.ProcessChunk(recCtx, chunkIdx); err != nil {
 			if errors.Is(err, ErrPipelineStopped) {
 				record(ErrPipelineStopped)
