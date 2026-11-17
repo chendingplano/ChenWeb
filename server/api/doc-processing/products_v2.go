@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -122,6 +123,9 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 	}
 	items := payload["p"].([]any)
 	products := make([]any, 0, len(items))
+	// This error is the primary's retry text (CheckParsed), so it names every
+	// invalid span at once; one per retry can exhaust the retries (ChenWeb#28).
+	var spanErrs []error
 	for i, item := range items {
 		raw := item.(map[string]any)
 		name := strings.TrimSpace(asString(raw["n"]))
@@ -131,7 +135,8 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		}
 		spans, quote, err := resolveProductV2Spans(raw["s"].([]any), lines)
 		if err != nil {
-			return nil, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err)
+			spanErrs = append(spanErrs, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err))
+			continue
 		}
 		spans, quote = groundProductV2Spans(name, spans, quote, lines)
 		params := make([]any, 0)
@@ -162,6 +167,9 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 			},
 			"confidence": toFloat(raw["q"]), "confidence_reason": strings.TrimSpace(asString(raw["cr"])),
 		})
+	}
+	if len(spanErrs) > 0 {
+		return nil, errors.Join(spanErrs...)
 	}
 	return map[string]any{"products": products}, nil
 }
@@ -212,9 +220,13 @@ func resolveProductV2Spans(items []any, lines productSourceLines) ([]string, str
 				}
 			}
 		case m[3] != "":
-			found := false
+			found, labeled := false, false
 			for _, row := range productV2LineRows(start, lines[start]) {
 				found = found || row.id == m[3]
+				labeled = labeled || row.id != ""
+			}
+			if !found && !labeled {
+				return nil, "", fmt.Errorf("span %q cites a row that line %d does not have; line %d has no table rows, cite it as %d", span, start, start, start)
 			}
 			if !found {
 				return nil, "", fmt.Errorf("span %q cites a row that line %d does not have", span, start)

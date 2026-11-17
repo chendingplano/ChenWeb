@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -214,6 +218,55 @@ func TestProductsV2RejectsInvalidWireRecords(t *testing.T) {
 		mutate(raw)
 		check(100+i, raw)
 	}
+}
+
+// Prod record 382, chunk 14 (ChenWeb#28): line 264 is a figure legend paragraph, and the
+// primary cited its numbered items as rows 264#r2 to 264#r10 in nine products. The check
+// error is the primary's retry text, so it must name every invalid span, not only the first.
+func TestProductsV2NamesEveryInvalidRowSpan(t *testing.T) {
+	response, lines := loadProductsRecord382Chunk14(t)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(response), &payload); err != nil {
+		t.Fatal(err)
+	}
+	_, err := decodeProductMergedV2(payload, lines)
+	if err == nil {
+		t.Fatal("decode accepted rows cited on a line without table rows")
+	}
+	for r := 2; r <= 10; r++ {
+		if span := fmt.Sprintf(`"264#r%d"`, r); !strings.Contains(err.Error(), span) {
+			t.Errorf("error does not name %s: %v", span, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "line 264 has no table rows, cite it as 264") {
+		t.Errorf("error does not say how to cite line 264: %v", err)
+	}
+}
+
+// loadProductsRecord382Chunk14 returns the primary's captured response and the lines
+// the call sent, keyed by line number as productSourceLinesFromChunk builds them.
+func loadProductsRecord382Chunk14(t *testing.T) (string, productSourceLines) {
+	t.Helper()
+	body, err := os.ReadFile("testdata/products-merged-record382-chunk14.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Response string            `json:"response"`
+		Lines    map[string]string `json:"lines"`
+	}
+	if err := json.Unmarshal(body, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	lines := productSourceLines{}
+	for k, v := range fixture.Lines {
+		n, err := strconv.Atoi(k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines[n] = v
+	}
+	return fixture.Response, lines
 }
 
 func TestProductsV2DoesNotMutateCapturedResponse(t *testing.T) {
@@ -652,5 +705,44 @@ func TestProductsMergedV2RetriesPrimaryOnUngroundedSpan(t *testing.T) {
 	}
 	if rows := payload["products"].([]any); len(rows) != 2 {
 		t.Fatalf("products=%d, want 2 from the retried response", len(rows))
+	}
+}
+
+// Replays record 382's captured primary response (ChenWeb#28): the retry request
+// must name all nine invented rows of line 264, so one corrected response passes.
+func TestProductsMergedV2RetryNamesEveryInvalidSpan(t *testing.T) {
+	response, lines := loadProductsRecord382Chunk14(t)
+	fixed := regexp.MustCompile(`"264#r[0-9]+"`).ReplaceAllString(response, "264")
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		content := fixed
+		if len(bodies) == 1 {
+			content = response
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	}))
+	defer srv.Close()
+
+	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
+	p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261117-382"))
+	p.FallbackModelName = "fallback-model"
+	payload, model, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
+		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, lines)
+	if err != nil {
+		t.Fatalf("extractProductPayloadWithFallback: %v", err)
+	}
+	if model != "primary-model" || len(bodies) != 2 {
+		t.Fatalf("model=%q requests=%d; want one primary retry and no fallback call", model, len(bodies))
+	}
+	for r := 2; r <= 10; r++ {
+		if span := fmt.Sprintf(`\"264#r%d\"`, r); !strings.Contains(bodies[1], span) {
+			t.Errorf("retry request does not name %s", span)
+		}
+	}
+	if rows := payload["products"].([]any); len(rows) != 12 {
+		t.Fatalf("products=%d, want the 12 of the corrected response", len(rows))
 	}
 }
