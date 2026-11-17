@@ -121,6 +121,42 @@ func StartResponder(executable string) (func(), error) {
 	return func() { nc.Close() }, nil
 }
 
+// ListInstances asks every running copy of executable for its metadata and returns the
+// replies that arrive within wait. Unlike ListProcesses it does not stop at the first
+// reply, so it finds every instance.
+func ListInstances(ctx context.Context, executable string, wait time.Duration) ([]Process, error) {
+	nc, err := connectNATS()
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+	inbox := nats.NewInbox()
+	sub, err := nc.SubscribeSync(inbox)
+	if err != nil {
+		return nil, err
+	}
+	if err := nc.PublishRequest(Subject(executable), inbox, nil); err != nil {
+		return nil, err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	var processes []Process
+	for {
+		msg, err := sub.NextMsgWithContext(waitCtx)
+		if err != nil {
+			break
+		}
+		var process Process
+		if json.Unmarshal(msg.Data, &process) == nil && process.Executable == executable && process.Status == "running" {
+			processes = append(processes, process)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return processes, nil
+}
+
 // ListProcesses requests metadata from the running worker processes.
 func ListProcesses(ctx context.Context, executables []string) []Process {
 	processes := make([]Process, 0, len(executables))
