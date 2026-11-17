@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 const provisionV2Example = `{"v":2,"l":"zh","p":[{"n":"垃圾收运","t":"m","x":"垃圾应每日收运。","d":"每日收运要求","s":[42,"45-46"],"c":"收运要求","u":"垃圾","lt":"b","k":["收运"],"q":0.95,"f":1,"o":[{"n":"垃圾","t":"mat","r":"reg","s":[42],"q":0.9,"d":"分类后的垃圾","a":["生活垃圾"]}]}]}`
@@ -369,5 +370,40 @@ func TestProvisionsV2AcceptsDiscoveredObjectRoles(t *testing.T) {
 				t.Fatalf("stored objects = %#v, want role %q", objects, tc.want)
 			}
 		})
+	}
+}
+
+// A span the schema accepts but the decoder rejects (reversed range) used to
+// send the chunk straight to the fallback model. It must be retried on the
+// primary first, with the decode error in the retry input (ChenWeb#17).
+func TestProvisionsV2RetriesPrimaryOnDecodeFailure(t *testing.T) {
+	bad := strings.Replace(provisionV2Example, `"s":[42,"45-46"]`, `"s":["46-45"]`, 1)
+	var models []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		models = append(models, req.Model)
+		content := provisionV2Example
+		if len(models) == 1 {
+			content = bad
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	}))
+	defer srv.Close()
+	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
+	p := &ProvisionsProcessor{PromptRef: "prompt-extract-provisions-v8.md", ModelName: "primary-model", Extractor: client,
+		FallbackModelName: "fallback-model", Logger: loggerutil.CreateDefaultLogger("20261117-372")}
+	payload, model, err := p.extractProvisionPayloadWithFallback(context.Background(), "input", "instructions")
+	if err != nil {
+		t.Fatalf("extractProvisionPayloadWithFallback: %v", err)
+	}
+	if model != "primary-model" || !reflect.DeepEqual(models, []string{"primary-model", "primary-model"}) {
+		t.Fatalf("model=%q requests=%v; want the primary retried and no fallback call", model, models)
+	}
+	if got := len(payload["provisions"].([]any)); got != 1 {
+		t.Fatalf("provisions=%d, want 1", got)
 	}
 }

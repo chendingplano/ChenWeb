@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/metricvalue"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // resolveMergeAmbiguities sends one pending Metric Group (DR2 Rule-4) to the
@@ -40,7 +42,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 		})
 	}
 
-	winners, err = p.callMergeResolve(ctx, recordID, candidates, p.MergeResolveModelName, p.MergeResolveModelCfg)
+	winners, err = p.callMergeResolve(ctx, recordID, candidates, inputIDs, p.MergeResolveModelName, p.MergeResolveModelCfg)
 	if err == nil {
 		if valErr := validateMergeResolveResponse(winners, inputIDs, candidates); valErr == nil {
 			return winners, candidates, p.MergeResolveModelName, nil
@@ -60,7 +62,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 		"record_id", recordID, "primary_model", p.MergeResolveModelName,
 		"fallback_model", fallbackModelName, "error", err)
 
-	winners, fbErr := p.callMergeResolve(ctx, recordID, candidates, fallbackModelName, p.FallbackMergeResolveModelCfg)
+	winners, fbErr := p.callMergeResolve(ctx, recordID, candidates, inputIDs, fallbackModelName, p.FallbackMergeResolveModelCfg)
 	if fbErr != nil {
 		return nil, candidates, fallbackModelName, fmt.Errorf("(MID_26071103) primary merge resolve failed: %w; fallback failed: %v", err, fbErr)
 	}
@@ -70,26 +72,56 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 	return winners, candidates, fallbackModelName, nil
 }
 
-func (p *MetricsProcessor) callMergeResolve(ctx context.Context, recordID int64, candidates []map[string]any, modelName string, cfg structureModelConfig) ([]map[string]any, error) {
+func (p *MetricsProcessor) callMergeResolve(ctx context.Context, recordID int64, candidates []map[string]any, inputIDs map[string]bool, modelName string, cfg structureModelConfig) ([]map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	taskPrompt := mergeResolveTask(p.MergeResolvePromptText, recordID, candidates)
 	in := newLLMJSONInput(ctx, p.MergeResolvePromptRef, p.MergeResolvePromptText, modelName, taskPrompt,
 		"merge_resolve_metrics", "MID-26071105")
-	payload, err := p.Extractor.ExtractJSON(ctx, in)
+	var (
+		payload map[string]any
+		err     error
+	)
+	if structured, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
+		// The partition check runs inside the client's retry loop, so an invalid
+		// partition is retried on this model before any fallback (ChenWeb#17).
+		// It runs on copies: the validator fills omitted fields in place.
+		contract := newDocProcessingContract("chenweb_metrics_merge_resolve", map[string]any{
+			"type": "object", "required": []string{"winning_metrics"},
+			"properties": map[string]any{"winning_metrics": schemaArray()},
+		})
+		contract.CheckParsed = func(parsed map[string]any) error {
+			winners := mergeResolveWinners(parsed)
+			for i, w := range winners {
+				winners[i] = maps.Clone(w)
+			}
+			return validateMergeResolveResponse(winners, inputIDs, candidates)
+		}
+		var result *llmclients.StructuredOutputResult
+		result, err = structured.ExtractStructuredJSON(ctx, in, contract)
+		if result != nil {
+			payload = result.Parsed
+		}
+	} else {
+		payload, err = p.Extractor.ExtractJSON(ctx, in)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26071106) merge resolve LLM call failed: %w", err)
 	}
-	raw, ok := payload["winning_metrics"].([]any)
-	if !ok {
+	if _, ok := payload["winning_metrics"].([]any); !ok {
 		return nil, fmt.Errorf("(MID_26071107) merge resolve output missing winning_metrics")
 	}
+	return mergeResolveWinners(payload), nil
+}
+
+func mergeResolveWinners(payload map[string]any) []map[string]any {
+	raw, _ := payload["winning_metrics"].([]any)
 	winners := make([]map[string]any, 0, len(raw))
 	for _, item := range raw {
 		if m, ok := item.(map[string]any); ok {
 			winners = append(winners, m)
 		}
 	}
-	return winners, nil
+	return winners
 }
 
 // A correct ID partition cannot justify changing the relationships of the
