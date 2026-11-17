@@ -28,11 +28,13 @@ var provisionV2ObjectRoles = map[string]string{
 func provisionV2Schema() map[string]any {
 	text := map[string]any{"type": "string", "minLength": 1}
 	score := map[string]any{"type": "number", "minimum": 0, "maximum": 1}
+	// A string span is a range ("150-151") or a table row as the input labels
+	// it ("1095#r24", "1095#h0"); decodeProvisionV2Spans stores a row as its line.
 	spans := map[string]any{
 		"type": "array", "minItems": 1,
 		"items": map[string]any{"anyOf": []any{
 			map[string]any{"type": "integer", "minimum": 1},
-			map[string]any{"type": "string", "pattern": `^[1-9][0-9]*(-[1-9][0-9]*)?$`},
+			map[string]any{"type": "string", "pattern": `^[1-9][0-9]*(-[1-9][0-9]*|#[hr][0-9]+)?$`},
 		}},
 	}
 	objects := schemaArrayOfObjects(map[string]any{
@@ -152,17 +154,22 @@ func decodeProvisionV2(payload map[string]any) (map[string]any, error) {
 
 func decodeProvisionV2Spans(value any) ([]string, error) {
 	spans := make([]string, 0)
+	seen := map[string]bool{}
 	for _, item := range value.([]any) {
 		var span string
 		if text, ok := item.(string); ok {
-			span = text
+			span = stripTableRowRefs(text)
 		} else {
 			span = strconv.FormatFloat(toFloat(item), 'f', 0, 64)
 		}
 		if _, _, ok := parseMetricLineSpan(span); !ok {
 			return nil, fmt.Errorf("invalid line span %q", span)
 		}
-		spans = append(spans, span)
+		// Rows of one table line collapse to the same line span.
+		if !seen[span] {
+			seen[span] = true
+			spans = append(spans, span)
+		}
 	}
 	return spans, nil
 }

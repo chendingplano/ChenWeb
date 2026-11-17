@@ -309,6 +309,52 @@ func TestProvisionsV2StructuredRetriesNonconformingResponses(t *testing.T) {
 	}
 }
 
+// Table lines reach the model as "<line>#r<K>:" rows, so it sometimes cites a
+// row (prod record 372, run 1971, chunk 84: "1095#r24"). The row names its
+// line; it must be stored as that line, without a retry.
+func TestProvisionsV2AcceptsTableRowSpansAsLines(t *testing.T) {
+	source := `{"v":2,"l":"zh","p":[` +
+		`{"n":"不带热回收功能机组免检","t":"m","x":"不带热回收功能的机组不需要检验","s":["1095#r24"],"lt":"tc","q":0.85,"f":1,"o":[{"n":"不带热回收功能的机组","t":"eq","r":"reg","s":["1095#r24"],"q":0.85}]},` +
+		`{"n":"对照表","t":"m","x":"按表 J.1 的规定","s":["1095#h0","1095#r24","1095#r25",1096,"1097-1098"],"lt":"mx","q":0.8,"f":2}]}`
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": source}}}})
+	}))
+	defer srv.Close()
+	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()}
+	p := &ProvisionsProcessor{PromptRef: "prompt-extract-provisions-v8.md"}
+	got, err := p.extractProvisionPayloadFromText(context.Background(), "input", "instructions", "test", client)
+	if err != nil || requests.Load() != 1 {
+		t.Fatalf("requests=%d err=%v; a row span must be accepted on the first attempt", requests.Load(), err)
+	}
+	provisions := got["provisions"].([]any)
+	first := provisions[0].(map[string]any)
+	if !reflect.DeepEqual(first["source_line_spans"], []string{"1095"}) {
+		t.Errorf("provision spans=%#v, want [1095]", first["source_line_spans"])
+	}
+	if spans := objectItemsFromValue(first["objects"])[0]["source_line_spans"]; !reflect.DeepEqual(spans, []string{"1095"}) {
+		t.Errorf("object spans=%#v, want [1095]", spans)
+	}
+	if spans := provisions[1].(map[string]any)["source_line_spans"]; !reflect.DeepEqual(spans, []string{"1095", "1096", "1097-1098"}) {
+		t.Errorf("mixed spans=%#v, want [1095 1096 1097-1098]", spans)
+	}
+}
+
+func TestProvisionsV2RejectsMalformedTableRowSpans(t *testing.T) {
+	for _, span := range []string{"1095#", "1095#x3", "1095#r", "#r3", "1095#r3-1096", "0#r3"} {
+		payload := strings.Replace(provisionV2Example, `"s":[42,"45-46"]`, `"s":["`+span+`"]`, 1)
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := decodeProvisionV2(raw); err == nil {
+			t.Errorf("malformed span %q accepted", span)
+		}
+	}
+}
+
 func TestProvisionsV2AcceptsDiscoveredObjectRoles(t *testing.T) {
 	for _, tc := range []struct{ wire, want string }{{"loc", "location"}, {"installation location", "installation_location"}, {"reg", "regulated_object"}} {
 		t.Run(tc.wire, func(t *testing.T) {
