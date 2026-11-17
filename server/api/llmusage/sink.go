@@ -85,7 +85,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	}
 
 	if (record.AccountID == "" || record.ProfileID == "") && !isLocalModelHost(record.Metadata["host"]) {
-		sinkLogger.Warn("llm usage event account/profile not fully resolved; event will be logged with available linkage (MID-20260708-01)",
+		sinkLogger.Warn("llm usage event account/profile not fully resolved; event will be logged with available linkage (MID-20260708-01) (ChenWeb#25)",
 			"account_id", record.AccountID,
 			"profile_id", record.ProfileID,
 			"provider", string(record.Provider),
