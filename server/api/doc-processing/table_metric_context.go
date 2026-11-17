@@ -479,6 +479,31 @@ func matchTableMetricCellValue(g *TableGrid, metric map[string]any) (TableRow, b
 	return found, matched
 }
 
+// rowsWithMostEvidenceCells keeps the rows (indexes into g.Rows) with the most evidence
+// strings equal to one of their cells; none when no row has such a cell.
+func rowsWithMostEvidenceCells(g *TableGrid, rows []int, evidence []string) []int {
+	var best []int
+	bestScore := 0
+	for _, i := range rows {
+		score := 0
+		for _, e := range evidence {
+			for _, c := range g.Rows[i].Cells {
+				if normalizeTableMatchText(c) == e {
+					score++
+					break
+				}
+			}
+		}
+		switch {
+		case score > bestScore:
+			best, bestScore = []int{i}, score
+		case score == bestScore && score > 0:
+			best = append(best, i)
+		}
+	}
+	return best
+}
+
 func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]TableRow, string) {
 	// 1. Stored refs whose hashes all still match the grid. A hash found under another
 	// ID follows the row (row IDs move when the header detection changes).
@@ -499,9 +524,13 @@ func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]Tabl
 			return rows, tableRowsFromStoredRefs
 		}
 	}
-	// 2. A single data row that matches the most evidence strings.
+	// 2. A single data row that matches the most evidence strings. A tie goes to the one
+	// tied row with the most evidence strings that equal a whole cell: a key-value table
+	// names each parameter in its own cell, while a longer label or a note row only
+	// contains it (出水温度 vs 模拟污垢修正后的出水温度, record 372, ChenWeb#30).
 	if len(evidence) > 0 {
-		best, bestScore, tie := -1, 0, false
+		var best []int
+		bestScore := 0
 		for i, r := range g.Rows {
 			text := normalizeTableMatchText(strings.Join(r.Cells, ""))
 			score := 0
@@ -512,13 +541,16 @@ func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]Tabl
 			}
 			switch {
 			case score > bestScore:
-				best, bestScore, tie = i, score, false
+				best, bestScore = []int{i}, score
 			case score == bestScore && score > 0:
-				tie = true
+				best = append(best, i)
 			}
 		}
-		if best >= 0 && !tie {
-			return []TableRow{g.Rows[best]}, tableRowsFromEvidence
+		if len(best) > 1 {
+			best = rowsWithMostEvidenceCells(g, best, evidence)
+		}
+		if len(best) == 1 {
+			return []TableRow{g.Rows[best[0]]}, tableRowsFromEvidence
 		}
 	}
 	// 3. LLM-cited data rows that exist in the grid (hash not yet known or stale).
