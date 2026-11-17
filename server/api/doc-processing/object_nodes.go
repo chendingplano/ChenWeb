@@ -443,7 +443,7 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 		if it.result.Status == ObjectReconcileAmbiguous {
 			names := objectReconcileCandidateDisplay(it.candidates)
 			if logger != nil {
-				logger.Warn("object reconciliation ambiguous",
+				logger.Warn("object reconciliation ambiguous (ChenWeb#18)",
 					"input_record_id", obj.InputRecordID,
 					"artifact_type", obj.ArtifactType,
 					"artifact_id", obj.ArtifactID,

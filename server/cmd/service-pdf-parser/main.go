@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -151,9 +152,15 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 		if strings.HasSuffix(entry.Name(), ".pending") {
 			continue
 		}
+		if strings.HasPrefix(entry.Name(), ".process-health-") {
+			continue // transient probe file written by processhealth.WritableDirectory (ChenWeb#11)
+		}
 		info, err := entry.Info()
 		if err != nil {
-			logger.Warn("failed to stat staging entry", "entry", entry.Name(), "error", err)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // removed between ReadDir and stat (ChenWeb#11)
+			}
+			logger.Warn("failed to stat staging entry (ChenWeb#11)", "entry", entry.Name(), "error", err)
 			continue
 		}
 

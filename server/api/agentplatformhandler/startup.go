@@ -46,7 +46,7 @@ func StartWorkers(ctx context.Context, logger ApiTypes.JimoLogger, workerCount i
 		}
 		logger.Info("agent-platform: docker preflight ok")
 	} else {
-		logger.Warn("agent-platform: AGENT_PLATFORM_FORCE_DRYRUN=true — Docker preflight skipped; all tasks use DryRunRunner")
+		logger.Warn("agent-platform: AGENT_PLATFORM_FORCE_DRYRUN=true — Docker preflight skipped; all tasks use DryRunRunner (ChenWeb#20)")
 	}
 
 	workdirRoot := os.Getenv("AGENT_PLATFORM_WORKDIR_ROOT")

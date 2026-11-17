@@ -208,7 +208,7 @@ func HandleApplySync(c echo.Context) error {
 	started := time.Now()
 	rows, nextCursor, err := fetchAllChanges(ctx, sourceURL, secret, item, state.LastCursor.String)
 	if err != nil {
-		adminLogger.Error("apply fetch failed", "item_id", item.ID, "error", err)
+		adminLogger.Error("apply fetch failed (ChenWeb#16)", "item_id", item.ID, "error", err)
 		_ = saveSyncError(ctx, db, item.ID, err.Error())
 		return c.JSON(http.StatusBadGateway, map[string]any{"ok": false, "message": err.Error()})
 	}
@@ -224,7 +224,7 @@ func HandleApplySync(c echo.Context) error {
 
 	filesDone := time.Now()
 	if err := upsertRows(ctx, db, item, rows); err != nil {
-		adminLogger.Error("apply upsert failed", "item_id", item.ID, "error", err)
+		adminLogger.Error("apply upsert failed (ChenWeb#16)", "item_id", item.ID, "error", err)
 		_ = saveSyncError(ctx, db, item.ID, err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": err.Error()})
 	}

@@ -639,7 +639,7 @@ func (p *ProductsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) erro
 			if isCtxStopped(ctx) {
 				return ErrPipelineStopped
 			}
-			p.Logger.Warn("extract_products merged chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+			p.Logger.Warn("extract_products merged chunk failed (ChenWeb#17)", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
 			p.batchMu.Lock()
 			p.batchMergedFailures++
 			p.batchMu.Unlock()
@@ -1522,7 +1522,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	if payload != nil {
 		payloadVal = payload
 	}
-	p.Logger.Warn("primary LLM failed",
+	p.Logger.Warn("primary LLM failed (ChenWeb#17)",
 		"action", opr,
 		"error", err,
 		"model_name", modelName,
@@ -1553,7 +1553,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 		return nil, fallbackModelName, fmt.Errorf("primary extraction failed and fallback model %q is unavailable: %w (MID-20261116-30)", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary products; retrying fallback model",
+	p.Logger.Warn("primary products; retrying fallback model (ChenWeb#17)",
 		"action", opr,
 		"primary_model", modelName,
 		"fallback_model", fallbackModelName,
@@ -2816,7 +2816,11 @@ func (p *ProductsProcessor) persistProductsStatus(ctx context.Context, rec DocMe
 		StatusRaw: statusRaw,
 		ErrorMsg:  errMsg,
 	}); err != nil {
-		p.Logger.Error("failed persisting products status", "record_id", rec.ID, "error", err)
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			p.Logger.Info("products status not persisted: interrupted by shutdown (ChenWeb#13)", "record_id", rec.ID)
+		} else {
+			p.Logger.Error("failed persisting products status (ChenWeb#13)", "record_id", rec.ID, "error", err)
+		}
 	}
 }
 

@@ -2,17 +2,19 @@ package llmusage
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"maps"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	"github.com/chendingplano/shared/go/api/ApiUtils"
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -26,6 +28,17 @@ type Sink struct {
 	NewID         func() string
 	Now           func() time.Time
 	DefaultStatus int
+}
+
+// newUsageEventID returns "llm-" plus 128 random bits. The previous 32-bit ID
+// (ApiUtils.GenerateRequestID) collided on llm_usage_event_pkey once the table passed
+// ~65k rows, losing the usage event (ChenWeb#12).
+func newUsageEventID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "llm-" + strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return "llm-" + hex.EncodeToString(b[:])
 }
 
 func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord) (string, error) {
@@ -49,7 +62,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	workspaceDay := startedAt.In(workspaceTZ)
 	workspaceDay = time.Date(workspaceDay.Year(), workspaceDay.Month(), workspaceDay.Day(), 0, 0, 0, 0, workspaceTZ)
 
-	newID := func() string { return ApiUtils.GenerateRequestID("llm") }
+	newID := newUsageEventID
 	if s.NewID != nil {
 		newID = s.NewID
 	}

@@ -1267,7 +1267,11 @@ func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors 
 				indexSpan.SetAttributes(attribute.String("index.status", "failed"))
 				indexSpan.End()
 				if s.Logger != nil {
-					s.Logger.Error("post-process indexing failed", "record_id", recordID, "processor", name, "error", err)
+					if shutdownInterrupted(ctx, err) {
+						s.Logger.Info("post-process indexing interrupted by shutdown (ChenWeb#13)", "record_id", recordID, "processor", name)
+					} else {
+						s.Logger.Error("post-process indexing failed (ChenWeb#13)", "record_id", recordID, "processor", name, "error", err)
+					}
 				}
 				// ADR 2026081401 DR4: mirrors runSingleProcessorCollect's Phase
 				// A/B pattern -- without this, no PostProcessIndexer's failure
@@ -1604,8 +1608,19 @@ func (s *ControlService) persistPipelineStatusWithPlan(ctx context.Context, reco
 		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	})
 	if err != nil && s.Logger != nil {
-		s.Logger.Error("failed persisting doc pipeline status", "record_id", recordID, "error", err)
+		if shutdownInterrupted(ctx, err) {
+			s.Logger.Info("doc pipeline status not persisted: interrupted by shutdown (ChenWeb#13)", "record_id", recordID)
+		} else {
+			s.Logger.Error("failed persisting doc pipeline status (ChenWeb#13)", "record_id", recordID, "error", err)
+		}
 	}
+}
+
+// shutdownInterrupted reports whether err (or ctx) is a context cancellation, which is how an
+// in-flight step sees a service restart. Such steps log INFO instead of ERROR so real failures
+// stay visible (ChenWeb#13).
+func shutdownInterrupted(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) || (ctx != nil && ctx.Err() != nil)
 }
 
 func (s *ControlService) persistProcessorRuntimeStatus(ctx context.Context, recordID int64, processorName string, procStatus string, progress string) {
@@ -1620,7 +1635,11 @@ func (s *ControlService) persistProcessorRuntimeStatus(ctx context.Context, reco
 		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	})
 	if err != nil && s.Logger != nil {
-		s.Logger.Error("failed persisting processor runtime status", "record_id", recordID, "processor", processorName, "error", err)
+		if shutdownInterrupted(ctx, err) {
+			s.Logger.Info("processor runtime status not persisted: interrupted by shutdown (ChenWeb#13)", "record_id", recordID, "processor", processorName)
+		} else {
+			s.Logger.Error("failed persisting processor runtime status (ChenWeb#13)", "record_id", recordID, "processor", processorName, "error", err)
+		}
 	}
 }
 

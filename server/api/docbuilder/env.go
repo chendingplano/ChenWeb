@@ -36,7 +36,9 @@ func envOr(key, def string) string {
 // NewStoreFromEnv builds the store from the environment. Document IDs come from the shared ID
 // manager on sharedDB (sequence IDSequence, provisioned here; safe to repeat).
 func NewStoreFromEnv(ctx context.Context, projectDB, sharedDB *sql.DB, requester string, logf func(string, ...any)) (*Store, error) {
-	root := strings.TrimSpace(os.Getenv("DOCUMENT_ROOT_DIR"))
+	// Trim literal quotes too: a value copied from a quoted .env line and read outside systemd/dotenv
+	// keeps them, which made Abs() resolve it under the working directory (ChenWeb#14).
+	root := strings.Trim(strings.TrimSpace(os.Getenv("DOCUMENT_ROOT_DIR")), "\"'")
 	if root == "" {
 		return nil, fmt.Errorf("DOCUMENT_ROOT_DIR is not set")
 	}
