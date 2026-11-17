@@ -1658,6 +1658,13 @@ func (p *ProductsProcessor) extractProductPayload(
 		contract := productExtractionContract()
 		if sourceLines != nil {
 			contract = newDocProcessingContract("chenweb_product_extraction_merged_v2", productMergedV2Schema())
+			// Spans are checked against the sent lines inside the client's retry
+			// loop, so a cited row the input lacks is retried on this model
+			// instead of sending the whole chunk to the fallback (ChenWeb#17).
+			contract.CheckParsed = func(parsed map[string]any) error {
+				_, err := decodeProductMergedV2(parsed, sourceLines)
+				return err
+			}
 		}
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
 		if result != nil {

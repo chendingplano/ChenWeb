@@ -616,3 +616,41 @@ func TestProductsV2GroundsAShiftedCitationOnTheNamingLine(t *testing.T) {
 		}
 	}
 }
+
+// Prod record 382, chunk 14: deepseek-v4-flash cited "264#r10", a row line 264
+// does not have. The schema passed, so the span check ran only after the
+// client returned, and the chunk went straight to the fallback model (dead,
+// HTTP 403). A grounding failure must get the primary's own retries first.
+func TestProductsMergedV2RetriesPrimaryOnUngroundedSpan(t *testing.T) {
+	bad := strings.Replace(productV2Example, `"116#r2"`, `"116#r10"`, 1)
+	var models []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		models = append(models, req.Model)
+		content := productV2Example
+		if len(models) == 1 {
+			content = bad
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	}))
+	defer srv.Close()
+
+	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
+	p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261117-382"))
+	p.FallbackModelName = "fallback-model"
+	payload, model, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
+		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, productV2Lines)
+	if err != nil {
+		t.Fatalf("extractProductPayloadWithFallback: %v", err)
+	}
+	if model != "primary-model" || !reflect.DeepEqual(models, []string{"primary-model", "primary-model"}) {
+		t.Fatalf("model=%q requests=%v; want the primary retried and no fallback call", model, models)
+	}
+	if rows := payload["products"].([]any); len(rows) != 2 {
+		t.Fatalf("products=%d, want 2 from the retried response", len(rows))
+	}
+}
