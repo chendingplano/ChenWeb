@@ -341,7 +341,18 @@
 		if (!value) return '';
 		const date = new Date(value);
 		if (Number.isNaN(date.getTime())) return value;
-		return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(date);
+		// Build numbers are UTC (server time.Now().UTC()), so show times in UTC too
+		// to keep the displayed start time consistent with the build number.
+		return new Intl.DateTimeFormat(locale, {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit',
+			second: '2-digit',
+			timeZone: 'UTC',
+			timeZoneName: 'short'
+		}).format(date);
 	}
 
 	function duration(start?: string, end?: string): string {
