@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -323,5 +327,78 @@ func TestSimplePreflightKeepsSectionOrderAndQualifyingCitations(t *testing.T) {
 	}
 	if !newSimpleChunkLines(s.sourceLines(s.lines())).hasNormalLine([]string{"20"}) {
 		t.Fatal("trailing overlap note hid the normal segment")
+	}
+}
+
+// Record 383, chunk 229 (ChenWeb#29): in a split table segment the model cited only a
+// header row for a set-aside item. The row-citation check ran after the structured call
+// returned, so the whole segment failed without a retry. It must run as CheckParsed: the
+// primary is retried with text naming the item, and the segment's rows are kept.
+func TestSimplePreflightRetriesPrimaryOnHeaderOnlyCitation(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		bodies []string
+		bad    = true
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || len(req.Messages) == 0 {
+			t.Errorf("request: %v", err)
+			return
+		}
+		input, _, retry := strings.Cut(req.Messages[len(req.Messages)-1].Content, "\n\nRetry instructions:")
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		addBad := bad && !retry
+		bad = bad && retry // only the first segment's first answer cites the header alone
+		mu.Unlock()
+		var metrics []any
+		for _, line := range preflightInputLines(t, input) {
+			if line.Flag != "n" || line.LineNumber != 20 {
+				continue
+			}
+			for _, row := range strings.Split(line.Content, "\n") {
+				if id, _, _ := strings.Cut(row, ":"); strings.HasPrefix(id, "20#r") {
+					metrics = append(metrics, map[string]any{"n": id, "s": "材料", "v": "1", "l": []any{"20"}, "t": []any{id}})
+				}
+			}
+		}
+		payload := map[string]any{"lang": "zh", "m": metrics}
+		if addBad {
+			payload["x"] = []any{map[string]any{"n": "尺寸档位", "r": "term_definition", "l": []any{"20"}, "t": []any{"20#h0"}}}
+		}
+		content, _ := json.Marshal(payload)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": string(content)}}}})
+	}))
+	defer srv.Close()
+
+	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
+	p := makeTestSimpleMetricsProcessor(client, &fakeMetricsStore{}, nil)
+	p.RelationModelCfg.MaxOutputTokens = 1500
+	chunk := Chunk{SeqNo: 229, Lines: []MarkedLine{simpleLine("n", 20, "table", preflightTable(6))}}
+	res, err := p.extractSimpleChunk(context.Background(), 383, chunk, "", 1)
+	if err != nil {
+		t.Fatalf("extractSimpleChunk: %v", err)
+	}
+	if len(res.rows) != 6 {
+		t.Fatalf("rows=%d, want all 6 rows kept after the retry", len(res.rows))
+	}
+	retries := 0
+	for _, b := range bodies {
+		if strings.Contains(b, "Retry instructions:") {
+			retries++
+			if !strings.Contains(b, "尺寸档位") || !strings.Contains(b, "20#h0") {
+				t.Errorf("retry request does not name the item and its citation: %s", b)
+			}
+		}
+	}
+	if retries != 1 {
+		t.Fatalf("retries=%d of %d requests, want exactly one", retries, len(bodies))
 	}
 }
