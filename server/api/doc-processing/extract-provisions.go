@@ -849,6 +849,12 @@ func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Contex
 		contract := provisionExtractionContract()
 		if p.forceV2 || provisionPromptUsesV2(p.PromptRef) {
 			contract = newDocProcessingContract("chenweb_provision_extraction_v2", provisionV2Schema())
+			// Decode checks (such as span ranges) run inside the client's retry
+			// loop, so they are retried on this model before any fallback (ChenWeb#17).
+			contract.CheckParsed = func(parsed map[string]any) error {
+				_, err := decodeProvisionV2(parsed)
+				return err
+			}
 		}
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
 		if result != nil {

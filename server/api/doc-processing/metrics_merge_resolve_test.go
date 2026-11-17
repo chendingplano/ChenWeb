@@ -2,8 +2,15 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -61,8 +68,8 @@ func TestResolveMergeAmbiguities_MissingMetricIDFailsAndUsesFallback(t *testing.
 	if modelUsed != "fallback-model" {
 		t.Fatalf("modelUsed=%q, want fallback-model", modelUsed)
 	}
-	if extractor.calledCount != 2 {
-		t.Fatalf("calledCount=%d, want 2 (primary + fallback)", extractor.calledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2 (primary + fallback)", extractor.structuredCalledCount)
 	}
 	if len(extractor.modelNames) != 2 || extractor.modelNames[0] != "test-merge-model" || extractor.modelNames[1] != "fallback-model" {
 		t.Fatalf("modelNames=%v, want [test-merge-model fallback-model]", extractor.modelNames)
@@ -161,5 +168,57 @@ func TestMergeResolvePreservesCompleteExpressions(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A partition that misses an input metric used to go straight to the fallback
+// model. With a structured client the primary is retried first, with the
+// partition error in the retry input (ChenWeb#17).
+func TestResolveMergeAmbiguities_RetriesPrimaryOnInvalidPartition(t *testing.T) {
+	bad := `{"winning_metrics":[{"metric_id":"173_mtc_1","absorbed_metric_ids":[],"metric_name":"Latency"}]}`
+	good := `{"winning_metrics":[{"metric_id":"173_mtc_1","absorbed_metric_ids":["173_mtc_9"],"metric_name":"Latency"}]}`
+	var models []string
+	var retryInput string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(body, &req)
+		models = append(models, req.Model)
+		content := good
+		if len(models) == 1 {
+			content = bad
+		} else {
+			retryInput = string(body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	}))
+	defer srv.Close()
+	p := &MetricsProcessor{
+		Extractor:                     &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()},
+		Logger:                        loggerutil.CreateDefaultLogger("TEST_MERGE_RESOLVE"),
+		MergeResolvePromptText:        "resolve merge ambiguities",
+		MergeResolvePromptRef:         "prompt-merge-resolve-metrics-v1.md",
+		MergeResolveModelName:         "test-merge-model",
+		FallbackMergeResolveModelName: "fallback-model",
+	}
+	group := []map[string]any{
+		{"metric_id": "173_mtc_1", "_merge_source": "existing", "metric_name": "Latency"},
+		{"metric_id": "173_mtc_9", "_merge_source": "new", "metric_name": "Latency"},
+	}
+	winners, _, modelUsed, err := p.resolveMergeAmbiguities(context.Background(), 173, group)
+	if err != nil {
+		t.Fatalf("resolveMergeAmbiguities: %v", err)
+	}
+	if modelUsed != "test-merge-model" || !reflect.DeepEqual(models, []string{"test-merge-model", "test-merge-model"}) {
+		t.Fatalf("model=%q requests=%v; want the primary retried and no fallback call", modelUsed, models)
+	}
+	if !strings.Contains(retryInput, "173_mtc_9") {
+		t.Fatalf("retry input does not name the missing metric: %s", retryInput)
+	}
+	if len(winners) != 1 {
+		t.Fatalf("winners=%+v", winners)
 	}
 }
