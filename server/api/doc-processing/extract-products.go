@@ -1571,7 +1571,8 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 			)
 			return map[string]any{"products": []any{}, "mentions": []any{}}, fallbackModelName, nil
 		}
-		return nil, fallbackModelName, fmt.Errorf("primary extraction failed: %w; fallback extraction failed: %v (MID-20261116-31)", err, fallbackErr)
+		return nil, fallbackModelName, fmt.Errorf("primary extraction (model=%s) failed: %w; fallback extraction (model=%s) failed: %v (MID-20261116-31)",
+			strings.TrimSpace(modelName), err, fallbackModelName, fallbackErr)
 	}
 	return payload, fallbackModelName, nil
 }
