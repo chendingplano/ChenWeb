@@ -237,17 +237,21 @@ func (p *MetricsProcessor) callSimpleChunkSelection(ctx context.Context, recordI
 	if filepath.Base(p.RelationPromptRef) == "prompt-extract-metric-simple-v2.md" {
 		input = wrapLinesWithDocContext(markedLinesToCompactJSON(lines), docCtx)
 	}
-	payload, err := p.extractMetricSimplePayload(ctx, input)
-	p.logExtractMetricsChunk(ctx, recordID, fmt.Sprintf("%d_s_c%d%s", recordID, chunk.SeqNo, callSuffix),
-		chunk.SeqNo, total, []string{p.RelationModelName}, p.RelationPromptRef, payload, err, start, p.Now(), "")
-	if err != nil {
-		return metricSimpleResult{}, err
-	}
 	sourceLines := lines
 	if selection != nil {
 		sourceLines = selection.sourceLines(lines)
 	}
 	idx := newSimpleChunkLines(sourceLines)
+	var check func(map[string]any) error
+	if selection != nil {
+		check = func(payload map[string]any) error { return selection.checkCitations(payload, idx) }
+	}
+	payload, err := p.extractMetricSimplePayload(ctx, input, check)
+	p.logExtractMetricsChunk(ctx, recordID, fmt.Sprintf("%d_s_c%d%s", recordID, chunk.SeqNo, callSuffix),
+		chunk.SeqNo, total, []string{p.RelationModelName}, p.RelationPromptRef, payload, err, start, p.Now(), "")
+	if err != nil {
+		return metricSimpleResult{}, err
+	}
 	res := metricSimpleResult{language: normalizeMetricSimpleLang(asString(payload["lang"])), calls: 1}
 	discarded := 0
 	rows, _ := payload["m"].([]any)
@@ -315,13 +319,16 @@ func (p *MetricsProcessor) callSimpleChunkSelection(ctx context.Context, recordI
 
 // extractMetricSimplePayload sends the prompt as the system message and the chunk as the user
 // message (DocumentFirst false), so the instructions are one cached prefix for every call.
-func (p *MetricsProcessor) extractMetricSimplePayload(ctx context.Context, inputText string) (map[string]any, error) {
+// check, when set, runs inside the structured client's retry loop (CheckParsed).
+func (p *MetricsProcessor) extractMetricSimplePayload(ctx context.Context, inputText string, check func(map[string]any) error) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, p.RelationModelCfg)
 	in := newLLMJSONInput(ctx, p.RelationPromptRef, p.RelationPromptText, p.RelationModelName, inputText, p.Name(), "MID-20261101-01")
 	in.DocumentFirst = false
 	var payload map[string]any
 	if structured, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
-		result, err := structured.ExtractStructuredJSON(ctx, in, metricsSimpleExtractionContract())
+		contract := metricsSimpleExtractionContract()
+		contract.CheckParsed = check
+		result, err := structured.ExtractStructuredJSON(ctx, in, contract)
 		if err != nil {
 			return nil, fmt.Errorf("(MID-20261101-02) extract metrics simple: %w", err)
 		}

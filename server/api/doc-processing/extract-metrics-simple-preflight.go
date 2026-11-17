@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -178,6 +179,32 @@ func (s metricSimpleSelection) sourceLines(request []MarkedLine) []MarkedLine {
 		}
 	}
 	return lines
+}
+
+// checkCitations runs accepts on every metric (m) and set-aside item (x) the response
+// assigns to normal lines, as callSimpleChunkSelection does, and names each item it
+// rejects. It is the contract's CheckParsed, so a citation slip is retried on the
+// primary with this text instead of failing the segment (ChenWeb#29).
+func (s metricSimpleSelection) checkCitations(payload map[string]any, idx simpleChunkLines) error {
+	var errs []error
+	for _, key := range []string{"m", "x"} {
+		items, _ := payload[key].([]any)
+		for i, item := range items {
+			raw, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			spans := normalizeSourceLineSpans(raw["l"])
+			if !idx.hasNormalLine(spans) {
+				continue
+			}
+			if _, err := s.accepts(raw, spans); err != nil {
+				t, _ := json.Marshal(raw["t"])
+				errs = append(errs, fmt.Errorf("%s[%d] %q cites t=%s: %w", key, i, strings.TrimSpace(asString(raw["n"])), t, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // For a split table, require explicit row citations before full-source inference.
