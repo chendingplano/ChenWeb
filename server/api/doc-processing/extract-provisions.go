@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -186,7 +187,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectTypes = ObjectTypeSQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
-		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv()}
+		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv(), Attention: attention.SQLStore{DB: ApiTypes.ProjectDBHandle}}
 	}
 	return p
 }

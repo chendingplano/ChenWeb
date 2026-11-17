@@ -27,6 +27,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/agentservicehandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/alertloghandler"
+	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/deepdoc/server/api/buildinfohandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/calendarhandler"
@@ -951,7 +952,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PATCH("/kb/schedules/:id", kbhandler.UpdateSchedule)
 	apiGroup.DELETE("/kb/schedules/:id", kbhandler.DeleteSchedule)
 	apiGroup.GET("/kb/schedules/:id/runs", kbhandler.ListScheduleRuns)
-	apiGroup.GET("/kb/objects/ambiguous", kbhandler.ListAmbiguousObjects)
+	apiGroup.GET("/kb/attention-items", attention.ListItems)
+	apiGroup.GET("/kb/attention-items/:id", attention.GetItem)
+	apiGroup.POST("/kb/attention-items/:id/resolve", attention.ResolveItem)
+	apiGroup.POST("/kb/attention-items/:id/dismiss", attention.DismissItem)
+	apiGroup.GET("/kb/objects/ambiguous-items/:id/artifact-object", kbhandler.GetAmbiguousItemArtifactObject)
 	apiGroup.GET("/kb/objects/ambiguous/:id", kbhandler.GetAmbiguousObjectDetail)
 	apiGroup.POST("/kb/objects/ambiguous/:id/create-node", kbhandler.CreateObjectNodeFromArtifactObject)
 	apiGroup.PATCH("/kb/objects/artifact-objects/:id", kbhandler.UpdateArtifactObject)

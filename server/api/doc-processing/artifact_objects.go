@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/chendingplano/deepdoc/server/api/attention"
 )
 
 const (
@@ -107,6 +109,9 @@ type ObjectReconcileResult struct {
 type ObjectReconciler struct {
 	Store   ObjectNodeStore
 	Options ObjectReconcileOptions
+	// Attention records ties broken by reconcileArtifactObjectsWithLLM as
+	// ambiguous-object-name attention items. Nil records nothing.
+	Attention attention.Recorder
 }
 
 func (r ObjectReconciler) ReconcileOne(ctx context.Context, obj ArtifactObject) (ObjectReconcileResult, error) {
@@ -117,6 +122,8 @@ func (r ObjectReconciler) ReconcileOne(ctx context.Context, obj ArtifactObject) 
 	if err != nil {
 		return ObjectReconcileResult{}, err
 	}
+	// FindCandidates orders by object type and id, not score.
+	sortCandidatesByScore(candidates)
 	if len(candidates) == 1 && candidates[0].Score >= 1 {
 		return ObjectReconcileResult{
 			ObjectID:   candidates[0].Node.ObjectID,
@@ -125,7 +132,7 @@ func (r ObjectReconciler) ReconcileOne(ctx context.Context, obj ArtifactObject) 
 			Method:     candidates[0].Method,
 		}, nil
 	}
-	if len(candidates) > 1 && candidates[0].Score == candidates[1].Score {
+	if len(topTiedCandidates(candidates)) > 1 {
 		return ObjectReconcileResult{Status: ObjectReconcileAmbiguous, Confidence: candidates[0].Score, Method: candidates[0].Method}, nil
 	}
 	if len(candidates) > 0 && candidates[0].Score >= 0.95 {

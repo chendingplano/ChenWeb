@@ -1,10 +1,57 @@
-export type AmbiguousObjectSummary = {
-	id: number;
+export const AMBIGUOUS_OBJECT_NAME_ITEM_TYPE = 'ambiguous-object-name';
+
+/** One tied kb.object_nodes candidate, as recorded when the tie was seen. */
+export type TieCandidate = {
+	object_id: string;
+	canonical_name: string;
+	object_type: string;
+	score: number;
+	method: string;
+};
+
+/** One artifact object that hit the tie (newest first in an item's details). */
+export type TieOccurrence = {
+	input_record_id: number;
 	artifact_type: string;
 	artifact_id: string;
 	object_name: string;
-	object_name_en: string;
-	confidence: number;
+	seen_at: string;
+};
+
+/** An earlier closing of an item that was reopened because the tie came back. */
+export type ResolutionHistoryEntry = {
+	status: string;
+	resolved_by?: string;
+	resolved_at?: string;
+	resolution?: string;
+	reopened_at: string;
+};
+
+export type AmbiguousObjectItemDetails = {
+	object_name?: string;
+	picked_object_id?: string;
+	tied_candidates?: TieCandidate[];
+	llm_outcome?: string;
+	occurrences?: TieOccurrence[];
+	resolution_history?: ResolutionHistoryEntry[];
+};
+
+/** One kb.attention_items row of type ambiguous-object-name. */
+export type AttentionItem = {
+	id: number;
+	item_type: string;
+	status: string;
+	dedupe_key: string;
+	title: string;
+	details: AmbiguousObjectItemDetails;
+	input_record_id: number;
+	occurrence_count: number;
+	reopen_count: number;
+	first_seen: string;
+	last_seen: string;
+	resolved_by: string;
+	resolved_at: string | null;
+	resolution: string;
 };
 
 export type LinkedArtifactObjectSummary = {
@@ -133,8 +180,31 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	return parsed as T;
 }
 
-export function listAmbiguousObjects(): Promise<{ status: boolean; rows: AmbiguousObjectSummary[] }> {
-	return req('/api/v1/kb/objects/ambiguous');
+export function listOpenAmbiguousItems(): Promise<{ status: boolean; items: AttentionItem[]; total: number }> {
+	return req(`/api/v1/kb/attention-items?type=${AMBIGUOUS_OBJECT_NAME_ITEM_TYPE}&status=open&limit=500`);
+}
+
+/**
+ * The current kb.artifact_objects row for an item's newest occurrence that
+ * still has one; `found` is false when every source row is gone.
+ */
+export function getAmbiguousItemArtifactObject(
+	itemId: number
+): Promise<{ status: boolean; found: boolean; artifact_object_id: number }> {
+	return req(`/api/v1/kb/objects/ambiguous-items/${itemId}/artifact-object`);
+}
+
+/** Resolves (cause fixed) or dismisses (data accepted) an open attention item. */
+export function closeAttentionItem(
+	itemId: number,
+	action: 'resolve' | 'dismiss',
+	resolution: string
+): Promise<{ status: boolean; item: AttentionItem }> {
+	return req(`/api/v1/kb/attention-items/${itemId}/${action}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ resolution })
+	});
 }
 
 export function getAmbiguousObjectDetail(id: number): Promise<AmbiguousObjectDetailResponse> {

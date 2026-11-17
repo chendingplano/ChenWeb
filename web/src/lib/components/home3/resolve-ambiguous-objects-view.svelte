@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
+	import { getLocale } from '$lib/paraglide/runtime';
 	import { onMount } from 'svelte';
 	import {
-		listAmbiguousObjects,
+		listOpenAmbiguousItems,
+		getAmbiguousItemArtifactObject,
+		closeAttentionItem,
 		getAmbiguousObjectDetail,
 		updateArtifactObject,
 		updateObjectNode,
@@ -17,7 +20,7 @@
 		fieldDirty,
 		describeCandidateMatches,
 		RECONCILE_STATUS_OPTIONS,
-		type AmbiguousObjectSummary,
+		type AttentionItem,
 		type ArtifactObjectDetail,
 		type LinkedArtifactObjectSummary,
 		type ObjectNodeCandidate,
@@ -37,10 +40,18 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted     = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
-	// --- Left panel state ---
-	let rows        = $state<AmbiguousObjectSummary[]>([]);
+	// --- Left panel state: open ambiguous-object-name attention items ---
+	let items       = $state<AttentionItem[]>([]);
 	let listLoading = $state(false);
 	let listError   = $state('');
+
+	// --- Selected attention item ---
+	let selectedItemId = $state<number | null>(null);
+	let selectedItem   = $derived(items.find((item) => item.id === selectedItemId) ?? null);
+	let itemNoRow      = $state(false); // no occurrence still has a kb.artifact_objects row
+	let closeNote      = $state('');
+	let closing        = $state(false);
+	let closeError     = $state('');
 
 	// --- Right panel state ---
 	let selectedId     = $state<number | null>(null);
@@ -202,18 +213,22 @@
 		return parts.join(' · ');
 	}
 
-	// Derived (not inlined in the template) so `selectedId`'s `number | null`
-	// type is narrowed once here, rather than needing a `number` at every
-	// neighborAmbiguousId call site in the markup.
+	// The left list shows attention items, or artifact objects in find mode;
+	// navigation moves through whichever is shown.
+	let navKey = $derived(findContext ? selectedId : selectedItemId);
 	let prevId = $derived.by(() =>
-		selectedId === null ? null : neighborAmbiguousId(currentVisibleRowIds(), selectedId, -1)
+		navKey === null ? null : neighborAmbiguousId(currentVisibleRowIds(), navKey, -1)
 	);
 	let nextId = $derived.by(() =>
-		selectedId === null ? null : neighborAmbiguousId(currentVisibleRowIds(), selectedId, 1)
+		navKey === null ? null : neighborAmbiguousId(currentVisibleRowIds(), navKey, 1)
 	);
 
 	function currentVisibleRowIds(): number[] {
-		return (findContext ? findRows : rows).map((row) => row.id);
+		return findContext ? findRows.map((row) => row.id) : items.map((item) => item.id);
+	}
+
+	function openTarget(id: number): Promise<void> {
+		return findContext ? selectRow(id) : selectItem(id);
 	}
 
 	function requestNav(kind: 'prev' | 'next' | 'switch', id: number) {
@@ -223,7 +238,7 @@
 			pendingSelectId = id;
 			return;
 		}
-		selectRow(id);
+		openTarget(id);
 	}
 
 	function goPrev() {
@@ -235,7 +250,7 @@
 	}
 
 	function clickCard(id: number) {
-		if (id === selectedId) return;
+		if (id === navKey) return;
 		requestNav('switch', id);
 	}
 
@@ -244,14 +259,14 @@
 		navConfirm = null;
 		pendingSelectId = null;
 		const success = await doSave();
-		if (success && target !== null) await selectRow(target);
+		if (success && target !== null) await openTarget(target);
 	}
 
 	function confirmNavDiscard() {
 		const target = pendingSelectId;
 		navConfirm = null;
 		pendingSelectId = null;
-		if (target !== null) selectRow(target);
+		if (target !== null) openTarget(target);
 	}
 
 	function stayOnNav() {
@@ -290,23 +305,9 @@
 					await updateObjectNode(currentNodes[i].object_id, nodePatch);
 				}
 			}
-			const resolved = currentObject.reconcile_status !== 'ambiguous';
+			// Saving never closes the attention item; Resolve or Dismiss does.
 			snapshotObject = { ...currentObject };
 			snapshotNodes = currentNodes.map((c) => ({ ...c }));
-			if (resolved && !findContext) {
-				const resolvedId = selectedId;
-				const nextIndex = nextIndexAfterResolve(rows.map((r) => r.id), resolvedId);
-				rows = rows.filter((r) => r.id !== resolvedId);
-				if (nextIndex !== null) {
-					await selectRow(rows[nextIndex].id);
-				} else {
-					selectedId = null;
-					currentObject = null;
-					snapshotObject = null;
-					currentNodes = [];
-					snapshotNodes = [];
-				}
-			}
 			return true;
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : String(e);
@@ -316,14 +317,10 @@
 		}
 	}
 
-	async function removeResolvedRow(resolvedId: number): Promise<void> {
-		const nextIndex = nextIndexAfterResolve(rows.map((r) => r.id), resolvedId);
-		rows = rows.filter((r) => r.id !== resolvedId);
-		if (nextIndex !== null) {
-			await selectRow(rows[nextIndex].id);
-			return;
-		}
+	function clearSelection() {
+		selectedItemId = null;
 		selectedId = null;
+		itemNoRow = false;
 		detailLoading = false;
 		currentObject = null;
 		snapshotObject = null;
@@ -331,27 +328,26 @@
 		snapshotNodes = [];
 	}
 
-	async function autoResolveSingleCandidate(
-		id: number,
-		detail: { artifact_object: ArtifactObjectDetail; candidates: ObjectNodeCandidate[] }
-	): Promise<boolean> {
-		if (detail.artifact_object.reconcile_status !== 'ambiguous' || detail.candidates.length !== 1) {
-			return false;
-		}
-		const candidate = detail.candidates[0];
+	async function closeSelectedItem(action: 'resolve' | 'dismiss') {
+		if (selectedItemId === null || closing || isDirty || saving) return;
+		const id = selectedItemId;
+		closing = true;
+		closeError = '';
 		try {
-			await updateArtifactObject(id, {
-				object_id: candidate.object_id,
-				reconcile_status: 'matched',
-				reconcile_confidence: candidate.score
-			});
-			if (selectedId === id) {
-				await removeResolvedRow(id);
+			await closeAttentionItem(id, action, closeNote);
+			clearFindMode();
+			const nextIndex = nextIndexAfterResolve(items.map((item) => item.id), id);
+			items = items.filter((item) => item.id !== id);
+			closeNote = '';
+			if (nextIndex !== null) {
+				await selectItem(items[nextIndex].id);
+			} else {
+				clearSelection();
 			}
-			return true;
 		} catch (e) {
-			saveError = e instanceof Error ? e.message : String(e);
-			return false;
+			closeError = e instanceof Error ? e.message : String(e);
+		} finally {
+			closing = false;
 		}
 	}
 
@@ -403,17 +399,13 @@
 		listLoading = true;
 		listError = '';
 		try {
-			const res = await listAmbiguousObjects();
-			rows = res.rows;
-			if (selectedId !== null && !rows.some((row) => row.id === selectedId)) {
-				selectedId = null;
-				currentObject = null;
-				snapshotObject = null;
-				currentNodes = [];
-				snapshotNodes = [];
+			const res = await listOpenAmbiguousItems();
+			items = res.items;
+			if (selectedItemId !== null && !items.some((item) => item.id === selectedItemId)) {
+				clearSelection();
 			}
-			if (rows.length > 0 && selectedId === null) {
-				await selectRow(rows[0].id);
+			if (items.length > 0 && selectedItemId === null) {
+				await selectItem(items[0].id);
 			}
 		} catch (e) {
 			listError = e instanceof Error ? e.message : String(e);
@@ -423,8 +415,11 @@
 	}
 
 	async function refreshLeftPanel() {
+		const leavingFind = findContext !== null;
 		clearFindMode();
 		await loadList();
+		// Back from find mode: show the selected item's artifact object again.
+		if (leavingFind && selectedItemId !== null) await selectItem(selectedItemId);
 	}
 
 	async function findLinkedArtifactObjects(node: ObjectNodeCandidate) {
@@ -467,12 +462,39 @@
 				survivorObjectID
 			);
 			rebindNotice = m.resolve_ambiguous_objects_rebound_artifact_object_to({ findRowsCount: findRows.length, plural: findRows.length === 1 ? '' : 's', survivorObjectID });
-			clearFindMode();
-			await loadList();
+			await refreshLeftPanel();
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : String(e);
 		} finally {
 			rebinding = false;
+		}
+	}
+
+	async function selectItem(itemId: number) {
+		selectedItemId = itemId;
+		closeNote = '';
+		closeError = '';
+		itemNoRow = false;
+		selectedId = null;
+		currentObject = null;
+		snapshotObject = null;
+		currentNodes = [];
+		snapshotNodes = [];
+		detailLoading = true;
+		detailError = '';
+		try {
+			const res = await getAmbiguousItemArtifactObject(itemId);
+			if (selectedItemId !== itemId) return; // a newer selection superseded this one
+			if (!res.found) {
+				itemNoRow = true;
+				detailLoading = false;
+				return;
+			}
+			await selectRow(res.artifact_object_id);
+		} catch (e) {
+			if (selectedItemId !== itemId) return;
+			detailError = e instanceof Error ? e.message : String(e);
+			detailLoading = false;
 		}
 	}
 
@@ -485,7 +507,6 @@
 		try {
 			const detail = await getAmbiguousObjectDetail(id);
 			if (selectedId !== id) return; // a newer selectRow call superseded this one
-			if (await autoResolveSingleCandidate(id, detail)) return;
 			snapshotObject = detail.artifact_object;
 			currentObject = { ...detail.artifact_object };
 			snapshotNodes = detail.candidates;
@@ -512,11 +533,25 @@
 		return values.join(', ');
 	}
 
-	function leftRowMeta(row: AmbiguousObjectSummary | LinkedArtifactObjectSummary): string {
-		if ('confidence' in row) {
-			return m.resolve_ambiguous_objects_confidence({ artifact_type: row.artifact_type, confidence: row.confidence.toFixed(2) });
-		}
+	function leftRowMeta(row: LinkedArtifactObjectSummary): string {
 		return `${row.artifact_type} · ${row.reconcile_status}${row.object_id ? ` · ${row.object_id}` : ''}`;
+	}
+
+	function formatTime(value: string | undefined | null): string {
+		if (!value) return '';
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? value : date.toLocaleString(getLocale());
+	}
+
+	function llmOutcomeLabel(outcome: string | undefined): string {
+		switch (outcome) {
+			case 'unresolved':
+				return m.resolve_ambiguous_objects_llm_unresolved();
+			case 'failed':
+				return m.resolve_ambiguous_objects_llm_failed();
+			default:
+				return m.resolve_ambiguous_objects_llm_not_configured();
+		}
 	}
 
 	function parseAliasesText(text: string): string[] {
@@ -547,7 +582,7 @@
 						{#if findContext}
 							{m.resolve_ambiguous_objects_row_linked_to({ findRowsCount: findRows.length, plural: findRows.length === 1 ? '' : 's', sourceLabel: findContext.sourceLabel })}
 						{:else}
-							{m.resolve_ambiguous_objects_row_at_reconcile_status_ambiguous({ rowsCount: rows.length, plural: rows.length === 1 ? '' : 's' })}
+							{m.resolve_ambiguous_objects_open_items({ count: items.length, plural: items.length === 1 ? '' : 's' })}
 						{/if}
 					</p>
 				</div>
@@ -603,12 +638,36 @@
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">
 				{m.resolve_ambiguous_objects_no_artifact_objects_are_currently()}
 			</div>
-		{:else if !findContext && rows.length === 0}
+		{:else if !findContext && items.length === 0}
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">
-				{m.resolve_ambiguous_objects_no_ambiguous_objects_the_queue()}
+				{m.resolve_ambiguous_objects_no_open_items()}
 			</div>
+		{:else if !findContext}
+			{#each items as item (item.id)}
+				<button
+					type="button"
+					onclick={() => clickCard(item.id)}
+					class="w-full text-left p-3 cursor-pointer"
+					style="
+						border-bottom:1px solid {borderColor};
+						background:{selectedItemId === item.id ? accentTint : 'transparent'};
+					"
+				>
+					<div class="flex items-center gap-2" style="font-size:13px; font-weight:500; color:{selectedItemId === item.id ? accent : textPrimary};">
+						<span>{item.title || item.dedupe_key}</span>
+						{#if item.reopen_count > 0}
+							<span style="font-size:10px; font-weight:600; padding:1px 6px; border-radius:9999px; background:rgba(248,113,113,0.15); color:#F87171;">
+								{m.resolve_ambiguous_objects_reopened({ count: item.reopen_count })}
+							</span>
+						{/if}
+					</div>
+					<div style="font-size:11px; color:{textMuted}; margin-top:2px;">
+						{m.resolve_ambiguous_objects_item_meta({ nodes: item.details.tied_candidates?.length ?? 0, count: item.occurrence_count, lastSeen: formatTime(item.last_seen) })}
+					</div>
+				</button>
+			{/each}
 		{:else}
-			{#each (findContext ? findRows : rows) as row (row.id)}
+			{#each findRows as row (row.id)}
 				<button
 					type="button"
 					onclick={() => clickCard(row.id)}
@@ -679,10 +738,85 @@
 		{#if createNodeError}
 			<div class="mb-4" style="font-size:12px; color:#F87171;">{m.resolve_ambiguous_objects_create_new_failed({ createNodeError })}</div>
 		{/if}
+		{#if selectedItem}
+			<div class="rounded-xl p-4 mb-4 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor}; max-height:40%; overflow-y:auto;">
+				<div class="flex items-start justify-between gap-4 flex-wrap">
+					<div>
+						<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">
+							{m.resolve_ambiguous_objects_item_heading({ name: selectedItem.title || selectedItem.dedupe_key })}
+						</h2>
+						<p style="font-size:11px; color:{textMuted}; margin-top:2px;">
+							{m.resolve_ambiguous_objects_item_summary({ count: selectedItem.occurrence_count, firstSeen: formatTime(selectedItem.first_seen), lastSeen: formatTime(selectedItem.last_seen), llm: llmOutcomeLabel(selectedItem.details.llm_outcome) })}
+						</p>
+					</div>
+					<div class="flex items-center gap-2">
+						<input
+							bind:value={closeNote}
+							placeholder={m.resolve_ambiguous_objects_close_note_placeholder()}
+							style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:12px; width:240px;"
+						/>
+						<button
+							type="button"
+							onclick={() => closeSelectedItem('resolve')}
+							disabled={closing || isDirty || saving}
+							title={isDirty ? m.resolve_ambiguous_objects_save_or_cancel_first() : m.resolve_ambiguous_objects_resolve_hint()}
+							style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white; opacity:{closing || isDirty || saving ? 0.5 : 1};"
+						>
+							{m.resolve_ambiguous_objects_resolve_item()}
+						</button>
+						<button
+							type="button"
+							onclick={() => closeSelectedItem('dismiss')}
+							disabled={closing || isDirty || saving}
+							title={isDirty ? m.resolve_ambiguous_objects_save_or_cancel_first() : m.resolve_ambiguous_objects_dismiss_hint()}
+							style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{closing || isDirty || saving ? 0.5 : 1};"
+						>
+							{m.resolve_ambiguous_objects_dismiss_item()}
+						</button>
+					</div>
+				</div>
+				{#if closeError}
+					<div class="mt-2" style="font-size:12px; color:#F87171;">{m.resolve_ambiguous_objects_close_failed({ closeError })}</div>
+				{/if}
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3" style="font-size:12px;">
+					<div>
+						<div style="font-size:11px; color:{textMuted}; margin-bottom:4px;">{m.resolve_ambiguous_objects_tied_nodes_recorded()}</div>
+						{#each selectedItem.details.tied_candidates ?? [] as cand (cand.object_id)}
+							<div style="color:{textPrimary}; padding:2px 0;">
+								<code>{cand.object_id}</code> · {cand.canonical_name} · {cand.object_type} · {cand.score}
+								{#if cand.object_id === selectedItem.details.picked_object_id}
+									<span style="font-size:10px; font-weight:600; padding:1px 6px; border-radius:9999px; background:{accentTint}; color:{accent};">{m.resolve_ambiguous_objects_picked()}</span>
+								{/if}
+							</div>
+						{/each}
+					</div>
+					<div>
+						<div style="font-size:11px; color:{textMuted}; margin-bottom:4px;">{m.resolve_ambiguous_objects_occurrences()}</div>
+						{#each selectedItem.details.occurrences ?? [] as occ (`${occ.input_record_id}|${occ.artifact_type}|${occ.artifact_id}|${occ.object_name}`)}
+							<div style="color:{textPrimary}; padding:2px 0;">
+								{m.resolve_ambiguous_objects_occurrence_row({ record: occ.input_record_id, artifactType: occ.artifact_type, artifactId: occ.artifact_id, name: occ.object_name, seenAt: formatTime(occ.seen_at) })}
+							</div>
+						{/each}
+					</div>
+				</div>
+				{#if (selectedItem.details.resolution_history ?? []).length > 0}
+					<div class="mt-3" style="font-size:12px;">
+						<div style="font-size:11px; color:#F87171; margin-bottom:4px;">{m.resolve_ambiguous_objects_reopened_history()}</div>
+						{#each selectedItem.details.resolution_history ?? [] as entry, i (i)}
+							<div style="color:{textSecondary}; padding:2px 0;">
+								{m.resolve_ambiguous_objects_history_row({ status: entry.status, by: entry.resolved_by ?? '', at: formatTime(entry.resolved_at), note: entry.resolution ?? '', reopenedAt: formatTime(entry.reopened_at) })}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 		{#if detailLoading}
 			<div style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_loading()}</div>
 		{:else if detailError}
 			<div style="color:#F87171; font-size:13px;">{m.resolve_ambiguous_objects_error_3({ detailError })}</div>
+		{:else if itemNoRow}
+			<div style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_no_current_row()}</div>
 		{:else if !currentObject}
 			<div style="color:{textMuted}; font-size:13px;">{m.resolve_ambiguous_objects_select_a_record_on_the()}</div>
 		{:else}
@@ -1058,7 +1192,10 @@
 				<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:10px;">{m.resolve_ambiguous_objects_about_this_page()}</h3>
 				<div style="font-size:12px; color:{textSecondary}; line-height:1.7;">
 					<p style="margin-bottom:10px;">
-						{m.resolve_ambiguous_objects_a_row_is()} <strong>{m.resolve_ambiguous_objects_ambiguous()}</strong> {m.resolve_ambiguous_objects_when_reconciliation_found_two_or()}
+						{m.resolve_ambiguous_objects_help_items()}
+					</p>
+					<p style="margin-bottom:10px;">
+						{m.resolve_ambiguous_objects_help_close()}
 					</p>
 					<p style="margin-bottom:10px;">
 						{m.resolve_ambiguous_objects_the()} <strong>{m.resolve_ambiguous_objects_recommended()}</strong> {m.resolve_ambiguous_objects_badge_marks_the_same_deterministic()} <strong>{m.resolve_ambiguous_objects_use_this()}</strong> {m.resolve_ambiguous_objects_on_any_candidate_to_copy()} <code>ambiguous_resolved</code>.
@@ -1069,7 +1206,7 @@
 						<code>new</code> {m.resolve_ambiguous_objects_a_new_object_node_was()} <code>rejected</code> {m.resolve_ambiguous_objects_no_valid_object_leave_object()}
 					</p>
 					<p>
-						<strong>{m.resolve_ambiguous_objects_save()}</strong> {m.resolve_ambiguous_objects_writes_your_edits_to_both()}<code>ambiguous</code> {m.resolve_ambiguous_objects_status_the_row_leaves_this()}
+						<strong>{m.resolve_ambiguous_objects_save()}</strong> {m.resolve_ambiguous_objects_help_save()}
 					</p>
 				</div>
 				<div class="flex justify-end mt-4">

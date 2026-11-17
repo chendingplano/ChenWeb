@@ -270,8 +270,9 @@ func resolveAmbiguousObjectConcurrency() int {
 type reconcileObjectItem struct {
 	obj        ArtifactObject
 	result     ObjectReconcileResult
-	candidates []ObjectNodeCandidate
-	ambiguous  bool // needs LLM adjudication (ambiguous AND a resolver is configured)
+	candidates []ObjectNodeCandidate // sorted by score, highest first
+	ambiguous  bool                  // needs LLM adjudication (ambiguous AND a resolver is configured)
+	llmOutcome string                // for a tie the LLM did not resolve: unresolved or failed
 }
 
 // ambiguousResolveResult is one ambiguous object's LLM adjudication outcome.
@@ -307,7 +308,7 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 		}
 		it := reconcileObjectItem{obj: obj, result: result}
 		if result.Status == ObjectReconcileAmbiguous {
-			candidates, candErr := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+			candidates, candErr := fetchSortedCandidates(ctx, reconciler, obj)
 			if candErr != nil {
 				return nil, candErr
 			}
@@ -364,7 +365,9 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 
 		if it.ambiguous {
 			rr := resolvedByIdx[i]
+			items[i].llmOutcome = tieLLMUnresolved
 			if rr.err != nil {
+				items[i].llmOutcome = tieLLMFailed
 				if logger != nil {
 					logger.Warn("LLM ambiguous object resolution failed",
 						"artifact_id", obj.ArtifactID,
@@ -384,6 +387,7 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 				}
 				resolvedObj, applied, applyErr := ApplyAmbiguousObjectLLMDecision(ctx, obj, it.candidates, rr.decision, applyStore, minConfidence)
 				if applyErr != nil {
+					items[i].llmOutcome = tieLLMFailed
 					if logger != nil {
 						logger.Warn("apply LLM ambiguous object resolution failed", "artifact_id", obj.ArtifactID, "err", applyErr)
 					}
@@ -441,22 +445,29 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 		}
 
 		if it.result.Status == ObjectReconcileAmbiguous {
-			names := objectReconcileCandidateDisplay(it.candidates)
-			if logger != nil {
-				logger.Warn("object reconciliation ambiguous (ChenWeb#18)",
-					"input_record_id", obj.InputRecordID,
-					"artifact_type", obj.ArtifactType,
-					"artifact_id", obj.ArtifactID,
-					"object_name", obj.ObjectName,
-					"top_score", it.result.Confidence,
-					"candidates", names,
-				)
-			}
+			llmOutcome := it.llmOutcome
 			if !it.ambiguous {
+				llmOutcome = tieLLMNotConfigured
 				logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 					Status: reconcileOutcomeUnresolved, Object: obj, Candidates: it.candidates,
-					CandidateDisplay: names,
+					CandidateDisplay: objectReconcileCandidateDisplay(it.candidates),
 				})
+			}
+			// Link every tie (openspec attention-items-ambiguous-objects): the
+			// tie-break pick, plus an attention item for a person to review.
+			switch tied := topTiedCandidates(it.candidates); len(tied) {
+			case 0:
+				// LLM merges removed every candidate, so no tie is left.
+				node, err := reconciler.Store.CreateNode(ctx, obj)
+				if err != nil {
+					return nil, err
+				}
+				it.result = ObjectReconcileResult{ObjectID: node.ObjectID, Status: ObjectReconcileNew, Confidence: 1, Method: "new_node"}
+			case 1:
+				// LLM merges collapsed the tie into one node.
+				it.result = ObjectReconcileResult{ObjectID: tied[0].Node.ObjectID, Status: ObjectReconcileMatched, Confidence: tied[0].Score, Method: tied[0].Method}
+			default:
+				it.result = breakObjectTie(ctx, reconciler, logger, obj, tied, llmOutcome)
 			}
 		}
 		obj.ObjectID = it.result.ObjectID

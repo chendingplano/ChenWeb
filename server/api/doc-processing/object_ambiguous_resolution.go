@@ -218,46 +218,6 @@ WHERE id = $5`, nullEmpty(objectID), status, confidence, string(ext), rowID)
 	return err
 }
 
-// AmbiguousObjectSummary is the lightweight row shape used by the admin
-// resolution page's left-panel list.
-type AmbiguousObjectSummary struct {
-	ID           int64
-	ArtifactType string
-	ArtifactID   string
-	ObjectName   string
-	ObjectNameEn string
-	Confidence   float64
-}
-
-// ListAmbiguousSummaries returns every kb.artifact_objects row still at
-// reconcile_status='ambiguous', for the admin resolution page. Unlike
-// LoadAmbiguous (used by the automated backfill), this has no limit — the
-// ADR-documented backlog is small (~40 rows).
-func (s ArtifactObjectSQLStore) ListAmbiguousSummaries(ctx context.Context) ([]AmbiguousObjectSummary, error) {
-	if s.DB == nil {
-		return nil, fmt.Errorf("db is nil")
-	}
-	rows, err := s.DB.QueryContext(ctx, `
-SELECT id, artifact_type, artifact_id, object_name, COALESCE(object_name_en, ''), confidence
-FROM kb.artifact_objects
-WHERE reconcile_status = $1
-ORDER BY id`, ObjectReconcileAmbiguous)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []AmbiguousObjectSummary
-	for rows.Next() {
-		var row AmbiguousObjectSummary
-		if err := rows.Scan(&row.ID, &row.ArtifactType, &row.ArtifactID, &row.ObjectName, &row.ObjectNameEn, &row.Confidence); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
-}
-
 // LoadByID loads one kb.artifact_objects row by primary key, regardless of
 // reconcile_status, for the admin resolution page's detail view. The second
 // return value is false if no row matches.

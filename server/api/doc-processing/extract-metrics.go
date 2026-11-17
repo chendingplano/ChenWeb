@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 	"github.com/chendingplano/deepdoc/server/api/ontology/assertions"
 	ontologycandidates "github.com/chendingplano/deepdoc/server/api/ontology/candidates"
@@ -631,8 +632,9 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectReconciler = ObjectReconciler{
-			Store:   ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle},
-			Options: ObjectReconcileOptionsFromEnv(),
+			Store:     ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle},
+			Options:   ObjectReconcileOptionsFromEnv(),
+			Attention: attention.SQLStore{DB: ApiTypes.ProjectDBHandle},
 		}
 	}
 	p.OpenValueJudge, p.OpenValueJudgeErr = newOpenValueJudgeFromEnv(logger)

@@ -413,34 +413,6 @@ func TestArtifactObjectSQLStoreUpdateResolutionWritesRow(t *testing.T) {
 	}
 }
 
-func TestArtifactObjectSQLStoreListAmbiguousSummariesReadsRows(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	mock.ExpectQuery("FROM kb.artifact_objects").
-		WithArgs(ObjectReconcileAmbiguous).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "artifact_type", "artifact_id", "object_name", "object_name_en", "confidence",
-		}).AddRow(
-			int64(7), searchArtifactProvision, "9_prv_1", "pressure regulator", "", 0.85,
-		))
-
-	store := ArtifactObjectSQLStore{DB: db}
-	rows, err := store.ListAmbiguousSummaries(context.Background())
-	if err != nil {
-		t.Fatalf("ListAmbiguousSummaries: %v", err)
-	}
-	if len(rows) != 1 || rows[0].ID != 7 || rows[0].ObjectName != "pressure regulator" {
-		t.Fatalf("rows = %+v, unexpected", rows)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
-}
-
 func TestArtifactObjectSQLStoreLoadByIDReadsRow(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

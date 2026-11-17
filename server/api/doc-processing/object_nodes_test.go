@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/attention"
 )
 
 func TestObjectNodeCreateNodeStoresEmptyArraysForNilSlices(t *testing.T) {
@@ -89,14 +90,15 @@ func TestFindCandidatesExcludesRejectedAndMergedNodes(t *testing.T) {
 	}
 }
 
-func TestReconcileArtifactObjectsLogsWarnOnAmbiguousTie(t *testing.T) {
+func TestReconcileArtifactObjectsBreaksTieAndRecordsAttention(t *testing.T) {
 	store := &tiedCandidateStore{
 		nodes: []ObjectNode{
-			{ObjectID: "obj_a", CanonicalName: "Pressure Regulator A"},
 			{ObjectID: "obj_b", CanonicalName: "Pressure Regulator B"},
+			{ObjectID: "obj_a", CanonicalName: "Pressure Regulator A"},
 		},
 	}
-	reconciler := ObjectReconciler{Store: store}
+	rec := &fakeAttentionRecorder{}
+	reconciler := ObjectReconciler{Store: store, Attention: rec}
 	logger := &fakeLogger{}
 
 	objects := []ArtifactObject{{
@@ -110,23 +112,33 @@ func TestReconcileArtifactObjectsLogsWarnOnAmbiguousTie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcileArtifactObjects: %v", err)
 	}
-	if len(reconciled) != 1 || reconciled[0].ObjectID != "" || reconciled[0].ReconcileStatus != ObjectReconcileAmbiguous {
-		t.Fatalf("reconciled = %+v, want ambiguous with empty object id", reconciled)
+	// No shared names with either node, so the smallest object_id wins.
+	if len(reconciled) != 1 || reconciled[0].ObjectID != "obj_a" || reconciled[0].ReconcileStatus != ObjectReconcileAmbiguousResolved ||
+		reconciled[0].ExtInfo["reconcile_method"] != "tie_break_deterministic" || reconciled[0].ReconcileConfidence != 0.85 {
+		t.Fatalf("reconciled = %+v, want tie-break link to obj_a", reconciled)
 	}
-	if len(logger.warns) != 1 {
-		t.Fatalf("warns = %+v, want exactly one warning", logger.warns)
+	if len(logger.warns) != 0 {
+		t.Fatalf("warns = %+v, want none", logger.warns)
 	}
-	warn := logger.warns[0]
-	if warn.message != "object reconciliation ambiguous" {
-		t.Fatalf("warn message = %q", warn.message)
+	info, ok := findInfoLog(logger.infos, "object reconciliation tie broken")
+	if !ok {
+		t.Fatalf("infos = %+v, want tie broken log", logger.infos)
 	}
-	if v, ok := logValue(warn.args, "artifact_id"); !ok || v != "9_prv_1" {
-		t.Fatalf("warn args = %v, want artifact_id=9_prv_1", warn.args)
+	if v, _ := logValue(info.args, "attention_item_id"); v != int64(41) {
+		t.Fatalf("attention_item_id = %v", v)
 	}
-	if v, ok := logValue(warn.args, "candidates"); !ok {
-		t.Fatalf("warn args = %v, want candidates key present", warn.args)
-	} else if names, ok := v.([]string); !ok || len(names) != 2 {
-		t.Fatalf("candidates arg = %v, want 2 candidate names", names)
+	if len(rec.reports) != 1 {
+		t.Fatalf("reports = %+v, want one", rec.reports)
+	}
+	r := rec.reports[0]
+	if r.ItemType != attention.TypeAmbiguousObjectName || r.DedupeKey != "obj_a|obj_b" || r.Title != "pressure regulator" || r.InputRecordID != 9 {
+		t.Fatalf("report = %+v", r)
+	}
+	if r.Details["picked_object_id"] != "obj_a" || r.Details["llm_outcome"] != tieLLMNotConfigured || len(r.Details["tied_candidates"].([]map[string]any)) != 2 {
+		t.Fatalf("details = %+v", r.Details)
+	}
+	if r.Occurrence["artifact_id"] != "9_prv_1" || r.Occurrence["artifact_type"] != searchArtifactProvision || r.Occurrence["input_record_id"] != int64(9) {
+		t.Fatalf("occurrence = %+v", r.Occurrence)
 	}
 }
 
@@ -223,7 +235,8 @@ func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
 	}}
 	logger := &fakeLogger{}
 
-	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes}, logger, resolver, 0.85, objectReconcileLogSink{})
+	rec := &fakeAttentionRecorder{}
+	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes, Attention: rec}, logger, resolver, 0.85, objectReconcileLogSink{})
 	if err != nil {
 		t.Fatalf("reconcileArtifactObjectsWithLLM: %v", err)
 	}
@@ -242,6 +255,9 @@ func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
 	}
 	if len(logger.warns) != 0 {
 		t.Fatalf("warns = %+v, want no ambiguous warning after LLM resolution", logger.warns)
+	}
+	if len(rec.reports) != 0 {
+		t.Fatalf("reports = %+v, want no attention item after LLM resolution", rec.reports)
 	}
 }
 

@@ -55,16 +55,6 @@ type objectNodeCandidateDTO struct {
 	Recommended     bool     `json:"recommended"`
 }
 
-// ambiguousObjectSummaryDTO is the wire shape for the left-panel list.
-type ambiguousObjectSummaryDTO struct {
-	ID           int64   `json:"id"`
-	ArtifactType string  `json:"artifact_type"`
-	ArtifactID   string  `json:"artifact_id"`
-	ObjectName   string  `json:"object_name"`
-	ObjectNameEn string  `json:"object_name_en"`
-	Confidence   float64 `json:"confidence"`
-}
-
 func nonNilStrings(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -130,39 +120,6 @@ func toObjectNodeCandidateDTO(c docprocessing.ObjectNodeCandidate, recommendedID
 		Method:          c.Method,
 		Recommended:     recommendedID != "" && c.Node.ObjectID == recommendedID,
 	}
-}
-
-// ListAmbiguousObjects handles GET /api/v1/kb/objects/ambiguous — the
-// left-panel list for the Resolve Ambiguous Objects admin page.
-func ListAmbiguousObjects(c echo.Context) error {
-	rc := EchoFactory.NewFromEcho(c, "CWB_KB_AAO_001")
-	defer rc.Close()
-	logger := rc.GetLogger()
-
-	db := ApiTypes.ProjectDBHandle
-	if db == nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "db not initialized (CWB_KB_AAO_010)"})
-	}
-
-	store := docprocessing.ArtifactObjectSQLStore{DB: db}
-	rows, err := store.ListAmbiguousSummaries(c.Request().Context())
-	if err != nil {
-		logger.Error("list ambiguous objects failed", "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to list ambiguous objects (CWB_KB_AAO_011)"})
-	}
-
-	out := make([]ambiguousObjectSummaryDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, ambiguousObjectSummaryDTO{
-			ID:           row.ID,
-			ArtifactType: row.ArtifactType,
-			ArtifactID:   row.ArtifactID,
-			ObjectName:   row.ObjectName,
-			ObjectNameEn: row.ObjectNameEn,
-			Confidence:   row.Confidence,
-		})
-	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "rows": out})
 }
 
 // GetAmbiguousObjectDetail handles GET /api/v1/kb/objects/ambiguous/:id — the

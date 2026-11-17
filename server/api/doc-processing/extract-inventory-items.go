@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -226,7 +227,7 @@ func NewInventoryItemsProcessor(
 	}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
-		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv()}
+		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv(), Attention: attention.SQLStore{DB: ApiTypes.ProjectDBHandle}}
 	}
 	return p
 }

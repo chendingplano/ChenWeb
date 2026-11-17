@@ -8,7 +8,9 @@ import {
 	fieldDirty,
 	findArtifactObjectsByObjectNode,
 	getAmbiguousObjectDetail,
-	listAmbiguousObjects,
+	listOpenAmbiguousItems,
+	getAmbiguousItemArtifactObject,
+	closeAttentionItem,
 	neighborAmbiguousId,
 	nextIndexAfterResolve,
 	rebindArtifactObjectsToMaster,
@@ -73,28 +75,60 @@ const baseCandidate: ObjectNodeCandidate = {
 	recommended: true
 };
 
-test('listAmbiguousObjects loads the ambiguous rows list', async () => {
+test('listOpenAmbiguousItems loads open ambiguous-object-name attention items', async () => {
 	const mock = installFetchMock(async () =>
 		Response.json({
 			status: true,
-			rows: [
+			total: 1,
+			items: [
 				{
-					id: 101,
-					artifact_type: 'provision',
-					artifact_id: '9_prv_1',
-					object_name: 'pressure regulator',
-					object_name_en: '',
-					confidence: 0.85
+					id: 5,
+					item_type: 'ambiguous-object-name',
+					status: 'open',
+					dedupe_key: 'obj_a|obj_b',
+					title: '管路',
+					details: { object_name: '管路', tied_candidates: [], occurrences: [] },
+					input_record_id: 279,
+					occurrence_count: 3,
+					reopen_count: 0,
+					first_seen: '2026-11-16T00:00:00Z',
+					last_seen: '2026-11-17T00:00:00Z',
+					resolved_by: '',
+					resolved_at: null,
+					resolution: ''
 				}
 			]
 		})
 	);
 	try {
-		const response = await listAmbiguousObjects();
+		const response = await listOpenAmbiguousItems();
 		assert.equal(mock.calls.length, 1);
-		assert.equal(String(mock.calls[0].input), '/api/v1/kb/objects/ambiguous');
-		assert.equal(response.rows.length, 1);
-		assert.equal(response.rows[0].object_name, 'pressure regulator');
+		assert.equal(String(mock.calls[0].input), '/api/v1/kb/attention-items?type=ambiguous-object-name&status=open&limit=500');
+		assert.equal(response.items.length, 1);
+		assert.equal(response.items[0].title, '管路');
+	} finally {
+		mock.restore();
+	}
+});
+
+test('getAmbiguousItemArtifactObject asks for the item\'s current artifact object row', async () => {
+	const mock = installFetchMock(async () => Response.json({ status: true, found: true, artifact_object_id: 77 }));
+	try {
+		const response = await getAmbiguousItemArtifactObject(5);
+		assert.equal(String(mock.calls[0].input), '/api/v1/kb/objects/ambiguous-items/5/artifact-object');
+		assert.equal(response.artifact_object_id, 77);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('closeAttentionItem posts the action and note', async () => {
+	const mock = installFetchMock(async () => Response.json({ status: true, item: { id: 5, status: 'dismissed' } }));
+	try {
+		await closeAttentionItem(5, 'dismiss', 'different parts in two standards');
+		assert.equal(String(mock.calls[0].input), '/api/v1/kb/attention-items/5/dismiss');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.deepEqual(JSON.parse(String(mock.calls[0].init?.body)), { resolution: 'different parts in two standards' });
 	} finally {
 		mock.restore();
 	}
