@@ -134,9 +134,10 @@ func observe(ctx context.Context, dir string, s processhealth.Service) processhe
 	o := processhealth.Observation{Service: s}
 	unitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	data, err := exec.CommandContext(unitCtx, "systemctl", "show", s.Unit, "-p", "ActiveState", "-p", "SubState", "-p", "MainPID", "-p", "NRestarts", "-p", "ActiveEnterTimestampMonotonic").Output()
+	data, err := exec.CommandContext(unitCtx, "systemctl", "show", s.Unit, "-p", "ActiveState", "-p", "SubState", "-p", "MainPID", "-p", "ExecMainPID", "-p", "NRestarts", "-p", "ActiveEnterTimestampMonotonic").Output()
 	o.UnitError = err
 	var startedMicros int64
+	var execPID int
 	for _, line := range strings.Split(string(data), "\n") {
 		key, value, _ := strings.Cut(line, "=")
 		switch key {
@@ -146,6 +147,8 @@ func observe(ctx context.Context, dir string, s processhealth.Service) processhe
 			o.SubState = value
 		case "MainPID":
 			o.PID, _ = strconv.Atoi(value)
+		case "ExecMainPID":
+			execPID, _ = strconv.Atoi(value)
 		case "NRestarts":
 			o.Restarts, _ = strconv.ParseUint(value, 10, 64)
 		case "ActiveEnterTimestampMonotonic":
@@ -162,6 +165,10 @@ func observe(ctx context.Context, dir string, s processhealth.Service) processhe
 			o.RunningFor = time.Duration(seconds*float64(time.Second)) - time.Duration(startedMicros)*time.Microsecond
 		}
 	}
-	o.Report, o.ReportError = processhealth.ReadReport(dir, s.Name)
+	reportPID := o.PID
+	if reportPID == 0 {
+		reportPID = execPID
+	}
+	o.Report, o.ReportError = processhealth.ReadReport(dir, s.Name, reportPID)
 	return o
 }

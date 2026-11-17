@@ -11,16 +11,16 @@ def test_report_contract_survives_operator_fault(tmp_path, monkeypatch):
     reporter = Reporter()
     reporter.set("blocked", "parser_configuration_invalid", "PDF_PARSER_NAME",
                  "Configured parser is unavailable", "operator_action")
-    report = json.loads((tmp_path / "pdf-parser.json").read_text())
+    report = json.loads((tmp_path / "pdf-parser-1234.json").read_text())
     assert report["pid"] == 1234
     assert report["state"] == "blocked"
     assert report["recovery"] == "operator_action"
     since = report["since"]
     reporter.set("blocked", "parser_configuration_invalid", "PDF_PARSER_NAME",
                  "Configured parser is unavailable", "operator_action")
-    assert json.loads((tmp_path / "pdf-parser.json").read_text())["since"] == since
+    assert json.loads((tmp_path / "pdf-parser-1234.json").read_text())["since"] == since
     reporter.set("healthy")
-    assert json.loads((tmp_path / "pdf-parser.json").read_text())["state"] == "healthy"
+    assert json.loads((tmp_path / "pdf-parser-1234.json").read_text())["state"] == "healthy"
     assert list(tmp_path.glob(".health-*")) == []
 
 
@@ -82,5 +82,17 @@ def test_idle_jetstream_worker_reports_healthy_without_completed_jobs(tmp_path, 
                 return object()
         await pdf_parser._run_pdf_health(stop, Bus(), Subscription(), {}, [], "", {})
     asyncio.run(scenario())
-    report = json.loads((tmp_path / "pdf-parser.json").read_text())
+    report = json.loads((tmp_path / f"pdf-parser-{os.getpid()}.json").read_text())
     assert report["state"] == "healthy"
+
+
+def test_separate_process_reports_do_not_overwrite(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROCESS_HEALTH_DIR", str(tmp_path))
+    monkeypatch.setenv("PROCESS_HEALTH_PID", "1234")
+    first = Reporter()
+    first.set("healthy")
+    monkeypatch.setenv("PROCESS_HEALTH_PID", "5678")
+    second = Reporter()
+    second.set("blocked", "failed", "parser", "unavailable", "restart")
+    assert json.loads((tmp_path / "pdf-parser-1234.json").read_text())["state"] == "healthy"
+    assert json.loads((tmp_path / "pdf-parser-5678.json").read_text())["state"] == "blocked"

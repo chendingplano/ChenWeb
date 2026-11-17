@@ -15,9 +15,9 @@ from pathlib import Path
 class Reporter:
     def __init__(self, service="pdf-parser"):
         directory = os.environ.get("PROCESS_HEALTH_DIR", "").strip()
-        self.path = Path(directory) / f"{service}.json" if directory else None
         self.lock = threading.Lock()
         pid = int(os.environ.get("PROCESS_HEALTH_PID", str(os.getpid())))
+        self.path = Path(directory) / f"{service}-{pid}.json" if directory else None
         now = self._now()
         self.report = {"service": service, "pid": pid,
                        "generation": f"{pid}-{time.time_ns()}", "state": "starting",

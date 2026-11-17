@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/chendingplano/deepdoc/server/processhealth"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,5 +32,27 @@ func TestMonitorLockExcludesConcurrentRuns(t *testing.T) {
 	if second, err := lock(path); err == nil {
 		second()
 		t.Fatal("concurrent monitor entered critical section")
+	}
+}
+
+func TestObserveReadsReportForSystemdProcess(t *testing.T) {
+	reports := t.TempDir()
+	reporter, err := processhealth.NewReporterAt(reports, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reporter.Set(processhealth.Blocked, "configuration_invalid", "config", "bad configuration", processhealth.OperatorAction); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	systemctl := filepath.Join(bin, "systemctl")
+	script := fmt.Sprintf("#!/bin/sh\nprintf 'ActiveState=failed\\nMainPID=0\\nExecMainPID=%d\\n'\n", os.Getpid())
+	if err := os.WriteFile(systemctl, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	o := observe(context.Background(), reports, processhealth.Service{Name: "worker", Unit: "worker.service", RequiresReport: true})
+	if o.ReportError != nil || o.Report.PID != os.Getpid() || o.Report.Reason != "configuration_invalid" {
+		t.Fatalf("report: %+v, error: %v", o.Report, o.ReportError)
 	}
 }

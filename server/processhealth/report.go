@@ -82,7 +82,7 @@ func NewReporterAt(dir, service string) (*Reporter, error) {
 	now := time.Now().UTC()
 	r := &Reporter{report: Report{Service: service, PID: os.Getpid(), Generation: fmt.Sprintf("%d-%d", os.Getpid(), now.UnixNano()), State: Starting, Recovery: None, Since: now, ObservedAt: now}}
 	if dir != "" {
-		r.path = filepath.Join(dir, service+".json")
+		r.path = filepath.Join(dir, fmt.Sprintf("%s-%d.json", service, r.report.PID))
 	}
 	return r, r.write()
 }
@@ -169,19 +169,24 @@ func writeJSON(path string, value any) error {
 	return dir.Sync()
 }
 
-func ReadReport(dir, service string) (Report, error) {
+func ReadReport(dir, service string, pid int) (Report, error) {
 	var r Report
-	if !serviceName.MatchString(service) {
-		return r, fmt.Errorf("invalid service name")
+	if !serviceName.MatchString(service) || pid <= 0 {
+		return r, fmt.Errorf("invalid service name or pid")
 	}
-	if err := readJSON(filepath.Join(dir, service+".json"), 64*1024, &r); err != nil {
+	err := readJSON(filepath.Join(dir, fmt.Sprintf("%s-%d.json", service, pid)), 64*1024, &r)
+	if os.IsNotExist(err) {
+		// Accept reports from workers that have not yet been upgraded.
+		err = readJSON(filepath.Join(dir, service+".json"), 64*1024, &r)
+	}
+	if err != nil {
 		return r, err
 	}
 	if err := r.Validate(); err != nil {
 		return r, err
 	}
-	if r.Service != service {
-		return r, fmt.Errorf("health report service mismatch")
+	if r.Service != service || r.PID != pid {
+		return r, fmt.Errorf("health report identity mismatch")
 	}
 	return r, nil
 }
