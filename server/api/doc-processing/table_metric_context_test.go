@@ -475,3 +475,34 @@ func TestTableMetricFootnoteRequiresCorroboration(t *testing.T) {
 		})
 	}
 }
+
+// Record 372, line 659 (ChenWeb#30): a key-value table names each parameter in its own
+// cell. 出水温度 is also part of the label 模拟污垢修正后的出水温度 (r12) and of the formula
+// note (r13), and 污垢系数 / 0.018 are in that note too, so evidence containment ties. The
+// row whose cells equal the evidence must win the tie.
+func TestBuildTableMetricContext_Record372KeyValueRowsTie(t *testing.T) {
+	body, err := os.ReadFile("testdata/record372-table-line659.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ParseInputLines(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := newTableLineIndex(lines)
+	// threshold_or_target as stored for 372_mtc_117 / 372_mtc_118: the LLM copied the rendered rows.
+	stored := "659#h0: 参数名称 | 参数名称 | 符号 | 计算公式 | 数值 | 单位 / 659#r4: 设计输入 | 出水温度 | $T_{\\text{wl}}$ | — | 7 | °C / 659#r5: 设计输入 | 污垢系数 | $ff_{\\text{sp}}$ | — | 0.018 | m"
+	for _, tc := range []struct{ name, value, threshold, row string }{
+		{"出水温度", "7", stored, "r4"},     // 372_mtc_117
+		{"污垢系数", "0.018", stored, "r5"}, // 372_mtc_118
+		{"出水温度", "7", "", "r4"},
+		{"模拟污垢修正后的出水温度", "6.81", "", "r12"},
+	} {
+		m := map[string]any{"metric_name": tc.name, "metric_value": tc.value, "threshold_or_target": tc.threshold,
+			"source_line_spans": []any{"659"}}
+		res := buildTableMetricContext(idx, m)
+		if len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != tc.row || res.Outcome != tableRowsFromEvidence {
+			t.Errorf("%s=%s: outcome %s refs %+v, want %s from evidence", tc.name, tc.value, res.Outcome, res.Refs, tc.row)
+		}
+	}
+}
