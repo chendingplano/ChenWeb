@@ -33,6 +33,8 @@ if [ ! -f ../../../.cache/parser-result-converter.pid ]; then
 fi
 PID="$(cat ../../../.cache/parser-result-converter.pid)"
 if kill -0 "$PID" 2>/dev/null; then
+  # The pid is the `go run` wrapper; SIGTERM to it alone leaves the service running.
+  pkill -TERM -P "$PID" 2>/dev/null || true
   kill "$PID"
   echo "stopped parser-result-converter (pid $PID)"
 else

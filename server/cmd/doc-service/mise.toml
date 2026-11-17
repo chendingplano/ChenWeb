@@ -39,6 +39,8 @@ if [ ! -f ../../../.cache/doc-service.pid ]; then
 fi
 PID="$(cat ../../../.cache/doc-service.pid)"
 if kill -0 "$PID" 2>/dev/null; then
+  # The pid is the `go run` wrapper; SIGTERM to it alone leaves the service running.
+  pkill -TERM -P "$PID" 2>/dev/null || true
   kill "$PID"
   echo "stopped doc-service (pid $PID)"
 else
