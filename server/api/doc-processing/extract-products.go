@@ -26,6 +26,7 @@ type ProductsProcessor struct {
 	Store                ProductsStore
 	Extractor            LLMJSONExtractor
 	Logger               ApiTypes.JimoLogger
+	Relations            ProductRelationResolver
 	ProcLogger           DocProcLogger
 	Now                  func() time.Time
 	PromptText           string
@@ -283,6 +284,9 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	if proc.MergedPass && proc.Pass1Only {
 		logger.Warn("EXTRACT_PRODUCT_PASS_1_ONLY ignored because EXTRACT_PRODUCTS_MERGED_PASS is set; the merged pass emits no mentions to stop at")
 		proc.Pass1Only = false
+	}
+	if ApiTypes.ProjectDBHandle != nil {
+		proc.Relations = ProductRelationSQLStore{DB: ApiTypes.ProjectDBHandle, Logger: logger}
 	}
 	proc.applyProductsReasoning()
 	if proc.MergedPass || !proc.Reasoning {
@@ -1720,6 +1724,9 @@ func (p *ProductsProcessor) extractProductPayload(
 			return nil, errors.New("compact merged product prompt requires a v2 response (MID-20261116-35)")
 		}
 		if payload, err = decodeProductMergedV2(payload, sourceLines); err != nil {
+			return nil, err
+		}
+		if err = p.resolveProductRelations(ctx, payload); err != nil {
 			return nil, err
 		}
 	}

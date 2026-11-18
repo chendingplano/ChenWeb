@@ -52,6 +52,8 @@ standards_boost = 0.25
 # those; see the bug doc before raising this further.
 hybrid_similarity_min = 0.20
 
+# Deprecated: weights now live in kb.product_relation_types (openspec product-relation-types);
+# this table is only the fallback when the table has no approved row for a value.
 [scoring.relation_type_weights]
 scope                     = 1.0
 regulated_object          = 1.0

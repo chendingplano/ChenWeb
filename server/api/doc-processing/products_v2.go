@@ -84,7 +84,7 @@ func productMergedV2Schema() map[string]any {
 		"n": text, "r": provisionV2Enum(productV2RelatedRelationships),
 	}, []string{"n", "r"}, false)
 	products := schemaArrayOfObjects(map[string]any{
-		"n": text, "c": schemaString(), "t": provisionV2Enum(productV2Types), "r": provisionV2Enum(productV2Relations),
+		"n": text, "c": schemaString(), "t": provisionV2Enum(productV2Types), "r": schemaString(),
 		"d": text, "s": spans, "o": provisionV2Enum(productV2Obligations), "x": schemaString(),
 		"cnd": schemaStringArray(), "exc": schemaStringArray(), "p": params, "rp": related, "a": schemaString(),
 		"q": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "cr": schemaString(),
@@ -133,6 +133,17 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		if name == "" || summary == "" {
 			return nil, fmt.Errorf("(MID_20261107_842) product %d has a blank name or summary", i+1)
 		}
+		// The relation code is validated against kb.product_relation_types after
+		// decoding (ProductsProcessor.resolveProductRelations); an unlisted code is
+		// proposed, not rejected. Only a blank code is a contract failure.
+		relationCode := strings.ToLower(strings.TrimSpace(asString(raw["r"])))
+		if relationCode == "" {
+			return nil, fmt.Errorf("(MID_20261118_003) product %d has a blank relation code", i+1)
+		}
+		relationType := productV2Relations[relationCode]
+		if relationType == "" {
+			relationType = relationCode
+		}
 		spans, quote, err := resolveProductV2Spans(raw["s"].([]any), lines)
 		if err != nil {
 			spanErrs = append(spanErrs, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err))
@@ -154,7 +165,7 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		}
 		products = append(products, map[string]any{
 			"product_name": name, "canonical_name": firstNonEmptyTrimmed(asString(raw["c"]), name),
-			"product_type": productV2Types[asString(raw["t"])], "relation_type": productV2Relations[asString(raw["r"])],
+			"product_type": productV2Types[asString(raw["t"])], "relation_type": relationType, "relation_code": relationCode,
 			"product_summary": summary, "evidence_quote": quote, "evidence_lines": spans,
 			"relation_details": map[string]any{
 				"obligation_level":         productV2Obligations[asString(raw["o"])],

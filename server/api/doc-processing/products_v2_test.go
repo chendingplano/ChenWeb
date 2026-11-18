@@ -68,7 +68,7 @@ func TestProductsV2DecodesFieldsAndDefaults(t *testing.T) {
 	want := []map[string]any{
 		{
 			"product_name": "垃圾桶", "canonical_name": "垃圾桶", "product_type": "equipment",
-			"relation_type": "usage_condition", "product_summary": "规定垃圾桶的清洁要求",
+			"relation_type": "usage_condition", "relation_code": "use", "product_summary": "规定垃圾桶的清洁要求",
 			"evidence_lines": []string{"143", "150-151"}, "evidence_quote": "垃圾桶应保持清洁。\n第一行\n第二行",
 			"confidence": 0.95, "confidence_reason": "正文明确规定",
 			"relation_details": map[string]any{
@@ -84,7 +84,7 @@ func TestProductsV2DecodesFieldsAndDefaults(t *testing.T) {
 		},
 		{
 			"product_name": "收集箱", "canonical_name": "分类收集箱", "product_type": "product_class",
-			"relation_type": "contains_product", "product_summary": "收集箱包含内胆",
+			"relation_type": "contains_product", "relation_code": "has", "product_summary": "收集箱包含内胆",
 			"evidence_lines": []string{"116#r2"}, "evidence_quote": "收集箱 | 含内胆",
 			"confidence": 0.0, "confidence_reason": "",
 			"relation_details": map[string]any{
@@ -171,7 +171,7 @@ func TestProductsV2RejectsInvalidWireRecords(t *testing.T) {
 		func(r map[string]any) { delete(r, "t") },
 		func(r map[string]any) { r["t"] = "unk" },
 		func(r map[string]any) { r["t"] = "equipment" },
-		func(r map[string]any) { r["r"] = "unknown" },
+		func(r map[string]any) { r["r"] = " " },
 		func(r map[string]any) { delete(r, "o") },
 		func(r map[string]any) { r["o"] = "x" },
 		func(r map[string]any) { delete(r, "d") },

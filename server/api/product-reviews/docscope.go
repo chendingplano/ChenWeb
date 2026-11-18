@@ -117,12 +117,7 @@ func (s DocumentScoper) pathA(ctx context.Context, nodes []ScopeNode, get func(i
 	}
 	defer func() { _ = rows.Close() }()
 
-	weight := func(rt string) float64 {
-		if w, ok := s.Config.Scoring.RelationTypeWeights[rt]; ok {
-			return w
-		}
-		return 0.3
-	}
+	weight := s.relationWeights(ctx)
 	for rows.Next() {
 		var rec int64
 		var rt, name, nameEN string
@@ -293,4 +288,37 @@ func keysOfInt(m map[int64]*ScopedDoc) []int64 {
 		out = append(out, k)
 	}
 	return out
+}
+
+// defaultRelationWeight is the weight of a relation type with no configured weight.
+const defaultRelationWeight = 0.3
+
+// relationWeights returns the weight of a kb.products.relation_type value. An approved
+// row of kb.product_relation_types wins; then the deprecated
+// [scoring.relation_type_weights] config; then defaultRelationWeight. A proposed type
+// has no reviewed weight yet, so it scores at the default. A table read error falls
+// back to the config rather than failing the scope.
+func (s DocumentScoper) relationWeights(ctx context.Context) func(string) float64 {
+	table := map[string]float64{}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT value, weight::float8 FROM kb.product_relation_types WHERE status = 'approved'`)
+	if err == nil {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var v string
+			var w float64
+			if rows.Scan(&v, &w) == nil {
+				table[v] = w
+			}
+		}
+	}
+	return func(rt string) float64 {
+		if w, ok := table[rt]; ok {
+			return w
+		}
+		if w, ok := s.Config.Scoring.RelationTypeWeights[rt]; ok {
+			return w
+		}
+		return defaultRelationWeight
+	}
 }
