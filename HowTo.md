@@ -4,6 +4,16 @@
     →
 ```
 
+# Harness vs. models
+
+url: https://runta.com/blog/introducing-frontierharness-eval-v1-1/
+
+**Harness vs. models - Costs**
+![Harness vs. models - Cost](../KnowledgeStore/Images/image_2026111801.png)
+
+**Harness vs. pass rate
+![Harness vs. models - pass rate](../KnowledgeStore/Images/image_2026111802.png)
+
 # How to Configure Local Domain Names
 Domain names can be configured in two places:
 - Service provider (such as GoDaddy)
@@ -4976,10 +4986,16 @@ Pricing
 
 Peak hours: 9:00 - 12:00 and 14:00-18:00 UTC on weekdays, 
 
+## Tecent Pricing
+
+| Model | Cached Input | Input | Output |
+|-------|--------------|-------|--------|
+| Hy4 Flash | $0.003 | $0.070 | $0.281 |
+| Hy4 | $0.042 | $0.834 | $2.51|
+
 ## Qwen Prices
-| Model | Input | Output |
-|-------|-------|--------|
-| Qwen 3.8 Max | 
+
+![Qwen pricing](../KnowledgeStore/Images/image_2026111803.png)
 
 # How to add images to markdown files
 ```text
