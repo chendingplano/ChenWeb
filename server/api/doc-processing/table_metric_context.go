@@ -281,7 +281,8 @@ type tableMetricContextResult struct {
 // "[r1] column: value | …". A unique value in the metric's named column takes
 // precedence, including over previously saved incorrect refs. Otherwise (design D5): stored refs
 // whose hashes still match → a single best evidence-matching row → LLM-cited rows that
-// exist → the whole table when it has ≤5 data rows → no match (the LLM context is kept).
+// exist → a unique row containing the value with its unit → the whole table when it has
+// ≤5 data rows → no match (the LLM context is kept).
 // When the spans also cover prose lines, the LLM context is kept and the table block
 // is appended after it.
 func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMetricContextResult {
@@ -650,7 +651,7 @@ func matchTableMetricQuantityRow(g *TableGrid, metric map[string]any) (TableRow,
 func tableMetricFootnoteMatcher(metric map[string]any) func(string) bool {
 	value := normalizeTableMatchText(asString(metric["metric_value"]))
 	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
-	if unit == "" || !regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`).MatchString(value) {
+	if unit == "" || !tableMetricScalarPattern.MatchString(value) {
 		return func(string) bool { return false }
 	}
 	quantity := regexp.MustCompile(`(?:^|[^\pN.])` + regexp.QuoteMeta(value+unit))

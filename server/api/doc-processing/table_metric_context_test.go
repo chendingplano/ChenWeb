@@ -506,3 +506,36 @@ func TestBuildTableMetricContext_Record372KeyValueRowsTie(t *testing.T) {
 		}
 	}
 }
+
+func TestTableMetricContext_Record422ScratchCount(t *testing.T) {
+	const condition = "面积：0.1 m²"
+	lines := []Line{
+		{LineNo: 636, LineType: "paragraph", Content: `在 $0.1\mathrm{m}^2$ 面积内，产品表面缺陷不应超出表C.7的规定。`},
+		{LineNo: 639, LineType: "table", Content: `<table><tr><th>序号</th><th>缺陷种类</th><th>允许范围</th></tr>
+<tr><td>1</td><td>发纹状擦伤</td><td>不多于17处</td></tr>
+<tr><td>2</td><td>轻划伤</td><td>不多于7处。仪器区内总长不超过50mm，非仪器区内总长不超过70mm</td></tr>
+<tr><td>3</td><td>麻点</td><td>分散存在</td></tr></table>`},
+	}
+	raw := map[string]any{
+		"n": "轻划伤数量", "v": "7", "u": "处", "r": "upper_bound", "c": condition,
+		"l": []any{"636", "639"},
+	}
+	row := expandSimpleMetricRow(raw, newSimpleChunkLines([]MarkedLine{{Line: lines[0]}, {Line: lines[1]}}))
+	refs := tableRowRefsFromValue(row["source_table_rows"])
+	if len(refs) != 1 || refs[0].Line != 639 || strings.Join(refs[0].Rows, ",") != "r2" {
+		t.Fatalf("source rows = %+v, want 639#r2", refs)
+	}
+	if row["condition"] != condition || !strings.Contains(asString(row["context"]), "面积内") ||
+		strings.Contains(asString(row["threshold_or_target"]), "17处") {
+		t.Fatalf("unexpected condition or evidence: %+v", row)
+	}
+
+	lines[1].Content = strings.Replace(lines[1].Content, "17处", "7处", 1)
+	res := buildTableMetricContext(newTableLineIndex(lines), map[string]any{
+		"metric_name": "轻划伤数量", "metric_value": "7", "unit": "处", "condition": condition,
+		"source_line_spans": []string{"636", "639"},
+	})
+	if res.Outcome == tableRowsFromEvidence {
+		t.Fatalf("matched an ambiguous quantity: %+v", res)
+	}
+}
