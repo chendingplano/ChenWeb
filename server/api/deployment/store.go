@@ -38,7 +38,7 @@ type Run struct {
 	Steps               []Step     `json:"steps,omitempty"`
 }
 
-const buildColumns = `id, build_number, build_name, target_machine, os_info, description, archive_name,
+const buildColumns = `id, COALESCE(build_number, ''), build_name, target_machine, os_info, description, archive_name,
 	status, error_message, requested_by, runner_host, runner_pid, started_at, finished_at`
 
 const deploymentColumns = `id, archive_name, build_number, previous_build_number, status, error_message,
@@ -111,7 +111,7 @@ func CreateBuild(ctx context.Context, db *sql.DB, r Run) (int64, error) {
 	var id int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO kb.deployment_builds
 		(build_number, build_name, target_machine, os_info, description, status, requested_by, runner_host)
-		VALUES ($1, $2, $3, $4, $5, 'running', $6, $7) RETURNING id`,
+		VALUES (NULLIF($1, ''), $2, $3, $4, $5, 'running', $6, $7) RETURNING id`,
 		r.BuildNumber, r.BuildName, r.TargetMachine, r.OSInfo, r.Description, r.RequestedBy, r.RunnerHost).Scan(&id)
 	if err != nil {
 		return 0, activeError(err)
@@ -180,12 +180,13 @@ func SaveSteps(ctx context.Context, db *sql.DB, kind string, runID int64, steps 
 	return nil
 }
 
-// FinishRun records a run's final status. archiveName is kept when empty.
+// FinishRun records a run's final status and, for a new build archive, its name and number.
 func FinishRun(ctx context.Context, db *sql.DB, kind string, id int64, status, errorMessage, archiveName string) error {
 	table, _, _, _ := runTable(kind)
 	_, err := db.ExecContext(ctx, `UPDATE `+table+` SET status = $2, error_message = $3, finished_at = NOW(),
-		archive_name = CASE WHEN $4 = '' THEN archive_name ELSE $4 END WHERE id = $1`,
-		id, status, errorMessage, archiveName)
+		archive_name = COALESCE(NULLIF($4, ''), archive_name),
+		build_number = COALESCE(NULLIF($5, ''), build_number) WHERE id = $1`,
+		id, status, errorMessage, archiveName, ArchiveBuildNumber(archiveName))
 	return err
 }
 

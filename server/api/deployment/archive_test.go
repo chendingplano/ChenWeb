@@ -3,9 +3,9 @@ package deployment
 import "testing"
 
 func TestArchiveNames(t *testing.T) {
-	name := ArchiveName("20261116093000")
-	if name != "runshen-deploy-20261116093000.tar.gz" || ArchiveBuildNumber(name) != "20261116093000" || !ValidArchiveName(name) {
-		t.Fatalf("round trip failed for %q", name)
+	name := "runshen-deploy-20261116093000.tar.gz"
+	if ArchiveBuildNumber(name) != "20261116093000" || !ValidArchiveName(name) {
+		t.Fatalf("invalid archive or build number for %q", name)
 	}
 	if ArchiveBuildNumber("runshen-depoly-20261115-1103.tar.gz") != "" || !ValidArchiveName("runshen-depoly-20261115-1103.tar.gz") {
 		t.Fatal("old archive name handling")

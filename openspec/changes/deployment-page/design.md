@@ -151,10 +151,11 @@ apart, and manual runs would stop matching button runs; parsing the scripts' exi
 
 ### D4. The archive is named after the build number; the deploy installs the confirmed name
 
-`shell_server_build_rcp.sh` sets and exports `BUILD_NUMBER` (the existing UTC
-`YYYYmmddHHMMSS` format) before calling `mise run build-server-linux`, and names the
-archive `runshen-deploy-<build_number>.tar.gz`. It still matches the deploy's
-`runshen-*.tar.gz` pattern.
+`mise run build-server-linux` captures the manifest's UTC `built_at` timestamp before
+binary compilation and formats the same instant as the build number (`YYYYmmddHHMMSS`).
+`shell_server_build_rcp.sh` reads the number from the manifest and names the archive
+`runshen-deploy-<build_number>.tar.gz`. After upload it reports the archive name to the
+runner, which records the name and number together in the build row.
 
 Before Deploy, the page asks the box for the newest archive on the relay
 (`shell_server_deploy.sh --newest`, so the relay address stays in the script) and shows its name, size, time and the build number

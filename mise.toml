@@ -125,12 +125,10 @@ cd "$REPO"
 # One marker line per step; the Deployment page (deploy-runner) turns them into step rows.
 step() { if [ $# -gt 1 ]; then printf '::step::%s::%s\n' "$1" "$2"; else printf '::step::%s\n' "$1"; fi; }
 
-BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M%S)}"
 BUILD_NAME="${BUILD_NAME:-chenweb}"
 TARGET_MACHINE="${TARGET_MACHINE:-unknown}"
 OS_INFO="${OS_INFO:-linux/amd64}"
 BUILD_DESCRIPTION="${BUILD_DESCRIPTION:-}"
-BUILD_METADATA_B64="$(BUILD_NUMBER="$BUILD_NUMBER" BUILD_NAME="$BUILD_NAME" TARGET_MACHINE="$TARGET_MACHINE" OS_INFO="$OS_INFO" BUILD_DESCRIPTION="$BUILD_DESCRIPTION" python3 -c 'import base64, json, os; print(base64.b64encode(json.dumps({"build_number":os.environ["BUILD_NUMBER"],"build_name":os.environ["BUILD_NAME"],"target_machine":os.environ["TARGET_MACHINE"],"os_info":os.environ["OS_INFO"],"description":os.environ["BUILD_DESCRIPTION"]}, separators=(",", ":")).encode()).decode())')"
 
 : "${PG_DB_NAME:?set PG_DB_NAME to the database containing kb.build_activities}"
 : "${PG_PASSWORD:?set PG_PASSWORD for the build activity database}"
@@ -196,6 +194,12 @@ step prompt-defaults
 python3 "$REPO/scripts/generate-doc-processor-prompt-defaults.py" \
   --refs-out "$DOC_PROMPT_REFS" \
   --exclude-prefixes-out "$DOC_PROMPT_PREFIXES"
+
+# Capture one UTC timestamp for all binaries and the manifest.
+BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BUILD_NUMBER="$(printf '%s' "$BUILT_AT" | tr -d 'TZ:-')"
+BUILD_METADATA_B64="$(BUILD_NUMBER="$BUILD_NUMBER" BUILD_NAME="$BUILD_NAME" TARGET_MACHINE="$TARGET_MACHINE" OS_INFO="$OS_INFO" BUILD_DESCRIPTION="$BUILD_DESCRIPTION" python3 -c 'import base64, json, os; print(base64.b64encode(json.dumps({"build_number":os.environ["BUILD_NUMBER"],"build_name":os.environ["BUILD_NAME"],"target_machine":os.environ["TARGET_MACHINE"],"os_info":os.environ["OS_INFO"],"description":os.environ["BUILD_DESCRIPTION"]}, separators=(",", ":")).encode()).decode())')"
+
 for pair in $SELECTED; do
   name="${pair%%:*}"; pkg="${pair##*:}"
   step binary "$name"
@@ -350,7 +354,7 @@ fi
   echo "git_rev:   $(git rev-parse HEAD)"
   echo "git_short: $(git rev-parse --short HEAD)"
   echo "git_dirty: $([ -n "$(git status --porcelain)" ] && echo yes || echo no)"
-  echo "built_at:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "built_at:  $BUILT_AT"
   echo "built_on:  $(hostname)"
   echo "binaries: $built"
   echo "migrations:$mig_counts"

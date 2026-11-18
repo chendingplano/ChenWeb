@@ -21,14 +21,17 @@ export BUILD_NAME="${1:-chenweb}"
 export TARGET_MACHINE="${2:-unknown}"
 export OS_INFO="${3:-linux/amd64}"
 export BUILD_DESCRIPTION="${4:-}"
-# Set here (not in the mise task) so the archive below can carry the same build number.
-export BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M%S)}"
 
 # Check the workspace before starting the potentially expensive server build.
 : "${PROJECT_WORKSPACE_DIR:?PROJECT_WORKSPACE_DIR must name an existing workspace directory}"
 [ -d "$PROJECT_WORKSPACE_DIR" ] || { echo "!! PROJECT_WORKSPACE_DIR is not a directory: $PROJECT_WORKSPACE_DIR" >&2; exit 1; }
 
 mise run build-server-linux
+BUILD_NUMBER=$(sed -n 's/^build_number: //p' /tmp/chenweb-deploy/MANIFEST)
+if [[ ! "$BUILD_NUMBER" =~ ^[0-9]{14}$ ]]; then
+  echo "!! Invalid build number in /tmp/chenweb-deploy/MANIFEST" >&2
+  exit 1
+fi
 
 # The server build recreates /tmp/chenweb-deploy, so stage documents afterwards.
 step documents
@@ -63,3 +66,4 @@ step upload
 echo "uploading $(basename "$archive") to $RELAY_USER@$RELAY_HOST:$RELAY_DIR/"
 scp -P "$RELAY_PORT" "$archive" "$RELAY_USER@$RELAY_HOST:$RELAY_DIR/"
 rm -f "$archive"
+printf '::archive::%s\n' "${archive##*/}"

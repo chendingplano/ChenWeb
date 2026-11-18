@@ -47,11 +47,12 @@ func ParseMarker(line string) (key, arg string, ok bool) {
 
 // Tracker turns a script's output into step states. It is safe for concurrent use.
 type Tracker struct {
-	mu      sync.Mutex
-	steps   []*Step
-	current int
-	dirty   map[int]bool
-	now     func() time.Time
+	mu          sync.Mutex
+	steps       []*Step
+	current     int
+	dirty       map[int]bool
+	now         func() time.Time
+	archiveName string
 }
 
 // NewTracker creates every planned step as pending and starts the first one, so
@@ -91,6 +92,10 @@ func (t *Tracker) Line(line string) {
 		t.marker(key, arg)
 		return
 	}
+	if name, ok := strings.CutPrefix(strings.TrimRight(line, "\r\n"), "::archive::"); ok && ArchiveBuildNumber(name) != "" {
+		t.archiveName = name
+		return
+	}
 	if t.current < 0 {
 		return
 	}
@@ -105,6 +110,13 @@ func (t *Tracker) Line(line string) {
 		s.OutputTruncated = true
 	}
 	t.dirty[t.current] = true
+}
+
+// ArchiveName returns the uploaded archive name reported by the build script.
+func (t *Tracker) ArchiveName() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.archiveName
 }
 
 func (t *Tracker) marker(key, arg string) {

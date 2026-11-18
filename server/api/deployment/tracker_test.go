@@ -136,3 +136,15 @@ func TestTakeDirtyReturnsOnlyChangedSteps(t *testing.T) {
 		t.Fatalf("dirty after take = %d", got)
 	}
 }
+
+func TestBuildArchiveMarkerKeepsUploadStep(t *testing.T) {
+	tr := NewTracker([]PlanStep{{Key: "upload"}}, time.Now)
+	tr.TakeDirty()
+	tr.Line("::archive::runshen-deploy-20261118010604.tar.gz\n")
+	if got := tr.ArchiveName(); got != "runshen-deploy-20261118010604.tar.gz" {
+		t.Fatalf("archive name = %q", got)
+	}
+	if steps := tr.TakeDirty(); len(steps) != 0 {
+		t.Fatalf("archive marker changed upload step: %+v", steps)
+	}
+}

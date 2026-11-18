@@ -27,7 +27,7 @@ server restarts during the build. Only one build SHALL be active at a time.
 
 #### Scenario: Start a build
 - **WHEN** an admin clicks Build Deployment with an optional description
-- **THEN** a build row is created with a new build number, the requester and the description, and the API answers 202 with the build id
+- **THEN** a build row is created with the requester and description, and the API answers 202 with the build id
 
 #### Scenario: Build already running
 - **WHEN** an admin starts a build while another build is `running`
@@ -66,9 +66,11 @@ marked `failed` with an error message.
 - **THEN** the next status request marks the build `failed` with "runner exited without reporting", and a new build can start
 
 ### Requirement: The archive carries the build number
-The build SHALL name its archive `runshen-deploy-<build_number>.tar.gz` and upload it to
-the relay, and the build number SHALL be the one embedded in the binaries and stored in
-the build row.
+The build SHALL derive its number in UTC `YYYYmmddHHMMSS` format from the manifest's
+`built_at` timestamp, captured immediately before binary compilation. The build SHALL
+embed the number in the binaries that report build info and use it to name the archive
+`runshen-deploy-<build_number>.tar.gz`. After upload, the runner SHALL record the archive
+name and build number in the build row.
 
 #### Scenario: Uploaded archive
 - **WHEN** build `20261116093000` succeeds

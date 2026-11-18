@@ -204,7 +204,7 @@ func StartBuild(c echo.Context) error {
 		return fail(c, http.StatusConflict, codeActiveRun, "a build is already running")
 	}
 	run := Run{
-		BuildNumber: time.Now().UTC().Format("20060102150405"), BuildName: "chenweb", TargetMachine: "unknown",
+		BuildName: "chenweb", TargetMachine: "unknown",
 		OSInfo: "linux/amd64", Description: strings.TrimSpace(body.Description), RequestedBy: requester(user), RunnerHost: hostname(),
 	}
 	id, err := CreateBuild(ctx, ApiTypes.ProjectDBHandle, run)

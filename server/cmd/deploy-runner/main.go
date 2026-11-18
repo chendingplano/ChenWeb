@@ -76,7 +76,6 @@ func main() {
 		}
 		run = *r
 		cmd = exec.Command("bash", "./shell_server_build_rcp.sh", run.BuildName, run.TargetMachine, run.OSInfo, run.Description)
-		cmd.Env = append(os.Environ(), "BUILD_NUMBER="+run.BuildNumber)
 	case deployment.KindDeploy:
 		r, ok, err := deployment.ClaimDeployment(ctx, db, os.Getpid())
 		if err != nil {
@@ -92,7 +91,7 @@ func main() {
 		cmd.Env = append(os.Environ(), "RELAY_ARCHIVE="+run.ArchiveName)
 	}
 	// Python buffers stdout in a pipe, which would attach its lines to a later step.
-	cmd.Env = append(cmd.Env, "PYTHONUNBUFFERED=1")
+	cmd.Env = append(cmd.Environ(), "PYTHONUNBUFFERED=1")
 	logger.Info("deploy-runner: started", "kind", kind, "id", run.ID, "build_number", run.BuildNumber,
 		"archive", run.ArchiveName, "pid", os.Getpid())
 
@@ -103,13 +102,15 @@ func main() {
 		}
 	}
 	exitCode, cause := deployment.Execute(cmd, tracker, save, time.Second)
+	archive := ""
+	if kind == deployment.KindBuild && exitCode == 0 && cause == nil {
+		archive = tracker.ArchiveName()
+		if archive == "" {
+			cause = fmt.Errorf("build script did not report the uploaded archive")
+		}
+	}
 	status, errorMessage := tracker.Finish(exitCode, cause)
 	save(tracker.TakeDirty())
-
-	archive := ""
-	if kind == deployment.KindBuild && status == deployment.StatusSucceeded {
-		archive = deployment.ArchiveName(run.BuildNumber)
-	}
 	if err := deployment.FinishRun(ctx, db, kind, run.ID, status, errorMessage, archive); err != nil {
 		logger.Error("deploy-runner: finish run failed", "kind", kind, "id", run.ID, "error", err)
 		os.Exit(1)

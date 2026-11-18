@@ -64,9 +64,9 @@ None. System Monitor has no spec; its `source` filter is an internal extension.
   in `content-panel.svelte`, `dep_*` and `nav_*` keys in `en.json` and `zh-cn.json`;
   `system-monitor-view.svelte` requests only its own source when embedded.
 - **Scripts:** step markers in `shell_server_build_rcp.sh`, `mise build-server-linux`,
-  `shell_server_deploy.sh` and `scripts/deploy-server-china.sh`; the build exports
-  `BUILD_NUMBER` and names the archive `runshen-deploy-<build_number>.tar.gz`; the build
-  ships `deploy-runner-linux`.
+  `shell_server_deploy.sh` and `scripts/deploy-server-china.sh`. The build derives its
+  number from the manifest's `built_at` timestamp, names the archive
+  `runshen-deploy-<build_number>.tar.gz`, and ships `deploy-runner-linux`.
 - **China box (one-time root setup):** install `chenweb-deploy.service` (User=gui); add
   `pdf-parser` and `chenweb-deploy` to `/etc/sudoers.d/gui-chenweb-services`; authorize
   `gui`'s SSH key on the relay (the deploy now downloads as `gui`, not root); set

@@ -9,9 +9,6 @@ var (
 	archiveBuildNumber = regexp.MustCompile(`^runshen-deploy-(\d{14})\.tar\.gz$`)
 )
 
-// ArchiveName is the name the build gives its archive on the relay.
-func ArchiveName(buildNumber string) string { return "runshen-deploy-" + buildNumber + ".tar.gz" }
-
 // ValidArchiveName reports whether name is a plain relay archive file name.
 func ValidArchiveName(name string) bool { return archiveNamePattern.MatchString(name) }
 
