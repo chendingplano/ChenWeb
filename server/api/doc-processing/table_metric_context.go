@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -327,7 +328,8 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 	for _, n := range tableLines {
 		g, _ := idx.grid(n)
 		rows, outcome := selectTableRows(g, cited[n], evidence)
-		if row, ok := matchTableMetricCellValue(g, metric); ok {
+		needsRow := outcome == tableRowsWholeTable || outcome == tableRowsUnmatched
+		if row, ok := matchTableMetricCellValue(g, metric, needsRow); ok {
 			rows, outcome = []TableRow{row}, tableRowsFromEvidence
 		} else if note, ok := matchTableMetricNoteRow(g, metric); ok {
 			rows, outcome = []TableRow{note}, tableRowsFromEvidence
@@ -460,16 +462,15 @@ func tableMetricCellIDs(g *TableGrid, rows []TableRow, outcome string, metric ma
 	return ids
 }
 
-// matchTableMetricCellValue uses the header to distinguish a value cell from notes
-// that mention the metric name. Only a unique exact value is sufficient to replace
-// saved refs; duplicate values and full-width footnotes cannot identify a row.
-func matchTableMetricCellValue(g *TableGrid, metric map[string]any) (TableRow, bool) {
+// matchTableMetricCellValue uses the header to distinguish a value cell from notes.
+// A unique exact value can replace saved refs. When no row was selected, labeled
+// conditions can disambiguate repeated values.
+func matchTableMetricCellValue(g *TableGrid, metric map[string]any, needsRow bool) (TableRow, bool) {
 	want := normalizeTableMatchText(asString(metric["metric_value"]))
 	if want == "" {
 		return TableRow{}, false
 	}
-	var found TableRow
-	matched := false
+	var candidates []TableRow
 	for _, id := range tableMetricCellIDs(g, g.Rows, tableRowsFromEvidence, metric) {
 		rowID, colID, _ := strings.Cut(id, ":c")
 		row, _ := g.Row(rowID)
@@ -477,12 +478,55 @@ func matchTableMetricCellValue(g *TableGrid, metric map[string]any) (TableRow, b
 		if _, fullWidth := row.FullWidthText(); fullWidth || normalizeTableMatchText(row.Cells[col-1]) != want {
 			continue
 		}
-		if matched {
+		candidates = append(candidates, row)
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	if len(candidates) < 2 || !needsRow {
+		return TableRow{}, false
+	}
+	condition := norm.NFKC.String(asString(metric["condition"]))
+	clauses := strings.FieldsFunc(condition, func(r rune) bool { return r == ';' || r == '\n' })
+	for _, clause := range clauses {
+		label, value, _ := strings.Cut(clause, ":")
+		label, value = normalizeTableMatchText(label), normalizeTableMatchText(value)
+		if label == "" || value == "" {
 			return TableRow{}, false
 		}
-		found, matched = row, true
+		candidates = slices.DeleteFunc(candidates, func(row TableRow) bool {
+			return !matchesTableMetricCondition(g, row, label, value)
+		})
 	}
-	return found, matched
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	return TableRow{}, false
+}
+
+func matchesTableMetricCondition(g *TableGrid, row TableRow, label, value string) bool {
+	for _, header := range g.Headers {
+		for col, span := range header.Spans {
+			if span == 0 || normalizeTableMatchText(header.Cells[col]) != label {
+				continue
+			}
+			end := min(col+span, len(row.Cells))
+			for c := col; c < end; c++ {
+				cell := normalizeTableMatchText(row.Cells[c])
+				if cell == value {
+					return true
+				}
+				// A grouped header can label a type and subtype in adjacent cells.
+				if cell != "" && c+1 < end {
+					subtype := normalizeTableMatchText(row.Cells[c+1])
+					if subtype != "" && cell != subtype && cell+"("+subtype+")" == value {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // rowsWithMostEvidenceCells keeps the rows (indexes into g.Rows) with the most evidence

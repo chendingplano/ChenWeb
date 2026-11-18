@@ -438,12 +438,12 @@ func TestTableMetricCellValueRequiresUniqueColumnValue(t *testing.T) {
 		{"遮光号", "7"},    // ambiguous header
 		{"不存在", "7"},
 	} {
-		if row, ok := matchTableMetricCellValue(g, map[string]any{"metric_name": tc.name, "metric_value": tc.value}); ok {
+		if row, ok := matchTableMetricCellValue(g, map[string]any{"metric_name": tc.name, "metric_value": tc.value}, true); ok {
 			t.Fatalf("%+v: unexpected row %+v", tc, row)
 		}
 	}
 	g.Rows[1].Cells[4] = "7"
-	if row, ok := matchTableMetricCellValue(g, map[string]any{"metric_name": "最低遮光号", "metric_value": "7"}); ok {
+	if row, ok := matchTableMetricCellValue(g, map[string]any{"metric_name": "最低遮光号", "metric_value": "7"}, true); ok {
 		t.Fatalf("duplicate column values must not pick a row: %+v", row)
 	}
 }
@@ -537,5 +537,47 @@ func TestTableMetricContext_Record422ScratchCount(t *testing.T) {
 	})
 	if res.Outcome == tableRowsFromEvidence {
 		t.Fatalf("matched an ambiguous quantity: %+v", res)
+	}
+}
+
+func TestBuildTableMetricContext_Record404RepeatedValue(t *testing.T) {
+	body, err := os.ReadFile("testdata/record404-table-line149.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ParseInputLines(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, condition, wantCell string
+	}{
+		{"production alert", "机组类型：水源式（低温余热式）；工况类型：H3型", "r9:c4"},
+		{"other row with same value", "机组类型:水源式(高温余热式); 工况类型:H4型", "r13:c4"},
+		{"ambiguous", "机组类型：水源式", ""},
+		{"conflicting", "机组类型：水源式（低温余热式）；工况类型：H4型", ""},
+		{"wrong header", "工况类型：低温余热式；机组类型：H3型", ""},
+		{"missing", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metric := map[string]any{
+				"metric_name": "性能系数", "metric_value": "1.2", "metric_unit": "kW/kW",
+				"condition": tc.condition, "context": "extracted context",
+				"source_line_spans": []string{"146", "149"},
+			}
+			counts := applyTableMetricContexts(lines, []map[string]any{metric}, nil, 404)
+			refs := tableRowRefsFromValue(metric["source_table_rows"])
+			if tc.wantCell == "" {
+				if counts[tableRowsUnmatched] != 1 || len(refs) != 0 || metric["context"] != "extracted context" {
+					t.Fatalf("want unmatched and original context, got %v, refs %+v, context %q", counts, refs, metric["context"])
+				}
+				return
+			}
+			if counts[tableRowsFromEvidence] != 1 || len(refs) != 1 ||
+				refs[0].Line != 149 || strings.Join(refs[0].Cells, ",") != tc.wantCell ||
+				len(refs[0].Rows) != 1 || refs[0].RowHash[refs[0].Rows[0]] == "" {
+				t.Fatalf("want hashed evidence at 149#%s, got %v with refs %+v", tc.wantCell, counts, refs)
+			}
+		})
 	}
 }
