@@ -21,10 +21,23 @@ const (
 	// TypeAmbiguousObjectName: an artifact object tied between two or more
 	// kb.object_nodes candidates and was linked by the deterministic tie-break.
 	TypeAmbiguousObjectName = "ambiguous-object-name"
+
+	// TypeUnresolvedMetricValue: extract_metrics produced a metric row whose value
+	// semantics it could not pin down (several values in one cell, a min/max
+	// expression, a formula reference). The row is kept as written; this item lets a
+	// person review the kind of value, not a defect to fix.
+	TypeUnresolvedMetricValue = "unresolved-metric-value"
+
+	// TypeUnresolvedReference: the reference resolver could not link a citation to a
+	// target artifact with confidence (no locator, a clause that delegates to a table,
+	// no matching content). A limit of the resolver, kept for a person to review.
+	TypeUnresolvedReference = "unresolved-reference"
 )
 
 var knownTypes = map[string]bool{
-	TypeAmbiguousObjectName: true,
+	TypeAmbiguousObjectName:   true,
+	TypeUnresolvedMetricValue: true,
+	TypeUnresolvedReference:   true,
 }
 
 // KnownType reports whether t is a declared item type.

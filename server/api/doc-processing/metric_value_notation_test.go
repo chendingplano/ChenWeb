@@ -1,9 +1,13 @@
 package docprocessing
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/chendingplano/deepdoc/server/api/attention"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 func TestNormalizeMetricValueNotation(t *testing.T) {
@@ -396,5 +400,35 @@ func TestDisjointRangesPreserveTheWholeExpression(t *testing.T) {
 	normalizeMetricValueNotation([]map[string]any{m})
 	if m["metric_value"] != "≥5.5 或 ≤-7" || m["value_range_type"] != "multi-ranges" || m["value_min"] != nil || m["value_max"] != nil || metricRowNeedsValueReview(m) {
 		t.Fatalf("disjoint ranges must remain a single classified expression: %#v", m)
+	}
+}
+
+type recordingAttention struct{ reports []attention.Report }
+
+func (r *recordingAttention) Record(_ context.Context, rep attention.Report) (attention.RecordResult, error) {
+	r.reports = append(r.reports, rep)
+	return attention.RecordResult{}, nil
+}
+
+// An unresolved value is recorded as an attention item, once per row and with a key that is
+// stable across runs, instead of raising an alarm.
+func TestLogMultiValueMetricRowsRecordsAttentionItems(t *testing.T) {
+	rec := &recordingAttention{}
+	p := &MetricsProcessor{Logger: loggerutil.CreateDefaultLogger("MID_TEST_ATTN"), Attention: rec}
+	rows := []map[string]any{
+		{"metric_name": "厚度", "metric_value": "0.05、1.2", "source_line_spans": [][]int{{3, 3}}},
+		{"metric_name": "厚度", "metric_value": "5", "source_line_spans": [][]int{{4, 4}}},
+	}
+	p.logMultiValueMetricRows(context.Background(), 372, rows)
+	p.logMultiValueMetricRows(context.Background(), 372, rows)
+
+	if len(rec.reports) != 2 {
+		t.Fatalf("recorded %d reports over two runs, want 2 (one unresolved row per run)", len(rec.reports))
+	}
+	if rec.reports[0].ItemType != attention.TypeUnresolvedMetricValue || rec.reports[0].InputRecordID != 372 {
+		t.Fatalf("report = %+v", rec.reports[0])
+	}
+	if rec.reports[0].DedupeKey != rec.reports[1].DedupeKey {
+		t.Fatalf("dedupe key changed between runs: %q vs %q", rec.reports[0].DedupeKey, rec.reports[1].DedupeKey)
 	}
 }

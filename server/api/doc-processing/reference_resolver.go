@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -177,10 +178,17 @@ func resolveAndApply(ctx context.Context, db *sql.DB, r ReferenceResolver, m Ref
 	if err := r.Apply(ctx, db, m, out); err != nil {
 		return "", fmt.Errorf("(MID_26101111) %s apply %s: %w", r.Family(), m.RefID, err)
 	}
-	if logger != nil && out.State != "resolved" {
-		logger.Warn("reference not resolved with confidence (ChenWeb#19)", "family", r.Family(), "ref_id", m.RefID,
-			"citing_record", m.InputRecordID, "target_record", target, "state", out.State,
-			"candidates", len(out.Candidates), "notes", out.Notes)
+	if out.State != "resolved" {
+		// A citation the resolver cannot pin down is expected (no locator, a delegating clause,
+		// content it cannot match), not an alarm: it is recorded for review, at Info.
+		if logger != nil {
+			logger.Info("reference not resolved with confidence", "family", r.Family(), "ref_id", m.RefID,
+				"citing_record", m.InputRecordID, "target_record", target, "state", out.State,
+				"candidates", len(out.Candidates), "notes", out.Notes)
+		}
+		if _, err := (attention.SQLStore{DB: db}).Record(ctx, unresolvedReferenceReport(r.Family(), m, target, out)); err != nil && logger != nil {
+			logger.Warn("record unresolved reference failed", "family", r.Family(), "ref_id", m.RefID, "error", err)
+		}
 	}
 	return out.State, nil
 }
@@ -213,4 +221,32 @@ FROM kb.ref_mentions m WHERE `+where+` ORDER BY m.id`, arg)
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// unresolvedReferenceReport is the attention item for one mention the resolver left unresolved.
+// The key (family, citing record, mention key, target) survives re-extraction, so a repeat
+// updates the item instead of adding another.
+func unresolvedReferenceReport(family string, m RefMention, target int64, out ResolveOutcome) attention.Report {
+	key := m.MentionKey
+	if key == "" {
+		key = m.RefID
+	}
+	title := firstNonEmptyTrimmed(m.CitedRaw, m.TargetContent, m.RefID)
+	return attention.Report{
+		ItemType:      attention.TypeUnresolvedReference,
+		DedupeKey:     fmt.Sprintf("%s:%d:%s:%d", family, m.InputRecordID, key, target),
+		Title:         title,
+		InputRecordID: m.InputRecordID,
+		Details: map[string]any{
+			"family":           family,
+			"ref_id":           m.RefID,
+			"cited_raw":        m.CitedRaw,
+			"target_content":   m.TargetContent,
+			"target_locator":   m.TargetLocator,
+			"target_record_id": target,
+			"state":            out.State,
+			"candidate_count":  len(out.Candidates),
+			"notes":            out.Notes,
+		},
+	}
 }

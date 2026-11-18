@@ -2,7 +2,9 @@ package docprocessing
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -10,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/deepdoc/server/api/metricvalue"
 	"golang.org/x/text/width"
 )
@@ -616,15 +619,46 @@ func multiValueMetricRows(metrics []map[string]any) []map[string]any {
 	return out
 }
 
+// unresolvedMetricValueReport is the attention item for one metric row whose value semantics
+// stay unresolved. The key (record, name, value, spans) is stable across re-runs, so a repeat
+// updates the item instead of adding another.
+func unresolvedMetricValueReport(recordID int64, row map[string]any) attention.Report {
+	name := strings.TrimSpace(asString(row["metric_name"]))
+	value := strings.TrimSpace(asString(row["metric_value"]))
+	spans, _ := json.Marshal(row["source_line_spans"])
+	sum := sha256.Sum256([]byte(name + "\x00" + value + "\x00" + string(spans)))
+	return attention.Report{
+		ItemType:      attention.TypeUnresolvedMetricValue,
+		DedupeKey:     strconv.FormatInt(recordID, 10) + ":" + hex.EncodeToString(sum[:8]),
+		Title:         name + " = " + value,
+		InputRecordID: recordID,
+		Details: map[string]any{
+			"metric_name":       name,
+			"metric_value":      value,
+			"value_structure":   row["value_structure"],
+			"source_line_spans": row["source_line_spans"],
+		},
+	}
+}
+
 // logMultiValueMetricRows writes one extract_metrics log entry (activity multi_value_rows)
 // listing the run's rows that still hold several values, so later runs can measure the
-// one-value-per-row prompt rule.
+// one-value-per-row prompt rule. Values come in many forms no rule can anticipate, so an
+// unresolved value is expected, not an alarm: it is logged at Info and each row is recorded
+// as a kb.attention_items entry that a person may review or dismiss.
 func (p *MetricsProcessor) logMultiValueMetricRows(ctx context.Context, recordID int64, metrics []map[string]any) {
 	rows := multiValueMetricRows(metrics)
 	if len(rows) == 0 {
 		return
 	}
-	p.Logger.Warn("metric value semantics remain unresolved (ChenWeb#19)", "record_id", recordID, "num_rows", len(rows))
+	p.Logger.Info("metric value semantics unresolved", "record_id", recordID, "num_rows", len(rows))
+	if p.Attention != nil {
+		for _, row := range rows {
+			if _, err := p.Attention.Record(ctx, unresolvedMetricValueReport(recordID, row)); err != nil {
+				p.Logger.Warn("record unresolved metric value failed", "record_id", recordID, "error", err)
+			}
+		}
+	}
 	artifactBytes, _ := json.Marshal(map[string]any{"multi_value_rows": rows})
 	artifactStr := string(artifactBytes)
 	extraBytes, _ := json.Marshal(map[string]any{"num_rows": len(rows)})

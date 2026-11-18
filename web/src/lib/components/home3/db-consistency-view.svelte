@@ -5,6 +5,12 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
 	import ProductRelationTypesCheck from './product-relation-types-check.svelte';
+	import AttentionItemsCheck from './attention-items-check.svelte';
+	import type { AttentionItem } from './resolve-ambiguous-objects-client.js';
+
+	function detailsOf<T>(item: AttentionItem): T {
+		return item.details as unknown as T;
+	}
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -198,6 +204,52 @@
 	{/each}
 
 	<ProductRelationTypesCheck {darkMode} />
+	<AttentionItemsCheck
+		{darkMode}
+		itemType="unresolved-metric-value"
+		title={m.umv_check_title()}
+		description={m.umv_check_description()}
+		noneText={m.umv_none()}
+		foundText={(count) => m.umv_found({ count })}
+		dismissLabel={m.umv_dismiss()}
+		dismissHint={m.umv_dismiss_hint()}
+	>
+		{#snippet row(item)}
+			{@const d = detailsOf<{ metric_name?: string; metric_value?: string; value_structure?: { kind?: string } | null; source_line_spans?: unknown }>(item)}
+			<div style="font-size:13px; font-weight:600; color:{textPrimary};">{d.metric_name}</div>
+			<div style="font-size:13px; margin:2px 0;"><code>{d.metric_value}</code></div>
+			<div style="font-size:11px; color:{textSecondary};">
+				{m.umv_record()}: {item.input_record_id} ·
+				{m.umv_lines()}: {JSON.stringify(d.source_line_spans ?? [])} ·
+				{m.umv_structure()}: {d.value_structure?.kind ?? m.umv_none_structure()} ·
+				{m.umv_seen()}: {item.occurrence_count}
+			</div>
+		{/snippet}
+	</AttentionItemsCheck>
+
+	<AttentionItemsCheck
+		{darkMode}
+		itemType="unresolved-reference"
+		title={m.urf_check_title()}
+		description={m.urf_check_description()}
+		noneText={m.urf_none()}
+		foundText={(count) => m.urf_found({ count })}
+		dismissLabel={m.umv_dismiss()}
+		dismissHint={m.urf_dismiss_hint()}
+	>
+		{#snippet row(item)}
+			{@const d = detailsOf<{ family?: string; cited_raw?: string; target_content?: string; target_locator?: string; target_record_id?: number; state?: string; notes?: string[] }>(item)}
+			<div style="font-size:13px; font-weight:600; color:{textPrimary};">{item.title}</div>
+			<div style="font-size:12px; margin:2px 0; color:{textSecondary};">{(d.notes ?? []).join('; ')}</div>
+			<div style="font-size:11px; color:{textSecondary};">
+				{m.umv_record()}: {item.input_record_id} →
+				{m.urf_target()}: {d.target_record_id} ·
+				{m.urf_family()}: {d.family} ·
+				{m.urf_state()}: {d.state} ·
+				{m.umv_seen()}: {item.occurrence_count}
+			</div>
+		{/snippet}
+	</AttentionItemsCheck>
 </div>
 
 <style>

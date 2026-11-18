@@ -184,6 +184,13 @@ export function listOpenAmbiguousItems(): Promise<{ status: boolean; items: Atte
 	return req(`/api/v1/kb/attention-items?type=${AMBIGUOUS_OBJECT_NAME_ITEM_TYPE}&status=open&limit=500`);
 }
 
+/** Open attention items of any declared type, newest sighting first. */
+export function listOpenAttentionItems(
+	itemType: string
+): Promise<{ status: boolean; items: AttentionItem[]; total: number }> {
+	return req(`/api/v1/kb/attention-items?type=${encodeURIComponent(itemType)}&status=open&limit=500`);
+}
+
 /**
  * The current kb.artifact_objects row for an item's newest occurrence that
  * still has one; `found` is false when every source row is gone.

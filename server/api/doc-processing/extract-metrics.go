@@ -29,11 +29,13 @@ import (
 )
 
 type MetricsProcessor struct {
-	InputStore                       DocMetadataStore
-	Store                            MetricsStore
-	CandidateSink                    OntologyCandidateSink
-	ObjectStore                      ArtifactObjectsStore
-	ObjectReconciler                 ObjectReconciler
+	InputStore       DocMetadataStore
+	Store            MetricsStore
+	CandidateSink    OntologyCandidateSink
+	ObjectStore      ArtifactObjectsStore
+	ObjectReconciler ObjectReconciler
+	// Attention records rows whose value semantics stay unresolved for human review; nil skips it.
+	Attention                        attention.Recorder
 	AmbiguousObjectLLMResolver       AmbiguousObjectLLMResolver
 	ResolveAmbiguousMinConfidence    float64
 	Extractor                        LLMJSONExtractor
@@ -636,6 +638,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		logger.Warn("configure ambiguous object LLM resolver failed", "err", err)
 	}
 	if ApiTypes.ProjectDBHandle != nil {
+		p.Attention = attention.SQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectReconciler = ObjectReconciler{
 			Store:     ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle},

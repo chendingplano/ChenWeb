@@ -566,7 +566,7 @@
 	});
 </script>
 
-<div class="flex" style="height:100%; overflow:hidden; background:{pageBg};">
+<div class="flex" style="height:100%; overflow:hidden; background:{pageBg}; user-select:text; -webkit-user-select:text;">
 	<!-- Left panel -->
 	<div
 		class="flex-shrink-0 flex flex-col"
