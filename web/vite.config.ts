@@ -36,6 +36,24 @@ export default defineConfig({
 	worker: {
 		format: 'es'
 	},
+	build: {
+		rollupOptions: {
+			// onLog, not onwarn: SvelteKit sets its own onwarn, which replaces ours.
+			onLog(level, log, handler) {
+				// Svelte's server compiler drops actions and other browser-only code,
+				// so a Svelte library's imports such as `use:clickOutside` from
+				// @svar-ui/lib-dom are unused in the SSR bundle. Rollup reports each
+				// one; they are not actionable here. Our own code is still reported.
+				if (
+					log.code === 'UNUSED_EXTERNAL_IMPORT' &&
+					log.ids?.every((id) => id.includes('/node_modules/'))
+				) {
+					return;
+				}
+				handler(level, log);
+			}
+		}
+	},
 	server: {
 		port: 5173,
 		allowedHosts: APP_HOST ? [APP_HOST] : [],

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -121,6 +122,7 @@ func RegisterRoutes(e *echo.Echo) error {
 		}
 
 		proxy := httputil.NewSingleHostReverseProxy(frontendURL)
+		proxy.ErrorHandler = devFrontendProxyErrorHandler(logger)
 		frontendHandler = proxy
 	} else {
 		logger.Info("Production deployment")
@@ -1233,6 +1235,20 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/doc-review/requests/:id/restart", docreviews.RestartRequest)
 
 	return nil
+}
+
+// devFrontendProxyErrorHandler replaces ReverseProxy's default handler, which
+// logs every failure as "http: proxy error". A browser that reloads or leaves a
+// page cancels its pending requests, so context.Canceled is not a proxy failure.
+func devFrontendProxyErrorHandler(logger ApiTypes.JimoLogger) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if errors.Is(err, context.Canceled) {
+			logger.Debug("Dev frontend request canceled by the client", "path", r.URL.Path)
+		} else {
+			logger.Error("Dev frontend proxy failed", "path", r.URL.Path, "error", err)
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}
 }
 
 func isLocalFaviconPath(path string) bool {
