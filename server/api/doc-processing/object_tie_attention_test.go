@@ -119,7 +119,7 @@ func TestReconcileTieRecorderFailureStillLinks(t *testing.T) {
 	if got[0].ObjectID != "obj_a" || got[0].ReconcileStatus != ObjectReconcileAmbiguousResolved {
 		t.Fatalf("object = %+v, want tie-break link", got[0])
 	}
-	if len(logger.errors) != 1 || logger.errors[0].message != "object reconciliation: recording attention item failed" {
+	if len(logger.errors) != 1 || logger.errors[0].message != "object reconciliation: recording attention item failed (ChenWeb#18)" {
 		t.Fatalf("errors = %+v, want one recording failure", logger.errors)
 	}
 }

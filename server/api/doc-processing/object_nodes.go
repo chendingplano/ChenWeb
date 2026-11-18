@@ -377,7 +377,7 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 			if rr.err != nil {
 				items[i].llmOutcome = tieLLMFailed
 				if logger != nil {
-					logger.Warn("LLM ambiguous object resolution failed",
+					logger.Warn("LLM ambiguous object resolution failed (ChenWeb#18)",
 						"artifact_id", obj.ArtifactID,
 						"err", rr.err,
 						"llm_response", structuredOutputRawResponse(rr.err),
@@ -397,7 +397,7 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 				if applyErr != nil {
 					items[i].llmOutcome = tieLLMFailed
 					if logger != nil {
-						logger.Warn("apply LLM ambiguous object resolution failed", "artifact_id", obj.ArtifactID, "err", applyErr)
+						logger.Warn("apply LLM ambiguous object resolution failed (ChenWeb#18)", "artifact_id", obj.ArtifactID, "err", applyErr)
 					}
 					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
 						Status: reconcileOutcomeApplyFailed, Object: obj, Candidates: it.candidates,

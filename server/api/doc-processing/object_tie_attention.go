@@ -108,7 +108,7 @@ func breakObjectTie(ctx context.Context, reconciler ObjectReconciler, logger Api
 		rec, err := reconciler.Attention.Record(ctx, ambiguousObjectTieReport(obj, tied, picked, llmOutcome))
 		if err != nil {
 			if logger != nil {
-				logger.Error("object reconciliation: recording attention item failed",
+				logger.Error("object reconciliation: recording attention item failed (ChenWeb#18)",
 					"input_record_id", obj.InputRecordID,
 					"artifact_type", obj.ArtifactType,
 					"artifact_id", obj.ArtifactID,
