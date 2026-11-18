@@ -224,3 +224,9 @@ func WriteRoutingAlarms(ctx context.Context, writer RoutingAlarmWriter, alarms [
 	}
 	return errs
 }
+
+// RoutingAlarmKindDocumentBusyMaxTries is raised when an event for a record
+// still cannot obtain the record's processing lease after the maximum number
+// of delivery attempts. Individual busy attempts are expected (a duplicate event
+// arriving while a run is active) and raise nothing.
+const RoutingAlarmKindDocumentBusyMaxTries = "document_busy_max_tries"

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/llmrun"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -23,11 +24,27 @@ type NATSSubscriber struct {
 	subsMu    sync.Mutex
 	subs      []*nats.Subscription
 	consumers map[*nats.Subscription]consumerRef
+
+	// OnBusyExhausted, when set, is called once a message has been delivered
+	// maxBusyTries times and the document's processing lease was still held.
+	// The message is then acknowledged (no more retries).
+	OnBusyExhausted func(ctx context.Context, payload []byte, tries uint64)
 }
 
 type consumerRef struct{ stream, name string }
 
 var invalidConsumerNameCharsRE = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
+
+// maxBusyTries is how many times an event is delivered while its document's
+// processing lease is held by another run before it is failed. Redelivery is
+// 30s apart, so the default of 20 tolerates a ~10 minute run.
+func maxBusyTries() uint64 {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("DOC_PROCESSOR_MAX_LEASE_TRIES")))
+	if err != nil || n < 1 {
+		return 20
+	}
+	return uint64(n)
+}
 
 func shouldAckOnHandlerError(err error) bool {
 	return errors.Is(err, ErrMissingParsedSuccess) ||
@@ -277,6 +294,27 @@ func (s *NATSSubscriber) SubscribeConcurrent(ctx context.Context, subject string
 				payload = llmrun.QueuePayload(payload, metadata.Stream, metadata.Sequence.Stream)
 			}
 			if err := handler(ctx, payload); err != nil {
+				if errors.Is(err, docprocessing.ErrDocumentBusy) {
+					// Expected when a duplicate event overlaps an active run: no alarm.
+					var delivered uint64 = 1
+					if metadata, merr := msg.Metadata(); merr == nil {
+						delivered = metadata.NumDelivered
+					}
+					if delivered < maxBusyTries() {
+						if s.logger != nil {
+							s.logger.Info("document busy, will retry", "subject", msg.Subject, "delivered", delivered)
+						}
+						_ = msg.NakWithDelay(30 * time.Second)
+						return
+					}
+					if s.OnBusyExhausted != nil {
+						s.OnBusyExhausted(ctx, msg.Data, delivered)
+					} else if s.logger != nil {
+						s.logger.Error("(MID_26111803) document busy, max tries exceeded", "subject", msg.Subject, "delivered", delivered)
+					}
+					_ = msg.Ack()
+					return
+				}
 				if s.logger != nil {
 					s.logger.Error("(MID_26041120) converter message failed", "subject", msg.Subject, "error", err)
 				}
