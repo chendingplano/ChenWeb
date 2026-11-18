@@ -52,7 +52,7 @@ type commentRequest struct {
 
 // Columns the list may be sorted or filtered by, and the SQL operators allowed.
 var sortableColumns = map[string]string{
-	"created_at": "l.created_at", "level": "l.level", "message": "l.message",
+	"id": "l.id", "created_at": "l.created_at", "level": "l.level", "message": "l.message",
 	"loc": "l.loc", "status": "l.status", "owner": "l.owner",
 	"resolver": "l.resolver",
 }
@@ -128,6 +128,11 @@ func List(c echo.Context) error {
 			return fail(c, http.StatusBadRequest, "invalid filter '"+raw+"' (CWB_ALT_030)")
 		}
 		value := parts[2]
+		if parts[0] == "id" {
+			if id, err := strconv.ParseInt(value, 10, 64); err != nil || id < 1 {
+				return fail(c, http.StatusBadRequest, "invalid filter '"+raw+"' (CWB_ALT_030)")
+			}
+		}
 		if parts[1] == "contains" {
 			value = "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value) + "%"
 		}

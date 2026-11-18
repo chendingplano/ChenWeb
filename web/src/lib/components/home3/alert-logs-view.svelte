@@ -60,6 +60,7 @@
 		page = $state(1),
 		pageSize = $state(50);
 	let filterDraft = $state({
+		id: '',
 		from: '',
 		to: '',
 		level: '',
@@ -70,6 +71,7 @@
 		owner: ''
 	});
 	let appliedFilters = $state({
+		id: '',
 		from: '',
 		to: '',
 		level: '',
@@ -179,7 +181,7 @@
 			const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
 			if (sort) params.set('sort', `${sort.col}|${sort.dir}`);
 			for (const f of filters) params.append('filter', `${f.col}|${f.op}|${f.value}`);
-			for (const key of ['level', 'loc', 'status', 'resolver', 'owner'] as const) {
+			for (const key of ['id', 'level', 'loc', 'status', 'resolver', 'owner'] as const) {
 				if (appliedFilters[key]) params.append('filter', `${key}|eq|${appliedFilters[key]}`);
 			}
 			if (appliedFilters.message.trim())
@@ -226,8 +228,14 @@
 		appliedFilters = { ...filterDraft };
 		applyFilters();
 	}
+	function showOpenEntries() {
+		filterDraft.status = 'open';
+		filters = filters.filter((filter) => filter.col !== 'status');
+		applyFormFilters();
+	}
 	function resetFormFilters() {
 		filterDraft = {
+			id: '',
 			from: '',
 			to: '',
 			level: '',
@@ -566,6 +574,15 @@
 		style="background:{cardBg};border:1px solid {borderColor};font-size:12px;color:{textSecondary}"
 	>
 		<label class="grid gap-1"
+			>{m.alert_logs_id()}<input
+				type="text"
+				inputmode="numeric"
+				pattern="[1-9][0-9]*"
+				bind:value={filterDraft.id}
+				style="width:90px;background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"
+			/></label
+		>
+		<label class="grid gap-1"
 			>{m.alert_logs_from()}<input
 				type="date"
 				bind:value={filterDraft.from}
@@ -634,6 +651,13 @@
 		>
 		<button type="submit" class="rounded px-3 py-1.5" style="background:{accent};color:white"
 			>{m.alert_logs_apply()}</button
+		>
+		<button
+			type="button"
+			onclick={showOpenEntries}
+			class="rounded px-3 py-1.5"
+			style="background:{surface2};color:{textPrimary};border:1px solid {borderColor}"
+			>{m.alert_logs_open_entries_only()}</button
 		>
 		<button
 			type="button"

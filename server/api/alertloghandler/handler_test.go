@@ -247,3 +247,38 @@ func TestBulkResolveAtomic(t *testing.T) {
 		})
 	}
 }
+
+func TestListIDFilter(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB, oldAuth := ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator
+	ApiTypes.SharedDBHandle = db
+	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+		return &ApiTypes.UserInfo{Email: "alice@example.com"}, nil
+	}
+	defer func() { ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator = oldDB, oldAuth }()
+	mock.ExpectQuery(`SELECT COUNT\(\*\).*l.id = \$1`).WithArgs("1882").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT id, level, message.*l.id = \$1`).WithArgs("1882", 50, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "level", "message", "req_id", "loc", "call_flow", "attrs", "created_at", "status", "owner", "resolution", "resolver", "resolve_time", "comments"}))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/?filter=id%7Ceq%7C1882", nil), rec)
+	if err := List(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	c = echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/?filter=id%7Ceq%7Cinvalid", nil), rec)
+	if err := List(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid ID: status %d", rec.Code)
+	}
+}
