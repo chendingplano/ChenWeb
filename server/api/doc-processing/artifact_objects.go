@@ -143,6 +143,13 @@ func (r ObjectReconciler) ReconcileOne(ctx context.Context, obj ArtifactObject) 
 			Method:     candidates[0].Method,
 		}, nil
 	}
+	// Same name under a differing, not-yet-approved type: do not create a
+	// duplicate node. The caller links it and records an attention item.
+	for _, c := range candidates {
+		if c.Method == objectMethodNameTypeReview {
+			return ObjectReconcileResult{Status: ObjectReconcileAmbiguous, Confidence: c.Score, Method: c.Method}, nil
+		}
+	}
 	node, err := r.Store.CreateNode(ctx, obj)
 	if err != nil {
 		return ObjectReconcileResult{}, err

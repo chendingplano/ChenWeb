@@ -13,6 +13,10 @@ import (
 	"github.com/lib/pq"
 )
 
+// objectMethodNameTypeReview marks a name match whose types differ while at
+// least one of them is not approved. It is linked, but routed to review.
+const objectMethodNameTypeReview = "name_type_review"
+
 type ObjectNodeSQLStore struct {
 	DB *sql.DB
 }
@@ -79,9 +83,13 @@ LIMIT $4`, pq.Array(names), obj.ObjectName, obj.ObjectType, maxCandidates)
 	for _, node := range nodes {
 		score := 0.85
 		method := "lexical_name"
-		if approvedObjectTypesCompatible(obj.ObjectType, node.ObjectType, approved) && objectNameBundlesOverlap(obj.NormalizedNames, node.NormalizedNames) {
-			score = 1
-			method = "exact_name"
+		if objectNameBundlesOverlap(obj.NormalizedNames, node.NormalizedNames) {
+			if approvedObjectTypesCompatible(obj.ObjectType, node.ObjectType, approved) {
+				score = 1
+				method = "exact_name"
+			} else if typesNeedReview(obj.ObjectType, node.ObjectType, approved) {
+				method = objectMethodNameTypeReview
+			}
 		}
 		out = append(out, ObjectNodeCandidate{Node: node, Score: score, Method: method})
 	}
@@ -464,6 +472,11 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 				}
 				it.result = ObjectReconcileResult{ObjectID: node.ObjectID, Status: ObjectReconcileNew, Confidence: 1, Method: "new_node"}
 			case 1:
+				if tied[0].Method == objectMethodNameTypeReview {
+					// Cross-type name match: link, and record it for review.
+					it.result = breakObjectTie(ctx, reconciler, logger, obj, tied, llmOutcome)
+					break
+				}
 				// LLM merges collapsed the tie into one node.
 				it.result = ObjectReconcileResult{ObjectID: tied[0].Node.ObjectID, Status: ObjectReconcileMatched, Confidence: tied[0].Score, Method: tied[0].Method}
 			default:

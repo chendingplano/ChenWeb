@@ -436,8 +436,76 @@ func TestFindCandidatesLinksSameUnapprovedType(t *testing.T) {
 // Issue #34: different types with one unapproved must not link silently.
 func TestFindCandidatesDoesNotLinkDifferentTypesWhenOneUnapproved(t *testing.T) {
 	got := findCandidatesWithApproved(t, "part", "equipment", "equipment")
-	if len(got) != 1 || got[0].Score >= 0.95 {
-		t.Fatalf("candidates = %+v, want one candidate below the link threshold", got)
+	if len(got) != 1 || got[0].Score >= 0.95 || got[0].Method != objectMethodNameTypeReview {
+		t.Fatalf("candidates = %+v, want one %s candidate below the link threshold", got, objectMethodNameTypeReview)
+	}
+}
+
+// Different types that are both approved are two distinct things: no review.
+func TestFindCandidatesDifferentApprovedTypesAreNotReviewed(t *testing.T) {
+	got := findCandidatesWithApproved(t, "part", "equipment", "part", "equipment")
+	if len(got) != 1 || got[0].Method != "lexical_name" {
+		t.Fatalf("candidates = %+v, want plain lexical_name", got)
+	}
+}
+
+// reviewCandidateStore returns every node as a name_type_review candidate.
+type reviewCandidateStore struct {
+	nodes   []ObjectNode
+	created int
+}
+
+func (s *reviewCandidateStore) FindCandidates(_ context.Context, _ ArtifactObject, _ ObjectReconcileOptions) ([]ObjectNodeCandidate, error) {
+	var out []ObjectNodeCandidate
+	for _, n := range s.nodes {
+		out = append(out, ObjectNodeCandidate{Node: n, Score: 0.85, Method: objectMethodNameTypeReview})
+	}
+	return out, nil
+}
+
+func (s *reviewCandidateStore) CreateNode(_ context.Context, obj ArtifactObject) (ObjectNode, error) {
+	s.created++
+	return ObjectNode{ObjectID: "new_node", CanonicalName: obj.ObjectName}, nil
+}
+
+// Issue #34 rule 2: a cross-type name match involving a proposed type is
+// linked to a candidate and routed to review with every candidate attached.
+func TestReconcileArtifactObjectsLinksCrossTypeMatchAndRecordsAttention(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		nodes []ObjectNode
+		want  string
+	}{
+		{"single candidate", []ObjectNode{{ObjectID: "obj_a", CanonicalName: "保护接地端子", ObjectType: "equipment"}}, "obj_a"},
+		{"several candidates", []ObjectNode{
+			{ObjectID: "obj_b", CanonicalName: "保护接地端子", ObjectType: "equipment"},
+			{ObjectID: "obj_a", CanonicalName: "保护接地端子", ObjectType: "material"},
+		}, "obj_a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &reviewCandidateStore{nodes: tc.nodes}
+			rec := &fakeAttentionRecorder{}
+			reconciled, err := reconcileArtifactObjects(context.Background(), []ArtifactObject{{
+				InputRecordID: 9, ArtifactType: searchArtifactProvision, ArtifactID: "9_prv_1",
+				ObjectName: "保护接地端子", ObjectType: "part",
+			}}, ObjectReconciler{Store: store, Attention: rec}, &fakeLogger{})
+			if err != nil {
+				t.Fatalf("reconcileArtifactObjects: %v", err)
+			}
+			if len(reconciled) != 1 || reconciled[0].ObjectID != tc.want || reconciled[0].ReconcileStatus != ObjectReconcileAmbiguousResolved {
+				t.Fatalf("reconciled = %+v, want link to %s", reconciled, tc.want)
+			}
+			if store.created != 0 {
+				t.Fatalf("created %d nodes, want none", store.created)
+			}
+			if len(rec.reports) != 1 {
+				t.Fatalf("reports = %+v, want one attention item", rec.reports)
+			}
+			got := rec.reports[0].Details["tied_candidates"].([]map[string]any)
+			if len(got) != len(tc.nodes) {
+				t.Fatalf("attention candidates = %+v, want all %d", got, len(tc.nodes))
+			}
+		})
 	}
 }
 

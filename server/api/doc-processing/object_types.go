@@ -133,6 +133,13 @@ func (s ObjectTypeSQLStore) approvedNames(ctx context.Context, names []string) (
 	return approved, rows.Err()
 }
 
+// typesNeedReview reports whether two differing types include one that is not
+// approved, so a name match between them cannot be trusted or discarded.
+func typesNeedReview(a, b string, approved map[string]bool) bool {
+	a, b = normalizeObjectToken(a), normalizeObjectToken(b)
+	return a != b && (a != "" && !approved[a] || b != "" && !approved[b])
+}
+
 func approvedObjectTypesCompatible(a, b string, approved map[string]bool) bool {
 	a, b = normalizeObjectToken(a), normalizeObjectToken(b)
 	// An identical type links whether or not it is approved: linking to an
