@@ -151,8 +151,9 @@ apart, and manual runs would stop matching button runs; parsing the scripts' exi
 
 ### D4. The archive is named after the build number; the deploy installs the confirmed name
 
-`mise run build-server-linux` captures the manifest's UTC `built_at` timestamp before
-binary compilation and formats the same instant as the build number (`YYYYmmddHHMMSS`).
+`mise run build-server-linux` captures the build machine's local time before binary
+compilation. The manifest records `built_at` with the UTC offset and uses the same local
+time for the build number (`YYYYmmddHHMMSS`).
 `shell_server_build_rcp.sh` reads the number from the manifest and names the archive
 `runshen-deploy-<build_number>.tar.gz`. After upload it reports the archive name to the
 runner, which records the name and number together in the build row.

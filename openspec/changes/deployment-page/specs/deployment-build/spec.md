@@ -66,8 +66,9 @@ marked `failed` with an error message.
 - **THEN** the next status request marks the build `failed` with "runner exited without reporting", and a new build can start
 
 ### Requirement: The archive carries the build number
-The build SHALL derive its number in UTC `YYYYmmddHHMMSS` format from the manifest's
-`built_at` timestamp, captured immediately before binary compilation. The build SHALL
+The build SHALL derive its number in local `YYYYmmddHHMMSS` format from the build
+machine's clock immediately before binary compilation. The manifest's `built_at`
+SHALL record the same time with its UTC offset. The build SHALL
 embed the number in the binaries that report build info and use it to name the archive
 `runshen-deploy-<build_number>.tar.gz`. After upload, the runner SHALL record the archive
 name and build number in the build row.

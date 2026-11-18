@@ -77,7 +77,7 @@ None. System Monitor has no spec; its `source` filter is an internal extension.
 - **Reusable modules:** searched the catalogue for step runners, job status, process
   control, log monitors and run IDs; the only match is `20261108-01` Shared ID Manager,
   which this change does not need (every new ID is its table's own `BIGSERIAL` primary
-  key; `build_number` stays the existing UTC timestamp string). Reused uncatalogued code:
+  key. `build_number` uses the build machine's local timestamp). Reused uncatalogued code:
   `system-monitor-view.svelte` (embedded log window, second use after the Doc Processor
   dashboard, so it is registered as a module) and `server/buildinfo` (running build
   number per process). Nothing generic exists for running scripts step by step, so the
