@@ -394,3 +394,57 @@ func TestObjectNodeCreateNodeKeepsEmptyArraysOnConflict(t *testing.T) {
 		t.Fatalf("expectations: %v", err)
 	}
 }
+
+func findCandidatesWithApproved(t *testing.T, objType, nodeType string, approved ...string) []ObjectNodeCandidate {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	cols := []string{
+		"id", "object_id", "canonical_object_id", "canonical_name", "canonical_name_en",
+		"canonical_name_zh", "primary_language", "object_type", "aliases", "acronyms",
+		"normalized_names", "description", "search_document", "reconcile_status", "ext_info",
+	}
+	mock.ExpectQuery("FROM kb.object_nodes").WillReturnRows(sqlmock.NewRows(cols).AddRow(
+		int64(1), "obj_1", "", "保护接地端子", "", "", "", nodeType,
+		[]byte("[]"), []byte("[]"), []byte(`["保护接地端子"]`), "", "", "active", []byte("{}"),
+	))
+	rows := sqlmock.NewRows([]string{"name"})
+	for _, a := range approved {
+		rows.AddRow(a)
+	}
+	mock.ExpectQuery("SELECT name FROM kb.object_types").WillReturnRows(rows)
+	got, err := ObjectNodeSQLStore{DB: db}.FindCandidates(context.Background(), ArtifactObject{
+		ObjectName: "保护接地端子", ObjectType: objType, NormalizedNames: []string{"保护接地端子"},
+	}, ObjectReconcileOptions{})
+	if err != nil {
+		t.Fatalf("FindCandidates: %v", err)
+	}
+	return got
+}
+
+// Issue #34: same name and same unapproved type scores as an exact match.
+func TestFindCandidatesLinksSameUnapprovedType(t *testing.T) {
+	got := findCandidatesWithApproved(t, "part", "part")
+	if len(got) != 1 || got[0].Score != 1 || got[0].Method != "exact_name" {
+		t.Fatalf("candidates = %+v, want one exact_name at 1.0", got)
+	}
+}
+
+// Issue #34: different types with one unapproved must not link silently.
+func TestFindCandidatesDoesNotLinkDifferentTypesWhenOneUnapproved(t *testing.T) {
+	got := findCandidatesWithApproved(t, "part", "equipment", "equipment")
+	if len(got) != 1 || got[0].Score >= 0.95 {
+		t.Fatalf("candidates = %+v, want one candidate below the link threshold", got)
+	}
+}
+
+// Approved-type behaviour is unchanged.
+func TestFindCandidatesLinksSameApprovedType(t *testing.T) {
+	got := findCandidatesWithApproved(t, "part", "part", "part")
+	if len(got) != 1 || got[0].Score != 1 || got[0].Method != "exact_name" {
+		t.Fatalf("candidates = %+v, want one exact_name at 1.0", got)
+	}
+}

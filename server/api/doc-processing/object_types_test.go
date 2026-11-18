@@ -43,8 +43,10 @@ func TestObjectTypeBlankCannotCreateProposal(t *testing.T) {
 }
 
 func TestTypeConfidenceRequiresApproval(t *testing.T) {
-	if approvedObjectTypesCompatible("waste_stream", "waste_stream", map[string]bool{}) {
-		t.Fatal("proposal boosted matching")
+	// Issue #34: an identical type links whether or not it is approved. Linking
+	// does not approve the type; the registry review stays pending either way.
+	if !approvedObjectTypesCompatible("waste_stream", "waste_stream", map[string]bool{}) {
+		t.Fatal("same unapproved type must still link")
 	}
 	if !approvedObjectTypesCompatible("waste_stream", "waste_stream", map[string]bool{"waste_stream": true}) {
 		t.Fatal("approval did not enable type compatibility")
@@ -52,9 +54,13 @@ func TestTypeConfidenceRequiresApproval(t *testing.T) {
 	if approvedObjectTypesCompatible("waste_stream", "other", map[string]bool{"other": true}) {
 		t.Fatal("proposal treated as wildcard")
 	}
+	if approvedObjectTypesCompatible("part", "equipment", map[string]bool{}) {
+		t.Fatal("different unapproved types must not link")
+	}
 }
 
-func TestSQLCandidateConfidenceChangesAfterTypeApproval(t *testing.T) {
+// Issue #34: type approval no longer gates linking an identical type.
+func TestSQLCandidateConfidenceSameTypeLinksWithOrWithoutApproval(t *testing.T) {
 	for _, approved := range []bool{false, true} {
 		db, mock, err := sqlmock.New()
 		if err != nil {
@@ -71,11 +77,7 @@ func TestSQLCandidateConfidenceChangesAfterTypeApproval(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := 0.85
-		if approved {
-			want = 1
-		}
-		if len(candidates) != 1 || candidates[0].Score != want {
+		if len(candidates) != 1 || candidates[0].Score != 1 {
 			t.Fatalf("approved=%v candidates=%+v", approved, candidates)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {

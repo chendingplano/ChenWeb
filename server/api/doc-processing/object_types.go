@@ -135,6 +135,12 @@ func (s ObjectTypeSQLStore) approvedNames(ctx context.Context, names []string) (
 
 func approvedObjectTypesCompatible(a, b string, approved map[string]bool) bool {
 	a, b = normalizeObjectToken(a), normalizeObjectToken(b)
+	// An identical type links whether or not it is approved: linking to an
+	// existing node does not approve the type, and the registry review stays
+	// pending either way (issue #34).
+	if a != "" && a == b {
+		return true
+	}
 	if a != "" && !approved[a] || b != "" && !approved[b] {
 		return false
 	}
