@@ -19,9 +19,9 @@ see, describe or weight a new type.
 - A hard limit `MAX_PRODUCT_RELATION_TYPES` (default 50) on the table size. Above it, a
   warning is logged. Existing and new rows are still accepted.
 - A WARN alert whenever a new `proposed` type is added, asking an admin to review it.
-- New System Admin → Database Maintenance page "Product Relation Types" (English and Chinese):
-  lists types with status and usage counts; approving a proposed type requires non-empty
-  descriptions and asks for a weight (default 0.5).
+- A new check card on System Admin → Database Maintenance → Consistency Check (English and
+  Chinese): Check lists the proposed types with usage counts; each can be approved in place with
+  non-empty descriptions and a weight (default 0.5), or deleted when unused.
 - Product-review scoring reads relation-type weights from the table instead of
   `[scoring.relation_type_weights]` in `product-review.local.toml`.
 - Not in scope: rendering the prompt's code list from the table (decided separately; until then
@@ -31,7 +31,7 @@ see, describe or weight a new type.
 
 ### New Capabilities
 - `product-relation-types`: the relation-type vocabulary table, extractor validation and
-  proposal behavior, the size limit and warnings, and the approval page.
+  proposal behavior, the size limit and warnings, and the Consistency Check card.
 
 ### Modified Capabilities
 <!-- None: no existing spec covers extract_products relation handling. -->
@@ -41,8 +41,7 @@ see, describe or weight a new type.
 - Code: `server/api/doc-processing/products_v2.go` (schema, expansion), `extract-products.go`
   (validation, proposal insert), `server/api/product-reviews/` (`config.go`, `docscope.go`
   weight lookup), a new `server/api/kbhandler/` handler and routes, and a web view under
-  `web/src/lib/components/home3/` plus `nav-rail.svelte`, `content-panel.svelte` and a
-  `kb.page_config` nav seed.
+  `web/src/lib/components/home3/` (a card embedded in `db-consistency-view.svelte`).
 - Database: one goose migration creating and seeding `kb.product_relation_types`.
 - Config: `MAX_PRODUCT_RELATION_TYPES`; the TOML weights table becomes a fallback or is removed
   (decided in design).
@@ -50,8 +49,8 @@ see, describe or weight a new type.
 - Docs: bug 2026111703 (#31) is corrected (`stor` already covers transport);
   a devdoc for the relation vocabulary.
 - Reusable modules searched: the catalogue (`KnowledgeStore/doc-repo/modules/`) and the code.
-  Reused: the Object Types page pattern (list/detail registry view, client, admin check; not
-  catalogued). Considered and not used: `module-localized-text-editor` (canvas JSON value, not
+  Reused: the Consistency Check page (`db-consistency-view.svelte`) as the host and its card
+  styling, and the Object Types handler's admin check (not catalogued). Considered and not used: `module-localized-text-editor` (canvas JSON value, not
   two plain columns). Nothing catalogued covers a
   vocabulary table with proposal and approval, so this is new code. IDs: the table's key is the
   relation code itself, so no shared-ID sequence is needed.

@@ -65,16 +65,22 @@ descriptions and a weight between 0 and 1. The approval form SHALL prefill the w
 - **WHEN** an admin approves a proposed type with both descriptions and weight 0.6
 - **THEN** the type is `approved`, the weight is 0.6, and approver and time are recorded
 
-### Requirement: Product Relation Types page
-The system SHALL provide a page "Product Relation Types" under System Admin → Database
-Maintenance, in English and Chinese, listing all types with status, descriptions, weight and
-usage count, proposed types first, with approve, edit and (for unused proposed types) delete
-actions.
+### Requirement: Consistency Check review card
+The Consistency Check page under System Admin → Database Maintenance SHALL include a check
+"Product relation types awaiting review", in English and Chinese. Its Check action SHALL list
+every proposed type with its usage counts, and report that all are reviewed when there are
+none. Each listed type SHALL offer Approve (with both descriptions and a weight prefilled 0.5)
+and, while no product uses it, Delete. The server SHALL also allow editing an approved type's
+descriptions and weight through the API.
 
 #### Scenario: Review a proposal
-- **WHEN** an admin opens the page while `pkg` is proposed
-- **THEN** `pkg` is listed first with a proposed badge, and its approve dialog requires both
+- **WHEN** an admin runs the check while `pkg` is proposed
+- **THEN** the card reports one proposed type and shows `pkg` with a form that requires both
   descriptions and shows a weight of 0.5
+
+#### Scenario: Nothing to review
+- **WHEN** an admin runs the check and no type is proposed
+- **THEN** the card reports that every type has been reviewed
 
 ### Requirement: Weights feed product review
 Product review SHALL take the relation-type weight from the table by stored value, falling back

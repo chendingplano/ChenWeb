@@ -21,25 +21,7 @@ export type ProductRelationTypeInput = {
 	weight: number;
 };
 
-export type ProductRelationTypeFilter = 'proposed' | 'approved' | 'all';
-
 export const DEFAULT_RELATION_WEIGHT = 0.5;
-
-export function filterProductRelationTypes(
-	rows: ProductRelationType[],
-	filter: ProductRelationTypeFilter,
-	search: string
-): ProductRelationType[] {
-	const query = search.trim().toLocaleLowerCase();
-	return rows.filter(
-		(row) =>
-			(filter === 'all' || row.status === filter) &&
-			(!query ||
-				[row.code, row.value, row.description_en, row.description_zh].some((v) =>
-					v.toLocaleLowerCase().includes(query)
-				))
-	);
-}
 
 /** Mirrors the server: both descriptions required, weight within 0..1. */
 export function validateRelationTypeInput(
@@ -75,13 +57,6 @@ export function approveProductRelationType(
 	input: ProductRelationTypeInput
 ): Promise<{ status: true; row: ProductRelationType }> {
 	return request(`${base}/${encodeURIComponent(code)}/approve`, json('POST', input));
-}
-
-export function updateProductRelationType(
-	code: string,
-	input: ProductRelationTypeInput
-): Promise<{ status: true; row: ProductRelationType }> {
-	return request(`${base}/${encodeURIComponent(code)}`, json('PUT', input));
 }
 
 export function deleteProductRelationType(code: string): Promise<{ status: true }> {

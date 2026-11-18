@@ -4,6 +4,7 @@
 	import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
+	import ProductRelationTypesCheck from './product-relation-types-check.svelte';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -195,6 +196,8 @@
 			{/if}
 		</div>
 	{/each}
+
+	<ProductRelationTypesCheck {darkMode} />
 </div>
 
 <style>

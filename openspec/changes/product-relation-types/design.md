@@ -71,26 +71,35 @@ weight is outside 0–1; weight defaults to 0.5 in the form), and edit of descri
 approved rows. Approved codes cannot be deleted. A proposed code can be deleted only when no
 `kb.products` row uses its value.
 
-**D7. Page.** "Product Relation Types" under System Admin → Database Maintenance, modeled on
-the Object Types page (client module, nav-rail entry, `content-panel` mapping,
-`kb.page_config` seed migration). Proposed rows sort first with a badge. The detail pane has
-two description textareas (English, Chinese) and a weight input prefilled 0.5; approving a
-proposed type requires both descriptions, and the client mirrors the server validation. Keys
-are `prt_*` in both message files.
+**D7. Consistency Check card.** The review lives on System Admin → Database Maintenance →
+Consistency Check as a second card under the existing `kb.inputs.status` check (component
+`product-relation-types-check.svelte`, embedded by `db-consistency-view.svelte`). Check calls
+the list endpoint and keeps the `proposed` rows: none → "all reviewed"; otherwise each proposal
+is shown with its usage counts and a form of two description textareas (English, Chinese) and a
+weight input prefilled 0.5. Approve needs both descriptions (the client mirrors the server
+validation); Delete is disabled while products use the type. Approved types are not listed on
+the page; editing one is possible through the API only. Keys are `prt_*` in both message files.
+An earlier draft was a separate Object-Types-style page; it was folded into this check because
+the Consistency Check page is where admins look for data that needs attention.
+
+**D8. Weights in product review.** `docscope.go` reads weights from the table (keyed by
+`value`, approved rows only, loaded once per scope run), falling back to the TOML map and then
+0.3 when the table has no row. The TOML table is kept as a fallback in this change and marked
+deprecated; removing it is a follow-up once production is seeded.
 
 ## Reused modules
 
-- Object Types page (`object-types-view.svelte`, `object-types-client.ts`, `object_types_handler.go`;
-  not catalogued): the same proposed/approved registry for object types. Its list/detail layout,
-  admin check (`objectTypeReviewAdmin`), nav and content-panel wiring are copied. It is
-  specific to `kb.object_types` (integer IDs, approve-only, no form), so it was not extended.
+- Consistency Check page (`db-consistency-view.svelte`): the host. The new card copies its
+  styling tokens and Check/status banner layout; the existing card is unchanged.
+- Object Types handler (`object_types_handler.go`; not catalogued): its admin check
+  (`objectTypeReviewAdmin`) is reused by the new handler. Its page was not extended, since it
+  is specific to `kb.object_types`.
 - `module-localized-text-editor`: considered for the en/zh descriptions and not used. It edits a
   `{"en","zh-cn"}` JSON value inside the canvas property-editor framework; this table stores two
   plain columns, so two textareas are simpler.
 - Searched and not fitting: `module-attention-items` (queue of KB data problems with reopen
   semantics), `module-property-editor` (canvas property editing, no approval workflow).
-- No new reusable module is registered: the pattern is two pages' worth of copied structure, not
-  a shared component.
+- No new reusable module is registered: the card is specific to this table.
 
 ## Risks / Trade-offs
 

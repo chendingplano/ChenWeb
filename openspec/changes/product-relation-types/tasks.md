@@ -1,7 +1,7 @@
 ## 1. Database
 
 - [x] 1.1 Goose migration: create `kb.product_relation_types` (columns, CHECK for approved descriptions) and seed the 20 codes + `oth` with en/zh descriptions and weights per design D2
-- [x] 1.2 Goose migration: seed `kb.page_config` nav entry for the new page; apply with `doc-service --migrate-only` and verify the seed
+- [x] 1.2 Nav entry for a standalone page: superseded. The review is a Consistency Check card, and migration `20261118000003` removes the entry `20261118000002` seeded
 
 ## 2. Extractor
 
@@ -20,11 +20,12 @@
 - [x] 4.1 Handlers + routes under `/kb/product-relation-types`: list with counts, approve, edit, delete-unused-proposed, with validation per design D6
 - [x] 4.2 Handler tests: 400 on blank description or weight out of range, delete refused when in use
 
-## 5. Page
+## 5. Consistency Check card
 
-- [x] 5.1 Client module and view modeled on the Object Types page; approve form with en/zh descriptions and weight default 0.5
-- [x] 5.2 Wire `nav-rail.svelte` and `content-panel.svelte`; add `prt_*` keys to `en.json` and `zh-cn.json`
-- [ ] 5.3 `bun run check` passes; open the page in the browser and verify list, approve and validation
+- [x] 5.1 Client module and `product-relation-types-check.svelte` card (Check lists proposals; approve form with en/zh descriptions and weight default 0.5; delete of unused proposals)
+- [x] 5.2 Embed the card in `db-consistency-view.svelte`; add `prt_*` keys to `en.json` and `zh-cn.json`
+- [x] 5.3 `bun run check` passes and the view compiles without warnings
+- [ ] 5.4 Open the Consistency Check page in the browser and verify Check, approve (both descriptions required, weight 0.5) and delete against a live server
 
 ## 6. Docs and close-out
 
