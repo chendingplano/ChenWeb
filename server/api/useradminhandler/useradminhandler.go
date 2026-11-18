@@ -185,9 +185,9 @@ func ListUsers(c echo.Context) error {
 	canManageAll := canManageAllUsers(currentUser)
 
 	if !canManageAll {
-		user, err := findIdentityByEmail(logger, currentUser.Email)
+		user, err := auth.KratosGetIdentityByID(logger, currentUser.UserId)
 		if err != nil {
-			logger.Warn("failed to reload self identity for self-scoped user management", "email", currentUser.Email, "error", err)
+			logger.Warn("failed to reload self identity for self-scoped user management", "identity_id", currentUser.UserId, "error", err)
 			user = currentUser
 		}
 		return c.JSON(http.StatusOK, listUsersResponse{
@@ -213,29 +213,6 @@ func ListUsers(c echo.Context) error {
 		Scope:        "all",
 		CanManageAll: true,
 	})
-}
-
-func findIdentityByEmail(logger ApiTypes.JimoLogger, email string) (*ApiTypes.UserInfo, error) {
-	email = strings.TrimSpace(strings.ToLower(email))
-	if email == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "email is required")
-	}
-
-	user, err := auth.KratosGetIdentityByEmail(logger, email)
-	if err == nil {
-		return user, nil
-	}
-
-	users, listErr := auth.KratosListAllIdentities(logger)
-	if listErr != nil {
-		return nil, err
-	}
-	for _, candidate := range users {
-		if strings.EqualFold(strings.TrimSpace(candidate.Email), email) {
-			return candidate, nil
-		}
-	}
-	return nil, err
 }
 
 func UpdateUser(c echo.Context) error {
