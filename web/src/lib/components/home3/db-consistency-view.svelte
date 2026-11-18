@@ -229,7 +229,7 @@
 
 	<AttentionItemsCheck
 		{darkMode}
-		itemType="unresolved-reference"
+		itemType={['unresolved-reference', 'missing-reference-document', 'reference-metric-no-match']}
 		title={m.urf_check_title()}
 		description={m.urf_check_description()}
 		noneText={m.urf_none()}
@@ -240,10 +240,15 @@
 		{#snippet row(item)}
 			{@const d = detailsOf<{ family?: string; cited_raw?: string; target_content?: string; target_locator?: string; target_record_id?: number; state?: string; notes?: string[] }>(item)}
 			<div style="font-size:13px; font-weight:600; color:{textPrimary};">{item.title}</div>
+			{#if item.item_type === 'missing-reference-document'}
+				<div style="font-size:12px; color:{textSecondary};">{m.urf_missing_document()}</div>
+			{:else if item.item_type === 'reference-metric-no-match'}
+				<div style="font-size:12px; color:{textSecondary};">{m.urf_no_metric_match()}</div>
+			{/if}
 			<div style="font-size:12px; margin:2px 0; color:{textSecondary};">{(d.notes ?? []).join('; ')}</div>
 			<div style="font-size:11px; color:{textSecondary};">
-				{m.umv_record()}: {item.input_record_id} →
-				{m.urf_target()}: {d.target_record_id} ·
+				{m.umv_record()}: {item.input_record_id} ·
+				{#if d.target_record_id}{m.urf_target()}: {d.target_record_id} ·{/if}
 				{m.urf_family()}: {d.family} ·
 				{m.urf_state()}: {d.state} ·
 				{m.umv_seen()}: {item.occurrence_count}

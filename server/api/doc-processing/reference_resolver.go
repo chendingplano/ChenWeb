@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chendingplano/deepdoc/server/api/attention"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -36,21 +35,19 @@ type ArtifactCandidate struct {
 
 // ResolveOutcome is a family's decision for one mention.
 type ResolveOutcome struct {
-	State      string // family state, e.g. resolved | needs_review | no_match
-	Notes      []string
-	Candidates []ArtifactCandidate // ranked, best first
+	State         string // family state, e.g. resolved | needs_review | no_match
+	TargetInputID int64
+	Notes         []string
+	Candidates    []ArtifactCandidate // ranked, best first
 }
 
 // ReferenceResolver is implemented by each artifact family (metric, provision, ...).
 type ReferenceResolver interface {
 	Family() string
 	Takes(m RefMention) bool
-	// HasArtifacts reports whether the record has been processed by the family's extractor.
-	HasArtifacts(ctx context.Context, db *sql.DB, recordID int64) (bool, error)
-	// Pending records that the mention waits for its target (not held, or not yet processed).
-	Pending(ctx context.Context, db *sql.DB, m RefMention) error
-	Resolve(ctx context.Context, db *sql.DB, m RefMention, targetRecordID int64) (ResolveOutcome, error)
-	Apply(ctx context.Context, db *sql.DB, m RefMention, out ResolveOutcome) error
+	// Reconcile updates the mention using its current holding and artifact data.
+	// targetReady identifies a completed extractor event for that particular target.
+	Reconcile(ctx context.Context, db *sql.DB, m RefMention, targetReady int64) (ResolveOutcome, error)
 }
 
 var (
@@ -103,43 +100,20 @@ func (s ResolveSummary) merge(o ResolveSummary) {
 
 // ResolveOutgoing is step 5: resolve the citing record's mentions for every registered family.
 func ResolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
-	ms, err := loadRefMentions(ctx, db, `m.input_record_id = $1 AND NOT m.internal`, citingRecordID)
+	return resolveOutgoing(ctx, db, citingRecordID, 0, logger)
+}
+
+func resolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID, resourceID int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
+	ms, err := loadRefMentions(ctx, db, `m.input_record_id = $1 AND NOT m.internal AND ($2 = 0 OR m.resource_id = $2)`, citingRecordID, resourceID)
 	if err != nil {
 		return nil, err
 	}
 	sum := ResolveSummary{}
 	for _, r := range registeredReferenceResolvers() {
-		has := map[int64]bool{}
-		for _, m := range ms {
-			if !r.Takes(m) {
-				continue
-			}
-			if m.R2State != refR2Held || m.TargetInputID == 0 {
-				if err := r.Pending(ctx, db, m); err != nil {
-					return sum, err
-				}
-				sum.add(r.Family(), "pending_target")
-				continue
-			}
-			ok, seen := has[m.TargetInputID]
-			if !seen {
-				if ok, err = r.HasArtifacts(ctx, db, m.TargetInputID); err != nil {
-					return sum, err
-				}
-				has[m.TargetInputID] = ok
-			}
-			if !ok {
-				if err := r.Pending(ctx, db, m); err != nil {
-					return sum, err
-				}
-				sum.add(r.Family(), "pending_target")
-				continue
-			}
-			state, err := resolveAndApply(ctx, db, r, m, m.TargetInputID, logger)
-			if err != nil {
-				return sum, err
-			}
-			sum.add(r.Family(), state)
+		out, err := reconcileReferences(ctx, db, r, ms, 0, logger)
+		sum.merge(out)
+		if err != nil {
+			return sum, err
 		}
 	}
 	return sum, nil
@@ -157,51 +131,41 @@ func ResolveIncoming(ctx context.Context, db *sql.DB, family string, targetRecor
 	if err != nil {
 		return sum, err
 	}
+	return reconcileReferences(ctx, db, r, ms, targetRecordID, logger)
+}
+
+func reconcileReferences(ctx context.Context, db *sql.DB, r ReferenceResolver, ms []RefMention, targetReady int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
+	sum := ResolveSummary{}
 	for _, m := range ms {
 		if !r.Takes(m) {
 			continue
 		}
-		state, err := resolveAndApply(ctx, db, r, m, targetRecordID, logger)
+		out, err := r.Reconcile(ctx, db, m, targetReady)
 		if err != nil {
-			return sum, err
+			return sum, fmt.Errorf("(MID_26101111) %s reconcile %s: %w", r.Family(), m.RefID, err)
 		}
-		sum.add(family, state)
+		if out.State == "" {
+			continue
+		}
+		sum.add(r.Family(), out.State)
+		if logger != nil && (out.State == "needs_review" || out.State == "no_match") {
+			logger.Info("reference not resolved with confidence", "family", r.Family(), "ref_id", m.RefID,
+				"citing_record", m.InputRecordID, "target_record", out.TargetInputID, "state", out.State,
+				"candidates", len(out.Candidates), "notes", out.Notes)
+		}
 	}
 	return sum, nil
 }
 
-func resolveAndApply(ctx context.Context, db *sql.DB, r ReferenceResolver, m RefMention, target int64, logger ApiTypes.JimoLogger) (string, error) {
-	out, err := r.Resolve(ctx, db, m, target)
-	if err != nil {
-		return "", fmt.Errorf("(MID_26101110) %s resolve %s: %w", r.Family(), m.RefID, err)
-	}
-	if err := r.Apply(ctx, db, m, out); err != nil {
-		return "", fmt.Errorf("(MID_26101111) %s apply %s: %w", r.Family(), m.RefID, err)
-	}
-	if out.State != "resolved" {
-		// A citation the resolver cannot pin down is expected (no locator, a delegating clause,
-		// content it cannot match), not an alarm: it is recorded for review, at Info.
-		if logger != nil {
-			logger.Info("reference not resolved with confidence", "family", r.Family(), "ref_id", m.RefID,
-				"citing_record", m.InputRecordID, "target_record", target, "state", out.State,
-				"candidates", len(out.Candidates), "notes", out.Notes)
-		}
-		if _, err := (attention.SQLStore{DB: db}).Record(ctx, unresolvedReferenceReport(r.Family(), m, target, out)); err != nil && logger != nil {
-			logger.Warn("record unresolved reference failed", "family", r.Family(), "ref_id", m.RefID, "error", err)
-		}
-	}
-	return out.State, nil
-}
-
-// loadRefMentions reads the mentions matching a WHERE clause over kb.ref_mentions m ($1 bound to arg).
-func loadRefMentions(ctx context.Context, db *sql.DB, where string, arg int64) ([]RefMention, error) {
+// loadRefMentions reads the mentions matching a WHERE clause over kb.ref_mentions m (with bound arguments).
+func loadRefMentions(ctx context.Context, db *sql.DB, where string, args ...any) ([]RefMention, error) {
 	rows, err := db.QueryContext(ctx, `
 SELECT m.id, m.input_record_id, m.ref_id, COALESCE(m.section, ''), COALESCE(m.source_line_spans, '[]'::jsonb),
        COALESCE(m.evidence, ''), m.target_content, m.target_scope, COALESCE(m.target_locator, ''),
        COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, ''), COALESCE(m.metric_subject, ''),
        COALESCE(m.metric_subject_en, ''), COALESCE(m.condition, ''), COALESCE(m.cited_raw, ''),
        COALESCE(m.r2_state, ''), COALESCE(m.target_input_id, 0), m.mention_key, m.internal, COALESCE(m.source_table_rows, '[]'::jsonb)::text
-FROM kb.ref_mentions m WHERE `+where+` ORDER BY m.id`, arg)
+FROM kb.ref_mentions m WHERE `+where+` ORDER BY m.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,32 +185,4 @@ FROM kb.ref_mentions m WHERE `+where+` ORDER BY m.id`, arg)
 		out = append(out, m)
 	}
 	return out, rows.Err()
-}
-
-// unresolvedReferenceReport is the attention item for one mention the resolver left unresolved.
-// The key (family, citing record, mention key, target) survives re-extraction, so a repeat
-// updates the item instead of adding another.
-func unresolvedReferenceReport(family string, m RefMention, target int64, out ResolveOutcome) attention.Report {
-	key := m.MentionKey
-	if key == "" {
-		key = m.RefID
-	}
-	title := firstNonEmptyTrimmed(m.CitedRaw, m.TargetContent, m.RefID)
-	return attention.Report{
-		ItemType:      attention.TypeUnresolvedReference,
-		DedupeKey:     fmt.Sprintf("%s:%d:%s:%d", family, m.InputRecordID, key, target),
-		Title:         title,
-		InputRecordID: m.InputRecordID,
-		Details: map[string]any{
-			"family":           family,
-			"ref_id":           m.RefID,
-			"cited_raw":        m.CitedRaw,
-			"target_content":   m.TargetContent,
-			"target_locator":   m.TargetLocator,
-			"target_record_id": target,
-			"state":            out.State,
-			"candidate_count":  len(out.Candidates),
-			"notes":            out.Notes,
-		},
-	}
 }

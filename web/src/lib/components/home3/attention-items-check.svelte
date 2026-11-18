@@ -10,8 +10,8 @@
 
 	type Props = {
 		darkMode?: boolean;
-		/** kb.attention_items item_type to list (see server/api/attention). */
-		itemType: string;
+		/** kb.attention_items types to list (see server/api/attention). */
+		itemType: string | string[];
 		title: string;
 		description: string;
 		noneText: string;
@@ -47,7 +47,10 @@
 		errorMsg = '';
 		rowError = '';
 		try {
-			items = (await listOpenAttentionItems(itemType)).items;
+			const types = Array.isArray(itemType) ? itemType : [itemType];
+			const results = await Promise.all(types.map((type) => listOpenAttentionItems(type)));
+			items = results.flatMap((result) => result.items)
+				.sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen));
 			status = items.length === 0 ? 'ok' : 'open';
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : String(err);

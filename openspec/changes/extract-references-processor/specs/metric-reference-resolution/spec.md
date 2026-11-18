@@ -32,6 +32,27 @@ SHALL mark `needs_review` with the top five candidates scoring at least 0.3, or 
 - **WHEN** the target record is held but `extract_metrics` has not processed it
 - **THEN** the mention is `pending_target` until step 6 runs on the target
 
+### Requirement: Metric attention items follow the current citation outcome
+The metric resolver SHALL use `missing-reference-document` for `not_held` or
+`edition_mismatch`, `reference-metric-no-match` when matching produced no candidates, and
+`unresolved-reference` when candidates require review. A held copy awaiting metric extraction
+SHALL remain `pending_target` without an open attention item.
+
+Items SHALL be keyed by type, citing record and stable mention key. Details SHALL include the
+citation, holding state, matching state, reason, target record when known and candidate count.
+Reconciliation SHALL update the current item and resolve superseded open items in the same
+transaction as the citation outcome. Re-extraction SHALL resolve open items for removed metric
+citations. The target's metric extraction SHALL retry incoming citations even if it finds zero
+metrics.
+
+#### Scenario: A missing copy becomes available and a metric later resolves
+- **WHEN** the cited copy is unavailable and becomes accessible before it has extracted metrics
+- **THEN** the missing-document item is resolved and the citation waits for extraction
+- **WHEN** extraction completes with no matching candidates
+- **THEN** a no-match item is opened
+- **WHEN** a later extraction provides a matching metric
+- **THEN** the no-match item is resolved with the citation
+
 ### Requirement: Resolved metrics are written into the referencing document
 For each resolved target metric, the resolver SHALL insert a row into the referencing record's
 `kb.metrics`:

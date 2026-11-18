@@ -4032,9 +4032,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			}
 			p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
 				"deleted_rows", deleted, "new_count", 0)
-			p.resolveIncomingReferences(ctx, p.batchRecordID)
 		}
 		p.Logger.Info(p.Name()+" batch: no candidates", "record_id", p.batchRecordID)
+		p.resolveIncomingReferences(ctx, p.batchRecordID)
 		return nil
 	}
 	if isCtxStopped(ctx) {

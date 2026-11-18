@@ -212,16 +212,9 @@ func (p *ReferencesProcessor) resolveHoldingEvent(ctx context.Context, store Ref
 	if err := store.ResolveHoldings(ctx, citing, resourceID); err != nil {
 		return sum, err
 	}
-	for _, r := range registeredReferenceResolvers() {
-		has, err := r.HasArtifacts(ctx, p.DB, recordID)
-		if err != nil {
-			return sum, err
-		}
-		if !has {
-			continue
-		}
-		s, err := ResolveIncoming(ctx, p.DB, r.Family(), recordID, p.Logger)
-		sum.merge(s)
+	for _, citingID := range citing {
+		outcome, err := resolveOutgoing(ctx, p.DB, citingID, resourceID, p.Logger)
+		sum.merge(outcome)
 		if err != nil {
 			return sum, err
 		}

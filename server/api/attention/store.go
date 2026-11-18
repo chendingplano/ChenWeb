@@ -32,12 +32,20 @@ const (
 	// target artifact with confidence (no locator, a clause that delegates to a table,
 	// no matching content). A limit of the resolver, kept for a person to review.
 	TypeUnresolvedReference = "unresolved-reference"
+
+	// TypeMissingReferenceDocument: no accessible copy satisfies the citation.
+	TypeMissingReferenceDocument = "missing-reference-document"
+
+	// TypeReferenceMetricNoMatch: the cited copy was searched and no metric candidate was found.
+	TypeReferenceMetricNoMatch = "reference-metric-no-match"
 )
 
 var knownTypes = map[string]bool{
-	TypeAmbiguousObjectName:   true,
-	TypeUnresolvedMetricValue: true,
-	TypeUnresolvedReference:   true,
+	TypeAmbiguousObjectName:      true,
+	TypeUnresolvedMetricValue:    true,
+	TypeUnresolvedReference:      true,
+	TypeMissingReferenceDocument: true,
+	TypeReferenceMetricNoMatch:   true,
 }
 
 // KnownType reports whether t is a declared item type.
@@ -134,6 +142,24 @@ func (s SQLStore) Record(ctx context.Context, r Report) (RecordResult, error) {
 	if s.DB == nil {
 		return RecordResult{}, fmt.Errorf("attention: db is nil")
 	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := s.RecordTx(ctx, tx, r)
+	if err != nil {
+		return RecordResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RecordResult{}, err
+	}
+	return result, nil
+}
+
+// RecordTx records a problem in the caller's transaction so its evidence and
+// the producer's state can commit together.
+func (s SQLStore) RecordTx(ctx context.Context, tx *sql.Tx, r Report) (RecordResult, error) {
 	if !KnownType(r.ItemType) {
 		return RecordResult{}, fmt.Errorf("%w: %q", ErrUnknownType, r.ItemType)
 	}
@@ -141,12 +167,6 @@ func (s SQLStore) Record(ctx context.Context, r Report) (RecordResult, error) {
 		return RecordResult{}, fmt.Errorf("attention: empty dedupe key")
 	}
 	now := s.now().UTC()
-
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return RecordResult{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	initial, err := json.Marshal(mergeDetails(map[string]any{}, r, now, nil))
 	if err != nil {
@@ -161,9 +181,6 @@ VALUES ($1, $2, $3, $4::jsonb, $5, $6, $6)
 ON CONFLICT (item_type, dedupe_key) DO NOTHING
 RETURNING id`, r.ItemType, r.DedupeKey, r.Title, string(initial), nullableID(r.InputRecordID), now).Scan(&id)
 	if err == nil {
-		if err := tx.Commit(); err != nil {
-			return RecordResult{}, err
-		}
 		return RecordResult{ID: id, Created: true}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -226,9 +243,6 @@ SET status = 'open',
     resolution = NULL,
     modify_time = $6
 WHERE id = $1`, id, r.Title, string(merged), nullableID(r.InputRecordID), reopenInc, now); err != nil {
-		return RecordResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return RecordResult{}, err
 	}
 	return RecordResult{ID: id, Reopened: reopened}, nil

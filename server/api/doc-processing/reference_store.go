@@ -91,6 +91,9 @@ func (s ReferenceSQLStore) ReplaceRecordReferences(ctx context.Context, recordID
 			return fmt.Errorf("(MID_26101105) link list entry: %w", err)
 		}
 	}
+	if err := closeRemovedMetricReferenceAttention(ctx, tx, recordID); err != nil {
+		return fmt.Errorf("(MID_261118067) close removed metric reference attention items: %w", err)
+	}
 	return tx.Commit()
 }
 

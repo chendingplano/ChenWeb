@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -43,28 +44,53 @@ func (metricReferenceResolver) Takes(m RefMention) bool {
 	return m.TargetContent == "criterion" || m.TargetContent == "criteria_set"
 }
 
-func (metricReferenceResolver) HasArtifacts(ctx context.Context, db *sql.DB, recordID int64) (bool, error) {
-	var ok bool
-	err := db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NULL)
-    OR EXISTS (SELECT 1 FROM kb.input_proc_status WHERE record_id = $1 AND processor = 'extract_metrics' AND proc_status = 'success')`,
-		recordID).Scan(&ok)
-	return ok, err
-}
-
-func (metricReferenceResolver) Pending(ctx context.Context, db *sql.DB, m RefMention) error {
+// Reconcile locks the mention before reading its current holding and matching
+// metrics. This serializes incoming and outgoing attempts for the same mention.
+func (metricReferenceResolver) Reconcile(ctx context.Context, db *sql.DB, m RefMention, targetReady int64) (ResolveOutcome, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return ResolveOutcome{}, err
 	}
 	defer tx.Rollback()
-	if err := clearMetricResolution(ctx, tx, m.ID); err != nil {
-		return err
+	err = tx.QueryRowContext(ctx, `
+SELECT COALESCE(r2_state, ''), COALESCE(target_input_id, 0)
+FROM kb.ref_mentions WHERE id = $1 FOR UPDATE`, m.ID).Scan(&m.R2State, &m.TargetInputID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ResolveOutcome{}, nil // The citing document replaced this mention.
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE kb.ref_mentions SET metric_state = $2 WHERE id = $1`, m.ID, metricRefPending); err != nil {
-		return err
+	if err != nil {
+		return ResolveOutcome{}, err
 	}
-	return tx.Commit()
+
+	out := ResolveOutcome{State: metricRefPending}
+	if m.R2State == refR2Held && m.TargetInputID != 0 {
+		ready := targetReady == m.TargetInputID
+		if !ready {
+			err = tx.QueryRowContext(ctx, `
+SELECT EXISTS (SELECT 1 FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NULL)
+    OR EXISTS (SELECT 1 FROM kb.input_proc_status
+               WHERE record_id = $1 AND processor IN ('extract_metrics', 'extract_metrics_simple') AND proc_status = 'success')`,
+				m.TargetInputID).Scan(&ready)
+			if err != nil {
+				return ResolveOutcome{}, err
+			}
+		}
+		if ready {
+			targets, err := loadMetricRefTargets(ctx, tx, m.TargetInputID)
+			if err != nil {
+				return ResolveOutcome{}, err
+			}
+			out = scoreMetricReference(m, m.TargetInputID, targets)
+		}
+	}
+	out.TargetInputID = m.TargetInputID
+	if err := applyMetricResolution(ctx, tx, m, out); err != nil {
+		return ResolveOutcome{}, err
+	}
+	if err := syncMetricReferenceAttention(ctx, tx, m, out); err != nil {
+		return ResolveOutcome{}, err
+	}
+	return out, tx.Commit()
 }
 
 func clearMetricResolution(ctx context.Context, tx *sql.Tx, mentionID int64) error {
@@ -82,15 +108,7 @@ type metricRefTarget struct {
 	Name, NameEn, Subject, SubjectEn, Section, Cond string
 }
 
-func (r metricReferenceResolver) Resolve(ctx context.Context, db *sql.DB, m RefMention, target int64) (ResolveOutcome, error) {
-	ts, err := loadMetricRefTargets(ctx, db, target)
-	if err != nil {
-		return ResolveOutcome{}, err
-	}
-	return scoreMetricReference(m, target, ts), nil
-}
-
-func loadMetricRefTargets(ctx context.Context, db *sql.DB, target int64) ([]metricRefTarget, error) {
+func loadMetricRefTargets(ctx context.Context, db refQueryer, target int64) ([]metricRefTarget, error) {
 	rows, err := db.QueryContext(ctx, `
 SELECT 'metrics', id, COALESCE(metric_id, ''), COALESCE(metric_name, ''), COALESCE(metric_name_en, ''),
        COALESCE(metric_subject, ''), COALESCE(metric_subject_en, ''), COALESCE(table_name_or_section, ''), COALESCE(condition, '')
@@ -198,13 +216,8 @@ func topRefCandidates(cs []ArtifactCandidate, min float64) []ArtifactCandidate {
 	return out
 }
 
-// Apply replaces the mention's metric links and resolved rows with the outcome (design D8/D10).
-func (metricReferenceResolver) Apply(ctx context.Context, db *sql.DB, m RefMention, out ResolveOutcome) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// applyMetricResolution replaces the mention's links and resolved rows.
+func applyMetricResolution(ctx context.Context, tx *sql.Tx, m RefMention, out ResolveOutcome) error {
 	// Serialize writers of this record's <rec>_rfm_<n> numbering.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('kb.metrics.rfm:' || $1::text, 0))`, m.InputRecordID); err != nil {
 		return err
@@ -213,11 +226,14 @@ func (metricReferenceResolver) Apply(ctx context.Context, db *sql.DB, m RefMenti
 		return err
 	}
 	var next int
-	if err := tx.QueryRowContext(ctx, `
+	if out.State == metricRefResolved {
+		if err := tx.QueryRowContext(ctx, `
 SELECT COALESCE(MAX(NULLIF(split_part(metric_id, '_rfm_', 2), '')::int), 0)
 FROM kb.metrics WHERE input_record_id = $1 AND ref_mention_id IS NOT NULL`, m.InputRecordID).Scan(&next); err != nil {
-		return err
+			return err
+		}
 	}
+
 	for i, c := range out.Candidates {
 		status := "candidate"
 		if c.Resolved {
@@ -256,7 +272,7 @@ UPDATE kb.ref_mentions SET metric_state = $2, ext_info = ext_info || jsonb_build
 WHERE id = $1`, m.ID, out.State, string(ext)); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // insertResolvedMetricRow copies the target metric's value into the referencing record (design

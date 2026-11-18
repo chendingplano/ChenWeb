@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
 ### Requirement: Artifact families resolve references through a registered resolver
-The reference layer SHALL define a resolver interface (`Family`, `Takes`, `HasArtifacts`,
-`Pending`, `Resolve`, `Apply`). Each artifact family SHALL register one implementation. The
+The reference layer SHALL define a resolver interface (`Family`, `Takes`, `Reconcile`).
+Each artifact family SHALL register one implementation. The
 reference layer SHALL NOT write artifact tables, and artifact extractors SHALL NOT parse references.
-Withdrawal SHALL need no operation of its own: `Apply` replaces a mention's previous links and
+Withdrawal SHALL need no operation of its own: `Reconcile` replaces a mention's previous links and
 rows, and deleting a mention SHALL remove them by foreign-key cascade.
 
 #### Scenario: A family takes only its own references
@@ -12,9 +12,9 @@ rows, and deleting a mention SHALL remove them by foreign-key cascade.
 - **THEN** the metric resolver's `Takes` returns false and nothing is written for it
 
 ### Requirement: Step 5 — the reference extractor resolves outgoing references
-After storing a record's mentions, `extract_references` SHALL run, for every registered family,
-`Resolve` and `Apply` for each mention the family takes whose holding is `held` and whose target
-record already has artifacts of that family.
+After storing a record's mentions, `extract_references` SHALL run `Reconcile` for each mention
+that a registered family takes. The family SHALL use the current holding and target readiness
+to decide whether to match artifacts or record a pending outcome.
 
 #### Scenario: Target already processed
 - **WHEN** document A is processed by `extract_references` after document B (which A cites) was processed by `extract_metrics`
@@ -31,8 +31,8 @@ A failure in step 6 SHALL be logged and SHALL NOT fail the extractor.
 
 ### Requirement: Holding events also trigger resolution
 When `extract_references` attaches a record to its resource, it SHALL find other records' mentions
-of that resource that become `held`, and resolve them for every family whose `HasArtifacts` is
-true for the record.
+of that resource, refresh their accessible copy selection, and reconcile every eligible mention
+against its updated holding.
 
 #### Scenario: Target ingested last
 - **WHEN** document A cites B, B is processed by `extract_metrics` first and by `extract_references` last

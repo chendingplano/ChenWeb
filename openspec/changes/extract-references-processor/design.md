@@ -110,30 +110,30 @@ citing record's `user_id`.
 type ReferenceResolver interface {
     Family() string                                          // "metric"
     Takes(m RefMention) bool
-    HasArtifacts(ctx context.Context, db *sql.DB, recordID int64) (bool, error)
-    Resolve(ctx context.Context, db *sql.DB, m RefMention, targetRecordID int64) ([]ArtifactCandidate, error)
-    Apply(ctx context.Context, db *sql.DB, m RefMention, cands []ArtifactCandidate) error
-    Pending(ctx context.Context, db *sql.DB, m RefMention) error  // target not held or not processed yet
+    Reconcile(ctx context.Context, db *sql.DB, m RefMention, targetReady int64) (ResolveOutcome, error)
 }
 ```
 
-There is no `Withdraw`: `Apply` replaces a mention's links and rows, and deleting a mention removes
+There is no `Withdraw`: reconciliation replaces a mention's links and rows, and deleting a mention removes
 them by foreign-key cascade (`kb.metrics.ref_mention_id`, `kb.reference_artifact_links.ref_mention_id`),
 which is how a re-run of `extract_references` withdraws. Resolvers are registered at init
 (`RegisterReferenceResolver`). Step 5 is `ResolveOutgoing(ctx,
 db, citingRecordID)`, called by `extract_references`. Step 6 is `ResolveIncoming(ctx, db, family,
-targetRecordID)`, called by an artifact extractor after it saves. The incoming-holding event is
-`ResolveIncoming` for every family whose `HasArtifacts` is true. All of them live in the
+targetRecordID)`, called by an artifact extractor after it saves. The incoming-holding event
+runs scoped outgoing reconciliation after refreshing copy selection for the affected resource.
+All of them live in the
 `docprocessing` package, so `extract_metrics` calls its own resolver directly. *Alternative*: a
 separate Go package. It was rejected for v1 because every party is in `docprocessing`.
 
 **D8. Write-then-look and idempotency.**
 - Each event commits its own rows before it queries the other side.
-- `Apply` takes `pg_advisory_xact_lock` on the citing record, so concurrent appliers to one record
+- Reconciliation locks the mention while reading its current holding, replacing the outcome and
+  synchronizing its attention item in one transaction.
+- Writing resolved metric rows takes `pg_advisory_xact_lock` on the citing record, so concurrent writers
   serialize their `<rec>_rfm_<n>` numbering.
 - Links are unique on (`ref_mention_id`, `artifact_family`, `target_artifact_key`), and writes use
   `ON CONFLICT … DO UPDATE`.
-- `Apply` for a mention first deletes that mention's previous links and rows, so re-resolution
+- Reconciliation first deletes the mention's previous links and rows, so re-resolution
   replaces and never accumulates.
 
 **D9. Metric matching (v1, deterministic).**
