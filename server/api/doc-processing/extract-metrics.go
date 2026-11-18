@@ -4178,7 +4178,7 @@ func (p *MetricsProcessor) resolveIncomingReferences(ctx context.Context, record
 	if db == nil {
 		return
 	}
-	sum, err := ResolveIncoming(ctx, db, "metric", recordID, p.Logger)
+	sum, err := ResolveIncoming(ctx, db, "metric", recordID)
 	if err != nil {
 		p.Logger.Warn("metric reference resolution (step 6) failed", "record_id", recordID, "error", err)
 		return

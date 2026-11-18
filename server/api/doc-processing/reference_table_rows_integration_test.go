@@ -96,13 +96,13 @@ func TestMetricReferenceAttentionLifecycle(t *testing.T) {
 	}
 	outgoing := func() {
 		t.Helper()
-		if _, err := ResolveOutgoing(ctx, db, 753, nil); err != nil {
+		if _, err := ResolveOutgoing(ctx, db, 753); err != nil {
 			t.Fatal(err)
 		}
 	}
 	incoming := func() {
 		t.Helper()
-		if _, err := ResolveIncoming(ctx, db, "metric", 999, nil); err != nil {
+		if _, err := ResolveIncoming(ctx, db, "metric", 999); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,7 +160,7 @@ VALUES ('unresolved-reference', $1, 753, '{"family":"metric"}')`,
 
 	exec(`UPDATE kb.metrics SET metric_name='Temperature' WHERE input_record_id=999`)
 	exec(`ALTER TABLE kb.attention_items RENAME TO blocked_attention_items`)
-	if _, err := ResolveIncoming(ctx, db, "metric", 999, nil); err == nil {
+	if _, err := ResolveIncoming(ctx, db, "metric", 999); err == nil {
 		t.Fatal("expected reconciliation to fail when attention items cannot be updated")
 	}
 	exec(`ALTER TABLE kb.blocked_attention_items RENAME TO attention_items`)

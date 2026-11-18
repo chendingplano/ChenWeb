@@ -181,7 +181,7 @@ func (p *ReferencesProcessor) FinalizeChunkBatch(ctx context.Context) error {
 
 	// Step 5. Resolution failures never fail the extraction: the mentions are stored and the next
 	// event on either side resolves them again.
-	outgoing, err := ResolveOutgoing(ctx, p.DB, recordID, p.Logger)
+	outgoing, err := ResolveOutgoing(ctx, p.DB, recordID)
 	if err != nil {
 		p.Logger.Warn("step 5 resolution failed", "record_id", recordID, "error", err)
 	}
@@ -213,7 +213,7 @@ func (p *ReferencesProcessor) resolveHoldingEvent(ctx context.Context, store Ref
 		return sum, err
 	}
 	for _, citingID := range citing {
-		outcome, err := resolveOutgoing(ctx, p.DB, citingID, resourceID, p.Logger)
+		outcome, err := resolveOutgoing(ctx, p.DB, citingID, resourceID)
 		sum.merge(outcome)
 		if err != nil {
 			return sum, err

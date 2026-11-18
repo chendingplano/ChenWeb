@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-
-	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 // ArtifactCandidate is one target artifact a mention may mean.
@@ -99,18 +97,18 @@ func (s ResolveSummary) merge(o ResolveSummary) {
 }
 
 // ResolveOutgoing is step 5: resolve the citing record's mentions for every registered family.
-func ResolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
-	return resolveOutgoing(ctx, db, citingRecordID, 0, logger)
+func ResolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID int64) (ResolveSummary, error) {
+	return resolveOutgoing(ctx, db, citingRecordID, 0)
 }
 
-func resolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID, resourceID int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
+func resolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID, resourceID int64) (ResolveSummary, error) {
 	ms, err := loadRefMentions(ctx, db, `m.input_record_id = $1 AND NOT m.internal AND ($2 = 0 OR m.resource_id = $2)`, citingRecordID, resourceID)
 	if err != nil {
 		return nil, err
 	}
 	sum := ResolveSummary{}
 	for _, r := range registeredReferenceResolvers() {
-		out, err := reconcileReferences(ctx, db, r, ms, 0, logger)
+		out, err := reconcileReferences(ctx, db, r, ms, 0)
 		sum.merge(out)
 		if err != nil {
 			return sum, err
@@ -121,7 +119,7 @@ func resolveOutgoing(ctx context.Context, db *sql.DB, citingRecordID, resourceID
 
 // ResolveIncoming is step 6 (and the holding event): resolve, with one family's resolver, every
 // other record's mention whose holding is targetRecordID.
-func ResolveIncoming(ctx context.Context, db *sql.DB, family string, targetRecordID int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
+func ResolveIncoming(ctx context.Context, db *sql.DB, family string, targetRecordID int64) (ResolveSummary, error) {
 	r := referenceResolverFor(family)
 	sum := ResolveSummary{}
 	if r == nil {
@@ -131,10 +129,10 @@ func ResolveIncoming(ctx context.Context, db *sql.DB, family string, targetRecor
 	if err != nil {
 		return sum, err
 	}
-	return reconcileReferences(ctx, db, r, ms, targetRecordID, logger)
+	return reconcileReferences(ctx, db, r, ms, targetRecordID)
 }
 
-func reconcileReferences(ctx context.Context, db *sql.DB, r ReferenceResolver, ms []RefMention, targetReady int64, logger ApiTypes.JimoLogger) (ResolveSummary, error) {
+func reconcileReferences(ctx context.Context, db *sql.DB, r ReferenceResolver, ms []RefMention, targetReady int64) (ResolveSummary, error) {
 	sum := ResolveSummary{}
 	for _, m := range ms {
 		if !r.Takes(m) {
@@ -148,11 +146,6 @@ func reconcileReferences(ctx context.Context, db *sql.DB, r ReferenceResolver, m
 			continue
 		}
 		sum.add(r.Family(), out.State)
-		if logger != nil && (out.State == "needs_review" || out.State == "no_match") {
-			logger.Info("reference not resolved with confidence", "family", r.Family(), "ref_id", m.RefID,
-				"citing_record", m.InputRecordID, "target_record", out.TargetInputID, "state", out.State,
-				"candidates", len(out.Candidates), "notes", out.Notes)
-		}
 	}
 	return sum, nil
 }
