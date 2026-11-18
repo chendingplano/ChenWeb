@@ -222,7 +222,7 @@ func TestSimplePreflightPreservesMergedCellsNotesAndRowOwnership(t *testing.T) {
 }
 
 func TestSimplePreflightMissingOrInvalidCitationFailsAtomically(t *testing.T) {
-	for _, kind := range []string{"missing", "invalid", "set-aside"} {
+	for _, kind := range []string{"missing", "invalid"} {
 		t.Run(kind, func(t *testing.T) {
 			ext := &simpleMetricsExtractor{respond: func(n int, _ llmclients.JSONExtractionInput) (map[string]any, error) {
 				row := map[string]any{"n": "length", "v": "1", "l": []any{"20"}, "t": []any{"20#r1"}}
@@ -232,10 +232,6 @@ func TestSimplePreflightMissingOrInvalidCitationFailsAtomically(t *testing.T) {
 						row["t"] = []any{"20#r999"}
 					} else {
 						delete(row, "t")
-					}
-					if kind == "set-aside" {
-						key = "x"
-						row["r"] = "no_value"
 					}
 				}
 				payload := map[string]any{"m": []any{}}
@@ -407,7 +403,8 @@ func TestSimplePreflightRecoversAfterOverlapTableCitationRetries(t *testing.T) {
 }
 
 // Record 383, chunk 229 (ChenWeb#29): in a split table segment the model cited only a
-// header row for a set-aside item. The row-citation check ran after the structured call
+// header row for an item (a set-aside then; set-asides are now owned by the table's first
+// segment, see TestSimplePreflightSetAsideAboutTableHeaderHasOneOwner, so a metric is used here). The row-citation check ran after the structured call
 // returned, so the whole segment failed without a retry. It must run as CheckParsed: the
 // primary is retried with text naming the item, and the segment's rows are kept.
 func TestSimplePreflightRetriesPrimaryOnHeaderOnlyCitation(t *testing.T) {
@@ -446,7 +443,8 @@ func TestSimplePreflightRetriesPrimaryOnHeaderOnlyCitation(t *testing.T) {
 		}
 		payload := map[string]any{"lang": "zh", "m": metrics}
 		if addBad {
-			payload["x"] = []any{map[string]any{"n": "尺寸档位", "r": "term_definition", "l": []any{"20"}, "t": []any{"20#h0"}}}
+			metrics = append(metrics, map[string]any{"n": "尺寸档位", "s": "材料", "v": "1", "l": []any{"20"}, "t": []any{"20#h0"}})
+			payload["m"] = metrics
 		}
 		content, _ := json.Marshal(payload)
 		w.Header().Set("Content-Type", "application/json")
@@ -505,5 +503,39 @@ func TestSimplePreflightRetainsExplicitRowCitationsInLineField(t *testing.T) {
 	row["t"] = []any{"916#r999"}
 	if _, err := first.accepts(row, spans); err == nil {
 		t.Fatal("explicit invalid t must fail even when l has usable row citations")
+	}
+}
+
+// Prod record 419, chunk 263: set-aside items about a table's own header or column range
+// ("表C.1温度列范围") cite header rows or no row. They have no data row to own them, so
+// retries can never fix them. The segment holding the table's first unit keeps the item;
+// the others drop it, so it is recorded once. Metrics keep the strict data-row rule.
+func TestSimplePreflightSetAsideAboutTableHeaderHasOneOwner(t *testing.T) {
+	work := newMetricSimpleWork([]MarkedLine{simpleLine("n", 20, "table", preflightTable(4))})
+	first := metricSimpleSelection{work, work.units[:2]}
+	second := metricSimpleSelection{work, work.units[2:]}
+	for name, item := range map[string]map[string]any{
+		"no t":        {"n": "表C.1温度列范围", "r": "term_definition", "l": []any{"20"}},
+		"header only": {"n": "表C.1温度列范围", "r": "term_definition", "l": []any{"20"}, "t": []any{"20#h0"}},
+	} {
+		payload := func(s metricSimpleSelection) error {
+			return s.checkCitations(map[string]any{"x": []any{item}}, newSimpleChunkLines(s.lines()))
+		}
+		if err := payload(first); err != nil {
+			t.Errorf("%s: first segment: %v", name, err)
+		}
+		if err := payload(second); err != nil {
+			t.Errorf("%s: second segment: %v", name, err)
+		}
+		if ok, err := first.acceptsSetAside(item, []string{"20"}); !ok || err != nil {
+			t.Errorf("%s: owner accept=%t err=%v", name, ok, err)
+		}
+		if ok, err := second.acceptsSetAside(item, []string{"20"}); ok || err != nil {
+			t.Errorf("%s: non-owner accept=%t err=%v", name, ok, err)
+		}
+	}
+	metric := map[string]any{"n": "x", "v": "1", "l": []any{"20"}, "t": []any{"20#h0"}}
+	if _, err := first.accepts(metric, []string{"20"}); err == nil {
+		t.Error("a metric citing only a header must still be rejected")
 	}
 }

@@ -3,6 +3,7 @@
 	import { onMount, tick } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
+	import DatePicker from '$lib/components/shared-ui/date-picker/DatePicker.svelte';
 	import NameValueVisualizer from '$lib/components/shared-ui/name-value/name-value-visualizer.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -141,6 +142,13 @@
 		if (!value) return '';
 		return userNames[value.trim().toLowerCase()] || value;
 	}
+	// Emails of users whose display name contains `text` (case-insensitive).
+	function emailsForName(text: string): string[] {
+		const needle = text.toLowerCase();
+		return Object.entries(userNames)
+			.filter(([, name]) => name.toLowerCase().includes(needle))
+			.map(([email]) => email);
+	}
 	async function loadUserNames() {
 		try {
 			const data = await call('/api/v1/system-admin/users');
@@ -181,11 +189,18 @@
 			const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
 			if (sort) params.set('sort', `${sort.col}|${sort.dir}`);
 			for (const f of filters) params.append('filter', `${f.col}|${f.op}|${f.value}`);
-			for (const key of ['id', 'level', 'loc', 'status', 'resolver', 'owner'] as const) {
+			for (const key of ['id', 'level', 'loc', 'status'] as const) {
 				if (appliedFilters[key]) params.append('filter', `${key}|eq|${appliedFilters[key]}`);
 			}
-			if (appliedFilters.message.trim())
-				params.append('filter', `message|contains|${appliedFilters.message.trim()}`);
+			// Full-text search. Owner/resolver are stored as emails but shown as names, so
+			// also search the emails behind any display name that matches the typed text.
+			for (const key of ['message', 'resolver', 'owner'] as const) {
+				const text = appliedFilters[key].trim();
+				if (!text) continue;
+				const alternatives = [text];
+				if (key !== 'message') alternatives.push(...emailsForName(text));
+				params.append('filter', `${key}|search|${alternatives.join('\n')}`);
+			}
 			if (appliedFilters.from)
 				params.append(
 					'filter',
@@ -583,19 +598,21 @@
 			/></label
 		>
 		<label class="grid gap-1"
-			>{m.alert_logs_from()}<input
-				type="date"
+			>{m.alert_logs_from()}<DatePicker
 				bind:value={filterDraft.from}
 				max={filterDraft.to || undefined}
-				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"
+				{darkMode}
+				ariaLabel={m.alert_logs_from()}
+				clearLabel={m.alert_logs_clear_date()}
 			/></label
 		>
 		<label class="grid gap-1"
-			>{m.alert_logs_to()}<input
-				type="date"
+			>{m.alert_logs_to()}<DatePicker
 				bind:value={filterDraft.to}
 				min={filterDraft.from || undefined}
-				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"
+				{darkMode}
+				ariaLabel={m.alert_logs_to()}
+				clearLabel={m.alert_logs_clear_date()}
 			/></label
 		>
 		<label class="grid gap-1"
@@ -609,6 +626,8 @@
 		>
 		<label class="grid gap-1"
 			>{m.alert_logs_message()}<input
+				type="search"
+				placeholder={m.alert_logs_search_placeholder()}
 				bind:value={filterDraft.message}
 				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"
 			/></label
@@ -632,22 +651,20 @@
 			></label
 		>
 		<label class="grid gap-1"
-			>{m.alert_logs_resolver_label()}<select
+			>{m.alert_logs_resolver_label()}<input
+				type="search"
+				placeholder={m.alert_logs_search_placeholder()}
 				bind:value={filterDraft.resolver}
 				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"
-				><option value="">{m.alert_logs_all()}</option
-				>{#each filterOptions.resolver as value}<option {value}>{displayUser(value)}</option
-					>{/each}</select
-			></label
+			/></label
 		>
 		<label class="grid gap-1"
-			>{m.alert_logs_owner()}<select
+			>{m.alert_logs_owner()}<input
+				type="search"
+				placeholder={m.alert_logs_search_placeholder()}
 				bind:value={filterDraft.owner}
 				style="background:{surface2};color:{textPrimary};border:1px solid {borderColor};border-radius:4px;padding:5px"
-				><option value="">{m.alert_logs_all()}</option>{#each filterOptions.owner as value}<option
-						{value}>{displayUser(value)}</option
-					>{/each}</select
-			></label
+			/></label
 		>
 		<button type="submit" class="rounded px-3 py-1.5" style="background:{accent};color:white"
 			>{m.alert_logs_apply()}</button

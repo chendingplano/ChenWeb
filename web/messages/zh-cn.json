@@ -387,6 +387,8 @@
 	"alert_logs_open_entries_only": "仅显示未解决记录",
 	"alert_logs_id": "编号",
 	"alert_logs_from": "开始日期",
+	"alert_logs_clear_date": "清除日期",
+	"alert_logs_search_placeholder": "搜索关键词",
 	"alert_logs_to": "结束日期",
 	"alert_logs_all": "全部",
 	"alert_logs_resolver_label": "解决人",

@@ -179,6 +179,39 @@ func TestListFiltersAcrossPages(t *testing.T) {
 	}
 }
 
+func TestListSearchFilterIsFullTextWithAliases(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	oldDB, oldAuth := ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator
+	ApiTypes.SharedDBHandle = db
+	EchoFactory.DefaultAuthenticator = func(ApiTypes.RequestContext) (*ApiTypes.UserInfo, error) {
+		return &ApiTypes.UserInfo{Email: "alice@example.com"}, nil
+	}
+	defer func() { ApiTypes.SharedDBHandle, EchoFactory.DefaultAuthenticator = oldDB, oldAuth }()
+	mock.ExpectQuery(`SELECT COUNT\(\*\).*websearch_to_tsquery\('simple', \$1\).*l\.owner ILIKE \$2 OR .*\$3\).*l\.owner ILIKE \$4`).
+		WithArgs("alice", "%alice%", "alice@example.com", "%alice@example.com%").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT id, level, message`).WithArgs("alice", "%alice%", "alice@example.com", "%alice@example.com%", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "level", "message", "req_id", "loc", "call_flow", "attrs", "created_at", "status", "owner", "resolution", "resolver", "resolve_time", "comments"}))
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/?filter=owner%7Csearch%7Calice%0Aalice%40example.com", nil)
+	if err := List(e.NewContext(req, httptest.NewRecorder())); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	// search is only allowed on text columns
+	rec := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/?filter=level%7Csearch%7Cx", nil)
+	if err := List(e.NewContext(req, rec)); err != nil || rec.Code != http.StatusBadRequest {
+		t.Fatalf("level search: err=%v code=%d", err, rec.Code)
+	}
+}
+
 func TestFilterOptionsIncludeValuesOutsideCurrentPage(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

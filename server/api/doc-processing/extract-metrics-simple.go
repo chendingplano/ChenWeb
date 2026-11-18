@@ -321,7 +321,7 @@ func (p *MetricsProcessor) callSimpleChunkSelection(ctx context.Context, recordI
 			continue
 		}
 		if selection != nil && idx.hasNormalLine(spans) {
-			accept, err := selection.accepts(raw, spans)
+			accept, err := selection.acceptsSetAside(raw, spans)
 			if err != nil {
 				return metricSimpleResult{}, fmt.Errorf("(MID-20261116-704) set-aside: %w", err)
 			}

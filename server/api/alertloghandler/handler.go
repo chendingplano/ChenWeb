@@ -57,7 +57,13 @@ var sortableColumns = map[string]string{
 	"resolver": "l.resolver",
 }
 
-var filterOps = map[string]string{"eq": "=", "ne": "<>", "gt": ">", "ge": ">=", "lt": "<", "contains": "ILIKE"}
+var filterOps = map[string]string{"eq": "=", "ne": "<>", "gt": ">", "ge": ">=", "lt": "<", "contains": "ILIKE", "search": "@@"}
+
+// searchColumns are the columns the "search" filter op (full-text search) accepts.
+var searchColumns = map[string]bool{"message": true, "owner": true, "resolver": true}
+
+// maxSearchAlternatives bounds the newline-separated alternatives of one search filter.
+const maxSearchAlternatives = 20
 
 type listResponse struct {
 	Status   bool       `json:"status"`
@@ -124,7 +130,8 @@ func List(c echo.Context) error {
 	for _, raw := range c.QueryParams()["filter"] {
 		parts := strings.SplitN(raw, "|", 3)
 		col, ok := sortableColumns[parts[0]]
-		if len(parts) != 3 || !ok || filterOps[parts[1]] == "" || (parts[1] == "contains" && parts[0] != "message") {
+		if len(parts) != 3 || !ok || filterOps[parts[1]] == "" || (parts[1] == "contains" && parts[0] != "message") ||
+			(parts[1] == "search" && !searchColumns[parts[0]]) {
 			return fail(c, http.StatusBadRequest, "invalid filter '"+raw+"' (CWB_ALT_030)")
 		}
 		value := parts[2]
@@ -132,6 +139,31 @@ func List(c echo.Context) error {
 			if id, err := strconv.ParseInt(value, 10, 64); err != nil || id < 1 {
 				return fail(c, http.StatusBadRequest, "invalid filter '"+raw+"' (CWB_ALT_030)")
 			}
+		}
+		if parts[1] == "search" {
+			// Newline-separated alternatives (the typed text plus any aliases the client
+			// resolved, e.g. the emails behind a matching display name) are OR-ed. Each
+			// matches by full-text word search or, so partial words and email fragments
+			// still hit, by case-insensitive substring.
+			var alts []string
+			for _, alt := range strings.Split(value, "\n") {
+				if alt = strings.TrimSpace(alt); alt != "" && len(alts) < maxSearchAlternatives {
+					alts = append(alts, alt)
+				}
+			}
+			if len(alts) == 0 {
+				continue
+			}
+			escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+			ors := make([]string, 0, 2*len(alts))
+			for _, alt := range alts {
+				args = append(args, alt)
+				ors = append(ors, "to_tsvector('simple', COALESCE("+col+", '')) @@ websearch_to_tsquery('simple', $"+strconv.Itoa(len(args))+")")
+				args = append(args, "%"+escape.Replace(alt)+"%")
+				ors = append(ors, col+" ILIKE $"+strconv.Itoa(len(args)))
+			}
+			where = append(where, "("+strings.Join(ors, " OR ")+")")
+			continue
 		}
 		if parts[1] == "contains" {
 			value = "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value) + "%"

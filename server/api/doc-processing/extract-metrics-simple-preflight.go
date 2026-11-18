@@ -209,7 +209,11 @@ func (s metricSimpleSelection) checkCitations(payload map[string]any, idx simple
 			if !idx.hasNormalLine(spans) {
 				continue
 			}
-			if _, err := s.accepts(raw, spans); err != nil {
+			accept := s.accepts
+			if key == "x" {
+				accept = s.acceptsSetAside
+			}
+			if _, err := accept(raw, spans); err != nil {
 				t, _ := json.Marshal(raw["t"])
 				errs = append(errs, fmt.Errorf("%s[%d] %q cites t=%s: %w", key, i, strings.TrimSpace(asString(raw["n"])), t, err))
 			}
@@ -317,6 +321,24 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 		return false, &metricSimpleOverlapCitation{line: overlapDataLine}
 	}
 	return false, errMetricSimpleRowCitation
+}
+
+// A set-aside item may be about the table itself (its title, header or a column's range),
+// so it can cite a header row or no row, and no data row owns it. The segment holding the
+// first unit of the cited table keeps it and the others drop it, so it is recorded once.
+// A metric needs a value, hence a data row, and never takes this path.
+func (s metricSimpleSelection) acceptsSetAside(raw map[string]any, spans []string) (bool, error) {
+	accept, err := s.accepts(raw, spans)
+	if !errors.Is(err, errMetricSimpleRowCitation) {
+		return accept, err
+	}
+	citedLines := newSimpleChunkLines(s.work.source).lineNumbers(spans)
+	for _, unit := range s.work.units {
+		if _, ok := s.work.tables[unit.position]; ok && slices.Contains(citedLines, s.work.source[unit.position].Line.LineNo) {
+			return slices.Contains(s.units, unit), nil
+		}
+	}
+	return false, err
 }
 
 func (p *MetricsProcessor) extractSimpleSelection(ctx context.Context, recordID int64, chunk Chunk, s metricSimpleSelection, docCtx string, total, depth int, suffix string) (metricSimpleResult, error) {

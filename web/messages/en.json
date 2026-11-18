@@ -387,6 +387,8 @@
 	"alert_logs_open_entries_only": "Open Entries Only",
 	"alert_logs_id": "ID",
 	"alert_logs_from": "From date",
+	"alert_logs_clear_date": "Clear date",
+	"alert_logs_search_placeholder": "Search words",
 	"alert_logs_to": "Through date",
 	"alert_logs_all": "All",
 	"alert_logs_resolver_label": "Resolved by",
