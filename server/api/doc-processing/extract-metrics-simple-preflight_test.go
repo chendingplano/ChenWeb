@@ -330,6 +330,82 @@ func TestSimplePreflightKeepsSectionOrderAndQualifyingCitations(t *testing.T) {
 	}
 }
 
+func TestSimplePreflightRecoversAfterOverlapTableCitationRetries(t *testing.T) {
+	contextTable := `<table><tr><th>Item</th><th>Value</th></tr>` +
+		`<tr><td>Context-only limit</td><td>900</td></tr>` +
+		`<tr><td colspan="2">Note: testing is at room temperature.</td></tr></table>`
+	work := newMetricSimpleWork([]MarkedLine{
+		simpleLine("o", 256, "table", contextTable),
+		simpleLine("o", 257, "table", preflightTable(1)),
+		simpleLine("o", 258, "paragraph", "test conditions"),
+		simpleLine("n", 259, "table", preflightTable(2)),
+	})
+	selection := metricSimpleSelection{work, work.units[:1]}
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) == 0 {
+			t.Errorf("invalid request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		message := request.Messages[len(request.Messages)-1].Content
+		input, _, _ := strings.Cut(message, "\n\nRetry instructions:")
+		mu.Lock()
+		requests = append(requests, input)
+		mu.Unlock()
+		refs := []string{"259#r1", "256#r2", "257#r1"}
+		value := "1"
+		// Mirror the production error: cite an overlap data row as the metric
+		// evidence while claiming the selected table in the source line field.
+		if strings.Contains(input, "Context-only limit") {
+			refs = []string{"256#r1"}
+			value = "900"
+		}
+		payload, _ := json.Marshal(map[string]any{"lang": "en", "m": []any{
+			map[string]any{"n": "length", "s": "material", "v": value, "l": []string{"259"}, "t": refs},
+		}})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{
+			map[string]any{"message": map[string]any{"content": string(payload)}},
+		}})
+	}))
+	defer server.Close()
+	client := &llmclients.OpenAIJSONClient{BaseURL: server.URL, APIKey: "test-key", HTTPClient: server.Client()}
+	p := makeTestSimpleMetricsProcessor(client, &fakeMetricsStore{}, nil)
+	p.RelationPromptRef = "prompt-extract-metric-simple-v2.md"
+	chunk := Chunk{SeqNo: 37, Lines: work.source}
+	res, err := p.extractSimpleSelection(context.Background(), 440, chunk, selection, "", 1, 0, "_s5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 4 || res.calls != 2 || len(res.rows) != 1 || res.rows[0]["metric_value"] != "1" {
+		t.Fatalf("requests=%d result=%+v", len(requests), res)
+	}
+	for _, input := range requests[:3] {
+		if !strings.Contains(input, "Context-only limit") {
+			t.Fatal("full overlap context lost during ordinary retries")
+		}
+	}
+	for _, text := range []string{"256#h0:", "256#r2:", "257#r1:", "test conditions", "259#r1:"} {
+		if !strings.Contains(requests[3], text) {
+			t.Errorf("recovery request lost %q", text)
+		}
+	}
+	if strings.Contains(requests[3], "256#r1:") || strings.Contains(requests[3], "259#r2:") {
+		t.Fatal("recovery request includes data outside its scope")
+	}
+	refs := res.rows[0]["source_table_rows"].([]TableRowRef)
+	if len(refs) != 3 {
+		t.Errorf("qualifying citations lost: %v", refs)
+	}
+}
+
 // Record 383, chunk 229 (ChenWeb#29): in a split table segment the model cited only a
 // header row for a set-aside item. The row-citation check ran after the structured call
 // returned, so the whole segment failed without a retry. It must run as CheckParsed: the

@@ -21,6 +21,15 @@ const (
 var metricSimpleNumbers = regexp.MustCompile(`[+-]?\d+(?:[.,]\d+)?`)
 var errMetricSimpleRowCitation = errors.New("split table output requires valid data-row citations in t")
 
+type metricSimpleOverlapCitation struct{ line int }
+
+func (e *metricSimpleOverlapCitation) Error() string {
+	return fmt.Sprintf("%v: table %d is overlap context; extract the value from a normal table row and cite that row in t",
+		errMetricSimpleRowCitation, e.line)
+}
+
+func (e *metricSimpleOverlapCitation) Unwrap() error { return errMetricSimpleRowCitation }
+
 // A unit is indivisible: one prose line or one original, expanded table row.
 // position indexes the original source, not a synthetic line number.
 type metricSimpleUnit struct {
@@ -33,6 +42,8 @@ type metricSimpleWork struct {
 	source []MarkedLine
 	tables map[int]*TableGrid
 	units  []metricSimpleUnit
+	// Recovery can limit which rows of one overlap table are visible for citation.
+	overlapTableOverride map[int]*TableGrid
 }
 
 type metricSimpleSelection struct {
@@ -242,6 +253,7 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 	if len(refs) == 0 {
 		return false, errMetricSimpleRowCitation
 	}
+	var overlapDataLine int
 	for _, ref := range refs {
 		var grid *TableGrid
 		for position, g := range s.work.tables {
@@ -250,13 +262,17 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 				break
 			}
 		}
-		if grid == nil {
+		overlap := grid == nil
+		if overlap {
 			// Originally-overlap tables supply legitimate qualifying citations,
 			// but cannot own any assertion in this source chunk.
-			for _, line := range s.work.source {
-				if line.Line.LineNo == ref.Line && line.Line.LineType == "table" {
-					grid, _ = ParseTableGrid(line.Line.Content)
-					break
+			grid = s.work.overlapTableOverride[ref.Line]
+			if grid == nil {
+				for _, line := range s.work.source {
+					if line.Line.LineNo == ref.Line && line.Line.LineType == "table" {
+						grid, _ = ParseTableGrid(line.Line.Content)
+						break
+					}
 				}
 			}
 			if grid == nil {
@@ -264,8 +280,17 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 			}
 		}
 		for _, id := range ref.Rows {
-			if _, ok := grid.Row(id); !ok {
+			row, ok := grid.Row(id)
+			if !ok {
+				if s.work.overlapTableOverride[ref.Line] != nil {
+					return false, fmt.Errorf("table %d row %s is outside the recovery request", ref.Line, id)
+				}
 				return false, errMetricSimpleRowCitation
+			}
+			if overlap && strings.HasPrefix(row.ID, "r") {
+				if _, fullWidth := row.FullWidthText(); !fullWidth {
+					overlapDataLine = ref.Line
+				}
 			}
 		}
 	}
@@ -288,6 +313,9 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 	if noteOwner != nil {
 		return selected[*noteOwner], nil
 	}
+	if overlapDataLine != 0 {
+		return false, &metricSimpleOverlapCitation{line: overlapDataLine}
+	}
 	return false, errMetricSimpleRowCitation
 }
 
@@ -295,12 +323,47 @@ func (p *MetricsProcessor) extractSimpleSelection(ctx context.Context, recordID 
 	if err := context.Cause(ctx); err != nil {
 		return metricSimpleResult{}, err
 	}
-	res, err := p.callSimpleChunkSelection(ctx, recordID, chunk, s.lines(), docCtx, total, suffix, &s)
+	lines := s.lines()
+	res, err := p.callSimpleChunkSelection(ctx, recordID, chunk, lines, docCtx, total, suffix, &s)
 	if err := context.Cause(ctx); err != nil {
 		return metricSimpleResult{}, err
 	}
 	if err == nil {
 		return res, nil
+	}
+	var overlap *metricSimpleOverlapCitation
+	if errors.Is(err, llmclients.ErrStructuredOutputRetriesExhausted) && errors.As(err, &overlap) {
+		// Keep the original context for the normal attempts. After those fail,
+		// remove the confusing data rows while keeping headers, notes and IDs.
+		for i, line := range lines {
+			if line.Line.LineNo != overlap.line || line.Line.LineType != "table" || normalizeChunkFlag(line.Mark) != "o" {
+				continue
+			}
+			grid, parseErr := ParseTableGrid(line.Line.Content)
+			if parseErr != nil {
+				break
+			}
+			grid.Rows = slices.DeleteFunc(grid.Rows, func(row TableRow) bool {
+				_, fullWidth := row.FullWidthText()
+				return !fullWidth
+			})
+			recoveryLines := slices.Clone(lines)
+			recoveryLines[i].Line.Content = grid.RenderNumbered(overlap.line)
+			work := *s.work
+			work.overlapTableOverride = map[int]*TableGrid{overlap.line: grid}
+			recovery := metricSimpleSelection{&work, s.units}
+			p.Logger.Info("extract metrics simple: retrying without overlap table data rows (ChenWeb#46)",
+				"record_id", recordID, "chunk", chunk.SeqNo, "segment", suffix, "overlap_table", overlap.line)
+			res, err = p.callSimpleChunkSelection(ctx, recordID, chunk, recoveryLines, docCtx, total, suffix+"_context_retry", &recovery)
+			if cause := context.Cause(ctx); cause != nil {
+				return metricSimpleResult{}, cause
+			}
+			if err != nil {
+				return metricSimpleResult{}, err
+			}
+			res.calls++ // the initial structured call exhausted its retries
+			return res, nil
+		}
 	}
 	truncated := errors.Is(err, llmclients.ErrStructuredOutputTruncated) || errors.Is(err, llmclients.ErrLLMResponseTruncated)
 	if len(s.units) < 2 || depth >= metricSimpleMaxSplitDepth || (!truncated && depth > 0) ||

@@ -55,6 +55,16 @@ processor's later chunks in the run SHALL fail without a call.
 - **THEN** the processor SHALL make no further extraction calls in that run
 - **AND** every chunk SHALL count as failed
 
+#### Scenario: A split segment repeatedly cites data from an overlap table
+
+- **WHEN** structured-output retries are exhausted and a metric claims a normal table as its
+  source while citing data rows only in an overlap table
+- **THEN** the processor SHALL make one additional structured extraction call on the same model,
+  omitting the implicated overlap table's data rows and keeping its headers, full-width notes,
+  and other context
+- **AND** the processor SHALL keep the normal citation ownership rules and reject citations to
+  rows omitted from the recovery request
+
 ### Requirement: Cacheable request layout
 
 Every extraction call SHALL send the instructions (the prompt text and its output schema) as the
