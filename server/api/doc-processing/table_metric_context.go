@@ -282,7 +282,8 @@ type tableMetricContextResult struct {
 // "[r1] column: value | …". A unique value in the metric's named column takes
 // precedence, including over previously saved incorrect refs. Otherwise (design D5): stored refs
 // whose hashes still match → a single best evidence-matching row → LLM-cited rows that
-// exist → a unique row containing the value with its unit → the whole table when it has
+// exist → a cited full-width header note naming the metric → a unique row containing
+// the value with its unit → the whole table when it has
 // ≤5 data rows → no match (the LLM context is kept). An exact row label plus column
 // heading in a metric name can narrow an otherwise uncited or whole-table metric.
 // When the spans also cover prose lines, the LLM context is kept and the table block
@@ -322,6 +323,7 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 		cited[r.Line] = r
 	}
 	evidence := tableMetricEvidence(metric)
+	metricName := normalizeTableMatchText(asString(metric["metric_name"]))
 	outcomeRank := map[string]int{tableRowsFromStoredRefs: 0, tableRowsFromEvidence: 1, tableRowsFromLLM: 2, tableRowsWholeTable: 3, tableRowsUnmatched: 4}
 	res.Outcome = tableRowsFromStoredRefs
 
@@ -342,6 +344,18 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 				(len(cells) == 0 || (len(cells) == 1 && cells[0] == cell))
 			if broad || sameRow {
 				rows, outcome, combinedNameCell = []TableRow{row}, tableRowsFromEvidence, cell
+			}
+		}
+		if outcome == tableRowsWholeTable || outcome == tableRowsUnmatched {
+			// The table parser can label a full-width opening note as a header.
+			// Keep the exact cited row when the note itself names the metric (ChenWeb#54).
+			if ids := cited[n].Rows; len(ids) == 1 && strings.HasPrefix(ids[0], "h") {
+				if row, ok := g.Row(ids[0]); ok {
+					if note, fullWidth := row.FullWidthText(); fullWidth && utf8.RuneCountInString(metricName) >= 2 &&
+						strings.Contains(normalizeTableMatchText(note), metricName) {
+						rows, outcome = []TableRow{row}, tableRowsFromLLM
+					}
+				}
 			}
 		}
 		if outcome == tableRowsWholeTable || outcome == tableRowsUnmatched {

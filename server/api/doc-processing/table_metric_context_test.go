@@ -111,6 +111,28 @@ func TestBuildTableMetricContext_LLMRowsUsedWhenEvidenceMissing(t *testing.T) {
 	}
 }
 
+func TestBuildTableMetricContext_CitedFullWidthHeaderNote(t *testing.T) {
+	const table = `<table><tr><td colspan="2">测量按GB/T 4980-2025进行,基准声功率: $1\times 10^{-12}\mathrm{W}$</td></tr><tr><td>项目</td><td>测量工况</td></tr><tr><td>转速</td><td></td></tr></table>`
+	idx := newTableLineIndex([]Line{{LineNo: 452, PageNo: 29, LineType: "table", Content: table}})
+	metric := map[string]any{
+		"metric_name":       "基准声功率",
+		"metric_value":      "1×10^-12",
+		"metric_unit":       "W",
+		"source_line_spans": []string{"452"},
+		"source_table_rows": []TableRowRef{{Line: 452, Rows: []string{"h0"}}},
+	}
+	res := buildTableMetricContext(idx, metric)
+	if len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "h0" ||
+		!strings.Contains(res.Context, "基准声功率") {
+		t.Fatalf("cited note lost: %+v", res)
+	}
+	metric["metric_name"] = "排气压力"
+	res = buildTableMetricContext(idx, metric)
+	if len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "r1" {
+		t.Fatalf("unrelated note selected: %+v", res)
+	}
+}
+
 func TestBuildTableMetricContext_StoredRefsWinWhenHashMatches(t *testing.T) {
 	idx := newTableLineIndex(record416Lines())
 	g, _ := ParseTableGrid(record416Table1)
