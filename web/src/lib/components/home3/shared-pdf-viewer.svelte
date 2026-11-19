@@ -4,6 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { placePdfOverlay } from './pdf-overlay-placement';
+	import { tableHighlightScrollDelta } from './pdf-highlight-scroll';
 	import { resolveTableReferences, tableLinesWithoutFallback, type TableReference, type TableGeometry } from './pdf-table-geometry';
 
 	type PdfWorker = { destroy: () => void };
@@ -547,16 +548,33 @@
 		const overlay = document.getElementById(
 			`${viewerId}-overlay-${pageNo}`
 		) as HTMLDivElement | null;
-		const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
+		const highlights = overlay?.querySelectorAll<HTMLElement>('.pdf-highlight');
+		const firstHighlight = highlights?.[0];
 		const host = pdfCanvasHostEl;
 		if (!firstHighlight || !host) return false;
 
 		const hostRect = host.getBoundingClientRect();
 		const highlightRect = firstHighlight.getBoundingClientRect();
 
+		if (highlights.length > 1 && host.clientHeight > 0) {
+			const tableMarks = Array.from(highlights).filter((mark) => mark.classList.contains('pdf-table-highlight'));
+			if (tableMarks.length > 0) {
+				const paneTop = hostRect.top + host.clientTop;
+				const bounds = (mark: HTMLElement) => {
+					const rect = mark.getBoundingClientRect();
+					return { top: rect.top - paneTop, bottom: rect.bottom - paneTop };
+				};
+				const delta = tableHighlightScrollDelta(
+					Array.from(highlights, bounds), tableMarks.map(bounds), host.clientHeight
+				);
+				if (delta !== 0) host.scrollTo({ top: host.scrollTop + delta, behavior });
+				return true;
+			}
+		}
+
 		if (alignOverflowingHighlights) {
-			const highlights = host.querySelectorAll<HTMLElement>('.pdf-highlight');
-			const extendsOutside = Array.from(highlights).some((highlight) => {
+			const allHighlights = host.querySelectorAll<HTMLElement>('.pdf-highlight');
+			const extendsOutside = Array.from(allHighlights).some((highlight) => {
 				const rect = highlight.getBoundingClientRect();
 				return rect.top < hostRect.top || rect.bottom > hostRect.bottom;
 			});
@@ -583,6 +601,7 @@
 		if (stageWidth <= 0) return;
 
 		const host = pdfCanvasHostEl;
+		const selectionAtRenderStart = tablePaintSeq;
 		const preserveTableScroll = tableReferences.length > 0 && pdfViewportByPage.size > 0 && !tableNavigationPending;
 		const scrollFraction = host && host.scrollHeight > 0 ? host.scrollTop / host.scrollHeight : 0;
 		const seq = ++pdfRenderSeq;
@@ -646,7 +665,7 @@
 				page = tableHighlights[0].page;
 				tableNavigationPending = false;
 			}
-			if (preserveTableScroll && !navigatingTable && host) {
+			if (preserveTableScroll && selectionAtRenderStart === tablePaintSeq && !navigatingTable && host) {
 				host.scrollTop = scrollFraction * host.scrollHeight;
 			} else if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
 				scrollToPage(clampPage(page), 'auto');
