@@ -284,22 +284,19 @@ func recoveryPayload(payload []byte) ([]byte, error) {
 	return json.Marshal(raw)
 }
 
-// FailBusyDocument is called when an event was retried the maximum number of
-// times and the record's processing lease was still held (ErrDocumentBusy). It
-// raises one alarm for the record (deduplicated by record_id+kind) and marks
-// the record's doc_processing status failed so it is visible instead of being
-// retried forever. Best-effort: failures are logged, never returned.
-func (s *ControlService) FailBusyDocument(ctx context.Context, payload []byte, tries uint64) {
+// ReportBusyDeliveryExhausted records a delivery that never acquired the lease.
+// The lease owner remains responsible for the document's processing status.
+func (s *ControlService) ReportBusyDeliveryExhausted(ctx context.Context, payload []byte, tries uint64) {
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil || evt.RecordID <= 0 {
 		if s.Logger != nil {
-			s.Logger.Error("(MID_26111801) busy-document retries exhausted but event has no record id", "tries", tries, "error", err)
+			s.Logger.Error("(MID_26111801) busy-document retries exhausted but event has no record id (ChenWeb#42)", "tries", tries, "error", err)
 		}
 		return
 	}
-	msg := fmt.Sprintf("record_id=%d: processing lease still held after %d delivery attempts; processing failed", evt.RecordID, tries)
+	msg := fmt.Sprintf("record_id=%d: processing lease still held after %d delivery attempts; acknowledging busy delivery", evt.RecordID, tries)
 	if s.Logger != nil {
-		s.Logger.Error("(MID_26111802) "+msg, "record_id", evt.RecordID, "tries", tries)
+		s.Logger.Info("(MID_26111802) "+msg+" (ChenWeb#42)", "record_id", evt.RecordID, "tries", tries)
 	}
 	s.raiseRoutingAlarms(ctx, []RoutingAlarm{{
 		Kind:     RoutingAlarmKindDocumentBusyMaxTries,
@@ -307,5 +304,4 @@ func (s *ControlService) FailBusyDocument(ctx context.Context, payload []byte, t
 		Message:  msg,
 		RecordID: evt.RecordID,
 	}})
-	s.persistProcessorRuntimeStatus(ctx, evt.RecordID, "doc_processing", "failed", msg)
 }

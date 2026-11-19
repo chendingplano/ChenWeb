@@ -239,3 +239,18 @@ func TestRuntimeHealthDoesNotClearNewerConcurrentFailure(t *testing.T) {
 		t.Fatalf("cleared newer fault: %v", err)
 	}
 }
+
+func TestBusyDeliveryExhaustionLeavesLeaseOwnerStatusAlone(t *testing.T) {
+	store := &fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 469, StatusRaw: "[]"}}
+	alarms := &recordingAlarmWriter{}
+	service := &ControlService{InputStore: store, RoutingAlarms: alarms}
+	service.ReportBusyDeliveryExhausted(context.Background(), []byte(`{"record_id":469}`), 20)
+
+	if len(alarms.alarms) != 1 || alarms.alarms[0].Kind != RoutingAlarmKindDocumentBusyMaxTries ||
+		alarms.alarms[0].RecordID != 469 {
+		t.Fatalf("expected a busy-delivery alarm for record 469, got %+v", alarms.alarms)
+	}
+	if updates := store.statusUpdates(); len(updates) != 0 {
+		t.Fatalf("exhausted duplicate updated the lease owner's status: %+v", updates)
+	}
+}

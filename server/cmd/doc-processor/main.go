@@ -321,7 +321,7 @@ func main() {
 		healthFail("processor_runtime_invalid", "processor configuration", "Required processor configuration, prompt or model could not be loaded; inspect the startup log", processhealth.OperatorAction)
 	}
 	control := runtime.Control
-	ns.OnBusyExhausted = control.FailBusyDocument
+	ns.OnBusyExhausted = control.ReportBusyDeliveryExhausted
 
 	processorNames := []string{"blocking"}
 	for _, p := range control.Processors {
