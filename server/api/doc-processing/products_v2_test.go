@@ -695,7 +695,7 @@ func TestProductsMergedV2RetriesPrimaryOnUngroundedSpan(t *testing.T) {
 	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
 	p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261117-382"))
 	p.FallbackModelName = "fallback-model"
-	payload, model, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
+	payload, model, _, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
 		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, productV2Lines)
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
@@ -729,7 +729,7 @@ func TestProductsMergedV2RetryNamesEveryInvalidSpan(t *testing.T) {
 	client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", HTTPClient: srv.Client()}
 	p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261117-382"))
 	p.FallbackModelName = "fallback-model"
-	payload, model, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
+	payload, model, _, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
 		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, lines)
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
