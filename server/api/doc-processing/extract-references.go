@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -28,18 +29,21 @@ import (
 const refOwnIdentifierChunks = 3
 
 type ReferencesProcessor struct {
-	InputStore   DocMetadataStore
-	DB           *sql.DB
-	Extractor    LLMJSONExtractor
-	Logger       ApiTypes.JimoLogger
-	ModelRef     string
-	ModelCfgPath string
-	ModelErr     error
-	ModelName    string
-	PromptText   string
-	PromptRef    string
-	PromptPath   string
-	PromptErr    error
+	InputStore        DocMetadataStore
+	DB                *sql.DB
+	Extractor         LLMJSONExtractor
+	Logger            ApiTypes.JimoLogger
+	ModelRef          string
+	ModelCfgPath      string
+	ModelErr          error
+	ModelName         string
+	FallbackModelName string
+	FallbackModelErr  error
+	FallbackExtractor LLMJSONExtractor
+	PromptText        string
+	PromptRef         string
+	PromptPath        string
+	PromptErr         error
 
 	batchRecordID int64
 	batchChunks   []Chunk
@@ -58,6 +62,7 @@ func NewReferencesProcessor(inputStore DocMetadataStore, db *sql.DB, e LLMJSONEx
 		[]string{"EXTRACT_REFERENCES_PROMPT"}, "prompt-extract-references-v2.md")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_REFERENCES_MODEL_NAME"}, "MODEL_DEF_FILE")
+	fallbackRef := strings.TrimSpace(os.Getenv("EXTRACT_REFERENCES_MODEL_FALLBACK"))
 	settings, configErr := LoadExtractorConfig("references")
 	if configErr != nil {
 		promptErr = configErr
@@ -65,17 +70,40 @@ func NewReferencesProcessor(inputStore DocMetadataStore, db *sql.DB, e LLMJSONEx
 		if ref, ok := settings["EXTRACT_REFERENCES_PROMPT"]; ok {
 			promptText, promptRef, promptPath, promptErr = loadPromptByRef(ref)
 		}
+		if ref, ok := settings["EXTRACT_REFERENCES_MODEL_FALLBACK"]; ok {
+			fallbackRef = strings.TrimSpace(ref)
+		}
 		if ref, ok := settings["EXTRACT_REFERENCES_MODEL_NAME"]; ok {
 			modelRef, modelCfgPath, modelCfg, modelErr = loadModelConfigByRef(ref, "MODEL_DEF_FILE")
 		}
 	}
+	var fallbackCfg structureModelConfig
+	var fallbackErr error
+	if fallbackRef != "" {
+		_, _, fallbackCfg, fallbackErr = loadModelConfigByRef(fallbackRef, "MODEL_DEF_FILE")
+	}
 	// Only an explicit no-reasoning policy overrides the model's thinking config.
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("MODEL_DEFAULT_REASONING_POLICY")), "no-reasoning") {
 		modelCfg = forceDisableThinking(modelCfg)
+		fallbackCfg = forceDisableThinking(fallbackCfg)
+	}
+	fallbackExtractor := e
+	if client, ok := e.(*llmclients.OpenAIJSONClient); ok && fallbackRef != "" && fallbackErr == nil {
+		timeoutSec := fallbackCfg.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 60
+		}
+		fallbackExtractor, fallbackErr = llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
+			Host: fallbackCfg.Host, BaseURL: fallbackCfg.BaseURL, APIKey: fallbackCfg.APIKey,
+			ModelName: fallbackCfg.ModelName, ProfileName: fallbackCfg.ProfileName, ThinkingType: fallbackCfg.ThinkingType,
+			TimeoutSec: timeoutSec, MaxOutputTokens: fallbackCfg.MaxOutputTokens,
+			EmbeddingDimensions: client.EmbeddingDimensions,
+		}, logger)
 	}
 	applyStructureModelConfigToExtractor(e, modelCfg)
 	return &ReferencesProcessor{InputStore: inputStore, DB: db, Extractor: e, Logger: logger,
 		ModelRef: modelRef, ModelCfgPath: modelCfgPath, ModelErr: modelErr, ModelName: modelCfg.ModelName,
+		FallbackModelName: fallbackCfg.ModelName, FallbackModelErr: fallbackErr, FallbackExtractor: fallbackExtractor,
 		PromptText: promptText, PromptRef: promptRef, PromptPath: promptPath, PromptErr: promptErr}
 }
 
@@ -113,23 +141,44 @@ func (p *ReferencesProcessor) ProcessChunk(ctx context.Context, idx int) error {
 		return fmt.Errorf("%s chunk index out of range", p.Name())
 	}
 	start := time.Now()
+	ctx, recovery := startLLMFallback(withLLMRecordID(ctx, p.batchRecordID))
+	defer recovery.flush()
 	in := newLLMJSONInput(ctx, p.Name(), p.PromptText, p.ModelName,
 		p.referenceChunkInputText(p.batchChunks[idx].Lines, p.batchDocCtx), p.Name(), "MID_26101121")
 	// The extraction instructions are large and identical across chunks, while each
 	// chunk's document input changes. Keep the prompt first so its stable prefix can
 	// be reused by the provider's prompt cache.
 	in.DocumentFirst = false
-	raw, err := p.Extractor.ExtractJSON(ctx, in)
+	in.Metadata = map[string]any{"chunk_index": idx, "chunk_total": len(p.batchChunks)}
+	raw, err := retryLLMTimeout(ctx, func() (map[string]any, error) {
+		return extractReferenceChunk(ctx, p.Extractor, in)
+	})
+	extractor := p.Extractor
+	if err != nil && ctx.Err() == nil {
+		if p.FallbackModelErr != nil {
+			err = fmt.Errorf("reference fallback model configuration failed: %w; primary failed: %w", p.FallbackModelErr, err)
+		} else if p.FallbackModelName != "" && p.FallbackExtractor != nil {
+			primaryErr := err
+			in.ModelName = p.FallbackModelName
+			extractor = p.FallbackExtractor
+			raw, err = extractReferenceChunk(ctx, extractor, in)
+			if err == nil {
+				recovery.recordChunk(p.DB, p.Logger, p.Name(), p.PromptRef, p.ModelName, in.ModelName, primaryErr, &idx)
+			} else {
+				err = fmt.Errorf("reference primary failed: %w; fallback failed: %w", primaryErr, err)
+			}
+		}
+	}
 	if err != nil {
 		p.Logger.Warn("extract references chunk failed", "record_id", p.batchRecordID, "chunk", idx,
 			"ms_used", time.Since(start).Milliseconds(), "error", err)
 		return err
 	}
 	ms := parseRefMentions(raw)
-	hit, miss := cacheTokenCounts(p.Extractor)
+	hit, miss := cacheTokenCounts(extractor)
 	p.Logger.Info("extract references chunk done", "record_id", p.batchRecordID, "chunk", idx,
 		"total", len(p.batchChunks), "references", len(ms), "cache_hit", hit, "cache_miss", miss,
-		"model_name", p.ModelName, "prompt_name", p.PromptRef, "ms_used", time.Since(start).Milliseconds())
+		"model_name", in.ModelName, "prompt_name", p.PromptRef, "ms_used", time.Since(start).Milliseconds())
 	p.mu.Lock()
 	p.mentions = append(p.mentions, ms...)
 	if idx < refOwnIdentifierChunks {
@@ -139,6 +188,28 @@ func (p *ReferencesProcessor) ProcessChunk(ctx context.Context, idx int) error {
 	}
 	p.mu.Unlock()
 	return nil
+}
+
+func extractReferenceChunk(ctx context.Context, extractor LLMJSONExtractor, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	if structured, ok := extractor.(LLMStructuredJSONExtractor); ok {
+		contract := newDocProcessingContract("chenweb_reference_extraction", map[string]any{
+			"type": "object", "required": []string{"references"},
+			"properties": map[string]any{"references": schemaArray()},
+		})
+		result, err := structured.ExtractStructuredJSON(ctx, in, contract)
+		if err != nil {
+			return nil, err
+		}
+		return result.Parsed, nil
+	}
+	payload, err := extractor.ExtractJSON(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := payload["references"].([]any); !ok {
+		return nil, fmt.Errorf("reference extraction response must contain a references array")
+	}
+	return payload, nil
 }
 
 func (p *ReferencesProcessor) FinalizeChunkBatch(ctx context.Context) error {

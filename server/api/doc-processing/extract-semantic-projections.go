@@ -868,6 +868,8 @@ func (p *SemanticProjectionsProcessor) FinalizeChunkBatch(ctx context.Context) e
 }
 
 func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	taskPrompt := semanticProjectionCandidateTask(p.CandidatePromptText)
 	payload, err := p.extractSemanticProjectionPayload(ctx, inputText, taskPrompt, "extract_semantic_projection_candidates", p.CandidateModelName, p.CandidateModelCfg)
 	if err == nil {
@@ -883,7 +885,7 @@ func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx c
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052130) primary candidate extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary semantic projection candidate extraction failed; retrying fallback model",
+	recovery.warn(p.Logger, "primary semantic projection candidate extraction failed; retrying fallback model",
 		"primary_model", primaryModelName,
 		"fallback_model", fallbackModelName,
 		"error", err,
@@ -899,6 +901,7 @@ func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx c
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052132) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, "extract_semantic_projection_candidates", p.CandidatePromptRef, primaryModelName, fallbackModelName, err)
 	return fallbackPayload, fallbackModelName, nil
 }
 

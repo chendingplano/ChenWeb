@@ -665,6 +665,8 @@ func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string
 		return nil, d.ModelName, fmt.Errorf("(MID_26061105) TOC primary model %q is in provider cooldown until %s", d.ModelName, retryAfter.UTC().Format(time.RFC3339))
 	}
 
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	result, err := d.callLLM(ctx, d.ModelName, d.ModelCfg, inputJSON)
 	if err == nil {
 		return parseTOCDetectionResult(result), d.ModelName, nil
@@ -674,14 +676,14 @@ func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string
 		return nil, d.ModelName, fmt.Errorf("(MID_26061101) TOC LLM detection failed and fallback not configured: %w, result:%s", err, result)
 	}
 
-	d.Logger.Warn("primary TOC LLM call failed, trying fallback",
+	recovery.warn(d.Logger, "primary TOC LLM call failed, trying fallback",
 		"primary_model", d.ModelName,
 		"fallback_model", d.FallbackModelName,
 		"error", err,
 	)
 	retryAfter := d.markPrimaryRetryCooldown(now, err)
 	if !retryAfter.IsZero() && d.Logger != nil {
-		d.Logger.Warn("primary TOC LLM provider unavailable; enabling cooldown",
+		recovery.warn(d.Logger, "primary TOC LLM provider unavailable; enabling cooldown",
 			"primary_model", d.ModelName,
 			"retry_after", retryAfter.UTC().Format(time.RFC3339),
 			"cooldown_seconds", int(tocProviderCooldown().Seconds()),
@@ -692,6 +694,7 @@ func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string
 	if fallbackErr != nil {
 		return nil, d.FallbackModelName, fmt.Errorf("(MID_26061102) TOC primary failed: %w; fallback failed: %v", err, fallbackErr)
 	}
+	recovery.record(d.Logger, "detect_toc", d.PromptRef, d.ModelName, d.FallbackModelName, err)
 	return parseTOCDetectionResult(result), d.FallbackModelName, nil
 }
 

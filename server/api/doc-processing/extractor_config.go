@@ -7,7 +7,7 @@ import (
 
 var extractorConfigKeys = map[string]map[string]string{
 	"metrics-simple": {"EXTRACT_METRICS_SIMPLE_MODEL_NAME": "text", "EXTRACT_METRICS_SIMPLE_PROMPT": "text", "EXTRACT_METRICS_MAX_TASKS": "int"},
-	"references":     {"EXTRACT_REFERENCES_MODEL_NAME": "text", "EXTRACT_REFERENCES_PROMPT": "text"},
+	"references":     {"EXTRACT_REFERENCES_MODEL_NAME": "text", "EXTRACT_REFERENCES_MODEL_FALLBACK": "text", "EXTRACT_REFERENCES_PROMPT": "text"},
 	"provisions":     {"EXTRACT_PROVISIONS_MODEL_NAME": "text", "EXTRACT_PROVISIONS_MODEL_FALLBACK": "text", "EXTRACT_PROVISIONS_PROMPT": "text", "EXTRACT_PROVISIONS_REVIEW_PROMPT": "text", "EXTRACT_PROVISIONS_MAX_TASKS": "int", "EXTRACT_PROVISIONS_INPUT": "input"},
 }
 

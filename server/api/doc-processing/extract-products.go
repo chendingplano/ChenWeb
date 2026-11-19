@@ -1515,9 +1515,13 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	modelName string,
 	cfg structureModelConfig,
 	sourceLines productSourceLines) (map[string]any, string, LLMJSONExtractor, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	primaryStart := time.Now()
 	extractor := p.productExtractor(cfg)
-	payload, err := p.extractProductPayload(ctx, extractor, opr, inputText, promptText, promptRef, modelName, sourceLines)
+	payload, err := retryLLMTimeout(ctx, func() (map[string]any, error) {
+		return p.extractProductPayload(ctx, extractor, opr, inputText, promptText, promptRef, modelName, sourceLines)
+	})
 	if err == nil {
 		return payload, strings.TrimSpace(modelName), extractor, nil
 	}
@@ -1526,7 +1530,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	if payload != nil {
 		payloadVal = payload
 	}
-	p.Logger.Warn("primary LLM failed (ChenWeb#17, ChenWeb#41)",
+	recovery.warn(p.Logger, "primary LLM failed (ChenWeb#17, ChenWeb#41)",
 		"action", opr,
 		"record_id", llmRecordIDFromContext(ctx),
 		"run_id", llmRunIDFromContext(ctx),
@@ -1537,11 +1541,11 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 		"raw_response", rawStructuredOutput(err),
 		"ms_used", time.Since(primaryStart).Milliseconds())
 
-	alarmOnTruncatedOutput(ctx, p.Logger, err, opr, modelName)
+	llmclients.ReportCallAlert(ctx, func() { alarmOnTruncatedOutput(ctx, p.Logger, err, opr, modelName) })
 
 	// The empty-JSON shortcut is legacy; a compact response must decode.
 	if sourceLines == nil && isEmptyProductExtractionError(err) {
-		p.Logger.Warn("primary products extraction returned empty JSON; treating as empty result without fallback",
+		recovery.warn(p.Logger, "primary products extraction returned empty JSON; treating as empty result without fallback",
 			"model_name", modelName,
 			"error", err,
 			"prompt_name", promptRef,
@@ -1551,7 +1555,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	}
 
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
-	if fallbackModelName == "" {
+	if fallbackModelName == "" || ctx.Err() != nil {
 		return nil, strings.TrimSpace(modelName), extractor,
 			fmt.Errorf("extract products failed and fallback model not available, err:%w, model_name:%s (MID-20261116-29)", err, modelName)
 	}
@@ -1559,7 +1563,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 		return nil, fallbackModelName, extractor, fmt.Errorf("primary extraction failed and fallback model %q is unavailable: %w (MID-20261116-30)", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary products; retrying fallback model (ChenWeb#17, ChenWeb#41)",
+	recovery.warn(p.Logger, "primary products; retrying fallback model (ChenWeb#17, ChenWeb#41)",
 		"action", opr,
 		"record_id", llmRecordIDFromContext(ctx),
 		"run_id", llmRunIDFromContext(ctx),
@@ -1573,16 +1577,18 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	payload, fallbackErr := p.extractProductPayload(ctx, extractor, opr, inputText, promptText, promptRef, fallbackModelName, sourceLines)
 	if fallbackErr != nil {
 		if sourceLines == nil && isEmptyProductExtractionError(fallbackErr) {
-			p.Logger.Warn("fallback products extraction returned empty JSON; treating as empty result",
+			recovery.warn(p.Logger, "fallback products extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
 				"prompt_name", promptRef,
 			)
+			recovery.record(p.Logger, opr, promptRef, modelName, fallbackModelName, err)
 			return map[string]any{"products": []any{}, "mentions": []any{}}, fallbackModelName, extractor, nil
 		}
 		return nil, fallbackModelName, extractor, fmt.Errorf("primary extraction (model=%s) failed: %w; fallback extraction (model=%s) failed: %v (MID-20261116-31)",
 			strings.TrimSpace(modelName), err, fallbackModelName, fallbackErr)
 	}
+	recovery.record(p.Logger, opr, promptRef, modelName, fallbackModelName, err)
 	return payload, fallbackModelName, extractor, nil
 }
 

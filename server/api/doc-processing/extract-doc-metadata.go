@@ -412,6 +412,8 @@ func (p *ExtractDocMetadataProcessor) logDocMetaSummary(
 }
 
 func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	parsed, err := p.extractMetadataWithModel(ctx, inputText, p.ModelName, p.ModelCfg)
 	if err == nil {
 		return parsed, strings.TrimSpace(p.ModelName), nil
@@ -426,7 +428,7 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051002) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary doc metadata extraction failed; retrying fallback model",
+	recovery.warn(p.Logger, "primary doc metadata extraction failed; retrying fallback model",
 		"primary_model", primaryModelName,
 		"fallback_model", fallbackModelName,
 		"error", err,
@@ -437,15 +439,17 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 	parsed, fallbackErr := p.extractMetadataWithModel(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
-			p.Logger.Warn("fallback doc metadata extraction returned empty JSON; treating as empty result",
+			recovery.warn(p.Logger, "fallback doc metadata extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
 				"prompt_name", p.PromptRef,
 			)
+			recovery.record(p.Logger, "extract_doc_metadata", p.PromptRef, primaryModelName, fallbackModelName, err)
 			return map[string]any{}, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051003) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, "extract_doc_metadata", p.PromptRef, primaryModelName, fallbackModelName, err)
 	return parsed, fallbackModelName, nil
 }
 

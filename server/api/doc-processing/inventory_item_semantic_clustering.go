@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/searchengine"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // ---- types ----
@@ -20,24 +20,24 @@ import (
 // inventory item E and the existing inventory items that hybrid search + coarse
 // filter found as candidates. It serialises to JSON for the adjudication prompt.
 type semClusterInvItemGroup struct {
-	GroupID string                   `json:"group_id"`
+	GroupID string                    `json:"group_id"`
 	Members []semClusterInvItemMember `json:"members"`
 }
 
 type semClusterInvItemMember struct {
-	InventoryItemID  string   `json:"inventory_item_id"`
-	ItemName         string   `json:"item_name"`
-	CanonicalName    string   `json:"canonical_name"`
-	Categories       []string `json:"categories"`
-	Manufacturer     string   `json:"manufacturer"`
-	Brand            string   `json:"brand"`
-	ModelNumber      string   `json:"model_number"`
-	PartNumber       string   `json:"part_number"`
-	Aliases          []string `json:"aliases"`
-	Standards        []string `json:"standards"`
-	InputRecordID    int64    `json:"input_record_id"`
-	SearchCosine     float64  `json:"search_cosine,omitempty"`
-	SearchLexicalScore float64 `json:"search_lexical_score,omitempty"`
+	InventoryItemID    string   `json:"inventory_item_id"`
+	ItemName           string   `json:"item_name"`
+	CanonicalName      string   `json:"canonical_name"`
+	Categories         []string `json:"categories"`
+	Manufacturer       string   `json:"manufacturer"`
+	Brand              string   `json:"brand"`
+	ModelNumber        string   `json:"model_number"`
+	PartNumber         string   `json:"part_number"`
+	Aliases            []string `json:"aliases"`
+	Standards          []string `json:"standards"`
+	InputRecordID      int64    `json:"input_record_id"`
+	SearchCosine       float64  `json:"search_cosine,omitempty"`
+	SearchLexicalScore float64  `json:"search_lexical_score,omitempty"`
 }
 
 // ---- config ----
@@ -316,12 +316,12 @@ func loadPendingInventoryItemsForSemCluster(ctx context.Context, db *sql.DB, rec
 	var out []pendingInventoryItemRow
 	for rows.Next() {
 		var (
-			e                  pendingInventoryItemRow
-			categoriesRaw      []byte
-			aliasesRaw         []byte
-			standardsRaw       []byte
-			rowID              int64
-			embeddingText      sql.NullString
+			e             pendingInventoryItemRow
+			categoriesRaw []byte
+			aliasesRaw    []byte
+			standardsRaw  []byte
+			rowID         int64
+			embeddingText sql.NullString
 		)
 		if err := rows.Scan(
 			&e.InventoryItemID, &e.ItemName, &e.CanonicalName,
@@ -358,10 +358,10 @@ func loadInventoryItemForSemCluster(ctx context.Context, db *sql.DB, inventoryIt
 	LIMIT 1`
 	row := db.QueryRowContext(ctx, q, inventoryItemID)
 	var (
-		e                 pendingInventoryItemRow
-		categoriesRaw     []byte
-		aliasesRaw        []byte
-		standardsRaw      []byte
+		e             pendingInventoryItemRow
+		categoriesRaw []byte
+		aliasesRaw    []byte
+		standardsRaw  []byte
 	)
 	if err := row.Scan(
 		&e.InventoryItemID, &e.ItemName, &e.CanonicalName,
@@ -556,6 +556,8 @@ func callInvItemAdjudicator(
 		return AdjudicationResult{}, fmt.Errorf("(INVSC_07) marshal groups: %w", err)
 	}
 
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := callInvItemAdjudicatorWithModel(ctx, string(inputJSON), cfg.ModelName, cfg.ModelCfg, cfg)
 	if err == nil {
 		return parseInvItemAdjudicationResult(payload, groups), nil
@@ -570,6 +572,7 @@ func callInvItemAdjudicator(
 	if fallbackErr != nil {
 		return AdjudicationResult{}, fmt.Errorf("(INVSC_08) primary adjudication failed: %w; fallback failed: %v", err, fallbackErr)
 	}
+	recovery.record(nil, "inventory_item_semantic_cluster_adjudication", cfg.PromptRef, cfg.ModelName, fallbackName, err)
 	return parseInvItemAdjudicationResult(payload, groups), nil
 }
 

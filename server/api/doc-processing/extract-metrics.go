@@ -2823,6 +2823,8 @@ func firstPromptLine(promptText string) string {
 */
 
 func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText, taskPrompt string) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := p.extractMetricPayload(ctx, inputText, taskPrompt, p.MentionModelName, p.MentionModelCfg, p.MentionPromptRef, "extract_metric_candidates", "MID-26052901", true)
 	if err == nil {
 		return payload, strings.TrimSpace(p.MentionModelName), nil
@@ -2844,7 +2846,7 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 			"prompt_name", p.MentionPromptRef,
 		)
 	} else {
-		p.Logger.Warn("primary metric candidate extraction failed; retrying fallback model",
+		recovery.warn(p.Logger, "primary metric candidate extraction failed; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"error", err,
@@ -2859,10 +2861,12 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 				"fallback_model", fallbackModelName,
 				"prompt_name", p.MentionPromptRef,
 			)
+			recovery.record(p.Logger, "extract_metric_candidates", p.MentionPromptRef, primaryModelName, fallbackModelName, err)
 			return map[string]any{"language": "unknown", "candidates": []any{}}, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26042493) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, "extract_metric_candidates", p.MentionPromptRef, primaryModelName, fallbackModelName, err)
 	return payload, fallbackModelName, nil
 }
 

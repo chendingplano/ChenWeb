@@ -759,6 +759,8 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 	}
 	chunkResults, runErr := runConcurrent(ctx, s.ExtractTopicsMaxTasks, len(chunks), func(runCtx context.Context, i int) (chunkTopicsResult, error) {
 		chunk := chunks[i]
+		runCtx, recovery := startLLMFallback(withLLMRecordID(runCtx, rec.ID))
+		defer recovery.flush()
 		chunkStart := s.Now()
 		chunkTopics, chunkErr := extractTopicsFromMarkedLinesWithLLM(
 			runCtx, rec.ID, s.Extractor, s.Logger, s.ModelName, s.PromptText, s.PromptRef,
@@ -781,6 +783,9 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 					)
 					chunkTopics = []TopicItem{}
 				} else {
+					if chunkErr != nil {
+						recovery.record(s.Logger, "extract_topics", s.PromptRef, s.ModelName, s.FallbackModelName, chunkErr)
+					}
 					chunkTopics = fbTopics
 					usedFallback = true
 				}
@@ -1503,8 +1508,10 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 // ExtractTopicsForChunk extracts topics for one chunk using canonical inputText
 // for cross-processor prompt-cache sharing. Implements topicsChunkBatcher.
 func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, recordID int64, chunk Chunk, totalChunks int, inputText string) ([]TopicItem, error) {
+	ctx, recovery := startLLMFallback(withLLMRecordID(ctx, recordID))
+	defer recovery.flush()
 	callStart := s.Now()
-	in := newLLMJSONInput(withLLMRecordID(ctx, recordID), s.PromptRef, s.PromptText, s.ModelName, inputText, "extract_topics", "MID-CWB-EXTRACT-TOPICS-BATCH")
+	in := newLLMJSONInput(ctx, s.PromptRef, s.PromptText, s.ModelName, inputText, "extract_topics", "MID-CWB-EXTRACT-TOPICS-BATCH")
 	s.Logger.Info("topics start (batch)", "record_id", recordID, "model", s.ModelName, "prompt", s.PromptRef, "seq", chunk.SeqNo)
 	parsed, primaryErr := extractTopicPayload(ctx, s.Extractor, in)
 	usedFallback := false
@@ -1523,6 +1530,9 @@ func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, re
 		} else {
 			rawTopics, _ := fbParsed["topics"].([]any)
 			topics = normalizeExtractedTopics(rawTopics, 1, s.Logger, "chunk_seqno", chunk.SeqNo, recordID)
+			if primaryErr != nil {
+				recovery.record(s.Logger, "extract_topics", s.PromptRef, s.ModelName, s.FallbackModelName, primaryErr)
+			}
 			primaryErr = nil
 			usedFallback = true
 		}

@@ -625,6 +625,8 @@ func callAdjudicator(
 		return AdjudicationResult{}, fmt.Errorf("(SEMCL_03) marshal groups: %w", err)
 	}
 
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := callAdjudicatorWithModel(ctx, string(inputJSON), cfg.ModelName, cfg.ModelCfg, cfg)
 	if err == nil {
 		return parseAdjudicationResult(payload, groups), nil
@@ -640,6 +642,7 @@ func callAdjudicator(
 	if fallbackErr != nil {
 		return AdjudicationResult{}, fmt.Errorf("(SEMCL_04) primary adjudication failed: %w; fallback failed: %v", err, fallbackErr)
 	}
+	recovery.record(nil, "semantic_cluster_adjudication", cfg.PromptRef, cfg.ModelName, fallbackName, err)
 	return parseAdjudicationResult(payload, groups), nil
 }
 

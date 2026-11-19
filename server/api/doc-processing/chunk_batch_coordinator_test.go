@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -144,7 +145,7 @@ func TestChunkBatchWarmsReferenceAndProductPrompts(t *testing.T) {
 	refs := &recordingProc{name: "extract_references"}
 	products := &recordingProc{name: "extract_products"}
 	s := &ControlService{}
-	if err := s.scheduleChunkBatch(context.Background(), []ChunkBatchProcessor{seed, refs, products}, make([]Chunk, 3), 1); err != nil {
+	if _, err := s.scheduleChunkBatch(context.Background(), []ChunkBatchProcessor{seed, refs, products}, make([]Chunk, 3), 1); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []*recordingProc{refs, products} {
@@ -163,6 +164,7 @@ func TestChunkBatchWarmsReferenceAndProductPrompts(t *testing.T) {
 type countingBatchProc struct {
 	name      string
 	initErr   error
+	chunkErr  error
 	processed int32
 	finalized int32
 }
@@ -174,7 +176,7 @@ func (c *countingBatchProc) InitChunkBatch(context.Context, int64, []Chunk, stri
 }
 func (c *countingBatchProc) ProcessChunk(context.Context, int) error {
 	atomic.AddInt32(&c.processed, 1)
-	return nil
+	return c.chunkErr
 }
 func (c *countingBatchProc) FinalizeChunkBatch(context.Context) error {
 	atomic.AddInt32(&c.finalized, 1)
@@ -217,5 +219,44 @@ func TestChunkBatchSkipsProcessorWhoseInitFailed(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&healthy.finalized); n != 1 {
 		t.Fatalf("healthy processor finalized %d times, want 1", n)
+	}
+}
+
+func TestChunkBatchMarksUnrecoveredChunkFailure(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "0")
+	dir := t.TempDir()
+	writeLineFile(t, filepath.Join(dir, "source_opendata.txt"))
+	store := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID: 441, ParserName: "opendata", StatusRaw: "[]",
+		ResultFilename:  filepath.Join(dir, "result.json"),
+		StagingFilename: filepath.Join(dir, "source.pdf"),
+	}}
+	refs := &countingBatchProc{name: "extract_references", chunkErr: context.DeadlineExceeded}
+	products := &countingBatchProc{name: "extract_products"}
+	svc := &ControlService{InputStore: store, Processors: []Processor{
+		&chunkBufferingPhaseAProc{name: "chunking", chunks: []Chunk{{SeqNo: 1}}},
+		refs, products,
+	}}
+
+	err := svc.handleEvent(context.Background(), []byte(`{"user_id":"test-user","record_id":"441"}`))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("pipeline error = %v, want timeout", err)
+	}
+	if refs.finalized != 1 || products.finalized != 1 {
+		t.Fatal("both processors should still finalize")
+	}
+	var status []struct {
+		Operation  string `json:"operation"`
+		ProcStatus string `json:"proc_status"`
+	}
+	if err := json.Unmarshal([]byte(store.currentStatusRaw()), &status); err != nil {
+		t.Fatal(err)
+	}
+	results := make(map[string]string)
+	for _, entry := range status {
+		results[entry.Operation] = entry.ProcStatus
+	}
+	if results[refs.name] != "failed" || results[products.name] != "success" {
+		t.Fatalf("processor status = %v, want references failed and products successful", results)
 	}
 }

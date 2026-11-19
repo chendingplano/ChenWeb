@@ -161,9 +161,15 @@ func (c *llmCategoryCreator) CreateCategory(ctx context.Context, rawKey, categor
 	}
 	inputJSON, _ := json.Marshal(input)
 
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := c.invoke(ctx, string(inputJSON), rawKey, categoryType, c.modelName, c.modelCfg)
 	if err != nil && strings.TrimSpace(c.fallbackModel) != "" {
+		primaryErr := err
 		payload, err = c.invoke(ctx, string(inputJSON), rawKey, categoryType, c.fallbackModel, c.fallbackCfg)
+		if err == nil {
+			recovery.record(c.logger, "create_artifact_category", c.promptRef, c.modelName, c.fallbackModel, primaryErr)
+		}
 	}
 	if err != nil {
 		return createdCategory{}, err

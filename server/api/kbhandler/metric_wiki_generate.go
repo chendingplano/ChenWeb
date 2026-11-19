@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	toml "github.com/pelletier/go-toml/v2"
@@ -94,7 +95,7 @@ func generateMetricWikiPage(ctx context.Context, logger ApiTypes.JimoLogger, mct
 		return nil, fmt.Errorf("encode metric facts: %w", err)
 	}
 
-	prose, modelName, err := runMetricWikiProse(ctx, logger, prompt, inputText)
+	prose, modelName, err := runMetricWikiProse(ctx, logger, mctx.RecordID, prompt, inputText)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func generateMetricWikiPage(ctx context.Context, logger ApiTypes.JimoLogger, mct
 
 // runMetricWikiProse tries the primary model, then the fallback, returning the
 // first valid prose result and the model name that produced it.
-func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt, inputText string) (metricWikiProse, string, error) {
+func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, recordID int64, prompt, inputText string) (metricWikiProse, string, error) {
 	type modelAttempt struct {
 		envKey   string
 		required bool
@@ -119,6 +120,13 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 		{"WIKIPAGE_CREATION_FALLBACK", false},
 	}
 
+	ctx, finishAlerts := llmclients.DeferCallAlerts(ctx)
+	recovered := false
+	defer func() { finishAlerts(recovered) }()
+	const operation = "generate_metric_wiki"
+	const promptName = "metric_wiki_generation_prompt"
+	var primaryErr error
+	var primaryModel string
 	var lastErr error
 	sawModel := false
 	for _, a := range attempts {
@@ -155,27 +163,36 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 			logger.Info("generating metric wiki prose", "env", a.envKey, "model_name", cfg.ModelName, "thinking_type", cfg.ThinkingType)
 		}
 		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-			PromptName: llmclients.EnsurePromptName("metric_wiki_generation_prompt", "generate_metric_wiki", "MID-20261007-01", cfg.ModelName),
+			PromptName: llmclients.EnsurePromptName(promptName, operation, "MID-20261007-01", cfg.ModelName),
 			PromptText: prompt,
 			ModelName:  cfg.ModelName,
 			InputText:  inputText,
-			CallReason: "generate_metric_wiki",
+			RecordID:   recordID,
+			CallReason: operation,
 			CallLoc:    "MID-20261007-01",
 		})
-		if err != nil {
+		prose := parseMetricWikiProse(payload)
+		if err != nil || strings.TrimSpace(prose.Lead) == "" {
+			message := "wiki LLM call failed"
+			if err == nil {
+				err = fmt.Errorf("model %q returned no usable lead", cfg.ModelName)
+				message = "wiki LLM output unusable"
+			}
 			lastErr = err
+			if a.required {
+				primaryErr, primaryModel = err, cfg.ModelName
+			}
 			if logger != nil {
-				logger.Error("wiki LLM call failed", "env", a.envKey, "err", err)
+				llmclients.ReportCallAlert(ctx, func() { logger.Error(message, "env", a.envKey, "err", err) })
 			}
 			continue
 		}
-		prose := parseMetricWikiProse(payload)
-		if strings.TrimSpace(prose.Lead) == "" {
-			lastErr = fmt.Errorf("model %q returned no usable lead", cfg.ModelName)
-			if logger != nil {
-				logger.Error("wiki LLM output unusable", "env", a.envKey)
-			}
-			continue
+		if primaryErr != nil {
+			recovered = true
+			llmusage.RecordRecoveredCall(ctx, ApiTypes.ProjectDBHandle, logger, llmusage.RecoveredCall{
+				RecordID: recordID, Operation: operation, Prompt: promptName, PrimaryModel: primaryModel,
+				FallbackModel: cfg.ModelName, PrimaryError: primaryErr,
+			})
 		}
 		return prose, cfg.ModelName, nil
 	}

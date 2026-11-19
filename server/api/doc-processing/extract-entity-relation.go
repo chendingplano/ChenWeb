@@ -892,6 +892,8 @@ func (p *EntityRelationProcessor) extractStructuredWithFallback(
 	contract llmclients.StructuredOutputContract,
 	emptyResult map[string]any,
 ) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := p.extractStructuredPayload(ctx, promptText, inputText, p.ModelName, p.ModelCfg, contract)
 	if err == nil {
 		return payload, strings.TrimSpace(p.ModelName), nil
@@ -909,7 +911,7 @@ func (p *EntityRelationProcessor) extractStructuredWithFallback(
 	if ApiUtils.IsEmptyJSONResponse(err) {
 		p.Logger.Info("primary timeout. Try the fallback")
 	} else {
-		p.Logger.Warn("primary extraction failed; retrying fallback model. Try the fallback!",
+		recovery.warn(p.Logger, "primary extraction failed; retrying fallback model. Try the fallback!",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"timeout", p.ModelCfg.TimeoutSec,
@@ -923,10 +925,12 @@ func (p *EntityRelationProcessor) extractStructuredWithFallback(
 		if isEmptyEntityRelationError(fallbackErr) {
 			p.Logger.Info("fallback extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName)
+			recovery.record(p.Logger, contract.Name, promptRef, primaryModelName, fallbackModelName, err)
 			return emptyResult, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052721) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, contract.Name, promptRef, primaryModelName, fallbackModelName, err)
 	return fallbackPayload, fallbackModelName, nil
 }
 

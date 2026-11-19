@@ -14,6 +14,7 @@
   { key:'EXTRACT_METRICS_MAX_TASKS', label:m.extractor_config_tasks(), type:'number' }
  ] : extractor === 'references' ? [
   { key:'EXTRACT_REFERENCES_MODEL_NAME', label:m.extractor_config_model(), type:'model' },
+  { key:'EXTRACT_REFERENCES_MODEL_FALLBACK', label:m.extractor_config_fallback(), type:'model' },
   { key:'EXTRACT_REFERENCES_PROMPT', label:m.extractor_config_prompt(), type:'prompt' }
  ] : [
   { key:'EXTRACT_PROVISIONS_MODEL_NAME', label:m.extractor_config_model(), type:'model' },

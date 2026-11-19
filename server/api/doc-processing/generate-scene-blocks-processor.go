@@ -737,6 +737,8 @@ func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start,
 }
 
 func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	// p.Logger.Info("call llm", "inputText", inputText)
 
 	payload, err := p.extractScenePayload(ctx, inputText, promptText, modelName, cfg)
@@ -754,14 +756,14 @@ func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Conte
 	}
 
 	if ApiUtils.IsEmptyJSONResponse(err) {
-		p.Logger.Warn("primary scene extraction returned empty JSON; retrying fallback model",
+		recovery.warn(p.Logger, "primary scene extraction returned empty JSON; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"error", err,
 			"prompt_name", promptRef,
 		)
 	} else {
-		p.Logger.Warn("primary scene extraction failed; retrying fallback model",
+		recovery.warn(p.Logger, "primary scene extraction failed; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"error", err,
@@ -772,15 +774,17 @@ func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Conte
 	payload, fallbackErr := p.extractScenePayload(ctx, inputText, promptText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
-			p.Logger.Warn("fallback scene extraction returned empty JSON; treating as empty result",
+			recovery.warn(p.Logger, "fallback scene extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
 				"prompt_name", promptRef,
 			)
+			recovery.record(p.Logger, "extract_scene_blocks", promptRef, primaryModelName, fallbackModelName, err)
 			return map[string]any{"scene_blocks": []any{}, "candidates": []any{}}, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051826) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, "extract_scene_blocks", promptRef, primaryModelName, fallbackModelName, err)
 	return payload, fallbackModelName, nil
 }
 

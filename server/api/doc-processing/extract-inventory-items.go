@@ -71,7 +71,7 @@ type InventoryItemsProcessor struct {
 	batchResults  []inventoryChunkOutcome
 	batchMu       sync.Mutex // protects batchResults append under concurrent Phase 3
 	batchStart    time.Time
-	batchSkip     bool       // set true by InitChunkBatch when data exists and !force
+	batchSkip     bool // set true by InitChunkBatch when data exists and !force
 }
 
 type InventoryItemsStore interface {
@@ -513,6 +513,8 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 }
 
 func (p *InventoryItemsProcessor) extractInventoryItemsWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := p.extractInventoryItemsPayload(ctx, inputText, p.ModelName, p.ModelCfg)
 	if err == nil {
 		return payload, strings.TrimSpace(p.ModelName), nil
@@ -528,10 +530,12 @@ func (p *InventoryItemsProcessor) extractInventoryItemsWithFallback(ctx context.
 	fallbackPayload, fallbackErr := p.extractInventoryItemsPayload(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
+			recovery.record(p.Logger, "extract_inventory_items", p.PromptRef, primaryModelName, fallbackModelName, err)
 			return map[string]any{"language": "unknown", "items": []any{}}, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26053116) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, "extract_inventory_items", p.PromptRef, primaryModelName, fallbackModelName, err)
 	return fallbackPayload, fallbackModelName, nil
 }
 

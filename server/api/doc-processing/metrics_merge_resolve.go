@@ -18,6 +18,8 @@ import (
 // "metric_id" and "_merge_source" ("existing"|"new") (DR4). Retries once with
 // the fallback model on failure or an invalid partition (ADR 2026071002 DR2/DR4).
 func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID int64, group []map[string]any) (winners []map[string]any, candidates []map[string]any, modelUsed string, err error) {
+	ctx, recovery := startLLMFallback(withLLMRecordID(ctx, recordID))
+	defer recovery.flush()
 	inputIDs := make(map[string]bool, len(group))
 	candidates = make([]map[string]any, 0, len(group))
 	for _, m := range group {
@@ -58,7 +60,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 	if p.FallbackMergeResolveModelErr != nil {
 		return nil, candidates, p.MergeResolveModelName, fmt.Errorf("(MID_26071102) merge resolve failed and fallback model %q unavailable: %w", p.FallbackMergeResolveModelRef, err)
 	}
-	p.Logger.Warn("merge resolve failed on primary model; retrying fallback",
+	recovery.warn(p.Logger, "merge resolve failed on primary model; retrying fallback",
 		"record_id", recordID, "primary_model", p.MergeResolveModelName,
 		"fallback_model", fallbackModelName, "error", err)
 
@@ -69,6 +71,7 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 	if valErr := validateMergeResolveResponse(winners, inputIDs, candidates); valErr != nil {
 		return nil, candidates, fallbackModelName, fmt.Errorf("(MID_26071104) fallback merge resolve returned invalid partition: %w", valErr)
 	}
+	recovery.record(p.Logger, "merge_resolve_metrics", p.MergeResolvePromptRef, p.MergeResolveModelName, fallbackModelName, err)
 	return winners, candidates, fallbackModelName, nil
 }
 

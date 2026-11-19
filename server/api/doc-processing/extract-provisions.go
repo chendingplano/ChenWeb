@@ -782,6 +782,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, inputText, promptText string) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := p.extractProvisionPayloadFromText(ctx, inputText, promptText, p.ModelName, p.Extractor)
 	if err == nil {
 		return payload, strings.TrimSpace(p.ModelName), p.registerProvisionObjectTypes(ctx, payload["provisions"].([]any), p.ModelName)
@@ -797,7 +799,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 			"fallback_model", p.FallbackModelName,
 		)
 	} else {
-		p.Logger.Warn("primary LLM failed extracting provisions. Try the fallback!",
+		recovery.warn(p.Logger, "primary LLM failed extracting provisions. Try the fallback!",
 			"error", err,
 			"model_name", p.ModelName,
 			"timeout_sec", extractorTimeoutSec(p.Extractor),
@@ -822,11 +824,12 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	payload, fallbackErr := p.extractProvisionPayloadFromText(ctx, inputText, promptText, fallbackModelName, fallbackExt)
 	if fallbackErr != nil {
 		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
-			p.Logger.Warn("fallback provisions extraction returned empty JSON; treating as empty result",
+			recovery.warn(p.Logger, "fallback provisions extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
 				"prompt_name", p.PromptRef,
 			)
+			recovery.record(p.Logger, "extract_provisions", p.PromptRef, p.ModelName, fallbackModelName, err)
 			return map[string]any{
 				"language":   "unknown",
 				"provisions": []any{},
@@ -834,7 +837,9 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26050545) primary extraction failed: %w; fallback extraction failed: %w", err, fallbackErr)
 	}
-	return payload, fallbackModelName, p.registerProvisionObjectTypes(ctx, payload["provisions"].([]any), fallbackModelName)
+	registerErr := p.registerProvisionObjectTypes(ctx, payload["provisions"].([]any), fallbackModelName)
+	recovery.record(p.Logger, "extract_provisions", p.PromptRef, p.ModelName, fallbackModelName, err)
+	return payload, fallbackModelName, registerErr
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText, promptText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {

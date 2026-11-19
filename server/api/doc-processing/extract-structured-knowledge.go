@@ -680,6 +680,8 @@ func flattenKnowledgeItems(recordID int64, enriched map[string]any, chunkSeqNo i
 // ---- Pass 1 extraction ----
 
 func (p *StructuredKnowledgeProcessor) extractKnowledgeCandidateWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	ctx, recovery := startLLMFallback(ctx)
+	defer recovery.flush()
 	payload, err := p.extractKnowledgePayloadWithContract(ctx, inputText, p.CandidatePromptText, p.CandidateModelName, p.CandidateModelCfg, structuredKnowledgeCandidateContract())
 	if err == nil {
 		return payload, strings.TrimSpace(p.CandidateModelName), nil
@@ -694,7 +696,7 @@ func (p *StructuredKnowledgeProcessor) extractKnowledgeCandidateWithFallback(ctx
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052630) primary candidate extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary structured knowledge candidate extraction failed; retrying fallback model",
+	recovery.warn(p.Logger, "primary structured knowledge candidate extraction failed; retrying fallback model",
 		"primary_model", primaryModelName,
 		"fallback_model", fallbackModelName,
 		"error", err,
@@ -710,6 +712,7 @@ func (p *StructuredKnowledgeProcessor) extractKnowledgeCandidateWithFallback(ctx
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052632) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
+	recovery.record(p.Logger, "extract_structured_knowledge_candidates", p.CandidatePromptRef, primaryModelName, fallbackModelName, err)
 	return fallbackPayload, fallbackModelName, nil
 }
 

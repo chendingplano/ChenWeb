@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 func TestRunMetricWikiProseReasoningPolicy(t *testing.T) {
@@ -63,8 +66,26 @@ func TestRunMetricWikiProseReasoningPolicy(t *testing.T) {
 			t.Setenv("MODEL_DEF_FILE", modelsPath)
 			t.Setenv("WIKIPAGE_CREATION_MODEL_NAME", "wiki-primary")
 			t.Setenv("WIKIPAGE_CREATION_FALLBACK", "wiki-fallback")
-			prose, model, err := runMetricWikiProse(context.Background(), nil, "Test prompt", "Test facts")
+			db, mock, err := sqlmock.New()
 			if err != nil {
+				t.Fatal(err)
+			}
+			previous := ApiTypes.ProjectDBHandle
+			ApiTypes.ProjectDBHandle = db
+			t.Cleanup(func() {
+				ApiTypes.ProjectDBHandle = previous
+				db.Close()
+			})
+			if tc.fallback {
+				mock.ExpectExec("INSERT INTO kb.failed_llm_calls").
+					WithArgs(int64(5), int64(0), "generate_metric_wiki", "metric_wiki_generation_prompt", "wiki-primary", "wiki-fallback", `model "wiki-primary" returned no usable lead`, "", nil).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			prose, model, err := runMetricWikiProse(context.Background(), nil, 5, "Test prompt", "Test facts")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatal(err)
 			}
 			wantModel, wantCalls := "wiki-primary", 1

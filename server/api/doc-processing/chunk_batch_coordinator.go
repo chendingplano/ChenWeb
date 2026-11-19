@@ -201,7 +201,8 @@ func (s *ControlService) runProcessorsChunkBatched(
 			"num_chunks", len(chunks),
 		)
 	}
-	if schedErr := s.scheduleChunkBatch(ctx, initOK, chunks, recordID); schedErr != nil {
+	chunkFailures, schedErr := s.scheduleChunkBatch(ctx, initOK, chunks, recordID)
+	if schedErr != nil {
 		if errors.Is(schedErr, ErrPipelineStopped) {
 			*requestStopped = true
 			phaseBSpan.SetStatus(codes.Error, "stopped")
@@ -245,6 +246,10 @@ func (s *ControlService) runProcessorsChunkBatched(
 			}
 			continue
 		}
+		if chunkErr := chunkFailures[bp.Name()]; chunkErr != nil {
+			s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "failed", chunkErr.Error())
+			continue
+		}
 		s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "success", "")
 	}
 
@@ -270,9 +275,9 @@ func (s *ControlService) scheduleChunkBatch(
 	batchProcessors []ChunkBatchProcessor,
 	chunks []Chunk,
 	recordID int64,
-) error {
+) (map[string]error, error) {
 	if len(batchProcessors) == 0 || len(chunks) == 0 {
-		return nil
+		return nil, nil
 	}
 	ordered := orderBatchProcessorsSeedFirst(batchProcessors)
 	seed := ordered[0]
@@ -282,19 +287,20 @@ func (s *ControlService) scheduleChunkBatch(
 		mu       sync.Mutex
 		firstErr error
 	)
-	record := func(err error) {
-		if err == nil {
-			return
-		}
+	failures := make(map[string]error)
+	record := func(processor string, err error) {
 		mu.Lock()
 		if firstErr == nil {
 			firstErr = err
+		}
+		if processor != "" && failures[processor] == nil {
+			failures[processor] = err
 		}
 		mu.Unlock()
 	}
 	runOne := func(bp ChunkBatchProcessor, chunkIdx int) {
 		if isCtxStopped(ctx) {
-			record(ErrPipelineStopped)
+			record("", ErrPipelineStopped)
 			return
 		}
 		name := bp.Name()
@@ -304,10 +310,10 @@ func (s *ControlService) scheduleChunkBatch(
 		recCtx := withLLMRecordID(withProcessorLLMRunID(ctx, name), recordID)
 		if err := bp.ProcessChunk(recCtx, chunkIdx); err != nil {
 			if errors.Is(err, ErrPipelineStopped) {
-				record(ErrPipelineStopped)
+				record("", ErrPipelineStopped)
 				return
 			}
-			record(fmt.Errorf("(MID_26062708) %s chunk %d: %w", bp.Name(), chunkIdx, err))
+			record(bp.Name(), fmt.Errorf("(MID_26062708) %s chunk %d: %w", bp.Name(), chunkIdx, err))
 		}
 	}
 
@@ -320,7 +326,7 @@ func (s *ControlService) scheduleChunkBatch(
 		case <-seedDone:
 		case <-ctx.Done():
 			wg.Wait()
-			return ErrPipelineStopped
+			return nil, ErrPipelineStopped
 		}
 	}
 
@@ -332,7 +338,7 @@ func (s *ControlService) scheduleChunkBatch(
 			case <-time.After(stagger):
 			case <-ctx.Done():
 				wg.Wait()
-				return ErrPipelineStopped
+				return nil, ErrPipelineStopped
 			}
 		}
 	}
@@ -350,7 +356,7 @@ func (s *ControlService) scheduleChunkBatch(
 			case <-time.After(stagger):
 			case <-ctx.Done():
 				wg.Wait()
-				return ErrPipelineStopped
+				return nil, ErrPipelineStopped
 			}
 		}
 	}
@@ -377,7 +383,7 @@ func (s *ControlService) scheduleChunkBatch(
 			case <-time.After(stagger):
 			case <-ctx.Done():
 				wg.Wait()
-				return ErrPipelineStopped
+				return nil, ErrPipelineStopped
 			}
 		}
 	}
@@ -401,7 +407,7 @@ func (s *ControlService) scheduleChunkBatch(
 					select {
 					case sem <- struct{}{}:
 					case <-ctx.Done():
-						record(ErrPipelineStopped)
+						record("", ErrPipelineStopped)
 						return
 					}
 					defer func() { <-sem }()
@@ -412,7 +418,7 @@ func (s *ControlService) scheduleChunkBatch(
 	}
 
 	wg.Wait()
-	return firstErr
+	return failures, firstErr
 }
 
 // runPhaseBProcessors selects the Phase B execution strategy:
