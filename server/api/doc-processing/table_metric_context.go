@@ -283,7 +283,8 @@ type tableMetricContextResult struct {
 // precedence, including over previously saved incorrect refs. Otherwise (design D5): stored refs
 // whose hashes still match → a single best evidence-matching row → LLM-cited rows that
 // exist → a unique row containing the value with its unit → the whole table when it has
-// ≤5 data rows → no match (the LLM context is kept).
+// ≤5 data rows → no match (the LLM context is kept). An exact row label plus column
+// heading in a metric name can narrow an otherwise uncited or whole-table metric.
 // When the spans also cover prose lines, the LLM context is kept and the table block
 // is appended after it.
 func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMetricContextResult {
@@ -329,10 +330,19 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 		g, _ := idx.grid(n)
 		rows, outcome := selectTableRows(g, cited[n], evidence)
 		needsRow := outcome == tableRowsWholeTable || outcome == tableRowsUnmatched
+		var combinedNameCell string
 		if row, ok := matchTableMetricCellValue(g, metric, needsRow); ok {
 			rows, outcome = []TableRow{row}, tableRowsFromEvidence
 		} else if note, ok := matchTableMetricNoteRow(g, metric); ok {
 			rows, outcome = []TableRow{note}, tableRowsFromEvidence
+		} else if row, cell := matchTableMetricCombinedName(g, metric); cell != "" {
+			cells := cited[n].Cells
+			broad := len(cells) == 0 && (needsRow || len(rows) == len(g.Rows))
+			sameRow := len(rows) == 1 && rows[0].ID == row.ID &&
+				(len(cells) == 0 || (len(cells) == 1 && cells[0] == cell))
+			if broad || sameRow {
+				rows, outcome, combinedNameCell = []TableRow{row}, tableRowsFromEvidence, cell
+			}
 		}
 		if outcome == tableRowsWholeTable || outcome == tableRowsUnmatched {
 			if row, ok := matchTableMetricQuantityRow(g, metric); ok {
@@ -351,7 +361,11 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 			continue
 		}
 		ref := TableRowRef{Line: n, RowHash: map[string]string{}}
-		ref.Cells = tableMetricCellIDs(g, rows, outcome, metric)
+		if combinedNameCell != "" {
+			ref.Cells = []string{combinedNameCell}
+		} else {
+			ref.Cells = tableMetricCellIDs(g, rows, outcome, metric)
+		}
 		var b strings.Builder
 		if c := idx.caption(n); c != "" {
 			b.WriteString(c)
@@ -527,6 +541,44 @@ func matchesTableMetricCondition(g *TableGrid, row TableRow, label, value string
 		}
 	}
 	return false
+}
+
+// matchTableMetricCombinedName recognizes a metric named for a first-column row
+// label followed by a column heading, as in record 404 Table 6. Require the
+// selected cell to carry the extracted value and reject multiple matching cells.
+func matchTableMetricCombinedName(g *TableGrid, metric map[string]any) (TableRow, string) {
+	name := normalizeTableMatchText(asString(metric["metric_name"]))
+	value := normalizeTableMatchText(asString(metric["metric_value"]))
+	if name == "" || value == "" {
+		return TableRow{}, ""
+	}
+	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
+	var matchRow TableRow
+	var matchCell string
+	for _, row := range g.Rows {
+		if len(row.Cells) < 2 || row.Spans[0] != 1 {
+			continue
+		}
+		label := normalizeTableMatchText(row.Cells[0])
+		heading, ok := strings.CutPrefix(name, label)
+		if label == "" || !ok || heading == "" {
+			continue
+		}
+		for col := 1; col < len(row.Cells) && col < len(g.Columns); col++ {
+			if row.Spans[col] != 1 || normalizeTableMatchText(g.Columns[col]) != heading {
+				continue
+			}
+			cellValue := normalizeTableMatchText(row.Cells[col])
+			if cellValue != value && cellValue != value+unit {
+				continue
+			}
+			if matchCell != "" {
+				return TableRow{}, ""
+			}
+			matchRow, matchCell = row, fmt.Sprintf("%s:c%d", row.ID, col+1)
+		}
+	}
+	return matchRow, matchCell
 }
 
 // rowsWithMostEvidenceCells keeps the rows (indexes into g.Rows) with the most evidence

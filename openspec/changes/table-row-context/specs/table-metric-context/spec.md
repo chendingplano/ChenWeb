@@ -45,6 +45,12 @@ For a metric whose spans cover a `table` line, the system SHALL replace `metric_
 - **AND** the matcher accepts a range that repeats its unit, such as `100mm~200mm`, and an explicit single-digit limit written in Chinese, such as `不应有多于两处`
 - **AND** prose that gives the applicability of the limit, such as an inspection area of 0.1 m², remains condition evidence
 
+#### Scenario: A metric name combines a row label and column heading
+- **WHEN** the metric name is the first-column row label followed by a column heading and exactly one cell at that intersection agrees with the extracted value
+- **THEN** the system can narrow a missing citation or a row-only citation covering the whole table to that cell
+- **AND** the cell stays selected when the stored citation is replayed
+- **AND** record 404 metric `404_mtc_19` cites `214#r2:c2` for the average wet-bulb temperature variation
+
 #### Scenario: Ambiguous evidence
 - **WHEN** no row is cited, several rows tie on evidence, and the table has more than 5 data rows
 - **THEN** the LLM's `metric_context` is kept and a warning is logged with the metric ID, line and table size

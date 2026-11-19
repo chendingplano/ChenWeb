@@ -55,6 +55,49 @@ func TestBuildTableMetricContext_EvidenceTieIsNotAWinner(t *testing.T) {
 	}
 }
 
+func TestBuildTableMetricContext_Record404CombinedRowAndColumnName(t *testing.T) {
+	const table = `<table><tr><td>试验参数</td><td>平均变动幅度</td><td>最大变动幅度</td></tr><tr><td>空气干球温度</td><td>±0.3°C</td><td>±0.5°C</td></tr><tr><td>空气湿球温度</td><td>±0.3°C</td><td>±0.5°C</td></tr><tr><td>热源侧流体进出口温度/给水进水温度</td><td>±0.3°C</td><td>±0.5°C</td></tr><tr><td>蒸汽压力</td><td>±1.5%</td><td>±3%</td></tr><tr><td>热源侧流体流量/使用侧蒸汽流量</td><td>±5%</td><td>±5%</td></tr></table>`
+	grid, err := ParseTableGrid(table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broad := TableRowRef{Line: 214, RowHash: map[string]string{}}
+	for _, row := range grid.Rows {
+		broad.Rows = append(broad.Rows, row.ID)
+		broad.RowHash[row.ID] = row.Hash
+	}
+	for _, tc := range []struct {
+		name, html, value string
+		refs              []TableRowRef
+		want              string
+	}{
+		{name: "omitted citation", html: table, value: "±0.3", want: "r2:c2"},
+		{name: "saved whole-table citation", html: table, value: "±0.3", refs: []TableRowRef{broad}, want: "r2:c2"},
+		{name: "disagreeing value", html: table, value: "±0.5"},
+		{name: "wrong unit", html: table, value: "±0.3%"},
+		{name: "ambiguous cell", html: strings.Replace(table, "空气干球温度", "空气湿球温度", 1), value: "±0.3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			idx := newTableLineIndex([]Line{{LineNo: 214, PageNo: 15, LineType: "table", Content: tc.html}})
+			metric := map[string]any{
+				"metric_name": "空气湿球温度平均变动幅度", "metric_value": tc.value, "metric_unit": "°C",
+				"source_line_spans": []string{"214"}, "source_table_rows": tc.refs,
+			}
+			res := buildTableMetricContext(idx, metric)
+			if len(res.Refs) != 1 || strings.Join(res.Refs[0].Cells, ",") != tc.want {
+				t.Fatalf("outcome=%s refs=%+v, want cell %q", res.Outcome, res.Refs, tc.want)
+			}
+			if tc.want != "" && (res.Outcome != tableRowsFromEvidence || strings.Join(res.Refs[0].Rows, ",") != "r2" || res.Refs[0].RowHash["r2"] != "b2149d425984") {
+				t.Fatalf("outcome=%s refs=%+v, want evidence at row r2 with its hash", res.Outcome, res.Refs)
+			}
+			metric["source_table_rows"] = res.Refs
+			if replay := buildTableMetricContext(idx, metric); len(replay.Refs) != 1 || strings.Join(replay.Refs[0].Cells, ",") != tc.want || replay.Context != res.Context {
+				t.Fatalf("replay changed citation or context: %+v", replay)
+			}
+		})
+	}
+}
+
 func TestBuildTableMetricContext_LLMRowsUsedWhenEvidenceMissing(t *testing.T) {
 	idx := newTableLineIndex(record416Lines())
 	m := map[string]any{
