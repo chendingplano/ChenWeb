@@ -331,6 +331,11 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 		} else if note, ok := matchTableMetricNoteRow(g, metric); ok {
 			rows, outcome = []TableRow{note}, tableRowsFromEvidence
 		}
+		if outcome == tableRowsWholeTable || outcome == tableRowsUnmatched {
+			if row, ok := matchTableMetricQuantityRow(g, metric); ok {
+				rows, outcome = []TableRow{row}, tableRowsFromEvidence
+			}
+		}
 		if outcome == tableRowsUnmatched {
 			if note, ok := matchTableMetricFootnote(g, metric); ok {
 				rows, outcome = []TableRow{note}, tableRowsFromEvidence
@@ -590,6 +595,58 @@ func matchTableMetricFootnote(g *TableGrid, metric map[string]any) (TableRow, bo
 	return found, matched
 }
 
+var tableMetricScalarPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
+
+// matchTableMetricQuantityRow recovers a citation when the value is embedded
+// in a data cell, e.g. "不多于7处", "100mm~200mm", or "多于两处".
+// A single row must match the complete quantity, including its unit.
+func matchTableMetricQuantityRow(g *TableGrid, metric map[string]any) (TableRow, bool) {
+	value := normalizeTableMatchText(asString(metric["metric_value"]))
+	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
+	if unit == "" {
+		return TableRow{}, false
+	}
+	unit = regexp.QuoteMeta(unit)
+	const afterQuantity = `(?:$|[^\pN\p{Latin}^/])`
+	var pattern string
+	switch {
+	case tableMetricScalarPattern.MatchString(value):
+		pattern = `(?:^|[^\pN.,])` + regexp.QuoteMeta(value) + unit
+		if len(value) == 1 && value[0] >= '1' && value[0] <= '9' {
+			numerals := [...]string{"一", "[二两]", "三", "四", "五", "六", "七", "八", "九"}
+			written := `(?:多于|少于|超过|至少|最多|低于|高于|小于|大于|不少于)` + numerals[value[0]-'1'] + unit
+			pattern = `(?:` + pattern + `|` + written + `)`
+		}
+	default:
+		endpoints := metricIntervalRe.FindStringSubmatch(value)
+		if endpoints == nil {
+			endpoints = metricHyphenRe.FindStringSubmatch(value)
+		}
+		if endpoints == nil {
+			return TableRow{}, false
+		}
+		pattern = `(?:^|[^\pN.,+\-])` + regexp.QuoteMeta(endpoints[1]) + `(?:` + unit + `)?[~〜–—-]` + regexp.QuoteMeta(endpoints[2]) + unit
+	}
+	quantity := regexp.MustCompile(pattern + afterQuantity)
+	var found TableRow
+	for _, row := range g.Rows {
+		if _, fullWidth := row.FullWidthText(); fullWidth {
+			continue
+		}
+		for _, cell := range row.Cells {
+			if !quantity.MatchString(normalizeTableMatchText(cell)) {
+				continue
+			}
+			if found.ID != "" {
+				return TableRow{}, false
+			}
+			found = row
+			break
+		}
+	}
+	return found, found.ID != ""
+}
+
 func tableMetricFootnoteMatcher(metric map[string]any) func(string) bool {
 	value := normalizeTableMatchText(asString(metric["metric_value"]))
 	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
@@ -687,7 +744,7 @@ func applyTableMetricContexts(lines []Line, metrics []map[string]any, logger Api
 		counts[res.Outcome]++
 		if res.Context == "" {
 			if logger != nil {
-				logger.Warn("table metric context: no row match (ChenWeb#19)",
+				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52)",
 					"record_id", recordID,
 					"metric_id", asString(m["metric_id"]),
 					"metric_name", asString(m["metric_name"]),
