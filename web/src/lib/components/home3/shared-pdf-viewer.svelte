@@ -3,6 +3,7 @@
 	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { placePdfOverlay } from './pdf-overlay-placement';
 	import { resolveTableReferences, tableLinesWithoutFallback, type TableReference, type TableGeometry } from './pdf-table-geometry';
 
 	type PdfWorker = { destroy: () => void };
@@ -180,12 +181,13 @@
 	let pdfSidebarWidth = $state(0);
 	let pdfViewportByPage = new SvelteMap<number, PdfPageViewport>();
 	let pdfActiveRenders = new SvelteMap<number, { cancel?: () => void }>();
+	let showFloatingOverlayStack = $derived(showAllFloatingOverlays && !!floatingOverlays);
 	let floatingOverlayPage = $state<number | null>(null);
 	let floatingOverlayLeft = $state(8);
 	let floatingOverlayTop = $state(8);
 	let floatingOverlayMaxHeight = $state(0);
-	let floatingOverlayWidth = $state(320);
-	let floatingOverlayEl = $state<HTMLDivElement | null>(null);
+	let floatingOverlayMaxWidth = $state(0);
+	let floatingOverlayContent = $state<HTMLDivElement | null>(null);
 	let floatingOverlayManuallyMoved = $state(false);
 	let floatingOverlayDrag = $state<{
 		pointerId: number;
@@ -463,43 +465,50 @@
 			floatingOverlayPage = null;
 			return;
 		}
-		if (floatingOverlayManuallyMoved) return;
+		if (showFloatingOverlayStack || floatingOverlayManuallyMoved) return;
 		const host = pdfCanvasHostEl;
 		if (!host) return;
 		const hostRect = host.getBoundingClientRect();
+		const hostLeft = hostRect.left + host.clientLeft;
+		const hostTop = hostRect.top + host.clientTop;
+		const previousPage = floatingOverlayPage;
 		for (const pageNo of pdfRenderedPages) {
-			const overlay = document.getElementById(
-				`${viewerId}-overlay-${pageNo}`
-			) as HTMLDivElement | null;
-			const viewport = pdfViewportByPage.get(pageNo);
-			const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
-			const pageShell = overlay?.closest('.pdf-canvas-shell') as HTMLElement | null;
-			if (!overlay || !viewport || !firstHighlight || !pageShell) continue;
-			const maxLeft = Math.max(8, viewport.width - floatingOverlayWidth - 8);
+			const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`);
+			const marks = overlay?.querySelectorAll<HTMLElement>('.pdf-highlight');
+			const canvas = overlay?.parentElement?.querySelector('canvas');
+			if (!marks?.length || !canvas) continue;
+			const pageRect = canvas.getBoundingClientRect();
+			const pane = {
+				left: Math.max(0, hostLeft - pageRect.left) + 8,
+				top: Math.max(0, hostTop - pageRect.top) + 8,
+				right: Math.min(pageRect.width, hostLeft + host.clientWidth - pageRect.left) - 8,
+				bottom: Math.min(pageRect.height, hostTop + host.clientHeight - pageRect.top) - 8
+			};
 			floatingOverlayPage = pageNo;
-			floatingOverlayLeft = maxLeft;
-			const shellRect = pageShell.getBoundingClientRect();
-			const visibleTop = Math.max(8, hostRect.top + 8 - shellRect.top);
-			const visibleBottom = Math.min(
-				viewport.height - 8,
-				hostRect.bottom - 8 - shellRect.top
+			floatingOverlayMaxWidth = Math.max(0, pane.right - pane.left);
+			const content = pageNo === previousPage ? floatingOverlayContent : null;
+			const highlights = Array.from(marks, (mark) => {
+				const rect = mark.getBoundingClientRect();
+				return {
+					left: rect.left - pageRect.left,
+					top: rect.top - pageRect.top,
+					right: rect.right - pageRect.left,
+					bottom: rect.bottom - pageRect.top
+				};
+			});
+			const card = content?.parentElement;
+			const placement = content && card && placePdfOverlay(
+				pane, highlights, card.getBoundingClientRect().width, content.getBoundingClientRect().height
 			);
-			floatingOverlayMaxHeight = Math.max(0, visibleBottom - visibleTop);
-			const cardHeight = Math.min(
-				floatingOverlayEl?.offsetHeight ?? 0,
-				floatingOverlayMaxHeight
-			);
-			const highlightTop = firstHighlight.offsetTop;
-			const belowHighlight = highlightTop + firstHighlight.offsetHeight + 12;
-			const aboveHighlight = highlightTop - cardHeight - 12;
-			const preferredTop = aboveHighlight >= visibleTop ? aboveHighlight : belowHighlight;
-			floatingOverlayTop = Math.max(
-				visibleTop,
-				Math.min(preferredTop, visibleBottom - cardHeight)
-			);
+			floatingOverlayMaxHeight = placement ? placement.maxHeight : 0;
+			if (placement) {
+				floatingOverlayLeft = placement.left;
+				floatingOverlayTop = placement.top;
+			}
 			return;
 		}
 		floatingOverlayPage = null;
+		floatingOverlayMaxHeight = 0;
 	}
 
 	function startFloatingOverlayDrag(event: PointerEvent) {
@@ -710,25 +719,23 @@
 	});
 
 	$effect(() => {
-		if (!floatingOverlayEl) return;
-		const measure = () => {
-			const width = Math.ceil(floatingOverlayEl?.getBoundingClientRect().width ?? 0);
-			if (width > 0 && width !== floatingOverlayWidth) {
-				floatingOverlayWidth = width;
-			}
-			updateFloatingOverlayAnchor();
-		};
-		measure();
-		const ro = new ResizeObserver(() => measure());
-		ro.observe(floatingOverlayEl);
-		return () => {
-			ro.disconnect();
-		};
+		showFloatingOverlayStack;
+		floatingOverlay;
+		void tick().then(updateFloatingOverlayAnchor);
+	});
+
+	$effect(() => {
+		if (!floatingOverlayContent) return;
+		// Measure the content independently of the card's scrollable height.
+		const ro = new ResizeObserver(updateFloatingOverlayAnchor);
+		ro.observe(floatingOverlayContent);
+		return () => ro.disconnect();
 	});
 
 	$effect(() => {
 		if (!pdfCanvasHostEl) return;
 		const ro = new ResizeObserver(() => {
+			updateFloatingOverlayAnchor();
 			const w = Math.floor(pdfCanvasHostEl?.clientWidth ?? 0);
 			if (w <= 0 || w === pdfLastRenderWidth) return;
 			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
@@ -847,33 +854,34 @@
 							<div class="pdf-canvas-shell">
 								<canvas class="pdf-canvas" id={`${viewerId}-canvas-${pageNo}`}></canvas>
 								<div class="pdf-overlay" id={`${viewerId}-overlay-${pageNo}`}></div>
-								{#if showAllFloatingOverlays && floatingOverlays}
-									{#if floatingOverlayPages.includes(pageNo)}
-										<div class="pdf-floating-overlay-stack">
-											{@render floatingOverlays(pageNo)}
-										</div>
-									{/if}
-								{:else if floatingOverlay && floatingOverlayPage === pageNo}
+								{#if !showFloatingOverlayStack && floatingOverlay && floatingOverlayPage === pageNo}
 									<div
 										class="pdf-floating-overlay-anchor"
-										style={`left:${floatingOverlayLeft}px; top:${floatingOverlayTop}px;`}
+										style={`left:${floatingOverlayLeft}px; top:${floatingOverlayTop}px; max-width:${floatingOverlayMaxWidth}px;`}
 									>
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
 										<div
 											class="pdf-floating-overlay-card"
 											class:dragging={floatingOverlayDrag !== null}
-											bind:this={floatingOverlayEl}
+											class:unplaced={floatingOverlayMaxHeight === 0}
 								style={`box-sizing:border-box;max-height:${floatingOverlayMaxHeight}px;overflow-y:auto;`}
 											onpointerdown={startFloatingOverlayDrag}
 											onpointermove={moveFloatingOverlay}
 											onpointerup={stopFloatingOverlayDrag}
 											onpointercancel={stopFloatingOverlayDrag}
 										>
-											{@render floatingOverlay()}
+											<div bind:this={floatingOverlayContent}>
+												{@render floatingOverlay()}
+											</div>
 										</div>
 									</div>
 								{/if}
 							</div>
+							{#if showFloatingOverlayStack && floatingOverlays && floatingOverlayPages.includes(pageNo)}
+								<div class="pdf-floating-overlay-stack">
+									{@render floatingOverlays(pageNo)}
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -1058,21 +1066,19 @@
 	}
 	.pdf-floating-overlay-anchor {
 		position: absolute;
+		width: max-content;
 		left: 0;
 		top: 0;
 		z-index: 3;
 		pointer-events: none;
 	}
 	.pdf-floating-overlay-stack {
-		position: absolute;
-		right: 8px;
-		top: 8px;
-		z-index: 3;
+		margin: 8px 8px 0 auto;
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
 		width: min(320px, calc(100% - 16px));
-		max-height: calc(100% - 16px);
+		max-height: 50vh;
 		overflow-y: auto;
 		overscroll-behavior: contain;
 		pointer-events: auto;
@@ -1084,6 +1090,9 @@
 		user-select: none;
 		-webkit-user-select: none;
 		max-width: min(420px, calc(100vw - 48px));
+	}
+	.pdf-floating-overlay-card.unplaced {
+		visibility: hidden;
 	}
 	.pdf-floating-overlay-card.dragging {
 		cursor: grabbing;
