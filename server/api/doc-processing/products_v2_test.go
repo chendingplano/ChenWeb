@@ -19,6 +19,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -434,6 +436,90 @@ func TestExtractProductsMergedForChunk_CompactSpanErrorUsesFallback(t *testing.T
 	}
 }
 
+func TestExtractProductsMergedForChunk_TimeoutFallbackAlert21578(t *testing.T) {
+	for _, fallbackSucceeds := range []bool{true, false} {
+		t.Run(fmt.Sprintf("fallback succeeds=%t", fallbackSucceeds), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			originalDB := ApiTypes.ProjectDBHandle
+			ApiTypes.ProjectDBHandle = db
+			t.Cleanup(func() { ApiTypes.ProjectDBHandle = originalDB })
+
+			var primaryCalls, fallbackCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct{ Model string }
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if request.Model == "test" {
+					primaryCalls.Add(1)
+					w.WriteHeader(http.StatusOK)
+					w.(http.Flusher).Flush()
+					<-r.Context().Done()
+					return
+				}
+				fallbackCalls.Add(1)
+				if !fallbackSucceeds {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []any{map[string]any{"message": map[string]any{"content": compactMergedTestResponse}}},
+				})
+			}))
+			defer server.Close()
+
+			client := &llmclients.OpenAIJSONClient{
+				BaseURL: server.URL, APIKey: "test-key",
+				HTTPClient: &http.Client{Timeout: 200 * time.Millisecond},
+			}
+			p := newCompactMergedTestProcessor(client)
+			p.MergedPromptRef = "prompt-extract-products-merged-v3.md"
+			p.FallbackModelName = "fallback"
+			p.FallbackModelCfg = structureModelConfig{ModelName: "fallback"}
+			block := chunksToBlocks([]Chunk{compactMergedTestChunk})[0]
+			const chunkIndex = 6
+			ctx := withLLMUserID(withLLMRunID(withLLMRecordID(context.Background(), 441), 3939), "test-user")
+			var alerts []loggerutil.AlertRecord
+			loggerutil.SetAlertSink(func(a loggerutil.AlertRecord) { alerts = append(alerts, a) })
+			t.Cleanup(func() { loggerutil.SetAlertSink(nil) })
+
+			if fallbackSucceeds {
+				mock.ExpectExec("INSERT INTO kb.failed_llm_calls").
+					WithArgs(int64(441), int64(3939), "extract products merged", p.MergedPromptRef, "test", "fallback", sqlmock.AnyArg(), "", chunkIndex).
+					WillReturnResult(sqlmock.NewResult(1, 1))
+			}
+			rows, model, didFallback, err := p.extractProductsMergedForChunk(ctx, "evt", chunkIndex, 49, block, compactMergedTestChunk, "doc")
+			if primaryCalls.Load() != 2 || fallbackCalls.Load() != 1 {
+				t.Fatalf("calls: primary=%d fallback=%d, want 2 and 1", primaryCalls.Load(), fallbackCalls.Load())
+			}
+			if fallbackSucceeds {
+				if err != nil || !didFallback || model != "fallback" || len(rows) != 1 || len(alerts) != 0 {
+					t.Fatalf("recovery: rows=%d model=%q fallback=%v err=%v alerts=%v", len(rows), model, didFallback, err, alerts)
+				}
+			} else {
+				if err == nil || didFallback {
+					t.Fatalf("unrecovered call: model=%q fallback=%v err=%v", model, didFallback, err)
+				}
+				hasProductAlert := false
+				for _, alert := range alerts {
+					hasProductAlert = hasProductAlert || strings.HasPrefix(alert.Message, "primary products; retrying fallback model")
+				}
+				if !hasProductAlert {
+					t.Fatal("missing product alert for unrecovered call")
+				}
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestExtractProductsMergedForChunk_CompactStructuredRetry(t *testing.T) {
 	for _, first := range []string{
 		`{"products":[{"product_name":"垃圾桶","evidence_lines":["143"]}]}`,
@@ -738,7 +824,7 @@ func TestProductsMergedV2RetriesPrimaryOnUngroundedSpan(t *testing.T) {
 	p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261117-382"))
 	p.FallbackModelName = "fallback-model"
 	payload, model, _, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
-		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, productV2Lines)
+		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, productV2Lines, nil)
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
 	}
@@ -772,7 +858,7 @@ func TestProductsMergedV2RetryNamesEveryInvalidSpan(t *testing.T) {
 	p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261117-382"))
 	p.FallbackModelName = "fallback-model"
 	payload, model, _, err := p.extractProductPayloadWithFallback(context.Background(), "extract products merged", "input", "prompt",
-		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, lines)
+		"prompt-extract-products-merged-v3.md", "primary-model", structureModelConfig{}, lines, nil)
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
 	}

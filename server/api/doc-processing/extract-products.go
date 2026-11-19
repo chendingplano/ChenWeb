@@ -1105,7 +1105,7 @@ func (p *ProductsProcessor) extractProductMentionsForChunk(
 	payload, modelName, extractor, err := p.extractProductPayloadWithFallback(ctx,
 		"extract products", inputText,
 		taskText, p.MentionPromptRef,
-		p.MentionModelName, p.MentionModelCfg, nil)
+		p.MentionModelName, p.MentionModelCfg, nil, &idx)
 	p.logLLMCall(ctx, fmt.Sprintf("%s_p1_b%d", eventID, idx), "extract_product_mentions", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, extractor, callStart, p.Now())
 	if err != nil {
 		return nil, modelName, false, err
@@ -1160,7 +1160,7 @@ func (p *ProductsProcessor) extractProductsMergedForChunk(
 	payload, modelName, extractor, err := p.extractProductPayloadWithFallback(ctx,
 		"extract products merged", inputText,
 		taskText, p.MergedPromptRef,
-		p.MergedModelName, p.MergedModelCfg, sourceLines)
+		p.MergedModelName, p.MergedModelCfg, sourceLines, &idx)
 	p.logLLMCall(ctx, fmt.Sprintf("%s_m_b%d", eventID, idx), "extract_products_merged", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MergedPromptRef), nil, err, extractor, callStart, p.Now())
 	if err != nil {
 		return nil, modelName, false, err
@@ -1471,7 +1471,7 @@ func (p *ProductsProcessor) enrichProductCandidatesWithLLM(
 		payload, modelName, extractor, err := p.extractProductPayloadWithFallback(concCtx,
 			"product relations", inputText,
 			taskText, p.RelationPromptRef,
-			p.RelationModelName, p.RelationModelCfg, nil)
+			p.RelationModelName, p.RelationModelCfg, nil, nil)
 		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_product_relations", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, extractor, callStart, p.Now())
 		if err != nil {
 			if isCtxStopped(concCtx) {
@@ -1514,7 +1514,8 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 	promptRef string,
 	modelName string,
 	cfg structureModelConfig,
-	sourceLines productSourceLines) (map[string]any, string, LLMJSONExtractor, error) {
+	sourceLines productSourceLines,
+	chunkIndex *int) (map[string]any, string, LLMJSONExtractor, error) {
 	ctx, recovery := startLLMFallback(ctx)
 	defer recovery.flush()
 	primaryStart := time.Now()
@@ -1582,13 +1583,13 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(
 				"error", fallbackErr,
 				"prompt_name", promptRef,
 			)
-			recovery.record(p.Logger, opr, promptRef, modelName, fallbackModelName, err)
+			recovery.recordChunk(ApiTypes.ProjectDBHandle, p.Logger, opr, promptRef, modelName, fallbackModelName, err, chunkIndex)
 			return map[string]any{"products": []any{}, "mentions": []any{}}, fallbackModelName, extractor, nil
 		}
 		return nil, fallbackModelName, extractor, fmt.Errorf("primary extraction (model=%s) failed: %w; fallback extraction (model=%s) failed: %v (MID-20261116-31)",
 			strings.TrimSpace(modelName), err, fallbackModelName, fallbackErr)
 	}
-	recovery.record(p.Logger, opr, promptRef, modelName, fallbackModelName, err)
+	recovery.recordChunk(ApiTypes.ProjectDBHandle, p.Logger, opr, promptRef, modelName, fallbackModelName, err, chunkIndex)
 	return payload, fallbackModelName, extractor, nil
 }
 
@@ -2465,7 +2466,7 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 		payload, modelName, extractor, err := p.extractProductPayloadWithFallback(concCtx,
 			"product translation", string(rowInput),
 			p.TranslatePromptText, p.TranslatePromptRef,
-			p.TranslateModelName, p.TranslateModelCfg, nil)
+			p.TranslateModelName, p.TranslateModelCfg, nil, nil)
 		p.logLLMCall(ctx, fmt.Sprintf("%s_p3_t%d", eventID, b), "translate_products", 3, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.TranslatePromptRef), nil, err, extractor, callStart, p.Now())
 		cacheHit, cacheMiss := cacheTokenCounts(extractor)
 		outputTokens := outputTokenCount(extractor)

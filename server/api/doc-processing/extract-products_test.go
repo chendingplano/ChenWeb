@@ -578,6 +578,7 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 		"deepseek-v4-flash",
 		structureModelConfig{},
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
@@ -1206,7 +1207,7 @@ func TestProductsPrimaryRetryKeepsItsProviderDuringFallback(t *testing.T) {
 	primaryCfg := structureModelConfig{ModelName: "primary-model", BaseURL: primary.URL, APIKey: "primary-key"}
 	firstDone := make(chan error, 1)
 	go func() {
-		_, _, _, err := p.extractProductPayloadWithFallback(ctx, "extract products", "primary chunk", "prompt", "prompt", primaryCfg.ModelName, primaryCfg, nil)
+		_, _, _, err := p.extractProductPayloadWithFallback(ctx, "extract products", "primary chunk", "prompt", "prompt", primaryCfg.ModelName, primaryCfg, nil, nil)
 		firstDone <- err
 	}()
 	select {
@@ -1214,7 +1215,7 @@ func TestProductsPrimaryRetryKeepsItsProviderDuringFallback(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("primary request did not reach its endpoint")
 	}
-	_, model, _, err := p.extractProductPayloadWithFallback(ctx, "extract products", "fallback chunk", "prompt", "prompt", primaryCfg.ModelName, primaryCfg, nil)
+	_, model, _, err := p.extractProductPayloadWithFallback(ctx, "extract products", "fallback chunk", "prompt", "prompt", primaryCfg.ModelName, primaryCfg, nil, nil)
 	close(releasePrimary)
 	if err != nil || model != p.FallbackModelName {
 		t.Fatalf("fallback result = %q, %v", model, err)
