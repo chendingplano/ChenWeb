@@ -22,10 +22,15 @@ is non-empty.
 - **WHEN** the model returns `r:"stor"`
 - **THEN** the product row stores `storage_requirement` and the code's usage count increases
 
+#### Scenario: Packaging requirements
+- **WHEN** merged product extraction returns `r:"pkg"` for a packaging requirement
+- **THEN** the extractor resolves the relation as `stor`, stores `storage_requirement`,
+  and counts the use under `stor`. The product type `t:"pkg"` still denotes a packaging article.
+
 #### Scenario: Unknown code becomes a proposal
-- **WHEN** the model returns `r:"pkg"` and `pkg` is not in the table
-- **THEN** a row with status `proposed`, value `pkg`, the input record, the product ID and
-  an `extra_info` object is inserted, the product row is stored with `relation_type = 'pkg'`,
+- **WHEN** the model returns `r:"new_code"` and `new_code` is not in the table
+- **THEN** a row with status `proposed`, value `new_code`, the input record, the product ID and
+  an `extra_info` object is inserted, the product row is stored with `relation_type = 'new_code'`,
   and the call is not retried
 
 #### Scenario: Known proposed code
@@ -74,8 +79,8 @@ and, while no product uses it, Delete. The server SHALL also allow editing an ap
 descriptions and weight through the API.
 
 #### Scenario: Review a proposal
-- **WHEN** an admin runs the check while `pkg` is proposed
-- **THEN** the card reports one proposed type and shows `pkg` with a form that requires both
+- **WHEN** an admin runs the check while `new_code` is proposed
+- **THEN** the card reports one proposed type and shows `new_code` with a form that requires both
   descriptions and shows a weight of 0.5
 
 #### Scenario: Nothing to review
@@ -87,5 +92,5 @@ Product review SHALL take the relation-type weight from the table by stored valu
 to the configured weights and then 0.3 when the table has no row.
 
 #### Scenario: Approved weight used
-- **WHEN** `pkg` is approved with weight 0.8 and a product with `relation_type = 'pkg'` matches
+- **WHEN** `new_code` is approved with weight 0.8 and a product with `relation_type = 'new_code'` matches
 - **THEN** the match is scored with weight 0.8

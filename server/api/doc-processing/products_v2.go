@@ -140,6 +140,10 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		if relationCode == "" {
 			return nil, fmt.Errorf("(MID_20261118_003) product %d has a blank relation code", i+1)
 		}
+		// Packaging requirements use the existing handling relation (ChenWeb#55).
+		if relationCode == "pkg" {
+			relationCode = "stor"
+		}
 		relationType := productV2Relations[relationCode]
 		if relationType == "" {
 			relationType = relationCode

@@ -271,6 +271,20 @@ func TestProductsV2RetryNamesContinuationTableLabels(t *testing.T) {
 	}
 }
 
+func TestProductsV2TreatsPackagingRequirementsAsHandling(t *testing.T) {
+	lines := productSourceLines{123: "机组应外套塑料罩或防潮纸并应固定在包装箱内，其包装应符合GB/T13384的规定。"}
+	rows := decodeProductV2Test(t, `{"v":2,"p":[
+		{"n":"二氧化碳空气源热泵机组","t":"eq","r":"pkg","d":"机组应按规定包装。","s":[123],"o":"m","q":0.9},
+		{"n":"包装箱","t":"pkg","r":"use","d":"包装箱用于固定机组。","s":[123],"o":"m","q":0.9}
+	]}`, lines)
+	if rows[0]["relation_code"] != "stor" || rows[0]["relation_type"] != "storage_requirement" {
+		t.Fatalf("packaging requirement did not use the existing handling relation: %+v", rows[0])
+	}
+	if rows[1]["product_type"] != "packaging" || rows[1]["relation_code"] != "use" {
+		t.Fatalf("packaging product type changed: %+v", rows[1])
+	}
+}
+
 // loadProductsRecord382Chunk14 returns the primary's captured response and the lines
 // the call sent, keyed by line number as productSourceLinesFromChunk builds them.
 func loadProductsRecord382Chunk14(t *testing.T) (string, productSourceLines) {
