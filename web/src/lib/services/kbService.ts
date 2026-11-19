@@ -84,6 +84,13 @@ export type ListKbInputsParams = {
 	excludeDocType?: string;
 	modifyStartTime?: string;
 	modifyEndTime?: string;
+	idLike?: string;
+	// userIds are the users whose display name matched the User filter; set
+	// userFilter when the filter is active, even if no user matched.
+	userFilter?: boolean;
+	userIds?: string[];
+	statusLike?: string;
+	processingMode?: string;
 	orderBy?: string;
 	orderDir?: 'asc' | 'desc';
 	// Keep only inputs that have gold benchmark rows, optionally for one skill
@@ -125,6 +132,13 @@ function buildQuery(params: ListKbInputsParams): string {
 	if (params.endTime.trim()) query.set('end_time', params.endTime.trim());
 	if (params.modifyStartTime?.trim()) query.set('modify_start_time', params.modifyStartTime.trim());
 	if (params.modifyEndTime?.trim()) query.set('modify_end_time', params.modifyEndTime.trim());
+	if (params.idLike?.trim()) query.set('id_like', params.idLike.trim());
+	if (params.userFilter) {
+		query.set('user_filter', 'true');
+		query.set('user_ids', (params.userIds ?? []).join(','));
+	}
+	if (params.statusLike?.trim()) query.set('status_like', params.statusLike.trim());
+	if (params.processingMode?.trim()) query.set('processing_mode', params.processingMode.trim());
 	if (params.orderBy?.trim()) query.set('order_by', params.orderBy.trim());
 	if (params.orderDir?.trim()) query.set('order_dir', params.orderDir.trim());
 	if (params.hasGoldMetrics) query.set('has_gold_metrics', 'true');

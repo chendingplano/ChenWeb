@@ -95,6 +95,11 @@ type listInputsFilters struct {
 	Title                string
 	DocNo                string
 	FileName             string
+	IDLike               string
+	UserFilter           bool
+	UserIDs              []string
+	StatusLike           string
+	ProcessingMode       string
 	ParserName           string
 	Operation            string
 	ProcStatus           string
@@ -184,6 +189,11 @@ func ListInputs(c echo.Context) error {
 		Title:                c.QueryParam("title"),
 		DocNo:                c.QueryParam("doc_no"),
 		FileName:             c.QueryParam("file_name"),
+		IDLike:               c.QueryParam("id_like"),
+		UserFilter:           strings.EqualFold(strings.TrimSpace(c.QueryParam("user_filter")), "true"),
+		UserIDs:              parseCSVQuery(c.QueryParam("user_ids")),
+		StatusLike:           c.QueryParam("status_like"),
+		ProcessingMode:       c.QueryParam("processing_mode"),
 		ParserName:           c.QueryParam("parser_name"),
 		Operation:            c.QueryParam("operation"),
 		ProcStatus:           c.QueryParam("proc_status"),
@@ -958,6 +968,28 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	if fileName != "" {
 		whereParts = append(whereParts, fmt.Sprintf("COALESCE(i.file_name, '') ILIKE %s", nextArg("%"+fileName+"%")))
 	}
+	if idLike := strings.TrimSpace(filters.IDLike); idLike != "" {
+		whereParts = append(whereParts, fmt.Sprintf("CAST(i.id AS TEXT) ILIKE %s", nextArg("%"+idLike+"%")))
+	}
+	if filters.UserFilter {
+		// The user display name lives in the system-admin user store, so the
+		// client resolves matching user IDs and sends them here.
+		if len(filters.UserIDs) == 0 {
+			whereParts = append(whereParts, "FALSE")
+		} else {
+			placeholders := make([]string, 0, len(filters.UserIDs))
+			for _, id := range filters.UserIDs {
+				placeholders = append(placeholders, nextArg(id))
+			}
+			whereParts = append(whereParts, fmt.Sprintf("i.user_id IN (%s)", strings.Join(placeholders, ", ")))
+		}
+	}
+	if statusLike := strings.TrimSpace(filters.StatusLike); statusLike != "" {
+		whereParts = append(whereParts, fmt.Sprintf("CAST(i.status AS TEXT) ILIKE %s", nextArg("%"+statusLike+"%")))
+	}
+	if mode := strings.TrimSpace(filters.ProcessingMode); mode != "" {
+		whereParts = append(whereParts, fmt.Sprintf("i.processing_mode = %s", nextArg(mode)))
+	}
 	if parserName := strings.TrimSpace(filters.ParserName); parserName != "" {
 		whereParts = append(whereParts, fmt.Sprintf("%s ILIKE %s", parserNameExpr, nextArg("%"+parserName+"%")))
 	}
@@ -1213,6 +1245,17 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// parseCSVQuery splits a comma-separated query value, dropping empty entries.
+func parseCSVQuery(raw string) []string {
+	parts := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			parts = append(parts, v)
+		}
+	}
+	return parts
 }
 
 func parseTimeQuery(raw string) (*time.Time, error) {

@@ -61,6 +61,11 @@
 	let showQuickFiltersMenu = $state(false);
 	let modifyStartTime = $state('');
 	let modifyEndTime = $state('');
+	// Column filters in the table header row.
+	let idFilter = $state('');
+	let userFilter = $state('');
+	let statusFilter = $state('');
+	let processingModeFilter = $state('');
 	let page = $state(1);
 	let pageSize = $state(50);
 	let sortField = $state('create_time');
@@ -251,6 +256,7 @@
 	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
+	let headerFilterStyle = $derived(`width:100%; min-width:0; box-sizing:border-box; height:26px; padding:0 6px; border:1px solid ${borderColor}; border-radius:6px; background:${surface2}; color:${textPrimary}; font-size:12px;`);
 	let colorSuccess = $derived(darkMode ? '#34D399' : '#10B981');
 	let colorError = $derived(darkMode ? '#F87171' : '#EF4444');
 
@@ -508,9 +514,29 @@
 			noDocProcessors: quickFilter === 'no_doc_processors',
 			modifyStartTime,
 			modifyEndTime,
+			idLike: idFilter,
+			userFilter: userFilter.trim() !== '',
+			userIds: matchingUserIds(userFilter),
+			statusLike: statusFilter,
+			processingMode: processingModeFilter,
 			orderBy: sortField,
 			orderDir: sortDir
 		};
+	}
+
+	// The User column shows the display name, so the User filter matches names
+	// here and the server filters by the resulting user IDs.
+	function matchingUserIds(text: string): string[] {
+		const needle = text.trim().toLowerCase();
+		if (!needle) return [];
+		return Object.values(usersById)
+			.filter((user) => userLabel(user).toLowerCase().includes(needle))
+			.map((user) => user.id);
+	}
+
+	function reloadFromHeaderFilter() {
+		page = 1;
+		loadRecords();
 	}
 
 	async function loadRecords() {
@@ -542,15 +568,18 @@
 		}
 	}
 
-	function userDisplayValue(record: KbInputRecord): string {
-		const user = record.user_id ? usersById[record.user_id] : undefined;
-		if (!user) return 'name-not-found';
-
+	function userLabel(user: ManagedUser): string {
 		const fullName = [user.first_name, user.last_name]
 			.map((part) => part?.trim())
 			.filter(Boolean)
 			.join(' ');
 		return fullName || user.email?.trim() || user.user_mobile?.trim() || 'name-not-found';
+	}
+
+	function userDisplayValue(record: KbInputRecord): string {
+		const user = record.user_id ? usersById[record.user_id] : undefined;
+		if (!user) return 'name-not-found';
+		return userLabel(user);
 	}
 
 	function toggleSort(field: string) {
@@ -600,6 +629,10 @@
 		endTime = '';
 		modifyStartTime = '';
 		modifyEndTime = '';
+		idFilter = '';
+		userFilter = '';
+		statusFilter = '';
+		processingModeFilter = '';
 		parseState = 'all';
 		page = 1;
 		loadRecords();
@@ -1333,6 +1366,7 @@
 						style="display:inline-flex; align-items:center; gap:4px; background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; cursor:pointer; white-space:nowrap;"
 					>
 						<span class="sort-label">{label}</span>
+						<span aria-hidden="true" style="color:{sortField === field ? accent : textMuted}; font-size:10px;">{sortField === field ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
 					</button>
 					<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label })} onpointerdown={(event) => startColumnResize(event, columnIndex)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(columnIndex, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(columnIndex, 16); } }}></button>
 				</th>
@@ -1365,6 +1399,34 @@
 						{@render sortHead('Create Time', 'create_time', 9)}
 						{@render sortHead('Modify Time', 'modify_time', 10)}
 						<th class="cell head resizable-head">{m.kb_import_actions()}<button class="column-resizer" style="color:{borderColor};" type="button" aria-label={m.kb_import_resize_column({ label: m.kb_import_actions() })} onpointerdown={(event) => startColumnResize(event, 11)} onkeydown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); resizeColumnByKey(11, -16); } else if (event.key === 'ArrowRight') { event.preventDefault(); resizeColumnByKey(11, 16); } }}></button></th>
+					</tr>
+									<tr>
+						<th class="cell head" style="background:{pageBg};"></th>
+						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={idFilter} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_id_column()} aria-label={m.kb_import_filter_column({ label: m.kb_import_id_column() })} style={headerFilterStyle} /></th>
+						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={userFilter} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_user()} aria-label={m.kb_import_filter_column({ label: m.kb_import_user() })} style={headerFilterStyle} /></th>
+						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={title} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_title()} aria-label={m.kb_import_filter_column({ label: m.kb_import_title() })} style={headerFilterStyle} /></th>
+						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={docNo} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_doc_no()} aria-label={m.kb_import_filter_column({ label: m.kb_import_doc_no() })} style={headerFilterStyle} /></th>
+						<th class="cell head" style="background:{pageBg};"></th>
+						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={fileName} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_file_name()} aria-label={m.kb_import_filter_column({ label: m.kb_import_file_name() })} style={headerFilterStyle} /></th>
+						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={statusFilter} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_status()} aria-label={m.kb_import_filter_column({ label: m.kb_import_status() })} style={headerFilterStyle} /></th>
+						<th class="cell head" style="background:{pageBg};">
+							<select bind:value={processingModeFilter} onchange={reloadFromHeaderFilter} aria-label={m.kb_import_filter_column({ label: m.kb_import_process_mode() })} style={headerFilterStyle}>
+								<option value="">{m.kb_import_all()}</option>
+								<option value="auto_offpeak">{m.kb_import_auto_off_peak_only()}</option>
+								<option value="auto">{m.kb_import_auto()}</option>
+								<option value="upload_only">{m.kb_import_upload_files_only()}</option>
+								<option value="pdf_parsing">{m.kb_import_pdf_parsing()}</option>
+							</select>
+						</th>
+						<th class="cell head" style="background:{pageBg};">
+							<input type="datetime-local" bind:value={startTime} onchange={reloadFromHeaderFilter} aria-label={m.kb_import_filter_from({ label: m.kb_import_create_time() })} style={headerFilterStyle} />
+							<input type="datetime-local" bind:value={endTime} onchange={reloadFromHeaderFilter} aria-label={m.kb_import_filter_to({ label: m.kb_import_create_time() })} style="{headerFilterStyle} margin-top:4px;" />
+						</th>
+						<th class="cell head" style="background:{pageBg};">
+							<input type="datetime-local" bind:value={modifyStartTime} onchange={reloadFromHeaderFilter} aria-label={m.kb_import_filter_from({ label: m.kb_import_modify_time() })} style={headerFilterStyle} />
+							<input type="datetime-local" bind:value={modifyEndTime} onchange={reloadFromHeaderFilter} aria-label={m.kb_import_filter_to({ label: m.kb_import_modify_time() })} style="{headerFilterStyle} margin-top:4px;" />
+						</th>
+						<th class="cell head" style="background:{pageBg};"></th>
 					</tr>
 				</thead>
 				<tbody>
