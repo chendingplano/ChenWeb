@@ -231,16 +231,22 @@ func resolveProductV2Spans(items []any, lines productSourceLines) ([]string, str
 				}
 			}
 		case m[3] != "":
-			found, labeled := false, false
+			found := false
+			var labels []string
 			for _, row := range productV2LineRows(start, lines[start]) {
-				found = found || row.id == m[3]
-				labeled = labeled || row.id != ""
+				if row.id == m[3] {
+					found = true
+					break
+				}
+				if row.id != "" {
+					labels = append(labels, m[1]+"#"+row.id)
+				}
 			}
-			if !found && !labeled {
+			if !found && len(labels) == 0 {
 				return nil, "", fmt.Errorf("span %q cites a row that line %d does not have; line %d has no table rows, cite it as %d", span, start, start, start)
 			}
 			if !found {
-				return nil, "", fmt.Errorf("span %q cites a row that line %d does not have", span, start)
+				return nil, "", fmt.Errorf("span %q cites a row that line %d does not have; use the exact label of the row supporting the claim. Labels in the input: %s (ChenWeb#51)", span, start, strings.Join(labels, ", "))
 			}
 			if rows[start] == nil {
 				rows[start] = map[string]bool{}

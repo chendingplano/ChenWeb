@@ -243,6 +243,34 @@ func TestProductsV2NamesEveryInvalidRowSpan(t *testing.T) {
 	}
 }
 
+func TestProductsV2RetryNamesContinuationTableLabels(t *testing.T) {
+	// Runshen alerts 21662 and 21663 cited the first continuation row as r0.
+	lines := productSourceLines{
+		386: "386#h0: 10 |  | 卷筒 | 运转正常,无异常声响\n386#r1: 11 | 回转机构 | 开式齿轮 | 啮合良好;润滑良好",
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(`{"v":2,"p":[{"n":"卷筒","t":"cmp","r":"perf","d":"要求卷筒运转正常、无异常声响。","s":["386#r0"],"o":"m","q":0.9}]}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+	_, err := decodeProductMergedV2(payload, lines)
+	if err == nil {
+		t.Fatal("decode accepted a row label absent from the input")
+	}
+	for _, label := range []string{"386#r0", "386#h0", "386#r1", "ChenWeb#51"} {
+		if !strings.Contains(err.Error(), label) {
+			t.Errorf("retry text does not name %s: %v", label, err)
+		}
+	}
+	payload["p"].([]any)[0].(map[string]any)["s"] = []any{"386#h0"}
+	corrected, err := decodeProductMergedV2(payload, lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := corrected["products"].([]any)[0].(map[string]any)["evidence_quote"]; got != "10 |  | 卷筒 | 运转正常,无异常声响" {
+		t.Errorf("decoded evidence = %q", got)
+	}
+}
+
 // loadProductsRecord382Chunk14 returns the primary's captured response and the lines
 // the call sent, keyed by line number as productSourceLinesFromChunk builds them.
 func loadProductsRecord382Chunk14(t *testing.T) (string, productSourceLines) {
