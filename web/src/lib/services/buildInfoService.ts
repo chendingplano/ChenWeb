@@ -3,6 +3,7 @@ export type BuildProcess = {
 	status: 'running' | 'stopped' | 'unreported';
 	pid?: number;
 	build_number?: string;
+	release_version?: string;
 	build_name?: string;
 	target_machine?: string;
 	os_info?: string;

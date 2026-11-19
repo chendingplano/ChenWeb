@@ -18,8 +18,8 @@
 	import {
 		DeploymentError,
 		getDeploymentStatus,
-		getNextArchive,
 		getRun,
+		listArchives,
 		listProcesses,
 		restartProcess,
 		startBuild,
@@ -27,10 +27,11 @@
 		type DeploymentProcess,
 		type DeploymentRole,
 		type DeploymentRun,
+		type Archive,
 		type DeploymentStep,
-		type NextArchive,
 		type RunKind
 	} from '$lib/services/deploymentService';
+	import { getNotesText, getReleases, notesPdfUrl } from './releases-client';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -53,8 +54,10 @@
 
 	type Problem = { text: string; detail: string };
 	type Dialog =
-		| { type: 'deploy'; archive: NextArchive }
+		| { type: 'deploy'; archives: Archive[]; running: string; selected: string }
 		| { type: 'restart'; process: DeploymentProcess };
+	// Notes shown for the archive selected in the deploy dialog.
+	type PickNotes = { key: string; rollback: boolean; text: string; pdf: string; error: string; loading: boolean };
 
 	let role = $state<DeploymentRole>('');
 	let kind = $state<RunKind | ''>('');
@@ -78,6 +81,8 @@
 	let dialog = $state<Dialog | null>(null);
 	let dialogLeft = $state(0);
 	let dialogTop = $state(0);
+	let pickNotes = $state<PickNotes | null>(null);
+	let nextRelease = $state<{ version: string; items: number } | null>(null);
 	let now = $state(Date.now());
 
 	const colors = $derived({
@@ -104,6 +109,7 @@
 	const locale = $derived(getLocale() === 'zh-cn' ? 'zh-CN' : 'en-US');
 	const busy = $derived(!!active || starting);
 	const chenweb = $derived(processes.find((p) => p.id === 'chenweb'));
+	const notesLang = $derived(getLocale() === 'zh-cn' ? 'zh-cn' : 'en');
 
 	function problemOf(err: unknown): Problem {
 		if (err instanceof DeploymentError) {
@@ -160,10 +166,20 @@
 			unreachable = false;
 			loadProblem = null;
 			loaded = true;
+			if (role === 'build') void loadNextRelease();
 			await updateShown();
 		} catch (err) {
 			if (isUnreachable(err)) unreachable = true;
 			else loadProblem = problemOf(err);
+		}
+	}
+
+	async function loadNextRelease() {
+		try {
+			const releases = await getReleases();
+			nextRelease = releases.next_build ? { version: releases.next_build, items: releases.pending.length } : null;
+		} catch {
+			nextRelease = null;
 		}
 	}
 
@@ -203,10 +219,9 @@
 		await refresh();
 	}
 
-	function placeDialog(trigger: HTMLElement) {
+	function placeDialog(trigger: HTMLElement, preferredWidth = 420, height = 280) {
 		const rect = trigger.getBoundingClientRect();
-		const width = Math.min(420, innerWidth - 16);
-		const height = 280;
+		const width = Math.min(preferredWidth, innerWidth - 16);
 		dialogLeft = Math.max(8, Math.min(rect.left, innerWidth - width - 8));
 		dialogTop = rect.bottom + 6 + height > innerHeight ? Math.max(8, rect.top - height - 6) : rect.bottom + 6;
 	}
@@ -216,9 +231,10 @@
 		checkingRelay = true;
 		actionProblem = null;
 		try {
-			const archive = await getNextArchive();
-			placeDialog(trigger);
-			dialog = { type: 'deploy', archive };
+			const list = await listArchives();
+			placeDialog(trigger, 680, Math.min(560, innerHeight - 16));
+			dialog = { type: 'deploy', archives: list.archives, running: list.running_release, selected: list.archives[0]?.archive_name ?? '' };
+			void loadPickNotes();
 		} catch (err) {
 			actionProblem = problemOf(err);
 		} finally {
@@ -226,8 +242,38 @@
 		}
 	}
 
-	async function confirmDeploy(archive: NextArchive) {
+	// The notes for the selected archive: every release after the running one up to it, or,
+	// for an older archive (a rollback), the releases it would remove.
+	async function loadPickNotes() {
+		if (dialog?.type !== 'deploy') return;
+		const archive = dialog.archives.find((a) => a.archive_name === dialog?.selected);
+		const running = dialog.running;
+		const target = archive?.release_version ?? '';
+		if (!target || target === running) {
+			pickNotes = null;
+			return;
+		}
+		const rollback = !!running && target < running;
+		const [from, to] = rollback ? [target, running] : [running, target];
+		const key = `${from}>${to}`;
+		pickNotes = { key, rollback, text: '', pdf: notesPdfUrl(from, to, notesLang), error: '', loading: true };
+		try {
+			const text = await getNotesText(from, to, notesLang);
+			if (pickNotes?.key === key) pickNotes = { ...pickNotes, text, loading: false };
+		} catch (err) {
+			if (pickNotes?.key === key) pickNotes = { ...pickNotes, error: err instanceof Error ? err.message : String(err), loading: false };
+		}
+	}
+
+	function selectArchive(name: string) {
+		if (dialog?.type !== 'deploy') return;
+		dialog = { ...dialog, selected: name };
+		void loadPickNotes();
+	}
+
+	async function confirmDeploy(archive: Archive) {
 		dialog = null;
+		pickNotes = null;
 		starting = true;
 		actionProblem = null;
 		try {
@@ -290,14 +336,17 @@
 			stage: () => m.dep_step_build_stage(),
 			documents: () => m.dep_step_build_documents(),
 			'pdf-parser': () => m.dep_step_build_pdf_parser(),
+			release: () => m.dep_step_build_release(),
 			archive: () => m.dep_step_build_archive(),
-			upload: () => m.dep_step_build_upload()
+			upload: () => m.dep_step_build_upload(),
+			'release-commit': () => m.dep_step_build_release_commit()
 		};
 		const deploy: Record<string, () => string> = {
 			check: () => m.dep_step_deploy_check(),
 			fetch: () => m.dep_step_deploy_fetch(),
 			extract: () => m.dep_step_deploy_extract(),
 			documents: () => m.dep_step_deploy_documents(),
+			release: () => m.dep_step_deploy_release(),
 			migrations: () => m.dep_step_deploy_migrations(),
 			prompts: () => m.dep_step_deploy_prompts(),
 			configs: () => m.dep_step_deploy_configs(),
@@ -429,7 +478,7 @@
 	});
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && dialog && (dialog = null)} />
+<svelte:window onkeydown={(e) => e.key === 'Escape' && dialog && ((dialog = null), (pickNotes = null))} />
 
 <div class="dep-page select-text" style={cssVars}>
 	<header class="page-head">
@@ -484,6 +533,9 @@
 				</div>
 				{#if role === 'build'}
 					<div class="build-form">
+						{#if nextRelease && !busy}
+							<span class="next-release">{m.dep_next_release({ version: nextRelease.version, count: nextRelease.items })}</span>
+						{/if}
 						<label class="field">
 							<span>{m.dep_description_label()}</span>
 							<input type="text" bind:value={description} placeholder={m.dep_description_placeholder()} disabled={busy} maxlength="300" />
@@ -519,8 +571,10 @@
 						{#if run.requested_by}<span>{m.dep_requested_by({ name: run.requested_by })}</span>{/if}
 						{#if run.started_at || run.requested_at}<span>{m.dep_started({ time: formatDate(run.started_at ?? run.requested_at) })}</span>{/if}
 						{#if run.started_at}<span>{m.dep_duration({ value: duration(run.started_at, run.finished_at) })}</span>{/if}
+						{#if run.release_version}<span class="mono accent">{m.dep_release({ version: run.release_version })}</span>{/if}
 						{#if run.archive_name}<span class="mono">{run.archive_name}</span>{/if}
 						{#if run.previous_build_number}<span>{m.dep_previous_build({ number: run.previous_build_number })}</span>{/if}
+						{#if run.previous_release_version}<span>{m.dep_previous_release({ version: run.previous_release_version })}</span>{/if}
 					</div>
 					{#if run.description}<p class="run-description">{run.description}</p>{/if}
 				</div>
@@ -579,6 +633,7 @@
 						<thead>
 							<tr>
 								<th>{m.dep_col_build()}</th>
+								<th>{m.dep_col_release()}</th>
 								<th>{m.dep_col_status()}</th>
 								<th>{m.dep_col_requested_by()}</th>
 								<th>{m.dep_col_started()}</th>
@@ -590,6 +645,7 @@
 							{#each recent as run (run.id)}
 								<tr class:selected={shown?.id === run.id}>
 									<td><button type="button" class="link mono" onclick={() => selectRun(run)}>{run.build_number || m.dep_build_number_unknown()}</button></td>
+									<td class="mono">{run.release_version || '—'}</td>
 									<td><span class="pill {run.status}">{statusLabel(run.status)}</span></td>
 									<td>{run.requested_by}</td>
 									<td class="mono">{formatDate(run.started_at ?? run.requested_at)}</td>
@@ -652,7 +708,7 @@
 
 	{#if dialog}
 		{@const d = dialog}
-		<div class="dialog" bind:this={dialogEl} role="dialog" aria-modal="false" aria-labelledby="dep-dialog-title" style:left="{dialogLeft}px" style:top="{dialogTop}px">
+		<div class="dialog" class:wide={d.type === 'deploy'} bind:this={dialogEl} role="dialog" aria-modal="false" aria-labelledby="dep-dialog-title" style:left="{dialogLeft}px" style:top="{dialogTop}px">
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="dialog-head" onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={() => (drag = null)} onpointercancel={() => (drag = null)} title={m.dep_move_dialog()}>
 				<strong id="dep-dialog-title">
@@ -662,13 +718,40 @@
 			</div>
 			<div class="dialog-body">
 				{#if d.type === 'deploy'}
-					<dl>
-						<dt>{m.dep_col_archive()}</dt><dd class="mono">{d.archive.archive_name}</dd>
-						<dt>{m.dep_col_build()}</dt><dd class="mono accent">{d.archive.build_number || m.dep_build_number_unknown()}</dd>
-						<dt>{m.dep_confirm_size()}</dt><dd>{megabytes(d.archive.size)}</dd>
-						<dt>{m.dep_confirm_modified()}</dt><dd>{formatDate(d.archive.modified)}</dd>
-						<dt>{m.dep_confirm_current()}</dt><dd class="mono">{chenweb?.build_number || m.dep_build_number_unknown()}</dd>
-					</dl>
+					<p class="running-line">
+						{m.dep_confirm_current()}:
+						<span class="mono accent">{d.running || m.dep_no_release()}</span>
+						<span class="mono muted">({chenweb?.build_number || m.dep_build_number_unknown()})</span>
+					</p>
+					<div class="archive-list" role="radiogroup" aria-label={m.dep_pick_release()}>
+						{#each d.archives as a (a.archive_name)}
+							<label class="archive-option" class:selected={a.archive_name === d.selected}>
+								<input type="radio" name="dep-archive" value={a.archive_name} checked={a.archive_name === d.selected} onchange={() => selectArchive(a.archive_name)} />
+								<span class="mono strong">{a.release_version || m.dep_no_release()}</span>
+								<span class="mono muted">{a.build_number || m.dep_build_number_unknown()}</span>
+								{#if a.release_version}<span class="muted">{m.dep_items({ count: a.item_count })}</span>{/if}
+								<span class="muted">{megabytes(a.size)}</span>
+								<span class="muted">{formatDate(a.modified)}</span>
+								{#if a.running}<span class="pill succeeded">{m.dep_running_badge()}</span>{/if}
+							</label>
+						{/each}
+					</div>
+					{#if pickNotes}
+						{#if pickNotes.rollback}
+							<div class="banner warning inset-none" role="alert"><TriangleAlertIcon size={16} /><span>{m.dep_rollback_warning()}</span></div>
+						{/if}
+						<div class="notes-head">
+							<strong>{pickNotes.rollback ? m.dep_notes_removed() : m.dep_notes_since()}</strong>
+							<a class="ghost small" href={pickNotes.pdf} target="_blank" rel="noopener">{m.dep_view_pdf()}</a>
+						</div>
+						{#if pickNotes.loading}<p class="muted"><LoaderCircleIcon size={14} class="dep-spin" /></p>{/if}
+						{#if pickNotes.error}<p class="danger-text">{pickNotes.error}</p>{/if}
+						{#if pickNotes.text}<pre class="pick-notes">{pickNotes.text}</pre>{/if}
+					{:else if d.archives.find((a) => a.archive_name === d.selected)?.release_version === d.running && d.running}
+						<p class="muted">{m.dep_same_release()}</p>
+					{:else if !d.archives.find((a) => a.archive_name === d.selected)?.release_version}
+						<p class="muted">{m.dep_no_release_info()}</p>
+					{/if}
 					<p>{m.dep_confirm_deploy_body()}</p>
 				{:else}
 					<p>
@@ -678,7 +761,12 @@
 			</div>
 			<div class="dialog-actions">
 				<button type="button" class="ghost" onclick={() => (dialog = null)}>{m.dep_cancel()}</button>
-				<button type="button" class="primary" onclick={() => (d.type === 'deploy' ? confirmDeploy(d.archive) : confirmRestart(d.process))}>{m.dep_confirm()}</button>
+				<button type="button" class="primary" disabled={d.type === 'deploy' && !d.selected}
+					onclick={() => {
+						if (d.type === 'restart') return confirmRestart(d.process);
+						const archive = d.archives.find((a) => a.archive_name === d.selected);
+						if (archive) void confirmDeploy(archive);
+					}}>{m.dep_confirm()}</button>
 			</div>
 		</div>
 	{/if}
@@ -761,9 +849,18 @@
 	.dialog-head strong{font-size:14px}
 	.dialog-body{flex:1;padding:12px 14px;font-size:13px;line-height:1.5}
 	.dialog-body p{margin:10px 0 0;color:var(--dep-muted)}
-	.dialog-body dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0}
-	.dialog-body dt{color:var(--dep-muted);font-size:12px}
-	.dialog-body dd{margin:0;overflow-wrap:anywhere}
+	.dialog.wide{width:min(680px,calc(100vw - 16px))}
+	.running-line{margin:0 0 10px !important;color:var(--dep-text) !important}
+	.archive-list{display:grid;gap:4px;max-height:220px;overflow:auto;padding:4px;border:1px solid var(--dep-border);border-radius:9px}
+	.archive-option{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 8px;border-radius:7px;font-size:12px;cursor:pointer}
+	.archive-option.selected{background:var(--dep-accentTint)}
+	.archive-option .strong{font-weight:700;font-size:12px}
+	.notes-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+	.pick-notes{margin:8px 0 0;max-height:240px;overflow:auto;padding:8px 10px;border:1px solid var(--dep-border);border-radius:8px;background:var(--dep-bg);font:11.5px/1.5 'SFMono-Regular',Consolas,monospace;white-space:pre-wrap}
+	.banner.inset-none{margin:12px 0 0}
+	.danger-text{color:var(--dep-danger)}
+	a.ghost{text-decoration:none}
+	.next-release{align-self:center;color:var(--dep-accent);font-size:12px;font-weight:650}
 	.dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;border-top:1px solid var(--dep-border)}
 	:global(.dep-spin){animation:dep-spin 1s linear infinite}
 	@keyframes dep-spin{to{transform:rotate(360deg)}}

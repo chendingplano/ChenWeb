@@ -18,23 +18,25 @@ var EmbeddedMetadataBase64 string
 var processStartedAt = time.Now().UTC()
 
 type Metadata struct {
-	BuildNumber   string `json:"build_number"`
-	BuildName     string `json:"build_name"`
-	TargetMachine string `json:"target_machine"`
-	OSInfo        string `json:"os_info"`
-	Description   string `json:"description"`
+	BuildNumber    string `json:"build_number"`
+	BuildName      string `json:"build_name"`
+	TargetMachine  string `json:"target_machine"`
+	OSInfo         string `json:"os_info"`
+	Description    string `json:"description"`
+	ReleaseVersion string `json:"release_version"`
 }
 
 type Process struct {
-	Executable    string     `json:"executable"`
-	Status        string     `json:"status"`
-	PID           int        `json:"pid,omitempty"`
-	BuildNumber   string     `json:"build_number,omitempty"`
-	BuildName     string     `json:"build_name,omitempty"`
-	TargetMachine string     `json:"target_machine,omitempty"`
-	OSInfo        string     `json:"os_info,omitempty"`
-	Description   string     `json:"description,omitempty"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
+	Executable     string     `json:"executable"`
+	Status         string     `json:"status"`
+	PID            int        `json:"pid,omitempty"`
+	BuildNumber    string     `json:"build_number,omitempty"`
+	BuildName      string     `json:"build_name,omitempty"`
+	TargetMachine  string     `json:"target_machine,omitempty"`
+	OSInfo         string     `json:"os_info,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	ReleaseVersion string     `json:"release_version,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
 }
 
 func EmbeddedMetadata() (Metadata, error) {
@@ -69,7 +71,7 @@ func CurrentProcess(executable string) (Process, error) {
 		Executable: executable, Status: "running", PID: os.Getpid(),
 		BuildNumber: metadata.BuildNumber, BuildName: metadata.BuildName,
 		TargetMachine: metadata.TargetMachine, OSInfo: metadata.OSInfo,
-		Description: metadata.Description, StartedAt: &processStartedAt,
+		Description: metadata.Description, ReleaseVersion: metadata.ReleaseVersion, StartedAt: &processStartedAt,
 	}, nil
 }
 

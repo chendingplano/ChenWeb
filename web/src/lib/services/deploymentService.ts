@@ -25,6 +25,8 @@ export type DeploymentRun = {
 	description?: string;
 	archive_name: string;
 	previous_build_number?: string;
+	release_version?: string;
+	previous_release_version?: string;
 	status: RunStatus;
 	error_message: string;
 	requested_by: string;
@@ -42,11 +44,22 @@ export type DeploymentStatus = {
 	recent: DeploymentRun[];
 };
 
-export type NextArchive = {
+/** One archive on the relay; release fields are empty for archives without a release file. */
+export type Archive = {
 	archive_name: string;
 	size: number;
 	modified: string;
 	build_number: string;
+	release_version: string;
+	release_date: string;
+	item_count: number;
+	running: boolean;
+};
+
+export type ArchiveList = {
+	archives: Archive[];
+	running_release: string;
+	running_build_number: string;
 };
 
 export type DeploymentProcess = {
@@ -113,7 +126,7 @@ export async function getRun(kind: RunKind, id: number): Promise<DeploymentRun> 
 export const startBuild = (description: string) =>
 	request<{ id: number; build_number: string }>('/builds', jsonPost({ description }));
 
-export const getNextArchive = () => request<NextArchive>('/next-archive');
+export const listArchives = () => request<ArchiveList>('/archives');
 
 export const startDeployment = (archiveName: string) =>
 	request<{ id: number }>('/deployments', jsonPost({ archive_name: archiveName }));

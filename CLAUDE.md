@@ -118,6 +118,19 @@ Every page must work in English and Chinese. Decision and rationale: ADR
   its sequence. `server/api/llmrun/id_allocation_guard_test.go` fails on a new
   `CREATE SEQUENCE`, `nextval(` or `MAX(x)+1` unless the file is allowlisted with a reason.
 
+# 5. Release items
+Every bug fix, improvement or feature that will ship is recorded as a release item on the
+build machine, so the next build's release notes list it (openspec `release-versioning`):
+
+```bash
+mise exec -- go run ./server/cmd/release-tool add-item --type "bug fix" --component ChenWeb --issue 142 "Short description of the bug"
+```
+
+`--type` is `bug fix`, `improvement` or `new feature`; `--component shared` for a change in
+the shared library; `--issue` only when a GitHub issue exists (its number only). Items can
+also be added on Development → System Admin → System → Releases. Do not create majors or
+minors unless asked; each successful build becomes the next revision by itself.
+
 # Frontend production builds
 
 From `web/`, install with `bun install --frozen-lockfile` and build with `bun run build`.

@@ -73,8 +73,8 @@ before it starts", which always offers the newest archive) is in the unarchived
 - **Reusable modules searched** (`find-reusable-module`: pdf render/generate, pdf viewer,
   version/release/markdown/typst): reuse **20261109-02 Document Builder (backend)** —
   `docbuilder.PandocConvert` for Markdown → PDF with the `DOCUMENT_PDF_ENGINE` /
-  `DOCUMENT_PDF_FONT` settings; reuse **20261109-01 Markdown Viewer** to show notes on the
-  page. **20261114-06 PDF View Window** was considered and not used (built for highlighted
+  `DOCUMENT_PDF_FONT` settings. **20261109-01 Markdown Viewer** (the page shows the plain-text
+  notes) and **20261114-06 PDF View Window** were considered and not used (built for highlighted
   evidence; PDFs open in the browser's own viewer). Nothing in the catalogue handles version
   numbers or release items; that code is new and ChenWeb-specific for now (it moves to
   `shared/` when tax adopts it).

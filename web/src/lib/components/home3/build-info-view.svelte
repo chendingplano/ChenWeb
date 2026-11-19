@@ -114,6 +114,7 @@
 							<th>{m.build_info_executable()}</th>
 							<th>{m.build_info_status()}</th>
 							<th>{m.build_info_process_id()}</th>
+							<th>{m.build_info_release_version()}</th>
 							<th>{m.build_info_build_number()}</th>
 							<th>{m.build_info_build_name()}</th>
 							<th>{m.build_info_target_machine()}</th>
@@ -128,6 +129,7 @@
 								<td><span class="executable">{process.executable}</span></td>
 								<td><span class:live={process.status === 'running'} class:offline={process.status !== 'running'} class="status-pill">{statusLabel(process.status)}</span></td>
 								<td class="mono">{process.pid ?? m.build_info_unspecified()}</td>
+								<td class="build-number">{process.release_version || m.build_info_unspecified()}</td>
 								<td class="build-number">{process.build_number ?? m.build_info_unspecified()}</td>
 								<td>{process.build_name ?? m.build_info_unspecified()}</td>
 								<td>{process.target_machine ?? m.build_info_unspecified()}</td>

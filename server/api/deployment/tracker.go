@@ -2,6 +2,7 @@ package deployment
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ const (
 
 	markerPrefix = "::step::"
 )
+
+var releaseVersionPattern = regexp.MustCompile(`^\d{2}\.\d{2}\.\d{2}$`)
 
 // Step is one row of kb.deployment_steps.
 type Step struct {
@@ -47,12 +50,13 @@ func ParseMarker(line string) (key, arg string, ok bool) {
 
 // Tracker turns a script's output into step states. It is safe for concurrent use.
 type Tracker struct {
-	mu          sync.Mutex
-	steps       []*Step
-	current     int
-	dirty       map[int]bool
-	now         func() time.Time
-	archiveName string
+	mu             sync.Mutex
+	steps          []*Step
+	current        int
+	dirty          map[int]bool
+	now            func() time.Time
+	archiveName    string
+	releaseVersion string
 }
 
 // NewTracker creates every planned step as pending and starts the first one, so
@@ -96,6 +100,10 @@ func (t *Tracker) Line(line string) {
 		t.archiveName = name
 		return
 	}
+	if v, ok := strings.CutPrefix(strings.TrimRight(line, "\r\n"), "::release::"); ok && releaseVersionPattern.MatchString(v) {
+		t.releaseVersion = v
+		return
+	}
 	if t.current < 0 {
 		return
 	}
@@ -110,6 +118,13 @@ func (t *Tracker) Line(line string) {
 		s.OutputTruncated = true
 	}
 	t.dirty[t.current] = true
+}
+
+// ReleaseVersion returns the release version the build script committed, if any.
+func (t *Tracker) ReleaseVersion() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.releaseVersion
 }
 
 // ArchiveName returns the uploaded archive name reported by the build script.

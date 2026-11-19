@@ -43,10 +43,10 @@ func Plan(kind string) []PlanStep {
 		steps = append(steps, PlanStep{Key: "check"}, PlanStep{Key: "web"}, PlanStep{Key: "prompt-defaults"})
 		steps = append(steps, binarySteps(BuildBinaries)...)
 		steps = append(steps, PlanStep{Key: "stage"}, PlanStep{Key: "documents"}, PlanStep{Key: "pdf-parser"},
-			PlanStep{Key: "archive"}, PlanStep{Key: "upload"})
+			PlanStep{Key: "release"}, PlanStep{Key: "archive"}, PlanStep{Key: "upload"}, PlanStep{Key: "release-commit"})
 	case KindDeploy:
 		steps = append(steps, PlanStep{Key: "check"}, PlanStep{Key: "fetch"}, PlanStep{Key: "extract"},
-			PlanStep{Key: "documents"}, PlanStep{Key: "migrations"}, PlanStep{Key: "prompts"}, PlanStep{Key: "configs"})
+			PlanStep{Key: "documents"}, PlanStep{Key: "release"}, PlanStep{Key: "migrations"}, PlanStep{Key: "prompts"}, PlanStep{Key: "configs"})
 		steps = append(steps, binarySteps(DeployBinaries)...)
 		steps = append(steps, PlanStep{Key: "pdf-parser"})
 	}

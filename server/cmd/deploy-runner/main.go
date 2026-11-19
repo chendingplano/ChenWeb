@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/deployment"
+	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -115,9 +117,34 @@ func main() {
 		logger.Error("deploy-runner: finish run failed", "kind", kind, "id", run.ID, "error", err)
 		os.Exit(1)
 	}
+	if release := tracker.ReleaseVersion(); kind == deployment.KindBuild && release != "" {
+		if err := deployment.SetBuildRelease(ctx, db, run.ID, release); err != nil {
+			logger.Error("deploy-runner: record release version failed", "id", run.ID, "release", release, "error", err)
+		}
+	}
+	if kind == deployment.KindDeploy && status == deployment.StatusSucceeded {
+		recordRunningRelease(ctx, logger, db, run)
+	}
 	logger.Info("deploy-runner: finished", "kind", kind, "id", run.ID, "status", status,
-		"exit_code", strconv.Itoa(exitCode), "archive", archive)
+		"exit_code", strconv.Itoa(exitCode), "archive", archive, "release", tracker.ReleaseVersion())
 	if status != deployment.StatusSucceeded {
 		os.Exit(1)
 	}
+}
+
+// recordRunningRelease sets the release this machine now runs. The new server also records
+// it at start from release/release.json, but a server from before release versioning
+// (a rollback) cannot, so the runner, which is always the newer binary here, clears it.
+func recordRunningRelease(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, run deployment.Run) {
+	var err error
+	if v, perr := releaseshandler.ParseVersion(run.ReleaseVersion); perr == nil {
+		err = releaseshandler.SetCurrent(ctx, db, releaseshandler.ProjectChenWeb, v, run.BuildNumber)
+	} else {
+		err = releaseshandler.ClearCurrent(ctx, db, releaseshandler.ProjectChenWeb)
+	}
+	if err != nil {
+		logger.Error("deploy-runner: record running release failed", "release", run.ReleaseVersion, "error", err)
+		return
+	}
+	logger.Info("deploy-runner: running release recorded", "release", run.ReleaseVersion, "build_number", run.BuildNumber)
 }

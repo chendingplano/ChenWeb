@@ -27,6 +27,8 @@ type Run struct {
 	Description         string     `json:"description,omitempty"`
 	ArchiveName         string     `json:"archive_name"`
 	PreviousBuildNumber string     `json:"previous_build_number,omitempty"`
+	ReleaseVersion      string     `json:"release_version"`
+	PreviousRelease     string     `json:"previous_release_version,omitempty"`
 	Status              string     `json:"status"`
 	ErrorMessage        string     `json:"error_message"`
 	RequestedBy         string     `json:"requested_by"`
@@ -39,10 +41,10 @@ type Run struct {
 }
 
 const buildColumns = `id, COALESCE(build_number, ''), build_name, target_machine, os_info, description, archive_name,
-	status, error_message, requested_by, runner_host, runner_pid, started_at, finished_at`
+	status, error_message, requested_by, runner_host, runner_pid, started_at, finished_at, release_version`
 
 const deploymentColumns = `id, archive_name, build_number, previous_build_number, status, error_message,
-	requested_by, runner_pid, requested_at, started_at, finished_at`
+	requested_by, runner_pid, requested_at, started_at, finished_at, release_version, previous_release_version`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -51,7 +53,7 @@ func scanBuild(row rowScanner) (Run, error) {
 	var started time.Time
 	var finished sql.NullTime
 	err := row.Scan(&r.ID, &r.BuildNumber, &r.BuildName, &r.TargetMachine, &r.OSInfo, &r.Description, &r.ArchiveName,
-		&r.Status, &r.ErrorMessage, &r.RequestedBy, &r.RunnerHost, &r.RunnerPID, &started, &finished)
+		&r.Status, &r.ErrorMessage, &r.RequestedBy, &r.RunnerHost, &r.RunnerPID, &started, &finished, &r.ReleaseVersion)
 	r.StartedAt = &started
 	r.FinishedAt = nullTime(finished)
 	return r, err
@@ -62,7 +64,7 @@ func scanDeployment(row rowScanner) (Run, error) {
 	var requested time.Time
 	var started, finished sql.NullTime
 	err := row.Scan(&r.ID, &r.ArchiveName, &r.BuildNumber, &r.PreviousBuildNumber, &r.Status, &r.ErrorMessage,
-		&r.RequestedBy, &r.RunnerPID, &requested, &started, &finished)
+		&r.RequestedBy, &r.RunnerPID, &requested, &started, &finished, &r.ReleaseVersion, &r.PreviousRelease)
 	r.RequestedAt = &requested
 	r.StartedAt = nullTime(started)
 	r.FinishedAt = nullTime(finished)
@@ -131,9 +133,9 @@ func CreateDeployment(ctx context.Context, db *sql.DB, r Run) (int64, error) {
 	defer tx.Rollback()
 	var id int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO kb.deployments
-		(archive_name, build_number, previous_build_number, status, requested_by)
-		VALUES ($1, $2, $3, 'queued', $4) RETURNING id`,
-		r.ArchiveName, r.BuildNumber, r.PreviousBuildNumber, r.RequestedBy).Scan(&id)
+		(archive_name, build_number, previous_build_number, status, requested_by, release_version, previous_release_version)
+		VALUES ($1, $2, $3, 'queued', $4, $5, $6) RETURNING id`,
+		r.ArchiveName, r.BuildNumber, r.PreviousBuildNumber, r.RequestedBy, r.ReleaseVersion, r.PreviousRelease).Scan(&id)
 	if err != nil {
 		return 0, activeError(err)
 	}
@@ -187,6 +189,12 @@ func FinishRun(ctx context.Context, db *sql.DB, kind string, id int64, status, e
 		archive_name = COALESCE(NULLIF($4, ''), archive_name),
 		build_number = COALESCE(NULLIF($5, ''), build_number) WHERE id = $1`,
 		id, status, errorMessage, archiveName, ArchiveBuildNumber(archiveName))
+	return err
+}
+
+// SetBuildRelease records the release version a build committed.
+func SetBuildRelease(ctx context.Context, db *sql.DB, id int64, version string) error {
+	_, err := db.ExecContext(ctx, `UPDATE kb.deployment_builds SET release_version = $2 WHERE id = $1`, id, version)
 	return err
 }
 

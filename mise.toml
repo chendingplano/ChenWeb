@@ -199,7 +199,10 @@ python3 "$REPO/scripts/generate-doc-processor-prompt-defaults.py" \
 BUILD_TIMESTAMP="$(date '+%Y%m%d%H%M%S %Y-%m-%dT%H:%M:%S%z')"
 BUILD_NUMBER="${BUILD_TIMESTAMP%% *}"
 BUILT_AT="${BUILD_TIMESTAMP#* }"
-BUILD_METADATA_B64="$(BUILD_NUMBER="$BUILD_NUMBER" BUILD_NAME="$BUILD_NAME" TARGET_MACHINE="$TARGET_MACHINE" OS_INFO="$OS_INFO" BUILD_DESCRIPTION="$BUILD_DESCRIPTION" python3 -c 'import base64, json, os; print(base64.b64encode(json.dumps({"build_number":os.environ["BUILD_NUMBER"],"build_name":os.environ["BUILD_NAME"],"target_machine":os.environ["TARGET_MACHINE"],"os_info":os.environ["OS_INFO"],"description":os.environ["BUILD_DESCRIPTION"]}, separators=(",", ":")).encode()).decode())')"
+# RELEASE_VERSION is set by shell_server_build_rcp.sh (release-tool reserve); a build run
+# without it has no release version.
+RELEASE_VERSION="${RELEASE_VERSION:-}"
+BUILD_METADATA_B64="$(BUILD_NUMBER="$BUILD_NUMBER" BUILD_NAME="$BUILD_NAME" TARGET_MACHINE="$TARGET_MACHINE" OS_INFO="$OS_INFO" BUILD_DESCRIPTION="$BUILD_DESCRIPTION" RELEASE_VERSION="$RELEASE_VERSION" python3 -c 'import base64, json, os; print(base64.b64encode(json.dumps({"build_number":os.environ["BUILD_NUMBER"],"build_name":os.environ["BUILD_NAME"],"target_machine":os.environ["TARGET_MACHINE"],"os_info":os.environ["OS_INFO"],"description":os.environ["BUILD_DESCRIPTION"],"release_version":os.environ["RELEASE_VERSION"]}, separators=(",", ":")).encode()).decode())')"
 
 for pair in $SELECTED; do
   name="${pair%%:*}"; pkg="${pair##*:}"
@@ -355,6 +358,9 @@ fi
   echo "git_rev:   $(git rev-parse HEAD)"
   echo "git_short: $(git rev-parse --short HEAD)"
   echo "git_dirty: $([ -n "$(git status --porcelain)" ] && echo yes || echo no)"
+  echo "shared_git_rev:   $(git -C "$REPO/../shared" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "shared_git_dirty: $([ -n "$(git -C "$REPO/../shared" status --porcelain 2>/dev/null)" ] && echo yes || echo no)"
+  echo "release_version: ${RELEASE_VERSION:-none}"
   echo "built_at:  $BUILT_AT"
   echo "built_on:  $(hostname)"
   echo "binaries: $built"

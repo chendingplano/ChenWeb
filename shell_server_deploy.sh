@@ -8,6 +8,8 @@ set -euo pipefail
 #   shell_server_deploy.sh              deploy the newest runshen-*.tar.gz on the relay
 #   shell_server_deploy.sh <archive>    deploy a local archive
 #   shell_server_deploy.sh --newest     print "<name> <size> <mtime>" of the newest relay archive
+#   shell_server_deploy.sh --list       print that line for every relay archive, newest first
+#   shell_server_deploy.sh --release-file <runshen-deploy-<build>.release.json>   print a release file
 #   RELAY_ARCHIVE=<name> shell_server_deploy.sh   deploy that relay archive (the Deployment page)
 #
 # Runs as gui (the Deployment page runs it from chenweb-deploy.service) or as root. As gui,
@@ -48,6 +50,25 @@ if [ "${1:-}" = --newest ]; then
   [ -n "$line" ] || die "No runshen archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
   read -r _ _ _ _ size mtime path <<< "$line"
   echo "$(basename "$path") $size $mtime"
+  exit 0
+fi
+# --list: every archive on the relay, newest first, as "<name> <size> <mtime>".
+if [ "${1:-}" = --list ]; then
+  lines=$(ssh -o BatchMode=yes -o ConnectTimeout=20 -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
+    bash -c "'ls -lt --time-style=+%s $RELAY_DIR/runshen-*.tar.gz 2>/dev/null'")
+  [ -n "$lines" ] || die "No runshen archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
+  while read -r _ _ _ _ size mtime path; do
+    [ -n "${path:-}" ] && echo "$(basename "$path") $size $mtime"
+  done <<< "$lines"
+  exit 0
+fi
+# --release-file <name>: print the release file uploaded next to an archive
+# (runshen-deploy-<build>.release.json), so releases can be listed without downloading archives.
+if [ "${1:-}" = --release-file ]; then
+  name="${2:-}"
+  [[ "$name" =~ ^runshen-deploy-[0-9]{14}\.release\.json$ ]] || die "invalid release file name: $name"
+  ssh -o BatchMode=yes -o ConnectTimeout=20 -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
+    bash -c "'cat $RELAY_DIR/$name'" || die "release file not found on the relay: $name"
   exit 0
 fi
 
@@ -110,6 +131,18 @@ if [ -d "$DEPLOY_DIR/document-workspace" ]; then
   else
     rsync -a --no-owner --no-group "$DEPLOY_DIR/document-workspace/" "$PROJECT_WORKSPACE_DIR/"
   fi
+fi
+
+# release/ (release.json and the notes) goes in before the server restarts, so the new
+# server imports it at start and records the release it runs. Archives built before
+# release versioning have none; the old release/ is removed so it is not mistaken for theirs.
+step release
+rm -rf "$CHENWEB_DIR/release"
+if [ -d "$DEPLOY_DIR/release" ]; then
+  cp -R "$DEPLOY_DIR/release" "$CHENWEB_DIR/release"
+  echo "  installed release $(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$CHENWEB_DIR/release/release.json" | head -n 1)"
+else
+  echo "  this archive has no release information"
 fi
 bash "$DEPLOY_DIR/deploy-server-china.sh" "$DEPLOY_DIR"
 

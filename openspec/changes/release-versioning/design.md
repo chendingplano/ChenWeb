@@ -96,9 +96,12 @@ cannot. Items added while a build runs stay pending for the next one. Binding at
 ### D5. Build flow
 `shell_server_build_rcp.sh` drives it, so page builds and hand builds behave the same:
 
-1. `check` step: `release-tool reserve` — first reverts any stale `building` row (no build
-   running, see Risks), then in one transaction inserts the next revision as `building`,
-   binds all pending items, and prints the version. The script exports `RELEASE_VERSION`.
+1. `check` step: the script builds `release-tool` once and runs `release-tool reserve --pid $$`
+   (under `mise exec`, which supplies the environment). In one transaction it reverts a stale
+   `building` row (see Risks), inserts the next revision as `building` with the script's host
+   and pid (`builder_host`, `builder_pid`), binds all pending items, and prints
+   `RELEASE_VERSION=<v>`. The shared logger also writes to stdout, so the script picks that
+   line out by pattern. The script exports `RELEASE_VERSION`.
 2. `mise run build-server-linux` embeds `release_version` in `buildinfo` metadata and adds
    `release_version:` and `shared_git_rev:` / `shared_git_dirty:` lines to MANIFEST.
 3. New `release` step (after pdf-parser, before archive): `release-tool notes --version V
@@ -108,8 +111,9 @@ cannot. Items added while a build runs stay pending for the next one. Binding at
 4. `archive`, then `upload` sends the archive and the sidecar
    `runshen-deploy-<build>.release.json` (a copy of `release.json`) to the relay.
 5. New `release-commit` step: `release-tool commit --version V` sets `released`, the release
-   date, and `kb.release_current`, and sets `kb.deployment_builds.release_version` when a row
-   with that build number exists (page builds only). Prints `::release::V`.
+   date, and `kb.release_current`, and prints `::release::V`. For page builds, `deploy-runner`
+   reads that marker and stores it in `kb.deployment_builds.release_version` (the row's
+   build number is only filled when the run finishes, so the tool cannot find it).
 6. A shell `trap` on any failure runs `release-tool abort --version V`: deletes the
    `building` row, which returns its items to pending. If the failure is after upload, the
    script first removes the uploaded archive and sidecar from the relay, so a version never
@@ -151,8 +155,15 @@ is idempotent and safe in any order. It runs:
 
 *Why server start, not `deploy-runner`:* during the deploy that first ships this feature the
 running `deploy-runner` is the old binary; the server restarts on every deploy, so it always
-sees the new file. `shell_server_deploy.sh` gains a `release` step that copies `release/`
-from the archive into the ChenWeb directory.
+sees the new file. `shell_server_deploy.sh` gains a `release` step (before
+`deploy-server-china.sh` restarts anything) that replaces `<ChenWeb>/release/` with the
+archive's copy, or removes it for an archive without one. A server that starts without the
+file clears its current release.
+
+After a successful deploy, `deploy-runner` also sets the current release from the queued row
+(or clears it when the archive had no release). This covers a rollback to a build from
+before this change: that server cannot record anything, but the runner doing the deploy is
+always the newer binary.
 
 ### D9. Choosing a release to deploy
 - `shell_server_deploy.sh --list` prints every `runshen-*.tar.gz` as `<name> <size> <mtime>`
@@ -183,7 +194,9 @@ cached as `.cache/release-notes/<sha256 of markdown>.pdf`. Released history neve
 so the cache never needs invalidating.
 
 Endpoint: `GET /api/v1/releases/notes?project=ChenWeb&from=01.02.03&to=01.02.06&format=text|pdf&lang=en|zh-cn`;
-`from` empty = from the beginning; for a single release the page passes the previous version.
+`from` empty = from the beginning. Notes for a single release run from the previous *build*
+release, so the first build of a new major or minor also shows that major's or minor's
+heading (`PreviousBuild`); the build's `RELEASE_NOTES.*` files use the same range.
 
 ### D11. API (replaces the current four routes)
 | Method and path | Role | Purpose |
@@ -200,12 +213,20 @@ Endpoint: `GET /api/v1/releases/notes?project=ChenWeb&from=01.02.03&to=01.02.06&
 All require an admin (same `authorize` rule as today). Log locations follow
 `CreateDefaultLogger` with new `YYYYMMDD-DDD` codes.
 
+### D12. Page UI rules (docs/frontend-rules.md)
+The Releases page uses inline panels under their buttons (new major/minor, add/edit item,
+delete confirmation) instead of dialogs, so no new dialog component was needed. The deploy
+release picker extends the Deployment page's existing anchored, draggable, resizable dialog.
+The Releases page keeps its drafts, open panels, expanded releases and scroll position in
+`sessionStorage` (restored during component set-up, before the save effect first runs).
+
 ## Reused modules
 
 - **20261109-02 Document Builder (backend)** — reuse `docbuilder.PandocConvert` and its
   `DOCUMENT_PDF_ENGINE` / `DOCUMENT_PDF_FONT` settings as is for Markdown → PDF. Not
   `ExportPDF`, which is tied to `kb.doc_files`.
-- **20261109-01 Markdown Viewer** — show the notes Markdown on both pages.
+- **20261109-01 Markdown Viewer** — considered; not used. The pages show the plain-text form
+  in a `<pre>`, so no Markdown endpoint was needed.
 - **20261114-06 PDF View Window** — considered; not used. It is built around highlighted
   evidence lines; a release-notes PDF opens in a new tab with the browser's viewer.
 - Nothing catalogued covers version numbers, release items or relay listing. The new code
@@ -218,10 +239,10 @@ All require an admin (same `authorize` rule as today). Log locations follow
 - [The build machine's `miner` database is a dev database] → every archive (and the relay)
   holds the full history; `release-tool import <release.json>` restores it. Never point
   `TEST_DATABASE_URL` at `miner`.
-- [A build killed hard leaves a `building` row and locked items] → the next `reserve` reverts
-  a `building` row when no build is running (`kb.deployment_builds` has no running row and
-  the `building` row is older than the newest finished build, or older than 6 hours for hand
-  builds). The Releases page shows a building release with its age.
+- [A build killed hard leaves a `building` row and locked items] → the row records the build
+  script's host and pid; the next `reserve` on the same host reverts it when that process is
+  gone, and refuses while it is alive. This works for hand builds, which have no
+  `kb.deployment_builds` row. The Releases page shows a building release with its age.
 - [pandoc/typst/font missing on the box] → the PDF endpoint answers 503 naming the missing
   tool; text notes still work. Installing them is a root task for the user.
 - [Two-digit limit] → a clear refusal at `reserve`, before any compile; the page shows how

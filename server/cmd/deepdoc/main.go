@@ -23,6 +23,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/ontology/seed"
 	"github.com/chendingplano/deepdoc/server/api/processhealthalarms"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
+	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	"github.com/chendingplano/deepdoc/server/api/scheduler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/deepdoc/server/processhealth"
@@ -220,6 +221,21 @@ func main() {
 		healthFail("migration_failed", "database schema", "Database migrations failed; inspect migration logs", processhealth.OperatorAction)
 	}
 	logger.Info("migrations completed successfully")
+
+	// On the deploy machine, record the release this build is (openspec release-versioning).
+	if wd, wdErr := os.Getwd(); wdErr == nil {
+		dir := config.GetConfigDir()
+		if dir == "" {
+			dir = wd
+		}
+		running, added, relErr := releaseshandler.ImportInstalled(context.Background(), project_db, dir,
+			strings.TrimSpace(config.AppConfig.Deployment.Role))
+		if relErr != nil {
+			logger.Error("import installed release file failed", "error", relErr, "file", releaseshandler.InstalledFile(dir))
+		} else if running != "" {
+			logger.Info("running release recorded", "version", running, "imported_releases", added)
+		}
+	}
 
 	// Register routes only after the database and its tables are ready. Route
 	// registration seeds the SQL-backed profile registry during initialization.

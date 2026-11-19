@@ -15,6 +15,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/chendingplano/deepdoc/server/api/releaseshandler"
 	"github.com/chendingplano/deepdoc/server/buildinfo"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -228,44 +229,134 @@ func StartBuild(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, map[string]any{"status": true, "id": id, "build_number": run.BuildNumber})
 }
 
-// NextArchive handles GET .../deployment/next-archive: the newest archive on the relay.
-func NextArchive(c echo.Context) error {
-	rc, _, err := requireAdmin(c, "20261116-745")
+// Archive is one archive on the relay, with its release when the relay holds its release file.
+type Archive struct {
+	ArchiveName    string    `json:"archive_name"`
+	Size           int64     `json:"size"`
+	Modified       time.Time `json:"modified"`
+	BuildNumber    string    `json:"build_number"`
+	ReleaseVersion string    `json:"release_version"`
+	ReleaseDate    string    `json:"release_date"`
+	ItemCount      int       `json:"item_count"`
+	Running        bool      `json:"running"`
+}
+
+// releaseFileTries is how many of the newest archives are tried for a release file; each
+// try is one ssh call over the slow relay link.
+const releaseFileTries = 3
+
+// Archives handles GET .../deployment/archives: every archive on the relay, newest first,
+// with its release, and the release this machine runs. It imports the newest release
+// file it can read from the relay, which carries the whole release history.
+func Archives(c echo.Context) error {
+	rc, _, err := requireAdmin(c, "20261119-301")
 	defer rc.Close()
 	if err != nil {
 		return err
 	}
+	logger := rc.GetLogger()
 	if role() != RoleDeploy {
 		return fail(c, http.StatusBadRequest, codeWrongRole, "deployments run only where [deployment] role = \"deploy\"")
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 90*time.Second)
 	defer cancel()
-	out, err := runCommand(ctx, chenwebDir(), "bash", "./shell_server_deploy.sh", "--newest")
+	out, err := runCommand(ctx, chenwebDir(), "bash", "./shell_server_deploy.sh", "--list")
 	if err != nil {
-		rc.GetLogger().Error("deployment: list relay archives failed", "error", err, "output", string(out))
+		logger.Error("deployment: list relay archives failed", "error", err, "output", string(out))
 		return fail(c, http.StatusBadGateway, codeRelayFailed, strings.TrimSpace(string(out)+"\n"+err.Error()))
 	}
-	name, size, modified, err := parseNewest(string(out))
+	archives, err := parseArchiveList(string(out))
 	if err != nil {
 		return fail(c, http.StatusBadGateway, codeRelayFailed, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "archive_name": name, "size": size,
-		"modified": modified, "build_number": ArchiveBuildNumber(name)})
+	db := ApiTypes.ProjectDBHandle
+	tries := 0
+	for _, a := range archives {
+		if a.BuildNumber == "" || tries == releaseFileTries {
+			continue
+		}
+		tries++
+		name := "runshen-deploy-" + a.BuildNumber + ".release.json"
+		data, err := runCommand(ctx, chenwebDir(), "bash", "./shell_server_deploy.sh", "--release-file", name)
+		if err != nil {
+			logger.Info("deployment: no release file on the relay", "file", name, "error", err)
+			continue
+		}
+		f, err := releaseshandler.ParseFile(jsonPart(data))
+		if err != nil {
+			logger.Warn("deployment: unreadable release file", "file", name, "error", err)
+			continue
+		}
+		added, err := releaseshandler.Import(ctx, db, f)
+		if err != nil {
+			logger.Error("deployment: import release file failed", "file", name, "error", err)
+			return fail(c, http.StatusInternalServerError, codeInternal, err.Error())
+		}
+		logger.Info("deployment: imported release file", "file", name, "added", added)
+		break
+	}
+	history, err := releaseshandler.History(ctx, db, releaseshandler.ProjectChenWeb)
+	if err != nil {
+		return fail(c, http.StatusInternalServerError, codeInternal, err.Error())
+	}
+	byBuild := map[string]releaseshandler.Release{}
+	for _, r := range history {
+		if r.BuildNumber != "" && r.Status == releaseshandler.StatusReleased {
+			byBuild[r.BuildNumber] = r
+		}
+	}
+	runningBuild := ""
+	if self, err := buildinfo.CurrentProcess("server"); err == nil {
+		runningBuild = self.BuildNumber
+	}
+	for i := range archives {
+		a := &archives[i]
+		if r, ok := byBuild[a.BuildNumber]; ok {
+			a.ReleaseVersion, a.ReleaseDate, a.ItemCount = r.Version, r.ReleaseDate, len(r.Items)
+		}
+		a.Running = a.BuildNumber != "" && a.BuildNumber == runningBuild
+	}
+	current, currentBuild, err := releaseshandler.Current(ctx, db, releaseshandler.ProjectChenWeb)
+	if err != nil {
+		return fail(c, http.StatusInternalServerError, codeInternal, err.Error())
+	}
+	running := ""
+	if currentBuild != "" || current != (releaseshandler.Version{}) {
+		running = current.String()
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "archives": archives,
+		"running_release": running, "running_build_number": runningBuild})
 }
 
-// parseNewest reads the last "<name> <size> <mtime>" line of shell_server_deploy.sh --newest.
-func parseNewest(out string) (name string, size int64, modified time.Time, err error) {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	fields := strings.Fields(lines[len(lines)-1])
-	if len(fields) != 3 || !ValidArchiveName(fields[0]) {
-		return "", 0, time.Time{}, fmt.Errorf("unexpected relay listing: %q", out)
+// jsonPart drops anything ssh printed before the release file's JSON (host key warnings).
+func jsonPart(out []byte) []byte {
+	if i := strings.IndexByte(string(out), '{'); i > 0 {
+		return out[i:]
 	}
-	size, err1 := strconv.ParseInt(fields[1], 10, 64)
-	mtime, err2 := strconv.ParseInt(fields[2], 10, 64)
-	if err1 != nil || err2 != nil {
-		return "", 0, time.Time{}, fmt.Errorf("unexpected relay listing: %q", out)
+	return out
+}
+
+// parseArchiveList reads the "<name> <size> <mtime>" lines of shell_server_deploy.sh --list,
+// skipping other lines (ssh warnings).
+func parseArchiveList(out string) ([]Archive, error) {
+	archives := []Archive{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 || !ValidArchiveName(fields[0]) {
+			continue
+		}
+		size, err1 := strconv.ParseInt(fields[1], 10, 64)
+		mtime, err2 := strconv.ParseInt(fields[2], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		archives = append(archives, Archive{ArchiveName: fields[0], Size: size, Modified: time.Unix(mtime, 0).UTC(),
+			BuildNumber: ArchiveBuildNumber(fields[0])})
 	}
-	return fields[0], size, time.Unix(mtime, 0).UTC(), nil
+	if len(archives) == 0 {
+		return nil, fmt.Errorf("unexpected relay listing: %q", out)
+	}
+	return archives, nil
 }
 
 // StartDeployment handles POST .../deployment/deployments {archive_name}.
@@ -298,6 +389,12 @@ func StartDeployment(c echo.Context) error {
 	}
 	run := Run{ArchiveName: body.ArchiveName, BuildNumber: ArchiveBuildNumber(body.ArchiveName),
 		PreviousBuildNumber: previous, RequestedBy: requester(user)}
+	// Releases are known from the release files the archive list imported.
+	run.ReleaseVersion, _ = releaseshandler.VersionForBuild(ctx, ApiTypes.ProjectDBHandle, releaseshandler.ProjectChenWeb, run.BuildNumber)
+	if cur, build, err := releaseshandler.Current(ctx, ApiTypes.ProjectDBHandle, releaseshandler.ProjectChenWeb); err == nil &&
+		(build != "" || cur != (releaseshandler.Version{})) {
+		run.PreviousRelease = cur.String()
+	}
 	id, err := CreateDeployment(ctx, ApiTypes.ProjectDBHandle, run)
 	if errors.Is(err, ErrActiveRun) {
 		return fail(c, http.StatusConflict, codeActiveRun, "a deployment is already queued or running")
@@ -315,7 +412,8 @@ func StartDeployment(c echo.Context) error {
 		return fail(c, http.StatusInternalServerError, codeStartFailed, msg)
 	}
 	logger.Info("deployment: deployment queued", "deployment_id", id, "archive", run.ArchiveName,
-		"build_number", run.BuildNumber, "previous_build_number", previous, "user", run.RequestedBy)
+		"build_number", run.BuildNumber, "previous_build_number", previous, "release", run.ReleaseVersion,
+		"previous_release", run.PreviousRelease, "user", run.RequestedBy)
 	return c.JSON(http.StatusAccepted, map[string]any{"status": true, "id": id})
 }
 
