@@ -330,11 +330,12 @@ func (p *MetricsProcessor) callSimpleChunkSelection(ctx context.Context, recordI
 				continue
 			}
 		}
+		refs := simpleMetricRowRefs(raw)
 		res.dropped = append(res.dropped, newDroppedMetricRow(map[string]any{
 			"metric_name":         strings.TrimSpace(asString(raw["n"])),
 			"source_line_spans":   spans,
-			"source_table_rows":   tableRowRefsFromValue(raw["t"]),
-			"threshold_or_target": idx.sourceText(spans, tableRowRefsFromValue(raw["t"])),
+			"source_table_rows":   refs,
+			"threshold_or_target": idx.sourceText(spans, refs),
 		}, metricDropStageEnrich, firstNonEmptyTrimmed(asString(raw["r"]), "unspecified")))
 	}
 	if discarded > 0 {
@@ -383,6 +384,15 @@ func normalizeMetricSimpleLang(raw string) string {
 	return lang
 }
 
+// Some responses place explicit row citations in l and omit t (ChenWeb#47).
+// Plain line numbers in l provide no row evidence.
+func simpleMetricRowRefs(raw map[string]any) []TableRowRef {
+	if raw["t"] != nil {
+		return tableRowRefsFromValue(raw["t"])
+	}
+	return tableRowRefsFromValue(raw["l"])
+}
+
 // expandSimpleMetricRow turns a compact row (spec metric-simple-extraction) into the long-named
 // row the shared steps and the store use, and fills the fields the model does not return.
 func expandSimpleMetricRow(raw map[string]any, idx simpleChunkLines) map[string]any {
@@ -403,7 +413,7 @@ func expandSimpleMetricRow(raw map[string]any, idx simpleChunkLines) map[string]
 		"condition":             raw["c"],
 		"condition_en":          raw["ce"],
 		"source_line_spans":     raw["l"],
-		"source_table_rows":     raw["t"],
+		"source_table_rows":     simpleMetricRowRefs(raw),
 		"value_structure":       raw["vs"],
 		"value_min":             raw["lo"],
 		"value_max":             raw["hi"],

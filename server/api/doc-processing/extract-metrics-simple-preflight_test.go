@@ -402,3 +402,32 @@ func TestSimplePreflightRetriesPrimaryOnHeaderOnlyCitation(t *testing.T) {
 		t.Fatalf("retries=%d of %d requests, want exactly one", retries, len(bodies))
 	}
 }
+
+func TestSimplePreflightRetainsExplicitRowCitationsInLineField(t *testing.T) {
+	// Runshen record 468 put precise citations in l and omitted t.
+	row := map[string]any{
+		"n": "教育培训总分", "s": "饮料制造企业", "v": "48", "u": "分",
+		"k": "requirement", "r": "exact", "l": []any{"916#r1", "916#r2"},
+	}
+	work := newMetricSimpleWork([]MarkedLine{simpleLine("n", 916, "table", preflightTable(4))})
+	first := metricSimpleSelection{work, work.units[:2]}
+	second := metricSimpleSelection{work, work.units[2:]}
+	spans := normalizeSourceLineSpans(row["l"])
+	if owned, err := first.accepts(row, spans); err != nil || !owned {
+		t.Fatalf("first segment owns the cited rows: owned=%t error=%v", owned, err)
+	}
+	if owned, err := second.accepts(row, spans); err != nil || owned {
+		t.Fatalf("second segment must omit the same rows: owned=%t error=%v", owned, err)
+	}
+
+	expanded := expandSimpleMetricRow(row, newSimpleChunkLines(work.source))
+	refs, _ := expanded["source_table_rows"].([]TableRowRef)
+	if len(refs) != 1 || refs[0].Line != 916 || strings.Join(refs[0].Rows, ",") != "r1,r2" {
+		t.Fatalf("expected both explicit source rows in the normalized metric, got %+v", refs)
+	}
+
+	row["t"] = []any{"916#r999"}
+	if _, err := first.accepts(row, spans); err == nil {
+		t.Fatal("explicit invalid t must fail even when l has usable row citations")
+	}
+}

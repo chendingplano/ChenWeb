@@ -238,7 +238,7 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 	if !needsRows {
 		return true, nil
 	}
-	refs := tableRowRefsFromValue(raw["t"])
+	refs := simpleMetricRowRefs(raw)
 	if len(refs) == 0 {
 		return false, errMetricSimpleRowCitation
 	}
