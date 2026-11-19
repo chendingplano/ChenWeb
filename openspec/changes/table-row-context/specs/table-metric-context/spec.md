@@ -37,6 +37,13 @@ For a metric whose spans cover a `table` line, the system SHALL replace `metric_
 - **WHEN** no row is cited, several rows tie on evidence, and the table has more than 5 data rows
 - **THEN** the LLM's `metric_context` is kept and a warning is logged with the metric ID, line and table size
 
+#### Scenario: A quantity is embedded in a table cell
+- **WHEN** there is no matching row from existing evidence or citations, and one data row contains the complete quantity with its unit
+- **THEN** select that row and compute its row hash
+- **AND** a range may repeat the same unit at both endpoints, such as `100mm~200mm`
+- **AND** an explicit limit may spell a single-digit count in Chinese, such as `不应有多于两处`
+- **AND** quantities that match multiple rows do not select a row
+
 #### Scenario: Uncited full-width footnote
 - **WHEN** a large table has no row match by the existing evidence or cited-row rules, and exactly one full-width row contains both the scalar metric value with its unit and a condition clause
 - **THEN** that footnote row is selected as evidence, with a computed row hash
