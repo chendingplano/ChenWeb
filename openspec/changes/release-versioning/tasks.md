@@ -37,7 +37,7 @@
 - [x] 6.3 `server/buildinfo`: `ReleaseVersion` in `Metadata`; Build Info API and `build-info-view.svelte` show it
 - [x] 6.4 `deployment/plan.go`: `release` and `release-commit` build steps; tracker records `::release::` and `deploy-runner` stores it; update the script/plan key test (deployment-page task 4.5)
 - [ ] 6.5 `bash -n` the scripts; run one real page build on the Mac with two pending items and check the archive's `release/`, the sidecar on the relay, the committed release and that both items are released
-- [ ] 6.6 Failure check: force a failure after `reserve` (e.g. a bad `BINS`) and confirm the release is gone and the items are pending again
+- [x] 6.6 Failure check: force a failure after `reserve` (e.g. a bad `BINS`) and confirm the release is gone and the items are pending again — verified 2026-11-19: hand run with BINS=bogus reserved 00.00.01, the trap gave it back, the test item returned to pending (then deleted)
 
 ## 7. Deploy integration
 
