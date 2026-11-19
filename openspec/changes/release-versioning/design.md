@@ -189,9 +189,19 @@ Headings exist in English and Chinese (a small Go table; this is server-generate
 the API takes `lang` per `ChenWeb/CLAUDE.md` §3). The build writes both languages into
 `release/`.
 
-PDF = `docbuilder.PandocConvert(DOCUMENT_PDF_ENGINE, DOCUMENT_PDF_FONT)` on the Markdown,
-cached as `.cache/release-notes/<sha256 of markdown>.pdf`. Released history never changes,
-so the cache never needs invalidating.
+PDF: the same renderer writes Typst source (every piece of text as a quoted Typst string,
+so item text can never be read as markup) and runs `typst compile`, caching the result as
+`.cache/release-notes/<sha256 of the source>.pdf`. Released history never changes, so the
+cache never needs invalidating. The font list (Helvetica, Arial, PingFang SC, SimHei,
+SimSun) plus Typst's automatic fallback covers Chinese on both machines, the same way the
+doc-review reports do.
+
+*Typst directly, not pandoc (changed 2026-11-19):* the first version reused Document
+Builder's `docbuilder.PandocConvert`, but pandoc is not installed on the China box, and
+Ubuntu 18.04's package is too old to drive Typst. The box already has `typst` and Chinese
+fonts (runbook §6.1), so rendering with Typst alone needs nothing new on any machine. Only
+basic Typst features are used (`set text`, `heading`, `list`, `strong`), which the box's
+0.14.2 supports, like the doc-review template.
 
 Endpoint: `GET /api/v1/releases/notes?project=ChenWeb&from=01.02.03&to=01.02.06&format=text|pdf&lang=en|zh-cn`;
 `from` empty = from the beginning. Notes for a single release run from the previous *build*
@@ -222,9 +232,10 @@ The Releases page keeps its drafts, open panels, expanded releases and scroll po
 
 ## Reused modules
 
-- **20261109-02 Document Builder (backend)** — reuse `docbuilder.PandocConvert` and its
-  `DOCUMENT_PDF_ENGINE` / `DOCUMENT_PDF_FONT` settings as is for Markdown → PDF. Not
-  `ExportPDF`, which is tied to `kb.doc_files`.
+- **20261109-02 Document Builder (backend)** — its `PandocConvert` was used first and then
+  dropped (see D10): it needs pandoc, which the China box lacks. The other `typst compile`
+  callers (doc-review reports, CDM publishing) run the command inline inside their own
+  workflows; there is no shared helper to reuse, and the call is one line.
 - **20261109-01 Markdown Viewer** — considered; not used. The pages show the plain-text form
   in a `<pre>`, so no Markdown endpoint was needed.
 - **20261114-06 PDF View Window** — considered; not used. It is built around highlighted
@@ -243,8 +254,8 @@ The Releases page keeps its drafts, open panels, expanded releases and scroll po
   script's host and pid; the next `reserve` on the same host reverts it when that process is
   gone, and refuses while it is alive. This works for hand builds, which have no
   `kb.deployment_builds` row. The Releases page shows a building release with its age.
-- [pandoc/typst/font missing on the box] → the PDF endpoint answers 503 naming the missing
-  tool; text notes still work. Installing them is a root task for the user.
+- [typst missing on a machine] → the PDF endpoint answers 503 naming it; text notes still
+  work. Both current machines have it.
 - [Two-digit limit] → a clear refusal at `reserve`, before any compile; the page shows how
   many revisions are left once fewer than 10 remain.
 - [Sidecar fetch over the slow relay link] → one small file per listing (tens of KB after a
@@ -263,8 +274,7 @@ The Releases page keeps its drafts, open panels, expanded releases and scroll po
 3. Deploy that build to prod with the current page (newest archive). The new server
    migrates, imports `release/release.json` and records the running release. From the next
    deploy the picker is used.
-4. Root on the box (user): confirm `pandoc`, `typst` and a CJK-capable font; set
-   `DOCUMENT_PDF_FONT` if needed.
+4. Nothing to install on the box: `typst` and Chinese fonts are already there (runbook §6.1).
 5. Rollback: deploying a pre-change archive works (old server ignores the new tables); the
    picker lists such archives without a version. Do not run the migration's Down on prod.
 

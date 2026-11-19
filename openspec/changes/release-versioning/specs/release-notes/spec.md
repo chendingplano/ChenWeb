@@ -31,15 +31,15 @@ and `(shared#<n>)` for component shared. A shared item without an issue SHALL be
 ### Requirement: Text and PDF forms in English and Chinese
 Notes SHALL be available as plain text and as PDF, with headings in English or Chinese as
 requested. Item text SHALL be shown as entered. The PDF SHALL be made from the same content
-as the text form, using pandoc with the configured `DOCUMENT_PDF_ENGINE` and
-`DOCUMENT_PDF_FONT`, and SHALL be reused for identical content.
+as the text form, compiled with `typst`, and SHALL be reused for identical content. Item
+text SHALL appear literally in the PDF, never interpreted as markup.
 
 #### Scenario: Chinese PDF
 - **WHEN** an admin requests notes as PDF with `lang=zh-cn`
 - **THEN** a PDF is returned whose section headings are Chinese and whose items match the text form
 
 #### Scenario: PDF tools missing
-- **WHEN** pandoc or the PDF engine is not installed on the machine
+- **WHEN** typst is not installed on the machine
 - **THEN** the PDF request fails with 503 naming the missing tool, and the text form still works
 
 ### Requirement: Notes are viewable on both machines

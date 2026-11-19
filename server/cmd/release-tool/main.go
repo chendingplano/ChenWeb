@@ -241,7 +241,7 @@ func writeNotes(ctx context.Context, project string, v releaseshandler.Version, 
 		if err := os.WriteFile(filepath.Join(out, base+".txt"), []byte(n.Text), 0o644); err != nil {
 			return err
 		}
-		path, err := pdf.PDF(ctx, n.Markdown)
+		path, err := pdf.PDF(ctx, n.Typst)
 		if err != nil {
 			return fmt.Errorf("%s PDF: %w", lang, err)
 		}

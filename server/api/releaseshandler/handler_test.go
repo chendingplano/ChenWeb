@@ -126,7 +126,7 @@ func TestNotesPDF(t *testing.T) {
 	t.Cleanup(func() { renderer = old })
 	dir := t.TempDir()
 	renderer = func() *PDFRenderer {
-		return &PDFRenderer{CacheDir: dir, Convert: func(_ context.Context, _, dst string) error {
+		return &PDFRenderer{CacheDir: dir, Compile: func(_ context.Context, _, dst string) error {
 			return os.WriteFile(dst, []byte("%PDF-1.7 test"), 0o644)
 		}}
 	}

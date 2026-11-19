@@ -65,16 +65,16 @@ before it starts", which always offers the newest archive) is in the unarchived
 - **Frontend:** `releases-view.svelte` / `releases-client.ts` rebuilt; `deployment-view.svelte`
   (release picker, notes since running release, version in history); `build-info-view.svelte`
   (version); Paraglide messages (en, zh-cn).
-- **Production box:** PDF rendering needs `pandoc`, `typst` and a CJK-capable font installed
-  (root step for the user); the `chenweb` service imports release files at start.
+- **Production box:** PDFs are compiled with the `typst` and Chinese fonts already installed
+  there; nothing new to install. The `chenweb` service imports release files at start.
 - **Docs:** devdoc `2026111901-devdoc-release-management.md` is superseded; deployment devdoc
   `2026111602` and the runbook gain the release steps; `ChenWeb/CLAUDE.md` gains the rule to
   add a release item for each fix.
 - **Reusable modules searched** (`find-reusable-module`: pdf render/generate, pdf viewer,
-  version/release/markdown/typst): reuse **20261109-02 Document Builder (backend)** —
-  `docbuilder.PandocConvert` for Markdown → PDF with the `DOCUMENT_PDF_ENGINE` /
-  `DOCUMENT_PDF_FONT` settings. **20261109-01 Markdown Viewer** (the page shows the plain-text
-  notes) and **20261114-06 PDF View Window** were considered and not used (built for highlighted
+  version/release/markdown/typst): **20261109-02 Document Builder (backend)**'s
+  `PandocConvert` was used first and dropped because the China box has no pandoc (design
+  D10); PDFs are compiled with `typst` directly. **20261109-01 Markdown Viewer** (the page
+  shows the plain-text notes) and **20261114-06 PDF View Window** were considered and not used (built for highlighted
   evidence; PDFs open in the browser's own viewer). Nothing in the catalogue handles version
   numbers or release items; that code is new and ChenWeb-specific for now (it moves to
   `shared/` when tax adopts it).

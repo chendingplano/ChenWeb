@@ -308,7 +308,7 @@ func GetNotes(c echo.Context) error {
 	if c.QueryParam("format") != "pdf" {
 		return c.Blob(http.StatusOK, "text/plain; charset=utf-8", []byte(notes.Text))
 	}
-	path, err := renderer().PDF(ctx, notes.Markdown)
+	path, err := renderer().PDF(ctx, notes.Typst)
 	if err != nil {
 		return respondError(c, rc, err)
 	}

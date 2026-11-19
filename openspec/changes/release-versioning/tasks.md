@@ -16,7 +16,7 @@
 ## 3. Release notes
 
 - [x] 3.1 Range selection (from, to] newest first, with major/minor headings; Markdown and plain-text renderers; issue formatting `(#n)`, `(shared#n)`, `[shared]`; English and Chinese heading table; golden-file tests for one release, a range across a new minor, an empty release
-- [x] 3.2 PDF via `docbuilder.PandocConvert(DOCUMENT_PDF_ENGINE, DOCUMENT_PDF_FONT)` cached as `.cache/release-notes/<sha256>.pdf`; missing pandoc/engine → typed error the handler maps to 503 naming the tool; test with a stub converter
+- [x] 3.2 PDF via `typst compile` of generated Typst source (text as quoted strings), cached as `.cache/release-notes/<sha256>.pdf`; missing typst → typed error the handler maps to 503 naming it; test with a stub compiler. (First built on `docbuilder.PandocConvert`; switched 2026-11-19 because the box has no pandoc.)
 
 ## 4. API and roles
 
@@ -57,7 +57,7 @@
 ## 9. Rollout
 
 - [ ] 9.1 On the Mac: create major `01`, add items (one via `release-tool add-item`), build, and view text and PDF notes on the Releases page
-- [ ] 9.2 Root on the box (user): confirm `pandoc`, `typst` and a CJK-capable font are installed; set `DOCUMENT_PDF_FONT` if needed
+- [x] 9.2 Nothing to install on the box: PDFs need only `typst` and Chinese fonts, both present (runbook §6.1). Confirm the PDF button during the deploy test.
 - [ ] 9.3 Deploy that build with the current page; confirm the box's Releases page shows the history and the running release
 - [ ] 9.4 Next build: deploy it with the picker; check notes since the running release, the PDF, a skipped-release range and the rollback warning (without confirming the rollback)
 
@@ -65,5 +65,5 @@
 
 - [x] 10.1 Rewrite devdoc `2026111901-devdoc-release-management.md` with the `create-devdoc` skill; add the release steps to devdoc `2026111602` and the runbook's "Deployment page" section
 - [x] 10.2 `ChenWeb/CLAUDE.md`: rule to record each fix with `release-tool add-item` (issue number when one exists)
-- [x] 10.3 Catalogue: `docbuilder.PandocConvert` is now used outside Document Builder — update module 20261109-02's `kb.reusable_modules` row and doc (`create-reusable-module`) and run `modules.py check`
+- [x] 10.3 Catalogue: no catalogued module is used after the switch to Typst; the earlier note on module 20261109-02 (row `use_when` and doc) was reverted and `modules.py check` re-run
 - [ ] 10.4 When `deployment-page` is archived, note that `release-deployment` replaces its "Deploy shows the archive before it starts" requirement

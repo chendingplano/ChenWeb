@@ -68,10 +68,11 @@ Release 01.02.06
 	if n.Text != want {
 		t.Fatalf("text =\n%s\nwant\n%s", n.Text, want)
 	}
-	for _, s := range []string{`title: "ChenWeb release notes"`, `### 01.02.06`, `**Bug fixes**`,
-		`- DeepSeek span repair corrupted quotes (shared#26)`, `- [shared] Faster \*pool\* start`} {
-		if !strings.Contains(n.Markdown, s) {
-			t.Errorf("markdown lacks %q:\n%s", s, n.Markdown)
+	for _, s := range []string{`#set document(title: "ChenWeb release notes")`, `#heading(level: 3, "01.02.06 (2026-11-19, build 20261119063000)")`,
+		`#strong("Bug fixes")`, `#list("DeepSeek span repair corrupted quotes (shared#26)", "Cited table evidence scrolled out of view (#142)")`,
+		`#list("[shared] Faster *pool* start")`, `lang: "en"`} {
+		if !strings.Contains(n.Typst, s) {
+			t.Errorf("typst lacks %q:\n%s", s, n.Typst)
 		}
 	}
 }
@@ -105,10 +106,21 @@ func TestRenderChinese(t *testing.T) {
 	}
 }
 
+func TestTypstStrEscapes(t *testing.T) {
+	if got := typstStr("a \"quote\" \\ back\nslash #x *y* @z"); got != `"a \"quote\" \\ back slash #x *y* @z"` {
+		t.Fatalf("typstStr = %s", got)
+	}
+	to := Version{1, 2, 6}
+	n := Render(ProjectChenWeb, InRange(sampleHistory(), nil, to), nil, to, "zh-cn")
+	if !strings.Contains(n.Typst, `lang: "zh"`) || !strings.Contains(n.Typst, `#strong("缺陷修复")`) {
+		t.Fatalf("zh typst:\n%s", n.Typst)
+	}
+}
+
 func TestPDFRendererCachesByContent(t *testing.T) {
 	calls := 0
-	p := &PDFRenderer{CacheDir: t.TempDir(), Engine: "typst", Font: "Helvetica",
-		Convert: func(_ context.Context, src, dst string) error {
+	p := &PDFRenderer{CacheDir: t.TempDir(),
+		Compile: func(_ context.Context, src, dst string) error {
 			calls++
 			md, _ := os.ReadFile(src)
 			return os.WriteFile(dst, append([]byte("%PDF "), md...), 0o644)
@@ -125,20 +137,15 @@ func TestPDFRendererCachesByContent(t *testing.T) {
 }
 
 func TestPDFRendererNamesMissingTool(t *testing.T) {
-	p := &PDFRenderer{CacheDir: t.TempDir(), Engine: "typst", Font: "Helvetica",
-		LookPath: func(name string) (string, error) {
-			if name == "pandoc" {
-				return "", errors.New("not found")
-			}
-			return "/bin/" + name, nil
-		}}
-	_, err := p.PDF(context.Background(), "# x")
-	if !errors.Is(err, ErrPDFUnavailable) || !strings.Contains(err.Error(), "pandoc") {
+	p := &PDFRenderer{CacheDir: t.TempDir(),
+		LookPath: func(name string) (string, error) { return "", errors.New("not found") }}
+	_, err := p.PDF(context.Background(), "x")
+	if !errors.Is(err, ErrPDFUnavailable) || !strings.Contains(err.Error(), "typst") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-// TestPDFRendererReal runs pandoc for real when RELEASES_TEST_REAL_PDF=1.
+// TestPDFRendererReal runs typst for real when RELEASES_TEST_REAL_PDF=1.
 func TestPDFRendererReal(t *testing.T) {
 	if os.Getenv("RELEASES_TEST_REAL_PDF") != "1" {
 		t.Skip("RELEASES_TEST_REAL_PDF not set")
@@ -147,7 +154,7 @@ func TestPDFRendererReal(t *testing.T) {
 	p := NewPDFRenderer(t.TempDir())
 	for _, lang := range Langs {
 		n := Render(ProjectChenWeb, InRange(sampleHistory(), &from, to), &from, to, lang)
-		path, err := p.PDF(context.Background(), n.Markdown)
+		path, err := p.PDF(context.Background(), n.Typst)
 		if err != nil {
 			t.Fatalf("%s: %v", lang, err)
 		}
