@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -567,7 +569,7 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 	p := NewProductsProcessor(nil, nil, extractor, nil)
 	p.FallbackModelName = "qwen-plus"
 
-	payload, modelName, err := p.extractProductPayloadWithFallback(
+	payload, modelName, _, err := p.extractProductPayloadWithFallback(
 		context.Background(),
 		"actor",
 		"input",
@@ -611,8 +613,8 @@ func TestProductsProcessor_ExtractProductPayloadUsesStructuredContractWhenAvaila
 	p.PromptRef = "prompt-test"
 	p.ModelName = "gpt-test"
 
-	payload, err := p.extractProductPayload(context.Background(),
-		"action", "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{}, nil)
+	payload, err := p.extractProductPayload(context.Background(), p.Extractor,
+		"action", "input text", "extract products", "prompt-test", "gpt-test", nil)
 	if err != nil {
 		t.Fatalf("extractProductPayload: %v", err)
 	}
@@ -1145,5 +1147,85 @@ func TestExtractProductsMergedForChunk_RejectsMentionShapedPayload(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "mention-shaped") {
 		t.Fatalf("error should name the shape mismatch, got: %v", err)
+	}
+}
+
+func TestProductsPrimaryRetryKeepsItsProviderDuringFallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	primaryStarted := make(chan struct{})
+	releasePrimary := make(chan struct{})
+	var primaryRequests atomic.Int32
+	var fallbackRequests atomic.Int32
+
+	respond := func(w http.ResponseWriter, content string) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{
+			map[string]any{"message": map[string]any{"content": content}},
+		}})
+	}
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Messages []struct{ Content string } }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		for _, message := range req.Messages {
+			if strings.Contains(message.Content, "fallback chunk") {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+		}
+		if r.Header.Get("Authorization") != "Bearer primary-key" {
+			t.Error("wrong credentials reached primary endpoint")
+		}
+		if primaryRequests.Add(1) == 1 {
+			close(primaryStarted)
+			select {
+			case <-releasePrimary:
+			case <-ctx.Done():
+				return
+			}
+			respond(w, "{}")
+			return
+		}
+		respond(w, `{"products":[]}`)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackRequests.Add(1)
+		if r.Header.Get("Authorization") != "Bearer fallback-key" {
+			t.Error("wrong credentials reached fallback endpoint")
+		}
+		respond(w, `{"products":[]}`)
+	}))
+	defer fallback.Close()
+
+	p := &ProductsProcessor{
+		Extractor:         &llmclients.OpenAIJSONClient{HTTPClient: primary.Client()},
+		Logger:            loggerutil.CreateDefaultLogger("MID_TEST_PRODUCT_PROVIDER"),
+		FallbackModelName: "fallback-model",
+		FallbackModelCfg:  structureModelConfig{ModelName: "fallback-model", BaseURL: fallback.URL, APIKey: "fallback-key"},
+	}
+	primaryCfg := structureModelConfig{ModelName: "primary-model", BaseURL: primary.URL, APIKey: "primary-key"}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, _, _, err := p.extractProductPayloadWithFallback(ctx, "extract products", "primary chunk", "prompt", "prompt", primaryCfg.ModelName, primaryCfg, nil)
+		firstDone <- err
+	}()
+	select {
+	case <-primaryStarted:
+	case <-ctx.Done():
+		t.Fatal("primary request did not reach its endpoint")
+	}
+	_, model, _, err := p.extractProductPayloadWithFallback(ctx, "extract products", "fallback chunk", "prompt", "prompt", primaryCfg.ModelName, primaryCfg, nil)
+	close(releasePrimary)
+	if err != nil || model != p.FallbackModelName {
+		t.Fatalf("fallback result = %q, %v", model, err)
+	}
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if got := primaryRequests.Load(); got != 2 {
+		t.Errorf("primary endpoint received %d requests for primary chunk, want 2", got)
+	}
+	if got := fallbackRequests.Load(); got != 1 {
+		t.Errorf("fallback endpoint received %d requests, want 1", got)
 	}
 }

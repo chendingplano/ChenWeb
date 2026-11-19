@@ -21,7 +21,7 @@ func TestMergedProductsUsesStablePromptPrefix(t *testing.T) {
 	}}
 	p := &ProductsProcessor{Extractor: extractor}
 	for _, input := range []string{"first chunk", "second chunk"} {
-		if _, err := p.extractProductPayload(context.Background(), "extract products merged", input, "stable instructions", "prompt", "model", structureModelConfig{}, nil); err != nil {
+		if _, err := p.extractProductPayload(context.Background(), p.Extractor, "extract products merged", input, "stable instructions", "prompt", "model", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
