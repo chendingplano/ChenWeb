@@ -25,7 +25,7 @@ before this change SHALL show no current release.
 - **THEN** the box's current release is `01.02.06`
 
 ### Requirement: The admin chooses which release to deploy
-On a machine with `role = "deploy"` the Deploy button SHALL list every `runshen-*.tar.gz`
+On a machine with `role = "deploy"` the Deploy button SHALL list every `*-deploy-*.tar.gz`
 archive on the relay, newest first, with its build number, release version (or "no release
 information" for archives without a release file), date, size and item count, and SHALL mark
 the running release. The newest archive SHALL be selected by default. The deployment SHALL

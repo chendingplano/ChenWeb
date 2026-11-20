@@ -109,7 +109,7 @@ cannot. Items added while a build runs stay pending for the next one. Binding at
    revisions, then writes `release.json`, `RELEASE_NOTES.txt`, `RELEASE_NOTES.pdf` (and the
    `zh-cn` pair, D10).
 4. `archive`, then `upload` sends the archive and the sidecar
-   `runshen-deploy-<build>.release.json` (a copy of `release.json`) to the relay.
+   `chenweb-deploy-<build>.release.json` (a copy of `release.json`) to the relay.
 5. New `release-commit` step: `release-tool commit --version V` sets `released`, the release
    date, and `kb.release_current`, and prints `::release::V`. For page builds, `deploy-runner`
    reads that marker and stores it in `kb.deployment_builds.release_version` (the row's
@@ -166,7 +166,7 @@ before this change: that server cannot record anything, but the runner doing the
 always the newer binary.
 
 ### D9. Choosing a release to deploy
-- `shell_server_deploy.sh --list` prints every `runshen-*.tar.gz` as `<name> <size> <mtime>`
+- `shell_server_deploy.sh --list` prints every `*-deploy-*.tar.gz` as `<name> <size> <mtime>`
   (newest first); `--release-file <name>` prints one sidecar. `--newest` stays for hand use.
 - New `GET /api/v1/deployment/archives` (deploy role): lists archives, fetches and imports
   the newest sidecar, and returns each archive with its build number, version (or none for

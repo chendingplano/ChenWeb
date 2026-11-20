@@ -46,7 +46,7 @@ func TestCreateDeploymentReportsActiveRun(t *testing.T) {
 	mock.ExpectQuery(`INSERT INTO kb.deployments`).
 		WillReturnError(errors.New(`pq: duplicate key value violates unique constraint "idx_deployments_one_active"`))
 	mock.ExpectRollback()
-	_, err := CreateDeployment(context.Background(), db, Run{ArchiveName: "runshen-deploy-1.tar.gz"})
+	_, err := CreateDeployment(context.Background(), db, Run{ArchiveName: "chenweb-deploy-1.tar.gz"})
 	if !errors.Is(err, ErrActiveRun) {
 		t.Fatalf("err = %v, want ErrActiveRun", err)
 	}

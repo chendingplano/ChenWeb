@@ -32,7 +32,7 @@
 
 ## 6. Build integration
 
-- [x] 6.1 `shell_server_build_rcp.sh`: in `check`, run `release-tool reserve` and export `RELEASE_VERSION`; trap that runs `release-tool abort` (and removes uploaded relay files if the failure is after upload); new `release` step before `archive`; upload the sidecar `runshen-deploy-<build>.release.json`; new `release-commit` step after `upload`
+- [x] 6.1 `shell_server_build_rcp.sh`: in `check`, run `release-tool reserve` and export `RELEASE_VERSION`; trap that runs `release-tool abort` (and removes uploaded relay files if the failure is after upload); new `release` step before `archive`; upload the sidecar `chenweb-deploy-<build>.release.json`; new `release-commit` step after `upload`
 - [x] 6.2 `mise.toml` `build-server-linux`: add `release_version` to the build metadata JSON; MANIFEST lines `release_version:`, `shared_git_rev:`, `shared_git_dirty:` (from `../shared`); works unchanged when `RELEASE_VERSION` is unset
 - [x] 6.3 `server/buildinfo`: `ReleaseVersion` in `Metadata`; Build Info API and `build-info-view.svelte` show it
 - [x] 6.4 `deployment/plan.go`: `release` and `release-commit` build steps; tracker records `::release::` and `deploy-runner` stores it; update the script/plan key test (deployment-page task 4.5)

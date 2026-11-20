@@ -94,11 +94,11 @@ step release
 release_tool notes --version "$RELEASE_VERSION" --build-number "$BUILD_NUMBER" \
   --out /tmp/chenweb-deploy/release --description "$BUILD_DESCRIPTION"
 
-# The deploy side reads the build number from this name (runshen-deploy-<build_number>).
-archive="/tmp/runshen-deploy-${BUILD_NUMBER}.tar.gz"
+# The deploy side reads the build number from this name (chenweb-deploy-<build_number>).
+archive="/tmp/chenweb-deploy-${BUILD_NUMBER}.tar.gz"
 # The release file also sits next to the archive, so the deploy machine can list
 # releases and show their notes without downloading archives.
-sidecar="/tmp/runshen-deploy-${BUILD_NUMBER}.release.json"
+sidecar="/tmp/chenweb-deploy-${BUILD_NUMBER}.release.json"
 
 step archive
 tar -czvf "$archive" /tmp/chenweb-deploy

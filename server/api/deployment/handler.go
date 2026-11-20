@@ -276,7 +276,7 @@ func Archives(c echo.Context) error {
 			continue
 		}
 		tries++
-		name := "runshen-deploy-" + a.BuildNumber + ".release.json"
+		name := strings.TrimSuffix(a.ArchiveName, ".tar.gz") + ".release.json"
 		data, err := runCommand(ctx, chenwebDir(), "bash", "./shell_server_deploy.sh", "--release-file", name)
 		if err != nil {
 			logger.Info("deployment: no release file on the relay", "file", name, "error", err)

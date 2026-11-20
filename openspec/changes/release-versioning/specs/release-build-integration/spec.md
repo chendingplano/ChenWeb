@@ -47,11 +47,11 @@ Before the archive is made the build SHALL write a `release/` directory into the
 build containing `release.json` (this release, its build number, git revisions and the full
 release history with items) and the notes for this release as plain text and PDF in English
 and Chinese. The upload SHALL also place a copy of `release.json` on the relay as
-`runshen-deploy-<build_number>.release.json`.
+`chenweb-deploy-<build_number>.release.json`.
 
 #### Scenario: Files in the archive
 - **WHEN** build `20261119063000` succeeds as `01.02.06`
-- **THEN** the archive contains `release/release.json`, `release/RELEASE_NOTES.txt`, `release/RELEASE_NOTES.pdf` and their `zh-cn` versions, and the relay holds `runshen-deploy-20261119063000.release.json`
+- **THEN** the archive contains `release/release.json`, `release/RELEASE_NOTES.txt`, `release/RELEASE_NOTES.pdf` and their `zh-cn` versions, and the relay holds `chenweb-deploy-20261119063000.release.json`
 
 ### Requirement: A failed build gives the revision back
 If a build fails or is abandoned at any step, the reserved release SHALL be removed and its

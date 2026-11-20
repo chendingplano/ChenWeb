@@ -140,8 +140,8 @@ func TestTakeDirtyReturnsOnlyChangedSteps(t *testing.T) {
 func TestBuildArchiveMarkerKeepsUploadStep(t *testing.T) {
 	tr := NewTracker([]PlanStep{{Key: "upload"}}, time.Now)
 	tr.TakeDirty()
-	tr.Line("::archive::runshen-deploy-20261118010604.tar.gz\n")
-	if got := tr.ArchiveName(); got != "runshen-deploy-20261118010604.tar.gz" {
+	tr.Line("::archive::chenweb-deploy-20261118010604.tar.gz\n")
+	if got := tr.ArchiveName(); got != "chenweb-deploy-20261118010604.tar.gz" {
 		t.Fatalf("archive name = %q", got)
 	}
 	if steps := tr.TakeDirty(); len(steps) != 0 {

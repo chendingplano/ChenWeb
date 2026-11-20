@@ -70,12 +70,12 @@ The build SHALL derive its number in local `YYYYmmddHHMMSS` format from the buil
 machine's clock immediately before binary compilation. The manifest's `built_at`
 SHALL record the same time with its UTC offset. The build SHALL
 embed the number in the binaries that report build info and use it to name the archive
-`runshen-deploy-<build_number>.tar.gz`. After upload, the runner SHALL record the archive
+`chenweb-deploy-<build_number>.tar.gz`. After upload, the runner SHALL record the archive
 name and build number in the build row.
 
 #### Scenario: Uploaded archive
 - **WHEN** build `20261116093000` succeeds
-- **THEN** `runshen-deploy-20261116093000.tar.gz` is on the relay and the build row's `archive_name` names it
+- **THEN** `chenweb-deploy-20261116093000.tar.gz` is on the relay and the build row's `archive_name` names it
 
 ### Requirement: Scripts stay usable by hand
 `shell_server_build_rcp.sh` SHALL keep its arguments and behaviour when run from a shell.

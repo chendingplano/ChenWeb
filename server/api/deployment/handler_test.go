@@ -76,7 +76,7 @@ func expectRunningDeployment(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(`SELECT .* FROM kb.deployments\s+WHERE status IN`).WillReturnRows(sqlmock.NewRows(
 		[]string{"id", "archive_name", "build_number", "previous_build_number", "status", "error_message",
 			"requested_by", "runner_pid", "requested_at", "started_at", "finished_at", "release_version", "previous_release_version"}).
-		AddRow(9, "runshen-deploy-20261116093000.tar.gz", "20261116093000", "", "running", "", "x", 100, now, now, nil, "", ""))
+		AddRow(9, "chenweb-deploy-20261116093000.tar.gz", "20261116093000", "", "running", "", "x", 100, now, now, nil, "", ""))
 }
 
 func TestNonAdminIsRejected(t *testing.T) {
@@ -104,7 +104,7 @@ func TestActionsRefusedForWrongRole(t *testing.T) {
 		t.Fatalf("StartBuild on deploy machine: %d %v", code, body)
 	}
 	setup(t, admin(), RoleBuild)
-	if code, body := call(t, StartDeployment, http.MethodPost, "/deployments", `{"archive_name":"runshen-deploy-20261116093000.tar.gz"}`); code != http.StatusBadRequest || body["code"] != codeWrongRole {
+	if code, body := call(t, StartDeployment, http.MethodPost, "/deployments", `{"archive_name":"chenweb-deploy-20261116093000.tar.gz"}`); code != http.StatusBadRequest || body["code"] != codeWrongRole {
 		t.Fatalf("StartDeployment on build machine: %d %v", code, body)
 	}
 	if code, body := call(t, RestartProcess, http.MethodPost, "/processes/doc-processor/restart", "", "id", "doc-processor"); code != http.StatusBadRequest || body["code"] != codeWrongRole {
@@ -117,7 +117,7 @@ func TestActionsRefusedForWrongRole(t *testing.T) {
 
 func TestStartDeploymentRejectsUnsafeArchiveName(t *testing.T) {
 	_, log := setup(t, admin(), RoleDeploy)
-	code, body := call(t, StartDeployment, http.MethodPost, "/deployments", `{"archive_name":"runshen-x.tar.gz;id"}`)
+	code, body := call(t, StartDeployment, http.MethodPost, "/deployments", `{"archive_name":"chenweb-x.tar.gz;id"}`)
 	if code != http.StatusBadRequest || body["code"] != codeInvalidArchive || len(log.calls) != 0 {
 		t.Fatalf("%d %v %v", code, body, log.calls)
 	}
@@ -126,7 +126,7 @@ func TestStartDeploymentRejectsUnsafeArchiveName(t *testing.T) {
 func TestStartDeploymentConflictsWithActiveDeployment(t *testing.T) {
 	mock, log := setup(t, admin(), RoleDeploy)
 	expectRunningDeployment(mock)
-	code, body := call(t, StartDeployment, http.MethodPost, "/deployments", `{"archive_name":"runshen-deploy-20261116093000.tar.gz"}`)
+	code, body := call(t, StartDeployment, http.MethodPost, "/deployments", `{"archive_name":"chenweb-deploy-20261116093000.tar.gz"}`)
 	if code != http.StatusConflict || body["code"] != codeActiveRun || len(log.calls) != 0 {
 		t.Fatalf("%d %v %v", code, body, log.calls)
 	}
@@ -173,12 +173,12 @@ func TestRestartChenwebAnswersBeforeRestarting(t *testing.T) {
 }
 func TestParseArchiveList(t *testing.T) {
 	archives, err := parseArchiveList("Warning: Permanently added host\n" +
-		"runshen-deploy-20261119063000.tar.gz 2234 1763533800\nrunshen-deploy-20261116093000.tar.gz 1234 1763285400\n")
-	if err != nil || len(archives) != 2 || archives[0].BuildNumber != "20261119063000" || archives[1].Size != 1234 ||
+		"chenweb-deploy-20261119063000.tar.gz 2234 1763533800\nlegacy-deploy-20261116093000.tar.gz 1234 1763285400\n")
+	if err != nil || len(archives) != 2 || archives[0].BuildNumber != "20261119063000" || archives[1].Size != 1234 || archives[1].BuildNumber != "20261116093000" ||
 		archives[1].Modified.Unix() != 1763285400 {
 		t.Fatalf("parseArchiveList = %+v %v", archives, err)
 	}
-	if _, err := parseArchiveList("No runshen archive found"); err == nil {
+	if _, err := parseArchiveList("No deploy archive found"); err == nil {
 		t.Fatal("expected an error")
 	}
 }
@@ -189,7 +189,7 @@ func TestArchivesListsReleasesFromTheNewestReleaseFile(t *testing.T) {
 		log.calls = append(log.calls, strings.Join(append([]string{name}, args...), " "))
 		switch args[1] {
 		case "--list":
-			return []byte("runshen-deploy-20261119063000.tar.gz 2234 1763533800\nrunshen-deploy-20261116093000.tar.gz 1234 1763285400\n"), nil
+			return []byte("chenweb-deploy-20261119063000.tar.gz 2234 1763533800\nlegacy-deploy-20261116093000.tar.gz 1234 1763285400\n"), nil
 		case "--release-file":
 			return []byte(`{"project":"ChenWeb","version":"01.00.01","build_number":"20261119063000","history":[` +
 				`{"project":"ChenWeb","version":"01.00.01","kind":"build","status":"released","build_number":"20261119063000",` +
@@ -222,7 +222,7 @@ func TestArchivesListsReleasesFromTheNewestReleaseFile(t *testing.T) {
 	if out["running_release"] != "" {
 		t.Fatalf("running_release = %v", out["running_release"])
 	}
-	if len(log.calls) != 2 || !strings.Contains(log.calls[1], "--release-file runshen-deploy-20261119063000.release.json") {
+	if len(log.calls) != 2 || !strings.Contains(log.calls[1], "--release-file chenweb-deploy-20261119063000.release.json") {
 		t.Fatalf("calls = %v", log.calls)
 	}
 }

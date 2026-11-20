@@ -4,9 +4,11 @@ import "regexp"
 
 var (
 	// archiveNamePattern guards the name passed to the deploy script, which hands it to
-	// scp as a remote path, so only plain file names are accepted.
-	archiveNamePattern = regexp.MustCompile(`^runshen-[A-Za-z0-9._-]+\.tar\.gz$`)
-	archiveBuildNumber = regexp.MustCompile(`^runshen-deploy-(\d{14})\.tar\.gz$`)
+	// scp as a remote path, so only plain file names are accepted. Builds are named
+	// chenweb-deploy-<build_number>.tar.gz; any <prefix>-deploy- name is accepted so
+	// archives built under an earlier prefix stay deployable.
+	archiveNamePattern = regexp.MustCompile(`^[A-Za-z0-9]+-deploy-[A-Za-z0-9._-]+\.tar\.gz$`)
+	archiveBuildNumber = regexp.MustCompile(`^[A-Za-z0-9]+-deploy-(\d{14})\.tar\.gz$`)
 )
 
 // ValidArchiveName reports whether name is a plain relay archive file name.

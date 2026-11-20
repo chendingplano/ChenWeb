@@ -2,13 +2,13 @@
 
 ### Requirement: Deploy shows the archive before it starts
 On a machine with `role = "deploy"`, the Deploy button SHALL first show the newest
-`runshen-*.tar.gz` on the relay: its name, size, time and build number (parsed from the
+`*-deploy-*.tar.gz` on the relay: its name, size, time and build number (parsed from the
 name, "unknown" for older names). The deployment SHALL start only after the admin
 confirms, and SHALL install exactly the confirmed archive.
 
 #### Scenario: Confirm the newest archive
 - **WHEN** an admin clicks Deploy
-- **THEN** the page shows `runshen-deploy-20261116093000.tar.gz`, its size and time, and build number `20261116093000`, and asks for confirmation
+- **THEN** the page shows `chenweb-deploy-20261116093000.tar.gz`, its size and time, and build number `20261116093000`, and asks for confirmation
 
 #### Scenario: Newer archive arrives before confirmation
 - **WHEN** a newer archive reaches the relay after the admin saw the confirmation but before the deploy downloads

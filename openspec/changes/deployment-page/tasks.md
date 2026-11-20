@@ -21,7 +21,7 @@
 
 ## 4. Scripts
 
-- [x] 4.1 `shell_server_build_rcp.sh`: `step()` helper printing markers; markers for check, documents, pdf-parser, archive, upload; set and export `BUILD_NUMBER` before calling mise; archive name `runshen-deploy-<build_number>.tar.gz`; print the archive name for the runner
+- [x] 4.1 `shell_server_build_rcp.sh`: `step()` helper printing markers; markers for check, documents, pdf-parser, archive, upload; set and export `BUILD_NUMBER` before calling mise; archive name `chenweb-deploy-<build_number>.tar.gz`; print the archive name for the runner
 - [x] 4.2 `mise.toml` `build-server-linux`: markers for web, each `binary::<name>`, stage; add `deploy-runner:./server/cmd/deploy-runner` to the binary list (no build-info ldflags needed)
 - [x] 4.3 `shell_server_deploy.sh`: markers for check, fetch, extract, documents, pdf-parser; drop the root check; `sudo -n /bin/systemctl` for pdf-parser; `--chown` only as root; `check` verifies `sudo -n /bin/systemctl status pdf-parser`; honour `RELAY_ARCHIVE`
 - [x] 4.4 `scripts/deploy-server-china.sh`: markers for migrations, prompts, configs and each `binary::<name>`; add `deploy-runner` as an install-only binary
@@ -33,7 +33,7 @@
 - [x] 5.1 `[deployment] role` in the config loader; `role` returned by `GET /status`
 - [x] 5.2 Handlers in `server/api/deployment/handler.go` for the D9 endpoints with the admin/owner check; register in `server/api/routes.go`
 - [x] 5.3 `POST /builds`: insert row (new build number, requester), start the runner detached (`Setsid`), record `runner_host`/`runner_pid`; 409 on an active build; 400 when role ≠ build
-- [x] 5.4 `GET /next-archive`: SSH to the relay (`bash -c` for the tcsh login shell), newest `runshen-*.tar.gz` with size and time, build number parsed from the name
+- [x] 5.4 `GET /next-archive`: SSH to the relay (`bash -c` for the tcsh login shell), newest `*-deploy-*.tar.gz` with size and time, build number parsed from the name
 - [x] 5.5 `POST /deployments`: insert queued row with archive name, build number and `previous_build_number` (`buildinfo.CurrentProcess("server")`), run `sudo -n /bin/systemctl start chenweb-deploy`; on error mark the row failed
 - [x] 5.6 `GET /processes` (process table from D6; `systemctl show` on the box; `buildinfo` build numbers) and `POST /processes/:name/restart` (allowlist, 409 during a deployment, delayed restart for `chenweb`, logged with user and unit)
 - [x] 5.7 Handler tests for the 400/403/409 cases and the restart allowlist (command runner injected, never a real `systemctl`)

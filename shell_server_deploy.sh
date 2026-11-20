@@ -5,11 +5,11 @@ set -euo pipefail
 # Set PROJECT_WORKSPACE_DIR in the environment (ChenWeb/.env on the box) to the existing
 # target workspace. Packaged Document Builder files are copied there without deleting other files.
 #
-#   shell_server_deploy.sh              deploy the newest runshen-*.tar.gz on the relay
+#   shell_server_deploy.sh              deploy the newest *-deploy-*.tar.gz on the relay
 #   shell_server_deploy.sh <archive>    deploy a local archive
 #   shell_server_deploy.sh --newest     print "<name> <size> <mtime>" of the newest relay archive
 #   shell_server_deploy.sh --list       print that line for every relay archive, newest first
-#   shell_server_deploy.sh --release-file <runshen-deploy-<build>.release.json>   print a release file
+#   shell_server_deploy.sh --release-file <chenweb-deploy-<build>.release.json>   print a release file
 #   RELAY_ARCHIVE=<name> shell_server_deploy.sh   deploy that relay archive (the Deployment page)
 #
 # Runs as gui (the Deployment page runs it from chenweb-deploy.service) or as root. As gui,
@@ -46,8 +46,8 @@ RELAY_DIR=/home/cding/Backups
 # (tcsh would expand it before bash sees it).
 if [ "${1:-}" = --newest ]; then
   line=$(ssh -o BatchMode=yes -o ConnectTimeout=20 -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
-    bash -c "'ls -lt --time-style=+%s $RELAY_DIR/runshen-*.tar.gz 2>/dev/null | head -n 1'")
-  [ -n "$line" ] || die "No runshen archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
+    bash -c "'ls -lt --time-style=+%s $RELAY_DIR/*-deploy-*.tar.gz 2>/dev/null | head -n 1'")
+  [ -n "$line" ] || die "No deploy archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
   read -r _ _ _ _ size mtime path <<< "$line"
   echo "$(basename "$path") $size $mtime"
   exit 0
@@ -55,18 +55,20 @@ fi
 # --list: every archive on the relay, newest first, as "<name> <size> <mtime>".
 if [ "${1:-}" = --list ]; then
   lines=$(ssh -o BatchMode=yes -o ConnectTimeout=20 -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
-    bash -c "'ls -lt --time-style=+%s $RELAY_DIR/runshen-*.tar.gz 2>/dev/null'")
-  [ -n "$lines" ] || die "No runshen archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
+    bash -c "'ls -lt --time-style=+%s $RELAY_DIR/*-deploy-*.tar.gz 2>/dev/null'")
+  [ -n "$lines" ] || die "No deploy archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
   while read -r _ _ _ _ size mtime path; do
     [ -n "${path:-}" ] && echo "$(basename "$path") $size $mtime"
   done <<< "$lines"
   exit 0
 fi
 # --release-file <name>: print the release file uploaded next to an archive
-# (runshen-deploy-<build>.release.json), so releases can be listed without downloading archives.
+# (chenweb-deploy-<build>.release.json), so releases can be listed without downloading archives.
+# Builds are named chenweb-deploy-<build>; any <prefix>-deploy- name is accepted so archives
+# built under an earlier prefix stay deployable.
 if [ "${1:-}" = --release-file ]; then
   name="${2:-}"
-  [[ "$name" =~ ^runshen-deploy-[0-9]{14}\.release\.json$ ]] || die "invalid release file name: $name"
+  [[ "$name" =~ ^[A-Za-z0-9]+-deploy-[0-9]{14}\.release\.json$ ]] || die "invalid release file name: $name"
   ssh -o BatchMode=yes -o ConnectTimeout=20 -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
     bash -c "'cat $RELAY_DIR/$name'" || die "release file not found on the relay: $name"
   exit 0
@@ -94,12 +96,12 @@ else
   rm -rf "$STAGING_DIR"
   mkdir -p "$STAGING_DIR"
   if [ -n "${RELAY_ARCHIVE:-}" ]; then
-    [[ "$RELAY_ARCHIVE" =~ ^runshen-[A-Za-z0-9._-]+\.tar\.gz$ ]] || die "invalid RELAY_ARCHIVE: $RELAY_ARCHIVE"
+    [[ "$RELAY_ARCHIVE" =~ ^[A-Za-z0-9]+-deploy-[A-Za-z0-9._-]+\.tar\.gz$ ]] || die "invalid RELAY_ARCHIVE: $RELAY_ARCHIVE"
     latest="$RELAY_DIR/$RELAY_ARCHIVE"
   else
     latest=$(ssh -p "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST" \
-      bash -c "'ls -t $RELAY_DIR/runshen-*.tar.gz 2>/dev/null | head -n 1'")
-    [ -n "$latest" ] || die "No runshen archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
+      bash -c "'ls -t $RELAY_DIR/*-deploy-*.tar.gz 2>/dev/null | head -n 1'")
+    [ -n "$latest" ] || die "No deploy archive found on $RELAY_USER@$RELAY_HOST:$RELAY_DIR"
   fi
   echo "Pulling $latest from $RELAY_USER@$RELAY_HOST:$RELAY_PORT ..."
   scp -P "$RELAY_PORT" "$RELAY_USER@$RELAY_HOST:$latest" "$STAGING_DIR/"

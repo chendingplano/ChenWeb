@@ -5,10 +5,10 @@ A deployment today:
 1. **Mac (build machine).** `shell_server_build_rcp.sh` runs `mise run build-server-linux`
    (embedded frontend, five linux/amd64 binaries, migrations, prompts, configs into
    `/tmp/chenweb-deploy`), stages Document Builder files and pdf-parser sources, packs
-   `/tmp/runshen-depoly-<YYYYmmdd-HHMM>.tar.gz` and copies it with `scp` to the relay
+   `/tmp/chenweb-deploy-<YYYYmmdd-HHMM>.tar.gz` and copies it with `scp` to the relay
    `cding@192.168.29.96:/home/cding/Backups`.
 2. **China box (deployment machine).** As root, `shell_server_deploy.sh`
-   downloads the newest `runshen-*.tar.gz` from the relay (reached from outside as
+   downloads the newest `*-deploy-*.tar.gz` from the relay (reached from outside as
    `47.189.245.217:8896`), extracts it and calls `deploy-server-china.sh`. That script
    syncs migrations, prompts and configs, then for each binary verifies the checksum,
    backs it up, stops the service, swaps the binary, starts the service, runs a health
@@ -155,7 +155,7 @@ apart, and manual runs would stop matching button runs; parsing the scripts' exi
 compilation. The manifest records `built_at` with the UTC offset and uses the same local
 time for the build number (`YYYYmmddHHMMSS`).
 `shell_server_build_rcp.sh` reads the number from the manifest and names the archive
-`runshen-deploy-<build_number>.tar.gz`. After upload it reports the archive name to the
+`chenweb-deploy-<build_number>.tar.gz`. After upload it reports the archive name to the
 runner, which records the name and number together in the build row.
 
 Before Deploy, the page asks the box for the newest archive on the relay
