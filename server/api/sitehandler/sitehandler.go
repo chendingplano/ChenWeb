@@ -19,10 +19,28 @@ import (
 )
 
 type Branding struct {
-	SiteName  string `toml:"site_name" json:"site_name"`
-	LogoText  string `toml:"logo_text" json:"logo_text"`
-	LogoImage string `toml:"logo_image" json:"logo_image"`
-	PoweredBy string `toml:"powered_by" json:"powered_by"`
+	SiteName       string `toml:"site_name" json:"site_name"`
+	LogoText       string `toml:"logo_text" json:"logo_text"`
+	LogoImage      string `toml:"logo_image" json:"logo_image"`
+	LogoImageWhite string `toml:"logo_image_white" json:"logo_image_white"`
+	PoweredBy      string `toml:"powered_by" json:"powered_by"`
+}
+
+// URLs of the logo files named by [branding] in config.local.toml.
+const (
+	logoURL      = "/api/site-logo"
+	logoWhiteURL = "/api/site-logo-white"
+)
+
+// applyLogoFiles points the branding logos at the logo endpoints when
+// config.local.toml names a file for them; otherwise the site file's values stay.
+func applyLogoFiles(cfg *SiteConfig, logoFile, logoWhiteFile string) {
+	if logoFile != "" {
+		cfg.Branding.LogoImage = logoURL
+	}
+	if logoWhiteFile != "" {
+		cfg.Branding.LogoImageWhite = logoWhiteURL
+	}
 }
 
 type Hero struct {
@@ -176,8 +194,37 @@ func GetSiteConfig(c echo.Context) error {
 		log.Printf("***** Alarm: LoadSiteConfig failed: %v (CWB_SITE_006)", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	applyLogoFiles(cfg, config.GetLogoFile(), config.GetLogoWhiteFile())
 	log.Printf("Served site config from %s (CWB_SITE_201)", path)
 	return c.JSON(http.StatusOK, cfg)
+}
+
+// GetSiteLogo serves the file named by [branding].logo_file.
+// Endpoint: GET /api/site-logo (public — pre-login pages show the logo).
+func GetSiteLogo(c echo.Context) error {
+	return serveLogoFile(c, "logo_file", config.GetLogoFile())
+}
+
+// GetSiteLogoWhite serves the file named by [branding].logo_white_file.
+// Endpoint: GET /api/site-logo-white (public).
+func GetSiteLogoWhite(c echo.Context) error {
+	return serveLogoFile(c, "logo_white_file", config.GetLogoWhiteFile())
+}
+
+func serveLogoFile(c echo.Context, key, path string) error {
+	if path == "" {
+		log.Printf("Logo requested but [branding].%s is not set in config.local.toml (CWB_SITE_009)", key)
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("(CWB_SITE_009) [branding].%s not set in config.local.toml", key),
+		})
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		log.Printf("***** Alarm: [branding].%s names %q, which is not a readable file: %v (CWB_SITE_010)", key, path, err)
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("(CWB_SITE_010) [branding].%s is not a readable file", key),
+		})
+	}
+	return c.File(path)
 }
 
 // GetTenantSiteConfig serves a tenant's site config.

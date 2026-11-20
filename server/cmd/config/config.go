@@ -247,6 +247,7 @@ type AppConfigDef struct {
 	// customer-facing frontend (ADR 2026071102). Tenant-dependent config
 	// filenames come from the site_tenants table, never from here.
 	SiteConfig SiteConfigSection `mapstructure:"config"`
+	Branding   BrandingSection   `mapstructure:"branding"`
 	// Frontend holds settings the frontend reads through dedicated endpoints.
 	// Configured via [frontend] in config.toml / config.local.toml.
 	Frontend FrontendConfigSection `mapstructure:"frontend"`
@@ -312,6 +313,15 @@ type PDFParserConfig struct {
 
 type SiteConfigSection struct {
 	ConfigFilename string `mapstructure:"config_filename"`
+}
+
+// BrandingSection names the logo image files of this deployment's tenant, so the
+// logos stay out of the repository. Configured via [branding] in config.local.toml;
+// paths are absolute or relative to the ChenWeb directory. When set, a file replaces
+// the matching logo of the site config served by /api/site-config.
+type BrandingSection struct {
+	LogoFile      string `mapstructure:"logo_file"`
+	LogoWhiteFile string `mapstructure:"logo_white_file"`
 }
 
 var AppConfig AppConfigDef
@@ -638,6 +648,12 @@ func normalizeStringList(raw []string) []string {
 func GetSiteConfigFilename() string {
 	return AppConfig.SiteConfig.ConfigFilename
 }
+
+// GetLogoFile returns [branding].logo_file, or "" when it is not configured.
+func GetLogoFile() string { return strings.TrimSpace(AppConfig.Branding.LogoFile) }
+
+// GetLogoWhiteFile returns [branding].logo_white_file, or "" when it is not configured.
+func GetLogoWhiteFile() string { return strings.TrimSpace(AppConfig.Branding.LogoWhiteFile) }
 
 // GetDefaultKnowledgeStoreName returns [frontend].default_knowledge_store, or
 // "" when it is not configured.

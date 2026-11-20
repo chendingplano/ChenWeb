@@ -5,6 +5,7 @@ export interface SiteBranding {
 	site_name: string;
 	logo_text: string;
 	logo_image: string;
+	logo_image_white: string;
 	powered_by: string;
 }
 

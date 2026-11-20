@@ -283,6 +283,9 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Tenant-independent site config for the SemOS customer-facing frontend
 	// (public: pre-login pages need it). ADR 2026071102.
 	e.GET("/api/site-config", sitehandler.GetSiteConfig)
+	// Tenant logo files named by [branding] in config.local.toml (public, like site-config).
+	e.GET("/api/site-logo", sitehandler.GetSiteLogo)
+	e.GET("/api/site-logo-white", sitehandler.GetSiteLogoWhite)
 	e.POST("/api/internal/mitmproxy/ingest", proxytracehandler.IngestMitmExchange)
 	// Sync-source side of production-data-sync: a deployed target reaches
 	// out to this instance to pull registered data items. No Kratos session
