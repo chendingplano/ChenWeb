@@ -70,7 +70,8 @@ href = "/home3"
 text = "SemOS — Knowledge Management AI Application System"
 address = """上海市杨浦区长阳路1687号1号楼"""
 newsletter = "Get the latest on knowledge management and AI."
-email = "99999@bzton.com"
+# Set per deployment: [branding].footer_email in config.local.toml.
+email = ""
 
 [[footer.quick_links]]
 label = "Knowledge Base"

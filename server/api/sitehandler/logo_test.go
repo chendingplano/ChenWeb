@@ -10,25 +10,31 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func TestApplyLogoFilesReplacesOnlyConfiguredLogos(t *testing.T) {
-	base := SiteConfig{Branding: Branding{LogoImage: "/images/logo-semos.svg"}}
+func TestApplyLocalBrandingReplacesOnlyConfiguredValues(t *testing.T) {
+	base := SiteConfig{Branding: Branding{LogoImage: "/images/logo-semos.svg"}, Footer: Footer{Email: "site@example.com"}}
 
 	cfg := base
-	applyLogoFiles(&cfg, "", "")
-	if cfg.Branding.LogoImage != "/images/logo-semos.svg" || cfg.Branding.LogoImageWhite != "" {
-		t.Fatalf("no files configured: branding = %+v", cfg.Branding)
+	applyLocalBranding(&cfg, "", "", "")
+	if cfg.Branding.LogoImage != "/images/logo-semos.svg" || cfg.Branding.LogoImageWhite != "" || cfg.Footer.Email != "site@example.com" {
+		t.Fatalf("nothing configured: branding = %+v, footer email = %q", cfg.Branding, cfg.Footer.Email)
 	}
 
 	cfg = base
-	applyLogoFiles(&cfg, "/data/branding/logo.png", "")
-	if cfg.Branding.LogoImage != logoURL || cfg.Branding.LogoImageWhite != "" {
-		t.Fatalf("logo_file only: branding = %+v", cfg.Branding)
+	applyLocalBranding(&cfg, "/data/branding/logo.png", "", "")
+	if cfg.Branding.LogoImage != logoURL || cfg.Branding.LogoImageWhite != "" || cfg.Footer.Email != "site@example.com" {
+		t.Fatalf("logo_file only: branding = %+v, footer email = %q", cfg.Branding, cfg.Footer.Email)
 	}
 
 	cfg = base
-	applyLogoFiles(&cfg, "", "/data/branding/logo-white.png")
+	applyLocalBranding(&cfg, "", "/data/branding/logo-white.png", "")
 	if cfg.Branding.LogoImage != "/images/logo-semos.svg" || cfg.Branding.LogoImageWhite != logoWhiteURL {
 		t.Fatalf("logo_white_file only: branding = %+v", cfg.Branding)
+	}
+
+	cfg = base
+	applyLocalBranding(&cfg, "", "", "contact@tenant.example")
+	if cfg.Footer.Email != "contact@tenant.example" || cfg.Branding.LogoImage != "/images/logo-semos.svg" {
+		t.Fatalf("footer_email only: branding = %+v, footer email = %q", cfg.Branding, cfg.Footer.Email)
 	}
 }
 

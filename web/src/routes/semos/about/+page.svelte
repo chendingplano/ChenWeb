@@ -231,15 +231,17 @@
 				</div>
 
 				<div class="md:pt-1 md:text-right">
-					<a
-						href="mailto:{cfg.footer.email}"
-						class="group inline-flex items-baseline gap-2 text-2xl font-bold tracking-tight break-all text-[#17181c] underline decoration-[#b08d57]/40 decoration-2 underline-offset-8 transition-colors duration-200 hover:decoration-[#b08d57] focus-visible:ring-2 focus-visible:ring-[#b08d57]/50 focus-visible:outline-none md:text-3xl dark:text-[#e9e7e2]"
-					>
-						{cfg.footer.email}
-						<ArrowUpRight
-							class="h-5 w-5 shrink-0 self-center text-[#b08d57] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
-						/>
-					</a>
+					{#if cfg.footer.email}
+						<a
+							href="mailto:{cfg.footer.email}"
+							class="group inline-flex items-baseline gap-2 text-2xl font-bold tracking-tight break-all text-[#17181c] underline decoration-[#b08d57]/40 decoration-2 underline-offset-8 transition-colors duration-200 hover:decoration-[#b08d57] focus-visible:ring-2 focus-visible:ring-[#b08d57]/50 focus-visible:outline-none md:text-3xl dark:text-[#e9e7e2]"
+						>
+							{cfg.footer.email}
+							<ArrowUpRight
+								class="h-5 w-5 shrink-0 self-center text-[#b08d57] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+							/>
+						</a>
+					{/if}
 					{#if cfg.footer.address}
 						<p
 							class="mt-8 text-sm leading-relaxed whitespace-pre-line text-[#6f6c66] dark:text-[#a5a29b]"

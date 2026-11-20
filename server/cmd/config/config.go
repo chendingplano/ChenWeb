@@ -315,13 +315,15 @@ type SiteConfigSection struct {
 	ConfigFilename string `mapstructure:"config_filename"`
 }
 
-// BrandingSection names the logo image files of this deployment's tenant, so the
-// logos stay out of the repository. Configured via [branding] in config.local.toml;
-// paths are absolute or relative to the ChenWeb directory. When set, a file replaces
-// the matching logo of the site config served by /api/site-config.
+// BrandingSection holds this deployment's tenant branding, so it stays out of the
+// repository: the logo image files (absolute paths or relative to the ChenWeb
+// directory) and the footer contact email. Configured via [branding] in
+// config.local.toml. Each value that is set replaces the matching field of the site
+// config served by /api/site-config.
 type BrandingSection struct {
 	LogoFile      string `mapstructure:"logo_file"`
 	LogoWhiteFile string `mapstructure:"logo_white_file"`
+	FooterEmail   string `mapstructure:"footer_email"`
 }
 
 var AppConfig AppConfigDef
@@ -654,6 +656,9 @@ func GetLogoFile() string { return strings.TrimSpace(AppConfig.Branding.LogoFile
 
 // GetLogoWhiteFile returns [branding].logo_white_file, or "" when it is not configured.
 func GetLogoWhiteFile() string { return strings.TrimSpace(AppConfig.Branding.LogoWhiteFile) }
+
+// GetFooterEmail returns [branding].footer_email, or "" when it is not configured.
+func GetFooterEmail() string { return strings.TrimSpace(AppConfig.Branding.FooterEmail) }
 
 // GetDefaultKnowledgeStoreName returns [frontend].default_knowledge_store, or
 // "" when it is not configured.
