@@ -214,7 +214,7 @@ SELECT
     i.file_name, i.backup_filename, i.result_filename, i.publish_date,
     i.authors, i.owner, COALESCE(i.status, '[]'::jsonb) AS status,
     i.create_time, i.modify_time, i.public_info, i.private_info, i.doc_metadata::text,
-    i.notes, i.error_msg
+    i.notes, i.error_msg, i.doc_origin AS doc_origin
 FROM kb.inputs i
 WHERE i.id = $1
 `)
@@ -222,14 +222,14 @@ WHERE i.id = $1
 		"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
-		"notes", "error_msg",
+		"notes", "error_msg", "doc_origin",
 	}).AddRow(
 		int64(7), "input_7.pdf", "mineru", "pdf", "tenant-alpha", int64(9), "Updated Title", "GB/T 50378-2019", "Store desc", "upload",
 		"/tmp/input_7.pdf", "/tmp/input_7.bak", "/tmp/input_7.json", time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
 		`["Alice","Bob"]`, int64(9),
 		`[]`, time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC), time.Date(2026, 4, 18, 10, 30, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"doc_no":"GB/T 50378-2019"}`,
-		"note", "",
+		"note", "", "local",
 	)
 	mock.ExpectQuery(selectQuery).WithArgs(int64(7)).WillReturnRows(rows)
 

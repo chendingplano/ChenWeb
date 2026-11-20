@@ -35,6 +35,48 @@
 	const highlightPages = $derived([...new Set(sourceLines.map((l) => l.page_number))]);
 	const fileUrl = $derived(currentInput ? `/api/v1/kb/inputs/${currentInput.id}/file` : '');
 	const isPdf = $derived(currentInput?.type?.toLowerCase() === 'pdf');
+	const MIN_PANEL = 280;
+	const MIN_EVIDENCE = 360;
+	let panelWidth = $state(460);
+	const MIN_ACTIVITIES = 200;
+	let activitiesWidth = $state(270);
+	let resizingActivities = false;
+	function clampActivities(width: number) {
+		const total = workspace?.clientWidth ?? 0;
+		const fixed = (folded ? 0 : 380) + 12 + panelWidth;
+		const max = Math.max(MIN_ACTIVITIES, total - fixed - MIN_EVIDENCE);
+		return Math.min(max, Math.max(MIN_ACTIVITIES, width));
+	}
+	function startResizeActivities(e: PointerEvent) { resizingActivities = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); e.preventDefault(); }
+	function moveResizeActivities(e: PointerEvent) {
+		const left = activitiesEl?.getBoundingClientRect().left;
+		if (!resizingActivities || left === undefined) return;
+		activitiesWidth = clampActivities(e.clientX - left);
+	}
+	function endResizeActivities(e: PointerEvent) { resizingActivities = false; (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); }
+	function keyResizeActivities(e: KeyboardEvent) {
+		if (e.key === 'ArrowLeft') { activitiesWidth = clampActivities(activitiesWidth - 24); e.preventDefault(); }
+		else if (e.key === 'ArrowRight') { activitiesWidth = clampActivities(activitiesWidth + 24); e.preventDefault(); }
+	}
+	let activitiesEl = $state<HTMLElement | null>(null);
+	let workspace = $state<HTMLDivElement | null>(null);
+	let resizing = false;
+	function clampPanel(width: number) {
+		const total = workspace?.clientWidth ?? 0;
+		const fixed = (folded ? 0 : 380) + activitiesWidth + 12 + 6;
+		const max = Math.max(MIN_PANEL, total - fixed - MIN_EVIDENCE);
+		return Math.min(max, Math.max(MIN_PANEL, width));
+	}
+	function startResize(e: PointerEvent) { resizing = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); e.preventDefault(); }
+	function moveResize(e: PointerEvent) {
+		if (!resizing || !workspace) return;
+		panelWidth = clampPanel(workspace.getBoundingClientRect().right - e.clientX);
+	}
+	function endResize(e: PointerEvent) { resizing = false; (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); }
+	function keyResize(e: KeyboardEvent) {
+		if (e.key === 'ArrowLeft') { panelWidth = clampPanel(panelWidth + 24); e.preventDefault(); }
+		else if (e.key === 'ArrowRight') { panelWidth = clampPanel(panelWidth - 24); e.preventDefault(); }
+	}
 	onMount(() => { void gold.load(); });
 	$effect(() => { if (highlightPages.length) page = highlightPages[0]; });
 	function labelText(value: string) {
@@ -85,7 +127,7 @@
 	<header><h1>{m.nav_sysadmin_llm_compliance_gold()}</h1><span>{m.cgv_read_only()}</span>
 		<button type="button" onclick={() => folded = !folded}>{folded ? m.metric_mgmt_unfold_record_list() : m.metric_mgmt_fold_record_list()}</button></header>
 	<p class="notice">{m.cgv_scope()}</p>
-	<div class="workspace" class:folded>
+	<div class="workspace" class:folded bind:this={workspace} style:--panel-w="{panelWidth}px" style:--act-w="{activitiesWidth}px">
 		<div class="browser" hidden={folded}>
 			<KbInputRecordBrowser {darkMode} fitPanel instanceKey="gold-compliance-record-browser"
 				title={m.metric_mgmt_kb_inputs()} subtitle={m.cgv_select_document()}
@@ -97,7 +139,7 @@
 				{#snippet extraControls()}<GoldRunFilters filter={gold} onChange={clear} />{/snippet}
 			</KbInputRecordBrowser>
 		</div>
-		<section class="activities">
+		<section class="activities" bind:this={activitiesEl}>
 			<h2>{m.cgv_activities()}</h2>
 			{#if error || gold.error}<p role="alert" class="error">{error || m.cgv_load_failed()}</p><button type="button" onclick={() => { const record = currentInput; clear(); if (record) void selectRecord(record); else void gold.load(); }}>{m.cgv_retry()}</button>{/if}
 			{#if loading}<p role="status">{m.cgv_loading()}</p>
@@ -126,6 +168,11 @@
 				{/each}
 			{/if}
 		</section>
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div class="act-splitter" role="separator" aria-orientation="vertical" aria-label={m.cgv_resize_activities()} tabindex="0"
+			aria-valuemin={MIN_ACTIVITIES} aria-valuenow={activitiesWidth}
+			onpointerdown={startResizeActivities} onpointermove={moveResizeActivities} onpointerup={endResizeActivities} onpointercancel={endResizeActivities}
+			onkeydown={keyResizeActivities}><span class="grip" aria-hidden="true"></span></div>
 		<section class="evidence">
 			{#if selected && currentInput}
 				<h2>{selected.activity}</h2>
@@ -137,6 +184,15 @@
 						<PdfViewWindow inputId={currentInput.id} {fileUrl} bind:page bind:zoom bind:numPages {darkMode} enableSelectionDialog={false} {highlightPages} highlightVersion={selectedId ?? 0} renderHighlights={highlights} />
 					{:else}<pre>{sourceLines.map((l) => `${l.line_number}\t${l.content}`).join('\n') || m.cgv_source_unavailable()}</pre>{/if}
 				</div>
+			{:else}<p class="empty">{m.cgv_select_activity()}</p>{/if}
+		</section>
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div class="splitter" role="separator" aria-orientation="vertical" aria-label={m.cgv_resize_panels()} tabindex="0"
+			aria-valuemin={MIN_PANEL} aria-valuenow={panelWidth}
+			onpointerdown={startResize} onpointermove={moveResize} onpointerup={endResize} onpointercancel={endResize}
+			onkeydown={keyResize}></div>
+		<section class="judgements">
+			{#if selected && currentInput}
 				<h2>{m.cgv_judgements()}</h2>
 				<div class="filters">
 					<label>{m.cgv_label()}<select bind:value={label}><option value="">{m.cgv_all_labels()}</option>{#each labels as value}<option value={value}>{labelText(value)}</option>{/each}</select></label>
@@ -162,29 +218,33 @@
 </div>
 
 <style>
-	.gold-page { --page-bg:#0e1116; --panel-bg:#161a22; --ink-line:#2a3140; --text-primary:#ede7d3; --text-muted:#aaa38f; --brass:#d4a24c; --font-mono:'JetBrains Mono',monospace; display:flex; flex-direction:column; height:100%; min-height:0; color:var(--text-primary); background:var(--page-bg); }
-	.gold-page.light { --page-bg:#f5f1e8; --panel-bg:#fbf8f0; --ink-line:#d7cfb8; --text-primary:#1a1410; --text-muted:#786f5f; --brass:#966412; }
+	.gold-page { --page-bg:#0e1116; --panel-bg:#161a22; --ink-line:#2a3140; --text-primary:#ede7d3; --text-muted:#aaa38f; --brass:#d4a24c; --card-bg:#303A4B; --card-line:#1F2530; --font-mono:'JetBrains Mono',monospace; display:flex; flex-direction:column; height:100%; min-height:0; color:var(--text-primary); background:var(--page-bg); }
+	.gold-page.light { --page-bg:#f5f1e8; --panel-bg:#fbf8f0; --ink-line:#d7cfb8; --text-primary:#1a1410; --text-muted:#786f5f; --brass:#966412; --card-bg:#FFFFFF; --card-line:#E5DEC8; }
 	header { display:flex; align-items:center; gap:16px; padding:12px 18px; border-bottom:1px solid var(--ink-line); }
 	h1 { margin:0; font:500 28px Georgia,serif; } h2 { font:500 20px Georgia,serif; margin:8px 0 14px; }
 	header span,small,.counts { color:var(--text-muted); font:11px/1.6 var(--font-mono); } header button { margin-left:auto; }
 	button,input,select { border:1px solid var(--ink-line); background:var(--panel-bg); color:var(--text-primary); padding:7px 9px; border-radius:4px; }
 	button { cursor:pointer; } button:hover,a:hover { color:var(--brass); } button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid var(--brass); outline-offset:2px; }
 	.notice { margin:0; padding:9px 18px; color:var(--text-muted); font-size:12px; border-bottom:1px solid var(--ink-line); }
-	.workspace { display:grid; grid-template-columns:380px 270px minmax(0,1fr); flex:1; min-height:0; overflow:hidden; }
-	.workspace.folded { grid-template-columns:270px minmax(0,1fr); }
+	.workspace { display:grid; grid-template-columns:380px var(--act-w) 12px minmax(0,1fr) 6px var(--panel-w); flex:1; min-height:0; overflow:hidden; }
+	.workspace.folded { grid-template-columns:var(--act-w) 12px minmax(0,1fr) 6px var(--panel-w); }
+	.act-splitter { position:relative; cursor:col-resize; user-select:none; touch-action:none; border-left:1px solid var(--ink-line); margin-left:5px; outline:none; }
+	.act-splitter .grip { position:absolute; top:50%; left:-5px; width:8px; height:52px; transform:translateY(-50%); border-radius:999px; border:1px solid var(--card-line); background:radial-gradient(circle,var(--text-muted) 22%,transparent 24%) center 6px / 6px 12px repeat-y,var(--panel-bg); }
+	.act-splitter:hover .grip,.act-splitter:focus-visible .grip { border-color:var(--brass); }
+	.splitter { cursor:col-resize; user-select:none; touch-action:none; background:var(--ink-line); } .splitter:hover,.splitter:focus-visible { background:var(--brass); outline:none; }
+	.judgements { overflow:auto; min-width:0; padding:16px; background:var(--panel-bg); }
 	.browser { min-height:0; overflow:hidden; border-right:1px solid var(--ink-line); }
-	.activities,.evidence { overflow:auto; min-width:0; padding:16px; } .activities { border-right:1px solid var(--ink-line); background:var(--panel-bg); }
-	.activity { display:flex; flex-direction:column; gap:6px; width:100%; margin:9px 0; text-align:left; } .activity.selected { border-color:var(--brass); box-shadow:inset 3px 0 var(--brass); }
+	.activities { overflow:auto; min-width:0; padding:16px; } .evidence { display:flex; flex-direction:column; overflow:hidden; min-width:0; min-height:0; padding:16px; } .activities { border-right:1px solid var(--ink-line); background:var(--panel-bg); }
+	.activity { background:var(--card-bg); border-color:var(--card-line); display:flex; flex-direction:column; gap:6px; width:100%; margin:9px 0; text-align:left; } .activity:hover { border-color:var(--brass); } .activity.selected { background:#3b82f6; border-color:#3b82f6; box-shadow:inset 4px 0 #1d4ed8; } .activity.selected,.activity.selected small,.activity.selected strong,.activity.selected span { color:#fff; }
 	.activity strong { font-size:14px; font-weight:500; } .activity span { font-size:12px; } .run { font:12px var(--font-mono); overflow-wrap:anywhere; }
 	details { margin-bottom:12px; } summary { cursor:pointer; color:var(--brass); } details p { white-space:pre-wrap; }
 	dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:6px 12px; font-size:12px; } dt { color:var(--text-muted); } dd { margin:0; overflow-wrap:anywhere; white-space:pre-wrap; }
-	.source { display:flex; flex-direction:column; height:380px; min-height:200px; resize:vertical; overflow:auto; border:1px solid var(--ink-line); margin:15px 0 22px; }
+	.source { display:flex; flex-direction:column; flex:1 1 0; min-height:300px; overflow:auto; border:1px solid var(--ink-line); margin:12px 0 0; }
 	pre { margin:0; padding:12px; font:12px/1.65 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; }
 	.filters { display:flex; flex-wrap:wrap; gap:12px; } label { display:flex; flex-direction:column; gap:5px; font-size:12px; } label:last-child { flex:1; }
 	article { margin:12px 0; padding:14px; border:1px solid var(--ink-line); background:var(--panel-bg); }
 	.candidate-heading { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:10px; font:11px var(--font-mono); }
 	.badge { padding:4px 7px; border:1px solid var(--ink-line); } .badge.governs { color:var(--brass); border-color:var(--brass); } a { color:var(--brass); font-size:13px; }
 	.empty { padding:40px; color:var(--text-muted); } .error { color:#e78a79; }
-	@media(max-width:1100px) { .workspace { grid-template-columns:330px 220px minmax(0,1fr); } }
-	@media(max-width:900px) { .workspace,.workspace.folded { display:flex; flex-direction:column; overflow:auto; } .browser { min-height:340px; } .activities,.evidence { overflow:visible; flex-shrink:0; } header { flex-wrap:wrap; } }
+	@media(max-width:900px) { .workspace,.workspace.folded { display:flex; flex-direction:column; overflow:auto; } .browser { min-height:340px; } .activities,.judgements { overflow:visible; flex-shrink:0; } .act-splitter { display:none; } .activities { overflow:visible; flex-shrink:0; } .evidence { overflow:visible; flex-shrink:0; } .source { flex:none; height:70vh; } .splitter { display:none; } header { flex-wrap:wrap; } }
 </style>

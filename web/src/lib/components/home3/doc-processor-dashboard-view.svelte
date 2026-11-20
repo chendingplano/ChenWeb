@@ -23,6 +23,8 @@
 		type KbInputRecord,
 		type ParseState
 	} from '$lib/services/kbService';
+	import RemoteDocumentConfirmation from './remote-document-confirmation.svelte';
+	import { createDefaultRecordBrowserFilters } from './topic-tree-record-browser.js';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import SystemMonitorView from './system-monitor-view.svelte';
 	import {
@@ -372,6 +374,8 @@
 	let restartParseFile = $state(false);
 	let restartConvert = $state(false);
 	let showRestartDialog = $state(false);
+	let remoteConfirmation: ReturnType<typeof RemoteDocumentConfirmation>;
+	let documentSearchFilters = $state(createDefaultRecordBrowserFilters());
 	let restarting = $state(false);
 	let restartError = $state('');
 
@@ -538,10 +542,11 @@
 		record: KbInputRecord,
 		procs: Record<string, boolean>,
 		reParse: boolean,
-		reConvert: boolean
+		reConvert: boolean,
+		allowRemote: boolean
 	) {
 		const chosen = selectableProcessorIds.filter((p) => procs[p]);
-		if (reParse) {
+		if (!allowRemote && reParse) {
 			await publishEvent('kb.pdf.staged', {
 				record_id: String(record.id),
 				type: record.type ?? 'pdf',
@@ -552,7 +557,7 @@
 			});
 			return;
 		}
-		if (reConvert) {
+		if (!allowRemote && reConvert) {
 			const payload: Record<string, unknown> = {
 				record_id: String(record.id),
 				type: 'pdf',
@@ -570,7 +575,10 @@
 			runMode === 'force',
 			forceClear
 		);
-		await publishEvent('kb.pdf.start-doc-processing', payload);
+		await publishEvent('kb.pdf.start-doc-processing', {
+			...payload,
+			...(allowRemote ? { allow_remote_doc: true } : {})
+		});
 	}
 
 	function filterByRunMode(
@@ -578,10 +586,13 @@
 		mode: RunMode,
 		selectedStageIds: Set<string>
 	): KbInputRecord[] {
-		if (mode === 'force') return records;
+		if (mode === 'force') {
+			const hasProcessor = selectableProcessorIds.some((id) => selectedStageIds.has(id));
+			return records.filter((record) => record.doc_origin !== 'remote' || hasProcessor);
+		}
 		return records.filter((rec) => {
 			const relevantStages = computeStages(rec, selectableProcessorIds).filter((s) =>
-				selectedStageIds.has(s.id)
+				selectedStageIds.has(s.id) && (rec.doc_origin !== 'remote' || !['parsing', 'converting'].includes(s.id))
 			);
 			return relevantStages.some((s) => {
 				if (mode === 'unfinished') return s.status === 'pending' || s.status === 'in-progress';
@@ -598,6 +609,7 @@
 			const base = {
 				docType: 'all',
 				parseState: 'all' as ParseState,
+				docOrigin: documentSearchFilters.searchDocOrigin,
 				fileName: '',
 				startTime: '',
 				endTime: '',
@@ -667,8 +679,9 @@
 		}
 	}
 
-	async function confirmLaunch() {
-		if (!selectedRecords.length) return;
+	async function confirmLaunch(event: MouseEvent) {
+		if (!selectedRecords.length || launching) return;
+		const anchor = (event.currentTarget as HTMLButtonElement).getBoundingClientRect();
 		launching = true;
 		launchError = '';
 		try {
@@ -677,12 +690,12 @@
 				...(convertChecked ? ['converting'] : []),
 				...selectableProcessorIds.filter((p) => processors[p])
 			]);
-			const eligible = filterByRunMode(selectedRecords, runMode, selectedStageIds).slice(
+			let eligible = filterByRunMode(selectedRecords, runMode, selectedStageIds).slice(
 				0,
 				maxRecords
 			);
-			showConfirm = false;
 			if (eligible.length === 0) {
+				showConfirm = false;
 				const modeLabel =
 					runMode === 'unfinished'
 						? m.doc_processor_dashboard_mode_unfinished()
@@ -692,8 +705,16 @@
 				noEligibleDialog = { recordCount: selectedRecords.length, modeLabel };
 				return;
 			}
+			const remoteCount = eligible.filter((record) => record.doc_origin === 'remote').length;
+			if (remoteCount > 0) {
+				const decision = await remoteConfirmation.ask(anchor, eligible.length, remoteCount);
+				if (decision === 'cancel') return;
+				if (decision === 'skip') eligible = eligible.filter((record) => record.doc_origin !== 'remote');
+			}
+			showConfirm = false;
+			if (eligible.length === 0) return;
 			const results = await Promise.allSettled(
-				eligible.map((rec) => doLaunch(rec, processors, parseFileChecked, convertChecked))
+				eligible.map((record) => doLaunch(record, processors, parseFileChecked, convertChecked, record.doc_origin === 'remote'))
 			);
 			const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
 			if (failures.length === 0) {
@@ -723,12 +744,16 @@
 		}
 	}
 
-	async function confirmRestart() {
-		if (!restartTarget) return;
+	async function confirmRestart(event: MouseEvent) {
+		const target = restartTarget;
+		if (!target || restarting) return;
+		const anchor = (event.currentTarget as HTMLButtonElement).getBoundingClientRect();
 		restarting = true;
 		restartError = '';
 		try {
-			await doLaunch(restartTarget, restartProcessors, restartParseFile, restartConvert);
+			const remote = target.doc_origin === 'remote';
+			if (remote && await remoteConfirmation.ask(anchor, 1, 1) !== 'include') return;
+			await doLaunch(target, restartProcessors, restartParseFile, restartConvert, remote);
 			showRestartDialog = false;
 			restartTarget = null;
 			launchToast = { kind: 'success', msg: m.doc_processor_dashboard_restart_triggered() };
@@ -1715,7 +1740,9 @@
 	<KbInputSearchDialog
 		bind:open={searchDialogOpen}
 		{darkMode}
-		onSelect={(records) => {
+		initialFilters={documentSearchFilters}
+		onSelect={(records, filters) => {
+			documentSearchFilters = filters;
 			selectedRecords = records;
 		}}
 	/>
@@ -1897,6 +1924,9 @@
 						>
 							<span style="font-family:monospace; color:{accent}; font-size:11px;">#{rec.id}</span>
 							<span class="max-w-32 truncate" title={recordTitle(rec)}>{recordTitle(rec)}</span>
+							{#if rec.doc_origin === 'remote'}
+								<span class="rounded border px-1 text-xs" style="border-color:{borderColor};">{m.doc_origin_remote()}</span>
+							{/if}
 							<button
 								onclick={() => {
 									selectedRecords = selectedRecords.filter((r) => r.id !== rec.id);
@@ -2555,6 +2585,8 @@
 <!-- ════════════════════════════════════════════════════════════
      Restart Dialog
 ══════════════════════════════════════════════════════════════ -->
+<RemoteDocumentConfirmation bind:this={remoteConfirmation} {darkMode} />
+
 {#if showRestartDialog && restartTarget}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
@@ -2584,6 +2616,9 @@
 
 			<div class="mb-4 space-y-1.5">
 				<!-- Optional pre-processor: Parse File -->
+				{#if restartTarget.doc_origin === 'remote'}
+					<p style="font-size:13px; color:{textSecondary};">{m.doc_origin_imported_line_file()}</p>
+				{/if}
 				<label
 					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 					style="background:{restartParseFile
@@ -2598,7 +2633,7 @@
 							: surface2;
 					}}
 				>
-					<input type="checkbox" bind:checked={restartParseFile} class="sr-only" />
+					<input type="checkbox" bind:checked={restartParseFile} disabled={restartTarget.doc_origin === 'remote'} class="sr-only" />
 					{#if restartParseFile}
 						<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 					{:else}
@@ -2630,7 +2665,7 @@
 							: surface2;
 					}}
 				>
-					<input type="checkbox" bind:checked={restartConvert} class="sr-only" />
+					<input type="checkbox" bind:checked={restartConvert} disabled={restartTarget.doc_origin === 'remote'} class="sr-only" />
 					{#if restartConvert}
 						<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{accent};" />
 					{:else}

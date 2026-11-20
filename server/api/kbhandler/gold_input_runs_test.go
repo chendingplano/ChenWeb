@@ -116,10 +116,10 @@ func TestListInputsSeparateBenchmarkEntries(t *testing.T) {
 			expectResolveParserNameColumn(mock, true)
 			rows := sqlmock.NewRows([]string{
 				"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
-				"backup_filename", "result_filename", "publish_date", "authors", "owner", "status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata", "notes", "error_msg", "benchmark_skill_version", "benchmark_model_name", "benchmark_run_id",
+				"backup_filename", "result_filename", "publish_date", "authors", "owner", "status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata", "notes", "error_msg", "doc_origin", "benchmark_skill_version", "benchmark_model_name", "benchmark_run_id",
 			})
 			for i, name := range models {
-				rows.AddRow(int64(753), "Input 753", "mineru", "pdf", "admin-1", nil, "Document", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "[]", time.Now(), time.Now(), nil, nil, nil, nil, nil, "6.0.0", name, fmt.Sprintf("run-%d", i))
+				rows.AddRow(int64(753), "Input 753", "mineru", "pdf", "admin-1", nil, "Document", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "[]", time.Now(), time.Now(), nil, nil, nil, nil, nil, "local", "6.0.0", name, fmt.Sprintf("run-%d", i))
 			}
 			data := mock.ExpectQuery("SELECT.*i.benchmark_skill_version, i.benchmark_model_name, i.benchmark_run_id.*" + regexp.QuoteMeta("FROM "+goldBenchmarkInputTable("kb.inputs", "testbed.metrics")+" i WHERE "+where) + ".*" + regexp.QuoteMeta("i.benchmark_skill_version ASC, i.benchmark_model_name ASC, i.benchmark_run_id ASC") + ".*LIMIT")
 			if model == "" {

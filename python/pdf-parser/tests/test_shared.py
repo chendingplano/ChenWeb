@@ -410,12 +410,14 @@ class TestReadQueriesCloseTransactions:
 
     def test_fetch_record_by_id_commits_after_select(self):
         conn = _FakeConn()
-        conn.row = (12, "doc.pdf", "/tmp/doc.pdf", "docling", "auto", "[]", "md5", "", "")
+        conn.row = (12, "doc.pdf", "/tmp/doc.pdf", "docling", "auto", "[]", "md5", "", "", "remote", True)
 
         record = fetch_record_by_id(conn, 12)
 
         assert conn.commit_called is True
         assert record["id"] == 12
+        assert record["doc_origin"] == "remote"
+        assert record["sync_marked"] is True
 
     def test_has_md5_record_commits_after_select(self):
         conn = _FakeConn()

@@ -9,7 +9,8 @@
 	import { selectedPageIds, togglePageRecord, togglePageSelection } from './kb-input-selection';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs, listAllKbInputIds, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig, updateKbInput, listPendingFiles, claimPendingFiles, type ListKbInputsParams, type PendingFileEntry, type ClaimPendingFilesResult } from '$lib/services/kbService';
+	import { listKbInputs, listAllKbInputOrigins, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig, updateKbInput, listPendingFiles, claimPendingFiles, type ListKbInputsParams, type PendingFileEntry, type ClaimPendingFilesResult } from '$lib/services/kbService';
+	import RemoteDocumentConfirmation from './remote-document-confirmation.svelte';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import { createDefaultRecordBrowserFilters } from '$lib/components/home3/topic-tree-record-browser.js';
 	import { listManagedUsers, type ManagedUser } from '$lib/services/userManagementService';
@@ -66,6 +67,7 @@
 	let userFilter = $state('');
 	let statusFilter = $state('');
 	let processingModeFilter = $state('');
+	let docOrigin = $state('');
 	let page = $state(1);
 	let pageSize = $state(50);
 	let sortField = $state('create_time');
@@ -151,6 +153,8 @@
 	let restarting = $state(false);
 	let processingParsed = $state(false);
 	let showProcessParsedMenu = $state(false);
+	let processMenuButton: HTMLButtonElement;
+	let remoteConfirmation: ReturnType<typeof RemoteDocumentConfirmation>;
 	let processParsedMessage = $state<{ kind: 'success' | 'error'; text: string } | null>(null);
 	let restartError = $state('');
 	let restartToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
@@ -519,6 +523,7 @@
 			userIds: matchingUserIds(userFilter),
 			statusLike: statusFilter,
 			processingMode: processingModeFilter,
+			docOrigin,
 			orderBy: sortField,
 			orderDir: sortDir
 		};
@@ -603,6 +608,7 @@
 		docNo = filters.searchDocNo ?? '';
 		fileName = filters.searchFileName ?? '';
 		docType = filters.searchDocType ?? 'all';
+		docOrigin = filters.searchDocOrigin ?? '';
 		parserName = filters.searchParserName ?? '';
 		pipelineFilter = filters.searchOperation ?? '';
 		procStatus = filters.searchProcStatus ?? 'all';
@@ -776,43 +782,58 @@
 	async function processInputs(selectedOnly = false, failedOnly = false) {
 		if (processingParsed) return;
 		if (selectedOnly && selectedRecordIds.size === 0) return;
+		const anchor = processMenuButton.getBoundingClientRect();
 		processingParsed = true;
 		showProcessParsedMenu = false;
 		processParsedMessage = null;
 		let queued = 0;
 		let failed = 0;
 		try {
-			let targetIDs = await listAllKbInputIds({
+			const chosen = selectedOnly ? new Set(selectedRecordIds) : null;
+			const matching = await listAllKbInputOrigins({
 				...currentFilterParams(),
 				...(failedOnly ? { failedProcessorsOnly: true } : {})
 			});
-			if (selectedOnly) {
-				const selected = new Set(selectedRecordIds);
-				targetIDs = targetIDs.filter((id) => selected.has(id));
-			}
-			let inputs: Array<{ id: number; converted_after_parse: boolean }> = [];
-			if (failedOnly) {
-				for (let offset = 0; offset < targetIDs.length; offset += 5000) {
-					const ids = targetIDs.slice(offset, offset + 5000);
-					try {
-						await publishEvent('kb.pdf.start-doc-processing', {
-							record_ids: ids.map(String),
-							'failed-proc-only': true,
-							force: true
-						});
-						queued += ids.length;
-					} catch {
-						failed += ids.length;
-					}
-				}
-			} else {
-				for (let offset = 0; offset < targetIDs.length; offset += 5000) {
-					const ids = targetIDs.slice(offset, offset + 5000);
+			const targets = chosen ? matching.filter(({ id }) => chosen.has(id)) : matching;
+			let inputs: Array<Pick<KbInputRecord, 'id' | 'doc_origin'> & { converted_after_parse: boolean }> = [];
+			if (!failedOnly) {
+				for (let offset = 0; offset < targets.length; offset += 5000) {
+					const ids = targets.slice(offset, offset + 5000).map(({ id }) => id);
 					const query = `?ids=${encodeURIComponent(ids.join(','))}`;
 					const response = await fetch(`/api/v1/kb/inputs/process-parsed${query}`, { credentials: 'same-origin' });
 					const result = await response.json().catch(() => null);
 					if (!response.ok) throw new Error(result?.error_msg ?? m.kb_import_request_failed({ status: response.status }));
 					inputs.push(...(result?.inputs ?? []));
+				}
+				inputs = inputs.filter((input) => input.doc_origin !== 'remote' || input.converted_after_parse);
+			}
+			const candidates = failedOnly ? targets : inputs;
+			const remoteCount = candidates.filter((input) => input.doc_origin === 'remote').length;
+			const decision = remoteCount > 0
+				? await remoteConfirmation.ask(anchor, candidates.length, remoteCount)
+				: 'skip';
+			if (decision === 'cancel') return;
+			const included = candidates.filter((input) => input.doc_origin !== 'remote' || decision === 'include');
+			if (!included.length && remoteCount > 0) return;
+			const includedIds = new Set(included.map(({ id }) => id));
+			inputs = inputs.filter(({ id }) => includedIds.has(id));
+			if (failedOnly) {
+				for (const remote of [false, true]) {
+					const batch = included.filter((input) => (input.doc_origin === 'remote') === remote);
+					for (let offset = 0; offset < batch.length; offset += 5000) {
+						const ids = batch.slice(offset, offset + 5000).map(({ id }) => String(id));
+						try {
+							await publishEvent('kb.pdf.start-doc-processing', {
+								record_ids: ids,
+								'failed-proc-only': true,
+								force: true,
+								...(remote ? { allow_remote_doc: true } : {})
+							});
+							queued += ids.length;
+						} catch {
+							failed += ids.length;
+						}
+					}
 				}
 			}
 			let conversionQueued = 0;
@@ -822,11 +843,12 @@
 					if (input.converted_after_parse) {
 						await publishEvent('kb.pdf.start-doc-processing', {
 							record_id: String(input.id),
-							force: true
+							force: true,
+							...(input.doc_origin === 'remote' ? { allow_remote_doc: true } : {})
 						});
 						processingQueued++;
 					} else {
-					await publishEvent('kb.pdf.parsed', {
+						await publishEvent('kb.pdf.parsed', {
 							record_id: String(input.id),
 							type: 'pdf',
 							status: 'success',
@@ -842,7 +864,7 @@
 			processParsedMessage = {
 				kind: failed > 0 ? 'error' : 'success',
 				text: failedOnly
-					? (targetIDs.length === 0 ? m.kb_import_no_failed_operations_match() : m.kb_import_queued_failed_retries({ queued, total: targetIDs.length }) + (failed > 0 ? m.kb_import_failed_suffix({ failed }) : ''))
+					? (included.length === 0 ? m.kb_import_no_failed_operations_match() : m.kb_import_queued_failed_retries({ queued, total: included.length }) + (failed > 0 ? m.kb_import_failed_suffix({ failed }) : ''))
 					: (inputs.length === 0
 						? m.kb_import_no_parsed_inputs_are_ready()
 						: m.kb_import_queued_parsed_inputs({ queued, total: inputs.length, conversionQueued, processingQueued }) + (failed > 0 ? m.kb_import_failed_suffix({ failed }) : ''))
@@ -856,22 +878,24 @@
 			};
 		} finally {
 			processingParsed = false;
-			loadRecords();
+			if (queued > 0) loadRecords();
 		}
 	}
+
 
 	async function doLaunch(
 		record: KbInputRecord,
 		procs: Record<string, boolean>,
 		reParse: boolean,
-		reConvert: boolean
+		reConvert: boolean,
+		allowRemote: boolean
 	) {
 		const chosen = selectableProcessorIds.filter((p) => procs[p]);
-		if (reParse) {
+		if (!allowRemote && reParse) {
 			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true, convert: reConvert, operation: chosen });
 			return;
 		}
-		if (reConvert) {
+		if (!allowRemote && reConvert) {
 			const payload: Record<string, unknown> = {
 				record_id: String(record.id),
 				type: 'pdf',
@@ -885,6 +909,7 @@
 		}
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
 		payload.operation = chosen;
+		if (allowRemote) payload.allow_remote_doc = true;
 		await publishEvent('kb.pdf.start-doc-processing', payload);
 	}
 
@@ -901,12 +926,16 @@
 		showRestartDialog = true;
 	}
 
-	async function confirmRestart() {
-		if (!restartTarget) return;
+	async function confirmRestart(event: MouseEvent) {
+		const target = restartTarget;
+		if (!target || restarting) return;
+		const anchor = (event.currentTarget as HTMLButtonElement).getBoundingClientRect();
 		restarting = true;
 		restartError = '';
 		try {
-			await doLaunch(restartTarget, restartProcessors, restartParseFile, restartConvert);
+			const remote = target.doc_origin === 'remote';
+			if (remote && await remoteConfirmation.ask(anchor, 1, 1) !== 'include') return;
+			await doLaunch(target, restartProcessors, restartParseFile, restartConvert, remote);
 			showRestartDialog = false;
 			restartTarget = null;
 			restartToast = { kind: 'success', msg: m.kb_import_restart_triggered() };
@@ -1221,6 +1250,7 @@
 				<div style="position:relative;">
 					<button
 						type="button"
+						bind:this={processMenuButton}
 						onclick={() => { showProcessParsedMenu = !showProcessParsedMenu; }}
 						disabled={processingParsed}
 						aria-haspopup="menu"
@@ -1406,7 +1436,13 @@
 						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={userFilter} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_user()} aria-label={m.kb_import_filter_column({ label: m.kb_import_user() })} style={headerFilterStyle} /></th>
 						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={title} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_title()} aria-label={m.kb_import_filter_column({ label: m.kb_import_title() })} style={headerFilterStyle} /></th>
 						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={docNo} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_doc_no()} aria-label={m.kb_import_filter_column({ label: m.kb_import_doc_no() })} style={headerFilterStyle} /></th>
-						<th class="cell head" style="background:{pageBg};"></th>
+						<th class="cell head" style="background:{pageBg};">
+							<select bind:value={docOrigin} onchange={reloadFromHeaderFilter} aria-label={m.doc_origin_label()} style={headerFilterStyle}>
+								<option value="">{m.doc_origin_all()}</option>
+								<option value="local">{m.doc_origin_local()}</option>
+								<option value="remote">{m.doc_origin_remote()}</option>
+							</select>
+						</th>
 						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={fileName} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_file_name()} aria-label={m.kb_import_filter_column({ label: m.kb_import_file_name() })} style={headerFilterStyle} /></th>
 						<th class="cell head" style="background:{pageBg};"><input type="text" bind:value={statusFilter} onchange={reloadFromHeaderFilter} placeholder={m.kb_import_status()} aria-label={m.kb_import_filter_column({ label: m.kb_import_status() })} style={headerFilterStyle} /></th>
 						<th class="cell head" style="background:{pageBg};">
@@ -1455,7 +1491,12 @@
 									<span class="ellipsis-cell">{record.title ?? '-'}</span>
 								</td>
 								<td class="cell" style="color:{textPrimary};">{record.doc_no ?? '-'}</td>
-								<td class="cell" style="color:{textPrimary};">{record.type}</td>
+								<td class="cell" style="color:{textPrimary};">
+									{record.type}
+									{#if record.doc_origin === 'remote'}
+										<span class="remote-tag">{m.doc_origin_remote()}</span>
+									{/if}
+								</td>
 								<td class="cell file-name-cell" title={record.file_name ?? '-'} style="color:{textPrimary};">
 									<span class="ellipsis-cell">
 										{#if (record.file_name ?? '').trim().toLowerCase().endsWith('.pdf')}
@@ -1587,7 +1628,7 @@
 	</div>
 </div>
 
-<KbInputSearchDialog
+<KbInputSearchDialog initialFilters={{ ...createDefaultRecordBrowserFilters(), searchDocOrigin: docOrigin }}
 	bind:open={searchOpen}
 	{darkMode}
 	onSelect={applySearchFilters}
@@ -2071,6 +2112,8 @@
 	</div>
 {/if}
 
+<RemoteDocumentConfirmation bind:this={remoteConfirmation} {darkMode} />
+
 {#if showRestartDialog && restartTarget}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
@@ -2090,13 +2133,16 @@
 
 			<div class="mb-4 space-y-1.5">
 				<!-- Optional pre-processor: Parse File -->
+				{#if restartTarget.doc_origin === 'remote'}
+					<p style="font-size:13px; color:{textSecondary};">{m.doc_origin_imported_line_file()}</p>
+				{/if}
 				<label
 					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 					style="background:{restartParseFile ? accentTint : surface2}; border:1px solid {restartParseFile ? accent + '40' : borderColor};"
 					onmouseenter={(e) => { if (!restartParseFile) (e.currentTarget as HTMLElement).style.background = surface3; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartParseFile ? accentTint : surface2; }}
 				>
-					<input type="checkbox" bind:checked={restartParseFile} class="sr-only" />
+					<input type="checkbox" bind:checked={restartParseFile} disabled={restartTarget.doc_origin === 'remote'} class="sr-only" />
 					{#if restartParseFile}
 						<CheckSquareIcon class="size-4 shrink-0" style="color:{accent};" />
 					{:else}
@@ -2113,7 +2159,7 @@
 					onmouseenter={(e) => { if (!restartConvert) (e.currentTarget as HTMLElement).style.background = surface3; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartConvert ? accentTint : surface2; }}
 				>
-					<input type="checkbox" bind:checked={restartConvert} class="sr-only" />
+					<input type="checkbox" bind:checked={restartConvert} disabled={restartTarget.doc_origin === 'remote'} class="sr-only" />
 					{#if restartConvert}
 						<CheckSquareIcon class="size-4 shrink-0" style="color:{accent};" />
 					{:else}
@@ -2314,6 +2360,15 @@
 {/if}
 
 <style>
+	.remote-tag {
+		display: inline-block;
+		margin-top: 3px;
+		padding: 1px 5px;
+		border: 1px solid currentColor;
+		border-radius: 4px;
+		font-size: 11px;
+	}
+
 	.cell {
 		padding: 10px 12px;
 		font-size: 13px;

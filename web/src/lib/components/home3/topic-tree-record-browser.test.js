@@ -46,6 +46,7 @@ test('createDefaultRecordBrowserFilters returns the default empty filter state',
 		searchDocNo: '',
 		searchFileName: '',
 		searchDocType: 'all',
+		searchDocOrigin: '',
 		searchParserName: '',
 		searchOperation: '',
 		searchProcStatus: 'all',
@@ -65,6 +66,7 @@ test('buildTopicTreeListParams applies search filters to the kb.inputs query', (
 			searchDocNo: 'GB/T',
 			searchFileName: 'report',
 			searchDocType: 'pdf',
+			searchDocOrigin: 'remote',
 			searchParserName: 'mineru',
 			searchOperation: 'extract_metadata',
 			searchProcStatus: 'success',
@@ -80,6 +82,7 @@ test('buildTopicTreeListParams applies search filters to the kb.inputs query', (
 	assert.equal(params.docNo, 'GB/T');
 	assert.equal(params.fileName, 'report');
 	assert.equal(params.docType, 'pdf');
+	assert.equal(params.docOrigin, 'remote');
 	assert.equal(params.parserName, 'mineru');
 	assert.equal(params.pipelineFilter, 'extract_metadata');
 	assert.equal(params.operation, '');

@@ -431,6 +431,10 @@
 	let provisionVisited = $state(false);
 	let metricsVisited = $state(false);
 	let chunksVisited = $state(false);
+	let importVisited = $state(false);
+	$effect(() => {
+		if (activeSection === 'kb-import') importVisited = true;
+	});
 	$effect(() => {
 		if ((activeSection === 'kb-chunk-view' || activeSection === 'kb-chunks') && knowledgeStoreState.activeStore) {
 			chunksVisited = true;
@@ -925,6 +929,11 @@
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
+			{#if importVisited}
+				<div class="h-full" hidden={activeSection !== 'kb-import'} inert={activeSection !== 'kb-import'}>
+					<KbImportView {darkMode} />
+				</div>
+			{/if}
 			{#if chunksVisited}
 				<div class="h-full" hidden={(activeSection !== 'kb-chunk-view' && activeSection !== 'kb-chunks') || !knowledgeStoreState.activeStore}>
 					<ChunkMgmtView {darkMode} />
@@ -1002,7 +1011,7 @@
 					<KnowledgeStoreView {darkMode} />
 				{/if}
 			{:else if activeSection === 'kb-import'}
-				<KbImportView {darkMode} />
+				<!-- The visited Import view remains mounted above. -->
 			{:else if activeSection === 'kb-llm-wiki-v3'}
 				<LlmWikiV3View {darkMode} />
 			{:else if activeSection === 'kb-input-details'}

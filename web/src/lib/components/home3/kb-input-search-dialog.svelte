@@ -100,6 +100,7 @@
 	let searchDocNo = $state('');
 	let searchFileName = $state('');
 	let searchDocType = $state('all');
+	let searchDocOrigin = $state('');
 	let searchParserName = $state('');
 	let searchOperation = $state('');
 	let searchProcStatus = $state('all');
@@ -128,6 +129,7 @@
 		searchDocNo = filters.searchDocNo ?? '';
 		searchFileName = filters.searchFileName ?? '';
 		searchDocType = filters.searchDocType ?? 'all';
+		searchDocOrigin = filters.searchDocOrigin ?? '';
 		searchParserName = filters.searchParserName ?? '';
 		searchOperation = filters.searchOperation ?? '';
 		searchProcStatus = filters.searchProcStatus ?? 'all';
@@ -144,6 +146,7 @@
 			searchDocNo,
 			searchFileName,
 			searchDocType,
+			searchDocOrigin,
 			searchParserName,
 			searchOperation,
 			searchProcStatus,
@@ -163,6 +166,7 @@
 			const res = await listKbInputs({
 				recordId: searchRecordId,
 				docType: searchDocType,
+				docOrigin: searchDocOrigin,
 				parseState: 'all',
 				title: searchTitle,
 				docNo: searchDocNo,
@@ -378,6 +382,14 @@
 									{/each}
 								</select>
 							</label>
+							<label class="field dialog-field">
+								<span class="field-label">{m.doc_origin_label()}</span>
+								<select bind:value={searchDocOrigin}>
+									<option value="">{m.doc_origin_all()}</option>
+									<option value="local">{m.doc_origin_local()}</option>
+									<option value="remote">{m.doc_origin_remote()}</option>
+								</select>
+							</label>
 							<label class="field dialog-field dialog-field-wide">
 								<span class="field-label">{m.kb_input_search_dialog_title_contains()}</span>
 								<input type="text" bind:value={searchTitle} placeholder={m.kb_input_search_dialog_input_title_standard_title()} onkeydown={(e) => {
@@ -534,7 +546,12 @@
 											/>
 										</td>
 										<td class="mono">{record.id}</td>
-										<td>{record.type}</td>
+										<td>
+											{record.type}
+											{#if record.doc_origin === 'remote'}
+												<span class="status-chip">{m.doc_origin_remote()}</span>
+											{/if}
+										</td>
 										<td>
 											<div class="result-primary">{inputDisplayName(record)}</div>
 											<div class="result-secondary mono">{inputDisplayDocNo(record) || '—'}</div>

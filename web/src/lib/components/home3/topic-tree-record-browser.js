@@ -7,6 +7,7 @@ export const TOPIC_TREE_PAGE_SIZE = 50;
  *   searchDocNo: string;
  *   searchFileName: string;
  *   searchDocType: string;
+ *   searchDocOrigin?: string;
  *   searchParserName: string;
  *   searchOperation: string;
  *   searchProcStatus: string;
@@ -25,6 +26,7 @@ export function createDefaultRecordBrowserFilters() {
 		searchDocNo: '',
 		searchFileName: '',
 		searchDocType: 'all',
+		searchDocOrigin: '',
 		searchParserName: '',
 		searchOperation: '',
 		searchProcStatus: 'all',
@@ -71,6 +73,7 @@ export function buildTopicTreeListParams({
 	/** @type {import('$lib/services/kbService').ListKbInputsParams} */
 	const params = {
 		docType: normalizedFilters.searchDocType?.trim() || 'all',
+		...(normalizedFilters.searchDocOrigin ? { docOrigin: normalizedFilters.searchDocOrigin } : {}),
 		excludeDocType: 'zip',
 		parseState: 'all',
 		fileName: normalizedFilters.searchFileName?.trim() || '',

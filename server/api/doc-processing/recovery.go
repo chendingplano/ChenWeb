@@ -34,7 +34,8 @@ func releaseLease(conn *sql.Conn, queries ...string) {
 	_ = conn.Close()
 }
 
-func acquireDocumentLease(ctx context.Context, db *sql.DB, recordID int64, cancelOnLoss ...context.CancelFunc) (func(), bool, error) {
+// AcquireDocumentLease excludes processing or sync work on the same input.
+func AcquireDocumentLease(ctx context.Context, db *sql.DB, recordID int64, cancelOnLoss ...context.CancelFunc) (func(), bool, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, false, err
@@ -176,7 +177,7 @@ func RecoverPendingEvents(ctx context.Context, db *sql.DB, js RecoveryJetStream,
 		}
 		streams = append(streams, source{stream, s.Subject, si.State.LastSeq, si.State.FirstSeq})
 	}
-	rows, err := conn.QueryContext(ctx, `SELECT id FROM kb.inputs WHERE parse_state='parsed_success' AND pipeline_state IN ('pending','running') AND processing_mode IN ('auto','auto_offpeak') AND modify_time < now()-($1 * interval '1 second') ORDER BY id LIMIT 1000`, opts.Grace.Seconds())
+	rows, err := conn.QueryContext(ctx, `SELECT id FROM kb.inputs WHERE doc_origin='local' AND parse_state='parsed_success' AND pipeline_state IN ('pending','running') AND processing_mode IN ('auto','auto_offpeak') AND modify_time < now()-($1 * interval '1 second') ORDER BY id LIMIT 1000`, opts.Grace.Seconds())
 	if err != nil {
 		return report, err
 	}
@@ -280,6 +281,7 @@ func recoveryPayload(payload []byte) ([]byte, error) {
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, err
 	}
+	delete(raw, "allow_remote_doc")
 	raw["doc_recovery"] = json.RawMessage("true")
 	return json.Marshal(raw)
 }

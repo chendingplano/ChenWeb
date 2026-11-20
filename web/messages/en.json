@@ -9094,6 +9094,8 @@
 	"cgv_retry": "Retry",
 	"cgv_activities": "Activities",
 	"cgv_judgements": "Candidate judgements",
+	"cgv_resize_panels": "Resize document and judgements panels",
+	"cgv_resize_activities": "Resize activities and source panels",
 	"cgv_snapshot": "Snapshot",
 	"cgv_rules": "Rules version",
 	"cgv_method": "Labelling method",
@@ -9295,5 +9297,18 @@
 	"urf_dismiss_hint": "The citation is acceptable without a resolved target",
 	"urf_target": "Target record",
 	"urf_family": "Family",
-	"urf_state": "State"
+	"urf_state": "State",
+  "doc_origin_label": "Document origin",
+  "doc_origin_all": "All origins",
+  "doc_origin_local": "Local",
+  "doc_origin_remote": "Remote",
+  "doc_origin_confirmation_title": "Process synced documents?",
+  "doc_origin_confirmation_one": "This document is synced from production.",
+  "doc_origin_confirmation_many": "Remote documents in this selection: {count}.",
+  "doc_origin_confirmation_overwrite": "The next sync after production results change will replace any results produced here.",
+  "doc_origin_confirmation_cancel": "Cancel",
+  "doc_origin_confirmation_skip": "Skip remote",
+  "doc_origin_confirmation_run": "Run anyway",
+  "doc_origin_confirmation_run_all": "Process all",
+  "doc_origin_imported_line_file": "Remote documents use their synced line files."
 }

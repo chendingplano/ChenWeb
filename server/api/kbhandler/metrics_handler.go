@@ -565,10 +565,10 @@ SELECT
     i.file_name, i.backup_filename, i.result_filename, i.publish_date,
     i.authors, i.owner, COALESCE(i.status, '[]'::jsonb) AS status,
     i.create_time, i.modify_time, i.public_info, i.private_info, i.doc_metadata::text,
-    i.notes, i.error_msg
+    i.notes, i.error_msg, %s AS doc_origin
 FROM %s i
 WHERE i.id = $1
-`, nameColumnExpr, parserNameColumnExpr, inputTable)
+`, nameColumnExpr, parserNameColumnExpr, inputDocOriginExpr(inputTable), inputTable)
 
 	row := db.QueryRow(query, id)
 	var (
@@ -584,7 +584,7 @@ WHERE i.id = $1
 		&record.FileName, &record.BackupFileName, &record.ResultFileName, &publishDate,
 		&record.Authors, &record.Owner, &statusBytes,
 		&record.CreateTime, &record.ModifyTime, &publicInfoNullable, &privateInfoNullable, &docMetadataNullable,
-		&record.Notes, &record.ErrorMsg,
+		&record.Notes, &record.ErrorMsg, &record.DocOrigin,
 	); err != nil {
 		return inputRecord{}, err
 	}

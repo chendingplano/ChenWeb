@@ -160,6 +160,10 @@ func (s *ControlService) runProcessorsChunkBatched(
 	initOK := make([]ChunkBatchProcessor, 0, len(batchProcessors))
 
 	for _, bp := range batchProcessors {
+		if !s.admitDocumentStage(ctx, recordID) {
+			*requestStopped = true
+			return
+		}
 		processorName := processorLogName(bp.(Processor))
 		s.persistProcessorRuntimeStatus(ctx, recordID, processorName, "active", "")
 		s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
@@ -215,6 +219,10 @@ func (s *ControlService) runProcessorsChunkBatched(
 
 	// --- Finalize each processor ---
 	for _, bp := range initOK {
+		if !s.admitDocumentStage(ctx, recordID) {
+			*requestStopped = true
+			return
+		}
 		processorName := processorLogName(bp.(Processor))
 		if isCtxStopped(ctx) {
 			*requestStopped = true

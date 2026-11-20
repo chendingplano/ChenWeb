@@ -25,6 +25,7 @@ type LineFileGeneratedEvent struct {
 	Filename         string
 	Force            bool
 	ForceClear       bool
+	AllowRemoteDoc   bool
 	Type             string
 	Status           string
 	Operations       []string
@@ -68,6 +69,7 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 		forceClear = b
 	}
 
+	allowRemote, _ := raw["allow_remote_doc"].(bool)
 	gateOverrides, gateErr := asStringMap(raw["processor_gate_overrides"])
 	if gateErr != nil {
 		return LineFileGeneratedEvent{}, fmt.Errorf("invalid processor_gate_overrides: %w", gateErr)
@@ -79,6 +81,7 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 		Filename:               firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
 		Force:                  force,
 		ForceClear:             forceClear,
+		AllowRemoteDoc:         allowRemote,
 		Type:                   strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
 		Status:                 strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
 		Operations:             parseOperations(firstPresentValue(raw, "operation", "processor_override", "processor_overrides", "doc-processors", "doc_processors")),

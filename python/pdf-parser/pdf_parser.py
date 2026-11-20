@@ -695,7 +695,7 @@ def _process_record(
         if not hasattr(conn, "cursor"):
             return
         current = fetch_record_by_id(conn, rec_id)
-        if current and has_stop_requested(current.get("status", "")):
+        if current and (current.get("sync_marked") or has_stop_requested(current.get("status", ""))):
             raise ParseStopped()
 
     try:
@@ -1061,6 +1061,7 @@ async def run_jetstream() -> None:
                 continue
             for msg in msgs:
                 payload = {}
+                lease_key = None
                 try:
                     payload = json.loads(msg.data.decode("utf-8"))
                     rec_id = int(payload.get("record_id") or 0)
@@ -1076,9 +1077,29 @@ async def run_jetstream() -> None:
                         await msg.ack()
                         continue
 
+                    # Match the Go document-processing lease while an explicit
+                    # stage event owns parser files and status.
+                    record_key = f"chenweb/doc-processing/record/{rec_id}"
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT pg_try_advisory_lock(hashtextextended(%s, 0))", (record_key,))
+                        acquired = cur.fetchone()[0]
+                        if acquired:
+                            lease_key = record_key
+                    conn.commit()
+                    if not acquired:
+                        await msg.nak(delay=2)
+                        continue
+
                     rec = fetch_record_by_id(conn, rec_id)
                     if not rec:
                         raise ValueError(f"kb.inputs record not found id={rec_id}")
+                    if rec["doc_origin"] == "remote":
+                        log.info("skipping parse event for remote document id=%s", rec_id)
+                        await msg.ack()
+                        continue
+                    if rec["sync_marked"]:
+                        await msg.nak(delay=2)
+                        continue
 
                     # Skip records already parsed/in-progress — handles JetStream
                     # redelivery that occurs when NATS drops between parse completion
@@ -1119,6 +1140,13 @@ async def run_jetstream() -> None:
                         await msg.ack()
                     else:
                         await msg.nak()
+                finally:
+                    if lease_key is not None:
+                        # Clear an aborted parse transaction before releasing the session lock.
+                        conn.rollback()
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s, 0))", (lease_key,))
+                        conn.commit()
     finally:
         stop.set()
         health_task.cancel()

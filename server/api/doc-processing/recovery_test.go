@@ -58,7 +58,7 @@ func recoveryDB(t *testing.T, idle bool, candidates ...int64) (*sql.DB, sqlmock.
 		for _, id := range candidates {
 			rows.AddRow(id)
 		}
-		mock.ExpectQuery("SELECT id FROM kb.inputs WHERE parse_state='parsed_success' AND pipeline_state IN \\('pending','running'\\) AND processing_mode IN \\('auto','auto_offpeak'\\)").WithArgs(float64(120)).WillReturnRows(rows)
+		mock.ExpectQuery("SELECT id FROM kb.inputs WHERE doc_origin='local' AND parse_state='parsed_success' AND pipeline_state IN \\('pending','running'\\) AND processing_mode IN \\('auto','auto_offpeak'\\)").WithArgs(float64(120)).WillReturnRows(rows)
 	}
 	if idle {
 		mock.ExpectExec("SELECT pg_advisory_unlock").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -96,7 +96,7 @@ func TestRecoveryPreservesOriginalExecutionAndOptions(t *testing.T) {
 	if err := os.WriteFile(filename, []byte("lines"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	raw := map[string]any{"record_id": float64(400), "line_file_filename": filename, "user_id": "user-1", "llm_execution_key": "original-run", "doc_processors": []any{"extract_metrics"}, "pipeline_override": "custom", "force": false}
+	raw := map[string]any{"record_id": float64(400), "line_file_filename": filename, "user_id": "user-1", "llm_execution_key": "original-run", "doc_processors": []any{"extract_metrics"}, "pipeline_override": "custom", "force": false, "allow_remote_doc": true}
 	payload, _ := json.Marshal(raw)
 	db, mock := recoveryDB(t, true, 400)
 	js := &recoveryTestJS{bound: true, messages: []*nats.RawStreamMsg{{Subject: "kb.line-file-generated", Data: payload, Time: time.Now().Add(-time.Hour)}}}
@@ -109,6 +109,7 @@ func TestRecoveryPreservesOriginalExecutionAndOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(got, "doc_recovery")
+	delete(raw, "allow_remote_doc")
 	if !reflect.DeepEqual(got, raw) {
 		t.Fatalf("changed original payload: got=%v want=%v", got, raw)
 	}
@@ -150,7 +151,7 @@ func TestDocumentLeaseRefusesConcurrentProcessing(t *testing.T) {
 	mock.ExpectExec("SELECT pg_advisory_lock_shared").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT pg_try_advisory_lock").WithArgs("chenweb/doc-processing/record/400").WillReturnRows(sqlmock.NewRows([]string{"acquired"}).AddRow(false))
 	mock.ExpectExec("SELECT pg_advisory_unlock_shared").WillReturnResult(sqlmock.NewResult(0, 1))
-	release, acquired, err := acquireDocumentLease(context.Background(), db, 400)
+	release, acquired, err := AcquireDocumentLease(context.Background(), db, 400)
 	if err != nil || acquired || release != nil {
 		t.Fatalf("acquired=%v err=%v", acquired, err)
 	}

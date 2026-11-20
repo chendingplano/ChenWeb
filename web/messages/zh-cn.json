@@ -9094,6 +9094,8 @@
 	"cgv_retry": "重试",
 	"cgv_activities": "活动",
 	"cgv_judgements": "候选判定",
+	"cgv_resize_panels": "调整文档与候选判定面板的宽度",
+	"cgv_resize_activities": "调整活动与源文档面板宽度",
 	"cgv_snapshot": "快照",
 	"cgv_rules": "规则版本",
 	"cgv_method": "标注方法",
@@ -9295,5 +9297,18 @@
 	"urf_dismiss_hint": "该引用没有解析出目标也可接受",
 	"urf_target": "目标记录",
 	"urf_family": "类别",
-	"urf_state": "状态"
+	"urf_state": "状态",
+  "doc_origin_label": "文档来源",
+  "doc_origin_all": "所有来源",
+  "doc_origin_local": "本地",
+  "doc_origin_remote": "远程",
+  "doc_origin_confirmation_title": "要处理已同步的文档吗？",
+  "doc_origin_confirmation_one": "此文档来自生产环境。",
+  "doc_origin_confirmation_many": "当前选中了 {count} 份远程文档。",
+  "doc_origin_confirmation_overwrite": "生产环境的处理结果变更后，下次同步将覆盖此处生成的结果。",
+  "doc_origin_confirmation_cancel": "取消",
+  "doc_origin_confirmation_skip": "跳过远程文档",
+  "doc_origin_confirmation_run": "仍然运行",
+  "doc_origin_confirmation_run_all": "全部处理",
+  "doc_origin_imported_line_file": "远程文档使用同步过来的行文件。"
 }

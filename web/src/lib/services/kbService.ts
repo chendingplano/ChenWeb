@@ -15,6 +15,8 @@ const BASE = '/api/v1/kb';
 
 export type ParseState = 'all' | 'pending' | 'parsing' | 'parsed_success' | 'parsed_failed';
 
+export type KbInputOrigin = 'local' | 'remote';
+
 export type KbInputRecord = {
 	gold_metric_runs?: Array<{ skill_version: string; model_name: string; run_id: string }>;
 	id: number;
@@ -26,6 +28,7 @@ export type KbInputRecord = {
 	title?: string;
 	doc_no?: string;
 	ks_desc?: string;
+	doc_origin?: KbInputOrigin;
 	processing_mode?: string;
 	source?: string;
 	file_name?: string;
@@ -90,6 +93,7 @@ export type ListKbInputsParams = {
 	userFilter?: boolean;
 	userIds?: string[];
 	statusLike?: string;
+	docOrigin?: string;
 	processingMode?: string;
 	orderBy?: string;
 	orderDir?: 'asc' | 'desc';
@@ -138,6 +142,7 @@ function buildQuery(params: ListKbInputsParams): string {
 		query.set('user_ids', (params.userIds ?? []).join(','));
 	}
 	if (params.statusLike?.trim()) query.set('status_like', params.statusLike.trim());
+	if (params.docOrigin?.trim()) query.set('doc_origin', params.docOrigin.trim());
 	if (params.processingMode?.trim()) query.set('processing_mode', params.processingMode.trim());
 	if (params.orderBy?.trim()) query.set('order_by', params.orderBy.trim());
 	if (params.orderDir?.trim()) query.set('order_dir', params.orderDir.trim());
@@ -185,22 +190,22 @@ export async function listKbInputs(params: ListKbInputsParams): Promise<ListKbIn
 	return response.json();
 }
 
-export async function listAllKbInputIds(
+export async function listAllKbInputOrigins(
 	params: Omit<ListKbInputsParams, 'page' | 'pageSize'>
-): Promise<number[]> {
+): Promise<Array<Pick<KbInputRecord, 'id' | 'doc_origin'>>> {
 	const pageSize = 500;
-	const ids: number[] = [];
+	const inputs: Array<Pick<KbInputRecord, 'id' | 'doc_origin'>> = [];
 	let page = 1;
 	let total = 0;
 	do {
 		const result = await listKbInputs({ ...params, page, pageSize });
 		const records = result.results ?? [];
 		if (records.length === 0) break;
-		ids.push(...records.map((record) => record.id));
+		inputs.push(...records.map(({ id, doc_origin }) => ({ id, doc_origin })));
 		total = result.total ?? 0;
 		page++;
-	} while (ids.length < total);
-	return ids;
+	} while (inputs.length < total);
+	return inputs;
 }
 
 export async function listDocProcLogs(params: {

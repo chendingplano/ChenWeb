@@ -19,6 +19,7 @@ type StartDocProcessingEvent struct {
 	All            string
 	DocProcessors  []string
 	FailedProcOnly bool
+	AllowRemoteDoc bool
 }
 
 func ParseStartDocProcessingEvent(payload []byte) (StartDocProcessingEvent, error) {
@@ -64,6 +65,7 @@ func ParseStartDocProcessingEvent(payload []byte) (StartDocProcessingEvent, erro
 		failedProcOnly = b
 	}
 
+	allowRemote, _ := raw["allow_remote_doc"].(bool)
 	return StartDocProcessingEvent{
 		RecordIDs:      recordIDs,
 		UserID:         strings.TrimSpace(asString(raw["user_id"])),
@@ -71,6 +73,7 @@ func ParseStartDocProcessingEvent(payload []byte) (StartDocProcessingEvent, erro
 		All:            all,
 		DocProcessors:  parseOperations(firstPresentValue(raw, "doc-processors", "doc_processors", "operation")),
 		FailedProcOnly: failedProcOnly,
+		AllowRemoteDoc: allowRemote,
 	}, nil
 }
 

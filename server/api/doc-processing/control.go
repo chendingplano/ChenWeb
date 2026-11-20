@@ -309,7 +309,7 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 			}
 			continue
 		}
-		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops, cmd.UserID)
+		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops, cmd.UserID, cmd.AllowRemoteDoc)
 		if err == nil {
 			eventPayload, err = llmrun.Inherit(payload, eventPayload)
 		}
@@ -383,7 +383,7 @@ func (s *ControlService) resolveStartDocProcessingRecords(ctx context.Context, c
 	return records, nil
 }
 
-func buildLineFileGeneratedPayload(recordID int64, filename string, operations []string, userID string) ([]byte, error) {
+func buildLineFileGeneratedPayload(recordID int64, filename string, operations []string, userID string, allowRemoteDoc bool) ([]byte, error) {
 	body := map[string]any{"record_id": strconv.FormatInt(recordID, 10)}
 	if strings.TrimSpace(filename) != "" {
 		body["filename"] = strings.TrimSpace(filename)
@@ -393,6 +393,9 @@ func buildLineFileGeneratedPayload(recordID int64, filename string, operations [
 	}
 	if strings.TrimSpace(userID) != "" {
 		body["user_id"] = strings.TrimSpace(userID)
+	}
+	if allowRemoteDoc {
+		body["allow_remote_doc"] = true
 	}
 	return json.Marshal(body)
 }
@@ -710,7 +713,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	if s.LeaseDB != nil {
 		leaseCtx, cancelLease := context.WithCancel(ctx)
 		defer cancelLease()
-		release, acquired, err := acquireDocumentLease(leaseCtx, s.LeaseDB, evt.RecordID, cancelLease)
+		release, acquired, err := AcquireDocumentLease(leaseCtx, s.LeaseDB, evt.RecordID, cancelLease)
 		if err != nil {
 			return err
 		}
@@ -719,6 +722,9 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 		defer release()
 		ctx = leaseCtx
+		if err := s.checkDocumentAdmission(ctx, evt.RecordID, evt.AllowRemoteDoc); err != nil {
+			return s.skipUnconfirmedRemote(err)
+		}
 		// A recovered event may have waited behind a normal event. Recheck after
 		// acquiring the lease, before routing or any destructive processor work.
 		var marker struct {
@@ -727,7 +733,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		_ = json.Unmarshal(payload, &marker)
 		if marker.Recovery {
 			var eligible bool
-			if err := s.LeaseDB.QueryRowContext(ctx, `SELECT parse_state='parsed_success' AND pipeline_state IN ('pending','running') AND processing_mode IN ('auto','auto_offpeak') FROM kb.inputs WHERE id=$1`, evt.RecordID).Scan(&eligible); err != nil {
+			if err := s.LeaseDB.QueryRowContext(ctx, `SELECT doc_origin='local' AND parse_state='parsed_success' AND pipeline_state IN ('pending','running') AND processing_mode IN ('auto','auto_offpeak') FROM kb.inputs WHERE id=$1`, evt.RecordID).Scan(&eligible); err != nil {
 				return err
 			}
 			if !eligible {
@@ -864,6 +870,13 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		return err
 	}
 	ctx = s.applyCrossPeakRule(ctx, cancelTask, evt.RecordID, peakMode)
+	if err := s.checkDocumentAdmission(ctx, evt.RecordID, evt.AllowRemoteDoc); err != nil {
+		return s.skipUnconfirmedRemote(err)
+	}
+	ctx = context.WithValue(ctx, documentStageGateKey{}, documentStageGate{
+		allowRemoteDoc: evt.AllowRemoteDoc,
+		stop:           cancelTask,
+	})
 	if s.newRunProcessors != nil {
 		processors, blockingProcessor, err = s.newRunProcessors()
 		s.recordRuntimeFault(err)
@@ -1097,10 +1110,19 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			if s.Logger != nil {
 				s.Logger.Warn("failed to create kb.doc_process_runs row", "record_id", evt.RecordID, "error", createErr)
 			}
+			if s.LeaseDB != nil {
+				return createErr
+			}
 		} else {
 			runID = id
 			runCreated = true
 			ctx = withRunID(ctx, runID)
+			if err := s.checkDocumentAdmission(ctx, evt.RecordID, evt.AllowRemoteDoc); err != nil {
+				if closeErr := s.RunStore.CloseDocProcessRun(context.Background(), runID, "stopped", nil); closeErr != nil {
+					return errors.Join(err, closeErr)
+				}
+				return s.skipUnconfirmedRemote(err)
+			}
 			if s.PlanStore != nil && planErr == nil {
 				if _, persistErr := s.PlanStore.CreateDocProcessPlan(ctx, DocProcessPlanRecord{
 					RunID:             runID,
@@ -1184,7 +1206,8 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	} else {
 		s.runProcessorsSequential(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr, &allProcResults)
 	}
-	if requestStopped {
+	if requestStopped || isCtxStopped(ctx) {
+		requestStopped = true
 		return nil
 	}
 
@@ -1331,6 +1354,9 @@ func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors 
 				}
 			}
 
+			if !s.admitDocumentStage(ctx, recordID) {
+				return
+			}
 			startTime := time.Now()
 			procCtx := withProcessorLLMRunID(ctx, name)
 			if s.Logger != nil {
@@ -1399,6 +1425,9 @@ type procResult struct {
 func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload []byte, p Processor, recordID int64) procResult {
 	procStart := s.now()
 	processorName := processorLogName(p)
+	if !s.admitDocumentStage(ctx, recordID) {
+		return procResult{stopped: true, operation: processorName}
+	}
 	ctx = withProcessorLLMRunID(ctx, processorName)
 	ctx, span := startProcessorSpan(ctx, p, processorPhase(p), recordID)
 	defer span.End()

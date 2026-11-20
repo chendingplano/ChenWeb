@@ -64,14 +64,14 @@ systemctl_cmd() { if [ "$IS_ROOT" = 1 ]; then systemctl "$@"; else sudo -n /bin/
 list_sql() { (cd "$1" 2>/dev/null && ls -1 ./*.sql 2>/dev/null) | sed 's|^\./||' | sort; }
 
 # --- valid binary -> systemd service (empty = CLI tool, install only) ---------
-valid_names="server doc-processor parser-result-converter doc-service create-admin deploy-runner process-monitor doc-recovery"
+valid_names="server doc-processor parser-result-converter doc-service create-admin deploy-runner process-monitor doc-recovery docsync-export"
 svc_for() {
   case "$1" in
     server)                   printf 'chenweb' ;;
     doc-processor)            printf 'doc-processor' ;;
     parser-result-converter)  printf 'parser-result-converter' ;;
     doc-service)              printf 'doc-service' ;;
-    create-admin)             printf '' ;;
+    create-admin|docsync-export) printf '' ;;
     process-monitor|doc-recovery) printf '' ;; # systemd timer commands
     deploy-runner)            printf '' ;;   # run by chenweb-deploy.service on demand
     *)                        printf '__invalid__' ;;

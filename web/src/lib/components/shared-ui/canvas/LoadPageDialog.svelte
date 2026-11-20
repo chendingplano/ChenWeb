@@ -6,6 +6,7 @@
 	import { getPage, getPageRecovery, searchPages, type PageSummary } from '$lib/wpi/api';
 	import type { JsonObject } from '$lib/wpi/types';
 	import { canvasThemeVars } from './canvas-theme';
+	import { movableDialog } from '../movable-dialog';
 
 	let {
 		darkMode = true,
@@ -94,29 +95,6 @@
 			if (request === controller) loadingId = '';
 		}
 	}
-	let drag: { x: number; y: number } | undefined;
-	// Dragging moves the dialog by its header; the buttons in it keep their own clicks.
-	function startDrag(e: PointerEvent) {
-		if (e.button !== 0 || (e.target as Element).closest('button')) return;
-		const rect = dialog.getBoundingClientRect();
-		dialog.style.margin = '0';
-		dialog.style.left = `${rect.left}px`;
-		dialog.style.top = `${rect.top}px`;
-		dialog.style.right = 'auto';
-		dialog.style.bottom = 'auto';
-		drag = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-	}
-	function moveDrag(e: PointerEvent) {
-		if (!drag) return;
-		const left = Math.min(Math.max(0, e.clientX - drag.x), window.innerWidth - dialog.offsetWidth);
-		const top = Math.min(Math.max(0, e.clientY - drag.y), window.innerHeight - dialog.offsetHeight);
-		dialog.style.left = `${left}px`;
-		dialog.style.top = `${top}px`;
-	}
-	function endDrag() {
-		drag = undefined;
-	}
 	onMount(() => {
 		dialog.showModal();
 		void list(0, true);
@@ -131,13 +109,7 @@
 	style={canvasThemeVars(darkMode)}
 	aria-labelledby="wpi-load-title"
 >
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<header
-		onpointerdown={startDrag}
-		onpointermove={moveDrag}
-		onpointerup={endDrag}
-		onpointercancel={endDrag}
-	>
+	<header use:movableDialog>
 		<h2 id="wpi-load-title">{m.wpi_load_title()}</h2>
 		<button type="button" onclick={onClose} aria-label={m.wpi_load_close()}>✕</button>
 	</header>

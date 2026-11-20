@@ -22,10 +22,10 @@ type PlanStep struct {
 }
 
 // BuildBinaries is the order mise build-server-linux builds the binaries in.
-var BuildBinaries = []string{"server", "doc-processor", "parser-result-converter", "doc-service", "create-admin", "deploy-runner", "process-monitor", "doc-recovery"}
+var BuildBinaries = []string{"server", "doc-processor", "parser-result-converter", "doc-service", "create-admin", "deploy-runner", "process-monitor", "doc-recovery", "docsync-export"}
 
 // DeployBinaries is the order deploy-server-china.sh installs them in (sorted *-linux names).
-var DeployBinaries = []string{"create-admin", "deploy-runner", "doc-processor", "doc-recovery", "doc-service", "parser-result-converter", "process-monitor", "server"}
+var DeployBinaries = []string{"create-admin", "deploy-runner", "doc-processor", "doc-recovery", "doc-service", "docsync-export", "parser-result-converter", "process-monitor", "server"}
 
 func binarySteps(names []string) []PlanStep {
 	steps := make([]PlanStep, 0, len(names))

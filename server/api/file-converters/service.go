@@ -47,6 +47,8 @@ type ConvertRequest struct {
 
 type InputRecord struct {
 	ID             int64
+	DocOrigin      string
+	SyncMarked     bool
 	Type           string
 	ParserName     string
 	StatusRaw      string
@@ -208,6 +210,23 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 		)
 	}()
 
+	// The converter owns the generated line file until conversion completes.
+	// Share the per-input lease with sync and document processing.
+	if store, ok := s.Store.(SQLStore); ok {
+		leaseCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		release, acquired, err := docprocessing.AcquireDocumentLease(leaseCtx, store.DB, req.RecordID, cancel)
+		if err != nil {
+			procErr = err
+			return err
+		}
+		if !acquired {
+			procErr = docprocessing.ErrDocumentBusy
+			return procErr
+		}
+		defer release()
+		ctx = leaseCtx
+	}
 	rec, err := s.Store.GetInputRecord(ctx, req.RecordID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -215,6 +234,14 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 			return procErr
 		}
 		procErr = fmt.Errorf("(MID_26041104) load record %d: %w", req.RecordID, err)
+		return procErr
+	}
+	if rec.DocOrigin == "remote" {
+		s.Logger.Info("skip conversion for remote document", "record_id", req.RecordID)
+		return nil
+	}
+	if rec.SyncMarked {
+		procErr = docprocessing.ErrDocumentBusy
 		return procErr
 	}
 	if !shouldForceReprocess(req) && HasOperationSuccess(rec.StatusRaw, "converted") {
@@ -803,7 +830,9 @@ SELECT id,
        COALESCE(status::text, '[]'),
        COALESCE(file_name, ''),
        COALESCE(result_filename, ''),
-       COALESCE(user_id, '')
+       COALESCE(user_id, ''),
+       doc_origin,
+       EXISTS (SELECT 1 FROM kb.doc_sync_marks WHERE input_id = kb.inputs.id)
 FROM kb.inputs
 WHERE id = $1`
 
@@ -816,6 +845,8 @@ WHERE id = $1`
 		&rec.FileName,
 		&rec.ResultFilename,
 		&rec.UserID,
+		&rec.DocOrigin,
+		&rec.SyncMarked,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

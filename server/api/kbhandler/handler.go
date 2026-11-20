@@ -43,6 +43,7 @@ type inputRecord struct {
 	Title             *string                    `json:"title,omitempty"`
 	DocNo             *string                    `json:"doc_no,omitempty"`
 	KSDesc            *string                    `json:"ks_desc,omitempty"`
+	DocOrigin         string                     `json:"doc_origin"`
 	ProcessingMode    *string                    `json:"processing_mode,omitempty"`
 	Source            *string                    `json:"source,omitempty"`
 	FileName          *string                    `json:"file_name,omitempty"`
@@ -99,6 +100,7 @@ type listInputsFilters struct {
 	UserFilter           bool
 	UserIDs              []string
 	StatusLike           string
+	DocOrigin            string
 	ProcessingMode       string
 	ParserName           string
 	Operation            string
@@ -193,6 +195,7 @@ func ListInputs(c echo.Context) error {
 		UserFilter:           strings.EqualFold(strings.TrimSpace(c.QueryParam("user_filter")), "true"),
 		UserIDs:              parseCSVQuery(c.QueryParam("user_ids")),
 		StatusLike:           c.QueryParam("status_like"),
+		DocOrigin:            c.QueryParam("doc_origin"),
 		ProcessingMode:       c.QueryParam("processing_mode"),
 		ParserName:           c.QueryParam("parser_name"),
 		Operation:            c.QueryParam("operation"),
@@ -303,7 +306,7 @@ func ListInputs(c echo.Context) error {
 		}
 	}
 
-	whereSQL, args, err := buildWhereClause(filters, nameWhereExpr, parserWhereExpr)
+	whereSQL, args, err := buildWhereClause(filters, nameWhereExpr, parserWhereExpr, inputDocOriginExpr(inputTable))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
@@ -377,6 +380,10 @@ func ListInputs(c echo.Context) error {
 		kept := make([]inputRecord, 0, len(results))
 		fixedCount := 0
 		for _, rec := range results {
+			if rec.DocOrigin == "remote" {
+				kept = append(kept, rec)
+				continue
+			}
 			stuck, fixErr := store.FixStuckPipeline(c.Request().Context(), rec.ID)
 			if fixErr != nil {
 				logger.Warn("stuck pipeline check failed", "record_id", rec.ID, "error", fixErr)
@@ -433,6 +440,7 @@ func ListProcessParsedInputIDs(c echo.Context) error {
 
 	query := `
 SELECT i.id,
+       i.doc_origin,
        EXISTS (
            SELECT 1
            FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS converted(entry)
@@ -449,7 +457,7 @@ CROSS JOIN LATERAL (
     ORDER BY parsed.entry->>'start_time' DESC
     LIMIT 1
 ) AS parsed
-WHERE i.processing_mode = 'pdf_parsing'
+WHERE (i.processing_mode = 'pdf_parsing' OR i.doc_origin = 'remote')
   AND NOT EXISTS (
       SELECT 1
       FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.status) = 'array' THEN i.status ELSE '[]'::jsonb END) AS doc_processing(entry)
@@ -486,13 +494,14 @@ WHERE i.processing_mode = 'pdf_parsing'
 	}
 	defer rows.Close()
 	type processParsedInput struct {
-		ID                  int64 `json:"id"`
-		ConvertedAfterParse bool  `json:"converted_after_parse"`
+		ID                  int64  `json:"id"`
+		DocOrigin           string `json:"doc_origin"`
+		ConvertedAfterParse bool   `json:"converted_after_parse"`
 	}
 	inputs := make([]processParsedInput, 0)
 	for rows.Next() {
 		var input processParsedInput
-		if err := rows.Scan(&input.ID, &input.ConvertedAfterParse); err != nil {
+		if err := rows.Scan(&input.ID, &input.DocOrigin, &input.ConvertedAfterParse); err != nil {
 			rc.GetLogger().Error("failed to read parsed input ID", "error", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to read parsed inputs"})
 		}
@@ -590,6 +599,7 @@ func resolveOrderClause(orderBy, orderDir, parserNameColumnExpr string) string {
 }
 
 func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int, orderBy, orderDir string, entries bool) ([]inputRecord, error) {
+	originColumnExpr := inputDocOriginExpr(inputTable)
 	extraColumns := ""
 	if entries {
 		extraColumns = ", i.benchmark_skill_version, i.benchmark_model_name, i.benchmark_run_id"
@@ -620,9 +630,10 @@ SELECT
     i.private_info,
     i.doc_metadata::text,
     i.notes,
-    i.error_msg%s
+    i.error_msg,
+    %s AS doc_origin%s
 FROM %s i
-`, nameColumnExpr, parserNameColumnExpr, extraColumns, inputTable)
+`, nameColumnExpr, parserNameColumnExpr, originColumnExpr, extraColumns, inputTable)
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
 	}
@@ -682,6 +693,7 @@ FROM %s i
 			&docMetadataNullable,
 			&record.Notes,
 			&record.ErrorMsg,
+			&record.DocOrigin,
 		}
 		if entries {
 			destinations = append(destinations, &run.SkillVersion, &run.ModelName, &run.RunID)
@@ -903,6 +915,13 @@ func getAllProcessorAliases() [][]string {
 	return allProcessorAliasList
 }
 
+func inputDocOriginExpr(inputTable string) string {
+	if inputTable == kbInputTableSingular || strings.Contains(inputTable, "FROM "+kbInputTableSingular+" input JOIN") {
+		return "'local'"
+	}
+	return "i.doc_origin"
+}
+
 func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (string, []any, error) {
 	whereParts := make([]string, 0)
 	args := make([]any, 0)
@@ -918,6 +937,18 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	parserNameExpr := "COALESCE(i.parser_name, '')"
 	if len(nameColumnExprs) > 1 && strings.TrimSpace(nameColumnExprs[1]) != "" {
 		parserNameExpr = strings.TrimSpace(nameColumnExprs[1])
+	}
+
+	originColumn := "i.doc_origin"
+	if len(nameColumnExprs) > 2 {
+		originColumn = nameColumnExprs[2]
+	}
+	switch origin := strings.TrimSpace(strings.ToLower(filters.DocOrigin)); origin {
+	case "", "all":
+	case "local", "remote":
+		whereParts = append(whereParts, originColumn+" = "+nextArg(origin))
+	default:
+		return "", nil, fmt.Errorf("invalid doc_origin: %q", origin)
 	}
 
 	if filters.RecordID != nil {

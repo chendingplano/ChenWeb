@@ -233,6 +233,7 @@
 	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
 	const retainedPages = [
 		{ id: 'doc-processor-dashboard', component: DocProcessorDashboardView },
+		{ id: 'kb-import', component: KbImportView },
 		{ id: 'sysadmin-resources-sync-data', component: SyncDataView },
 		{ id: 'sysadmin-llm-compliance-gold', component: ComplianceGoldView },
 		{ id: 'sysadmin-jetstream-events', component: JetStreamEventsView },
@@ -444,8 +445,6 @@
 					/* no-op — handled by parent navigation */
 				}}
 			/>
-		{:else if activeMenu?.childId === 'kb-import'}
-			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}
 			<MetricMgmtView
 				{darkMode}

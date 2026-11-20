@@ -316,9 +316,9 @@ func TestListInputsSuccess(t *testing.T) {
 
 	expectResolveInputTablePlural(mock)
 
-	countQuery := regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE LOWER(i.type) = LOWER($1) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $2`)
+	countQuery := regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE i.doc_origin = $1 AND LOWER(i.type) = LOWER($2) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $3`)
 	mock.ExpectQuery(countQuery).
-		WithArgs("pdf", "%report%").
+		WithArgs("remote", "pdf", "%report%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 	expectResolveNameColumnStaging(mock)
 	expectResolveParserNameColumn(mock, true)
@@ -349,14 +349,15 @@ SELECT
     i.private_info,
     i.doc_metadata::text,
     i.notes,
-    i.error_msg
+    i.error_msg,
+    i.doc_origin AS doc_origin
 FROM kb.inputs i
- WHERE LOWER(i.type) = LOWER($1) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $2 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $3 OFFSET $4`)
+ WHERE i.doc_origin = $1 AND LOWER(i.type) = LOWER($2) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $3 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $4 OFFSET $5`)
 	rows := sqlmock.NewRows([]string{
 		"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
-		"notes", "error_msg",
+		"notes", "error_msg", "doc_origin",
 	}).AddRow(
 		int64(101), "Report A", "mineru", "pdf", "user-alpha", int64(7), "Annual Report", nil, "Store desc", "auto", "upload", "/tmp/report-a.pdf",
 		"/backup/report-a.pdf", "/result/report-a.json", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
@@ -372,14 +373,14 @@ FROM kb.inputs i
 				"processor_pipeline_spec":{"Name":"legacy_default","DisplayName":"Legacy Default","LegacyEquivalent":true}
 			}
 		]`, time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 12, 10, 0, 0, time.UTC),
-		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
+		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "", "remote",
 	)
 	mock.ExpectQuery(dataQuery).
-		WithArgs("pdf", "%report%", 50, 0).
+		WithArgs("remote", "pdf", "%report%", 50, 0).
 		WillReturnRows(rows)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/inputs?doc_type=pdf&parse_state=parsed_success&file_name=report&page=1&page_size=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/inputs?doc_origin=remote&doc_type=pdf&parse_state=parsed_success&file_name=report&page=1&page_size=50", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -405,6 +406,9 @@ FROM kb.inputs i
 	}
 	if len(payload.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(payload.Results))
+	}
+	if payload.Results[0].DocOrigin != "remote" {
+		t.Fatalf("expected remote doc, got %q", payload.Results[0].DocOrigin)
 	}
 	if payload.Results[0].ID != 101 {
 		t.Fatalf("expected result id=101, got %d", payload.Results[0].ID)
@@ -533,7 +537,8 @@ func TestListInputsDataQueryFailure(t *testing.T) {
     i.private_info,
     i.doc_metadata::text,
     i.notes,
-    i.error_msg
+    i.error_msg,
+    i.doc_origin AS doc_origin
 FROM kb.inputs i
  ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(50, 0).
@@ -575,7 +580,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 			"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
 			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
-			"notes", "error_msg",
+			"notes", "error_msg", "doc_origin",
 		}))
 
 	e := echo.New()
@@ -615,7 +620,7 @@ func TestListInputsWithDateQueryParams(t *testing.T) {
 			"id", "name", "parser_name", "type", "title", "doc_no", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
 			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
-			"notes", "error_msg",
+			"notes", "error_msg", "doc_origin",
 		}))
 
 	e := echo.New()
@@ -682,7 +687,8 @@ func TestListInputsExtendedQueryParams(t *testing.T) {
     i.private_info,
     i.doc_metadata::text,
     i.notes,
-    i.error_msg
+    i.error_msg,
+    i.doc_origin AS doc_origin
 FROM kb.inputs i
  WHERE i.id = $1 AND LOWER(i.type) = LOWER($2) AND COALESCE(i.title, '') ILIKE $3 AND COALESCE(i.doc_no, '') ILIKE $4 AND COALESCE(i.staging_filename, '') ILIKE $5 AND COALESCE(i.file_name, '') ILIKE $6 AND COALESCE(i.parser_name, '') ILIKE $7 AND EXISTS (
 				SELECT 1 FROM kb.input_proc_status ps
@@ -692,12 +698,12 @@ FROM kb.inputs i
 		"id", "name", "parser_name", "type", "user_id", "ks_store_id", "title", "doc_no", "ks_desc", "processing_mode", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
-		"notes", "error_msg",
+		"notes", "error_msg", "doc_origin",
 	}).AddRow(
 		int64(84), "Input #84", "mineru", "pdf", "user-alpha", int64(7), "Title", "GB/T 123", "Store desc", "pdf_parsing", "upload", "/tmp/std.pdf",
 		"/backup/std.pdf", "/result/std.json", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[{"operation":"extract_metadata","proc_status":"success"}]`, time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC), time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC),
-		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
+		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "", "local",
 	)
 	mock.ExpectQuery(dataQuery).
 		WithArgs(int64(84), "pdf", "%Title%", "%GB/T%", "%Input%", "%std%", "%mineru%", "extract_metadata", "success", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 50, 0).

@@ -317,6 +317,8 @@ def claim_candidates(conn, batch_size: int, claim_timeout: int) -> list[dict]:
                COALESCE(backup_filename, '')
         FROM kb.inputs
         WHERE LOWER(type) = 'pdf'
+          AND doc_origin = 'local'
+          AND NOT EXISTS (SELECT 1 FROM kb.doc_sync_marks WHERE input_id = kb.inputs.id)
           AND COALESCE(processing_mode, 'auto') <> 'upload_only'
           AND (
               parse_state = 'pending'
@@ -378,7 +380,9 @@ def fetch_record_by_id(conn, rec_id: int) -> dict | None:
                COALESCE(status::text, '[]'),
                COALESCE(md5, ''),
                COALESCE(result_filename, ''),
-               COALESCE(backup_filename, '')
+               COALESCE(backup_filename, ''),
+               doc_origin,
+               EXISTS (SELECT 1 FROM kb.doc_sync_marks WHERE input_id = kb.inputs.id)
         FROM kb.inputs
         WHERE id = %s
         LIMIT 1
@@ -399,6 +403,8 @@ def fetch_record_by_id(conn, rec_id: int) -> dict | None:
         "md5": row[6],
         "result_filename": row[7],
         "backup_filename": row[8],
+        "doc_origin": row[9],
+        "sync_marked": row[10],
     }
 
 
