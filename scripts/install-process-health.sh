@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install supervision policies and independent timer tasks on onto.bzton.cn.
+# Install supervision policies and independent timer tasks on the China box.
 # Run as root AFTER installing instrumented binaries. Does not restart workers.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo 'Run as root' >&2; exit 1; }

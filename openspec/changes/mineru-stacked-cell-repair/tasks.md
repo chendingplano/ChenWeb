@@ -45,5 +45,5 @@
 ## 7. Docs and deploy
 
 - [x] 7.1 Document the repair (what it changes, when it skips, the log codes) in `python/pdf-parser/container/README.md` and in the PDF-parser section of devdoc `2026090701-devdoc-deploy-start-system-onto.md`
-- [ ] 7.2 With the user's go-ahead: build and deploy the `chenweb-pdf-parser` image and the `server`, `doc-processor` and `parser-result-converter` binaries to onto.bzton.cn
+- [ ] 7.2 With the user's go-ahead: build and deploy the `chenweb-pdf-parser` image and the `server`, `doc-processor` and `parser-result-converter` binaries to production
 - [ ] 7.3 With the user's go-ahead: re-parse record 100 on prod, run `extract_metrics_simple`, and confirm metrics for every welding method in 表 1

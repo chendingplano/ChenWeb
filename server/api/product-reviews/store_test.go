@@ -329,7 +329,7 @@ func TestListProfilesMixedRunHistory(t *testing.T) {
 // intake page's past-reviews list must get back a JSON array it can call
 // .length on, not null. A nil Go slice marshals to JSON null, which crashed
 // the frontend's `profiles.length === 0` check and froze the "Loading past
-// reviews…" placeholder (bug found live on onto.bzton.cn 2026-09-16, the
+// reviews…" placeholder (bug found live in production 2026-09-16, the
 // feature's very first real run: kb.product_profiles was still empty when
 // the intake page's initial load queried it).
 func TestListProfilesEmpty(t *testing.T) {

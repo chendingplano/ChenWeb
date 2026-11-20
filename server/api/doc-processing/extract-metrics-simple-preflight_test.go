@@ -478,7 +478,7 @@ func TestSimplePreflightRetriesPrimaryOnHeaderOnlyCitation(t *testing.T) {
 }
 
 func TestSimplePreflightRetainsExplicitRowCitationsInLineField(t *testing.T) {
-	// Runshen record 468 put precise citations in l and omitted t.
+	// Production record 468 put precise citations in l and omitted t.
 	row := map[string]any{
 		"n": "教育培训总分", "s": "饮料制造企业", "v": "48", "u": "分",
 		"k": "requirement", "r": "exact", "l": []any{"916#r1", "916#r2"},

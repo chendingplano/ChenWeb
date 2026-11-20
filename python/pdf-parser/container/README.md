@@ -16,19 +16,20 @@ version. No `.env`, documents or model weights are baked into the image.
 ## Build
 
 From the Mac's workspace root, upload these container files and the six
-adapter modules (the native deployment's Python files remain available):
+adapter modules (the native deployment's Python files remain available). The
+host, port and login are in the private deploy runbook:
 
 ```sh
-rsync -az -e 'ssh -p 8822' ChenWeb/python/pdf-parser/container/ \
-  gui@210.5.158.91:Workspace/ChenWeb/python/pdf-parser/container/
-rsync -az -e 'ssh -p 8822' \
+rsync -az -e 'ssh -p <port>' ChenWeb/python/pdf-parser/container/ \
+  <user>@<china-box>:Workspace/ChenWeb/python/pdf-parser/container/
+rsync -az -e 'ssh -p <port>' \
   ChenWeb/python/pdf-parser/parser_mineru.py \
   ChenWeb/python/pdf-parser/mineru_v4_adapter.py \
   ChenWeb/python/pdf-parser/mineru_table_repair.py \
   ChenWeb/python/pdf-parser/mineru_cell_repair.py \
   ChenWeb/python/pdf-parser/stacked_cells.py \
   ChenWeb/python/pdf-parser/table_geometry.py \
-  gui@210.5.158.91:Workspace/ChenWeb/python/pdf-parser/container/mineru-v4/
+  <user>@<china-box>:Workspace/ChenWeb/python/pdf-parser/container/mineru-v4/
 ```
 
 On onto, choose an empty build directory. The MinerU source directory must

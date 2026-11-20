@@ -26,7 +26,7 @@ export BUILD_DESCRIPTION="${4:-}"
 : "${PROJECT_WORKSPACE_DIR:?PROJECT_WORKSPACE_DIR must name an existing workspace directory}"
 [ -d "$PROJECT_WORKSPACE_DIR" ] || { echo "!! PROJECT_WORKSPACE_DIR is not a directory: $PROJECT_WORKSPACE_DIR" >&2; exit 1; }
 
-# Direct scp to the China box (210.5.158.91) can be extremely slow. Instead,
+# Direct scp to the China box can be extremely slow. Instead,
 # push to the Mac Mini (192.168.29.96), which the China box then pulls from
 # over its own, faster path -- see shell_server_deploy.sh.
 RELAY_HOST=192.168.29.96

@@ -2,7 +2,7 @@
 # render-prod-env.sh — port env vars from ChenWeb/mise.local.toml to the China box.
 #
 # WHY THIS EXISTS
-#   The dingbo/onto box (210.5.158.91) has no `mise`. Its systemd units read env
+#   The China box has no `mise`. Its systemd units read env
 #   vars from plain files via `EnvironmentFile=`:
 #       ~/Workspace/ChenWeb/.env        -> chenweb, doc-processor,
 #                                          parser-result-converter, pdf-parser

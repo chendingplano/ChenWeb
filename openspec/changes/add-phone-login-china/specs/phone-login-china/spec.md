@@ -63,7 +63,7 @@ Phone login SHALL be controllable via a feature flag (`enablePhoneLogin`) served
 - **THEN** the login page renders the "Login with Phone" mode alongside existing email/OAuth options
 
 ### Requirement: No Hard-Coded SMS Provider Credentials
-Aliyun SMS credentials (access key ID, access key secret, sign name, template code) SHALL be read exclusively from environment variables at runtime and SHALL NOT appear as literal values in any committed source file, unlike the bzton reference implementation.
+Aliyun SMS credentials (access key ID, access key secret, sign name, template code) SHALL be read exclusively from environment variables at runtime and SHALL NOT appear as literal values in any committed source file, unlike the partner reference implementation.
 
 #### Scenario: Missing configuration fails safely
 - **WHEN** the relay endpoint starts without `ALIYUN_SMS_ACCESS_KEY_ID`/`ALIYUN_SMS_ACCESS_KEY_SECRET`/`ALIYUN_SMS_SIGN_NAME`/`ALIYUN_SMS_TEMPLATE_CODE` set

@@ -246,7 +246,7 @@ func TestProductsV2NamesEveryInvalidRowSpan(t *testing.T) {
 }
 
 func TestProductsV2RetryNamesContinuationTableLabels(t *testing.T) {
-	// Runshen alerts 21662 and 21663 cited the first continuation row as r0.
+	// Production alerts 21662 and 21663 cited the first continuation row as r0.
 	lines := productSourceLines{
 		386: "386#h0: 10 |  | 卷筒 | 运转正常,无异常声响\n386#r1: 11 | 回转机构 | 开式齿轮 | 啮合良好;润滑良好",
 	}

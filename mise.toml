@@ -114,7 +114,7 @@ run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-
 run = "mise build-web && mise build-server"
 
 [tasks.build-server-linux]
-description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box (onto.bzton.cn). Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all eight."
+description = "Cross-build ChenWeb linux/amd64 binaries + sha256 + migration files + runtime prompts + *.local.toml reviewer configs + config.toml/config//docs/doc-templates into /tmp/chenweb-deploy for the China box. Doc-processor prompts are embedded in its binary. BINS=server,doc-processor subsets; default builds all eight."
 run = '''
 set -euo pipefail
 
@@ -297,7 +297,7 @@ fi
 # deploy runbook's Gotcha section). Missing doc-review.local.toml silently
 # disables 6 reviewer aspects; missing product-review.local.toml fails every
 # Product Review build request outright. Both have already been hit for real
-# on onto.bzton.cn (2026-09-16). Always shipped regardless of BINS.
+# in production (2026-09-16). Always shipped regardless of BINS.
 cfg_files=""
 for f in doc-review.local.toml product-review.local.toml; do
   if [ -f "$REPO/$f" ]; then
@@ -312,7 +312,7 @@ done
 # Ship config.toml + the config/ tree too. config.LoadConfig reads config.toml
 # and the optional sibling config.local.toml from disk at every startup (not go:embed'd), and /api/site-config's
 # LoadSiteConfig reads config/site/*.toml the same way -- see the deploy
-# runbook §2.3. config.toml specifically drifted on onto.bzton.cn for real
+# runbook §2.3. config.toml specifically drifted in production for real
 # (2026-09-23): the box's copy predated the 2026-09-17 commit that moved
 # [doc-processing] required_processors out of config.toml into
 # config.local.toml-only, so the box's stale copy kept winning over every
@@ -377,8 +377,8 @@ echo
 cat "$OUT"/*.sha256
 echo
 echo "next:"
-echo "  scp -P 8822 -r $OUT gui@210.5.158.91:~/"
-echo "  ssh -p 8822 gui@210.5.158.91   # then:  bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy  (no su needed -- gui has a scoped sudoers rule for systemctl)"
+echo "  copy $OUT to the China box (host, port and login: the private deploy runbook), then on the box:"
+echo "  bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy  (no su needed -- gui has a scoped sudoers rule for systemctl)"
 '''
 
 [tasks.serve]

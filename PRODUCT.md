@@ -12,7 +12,7 @@ Enterprise knowledge workers in Chinese organizations: compliance reviewers, sta
 
 ## Product Purpose
 
-SemOS (知识通, branded Bzton/标准通 for some tenants) turns documents into searchable, reviewable, actionable, interlinked knowledge: parsing and "smelting" documents into artifacts (summaries, metrics, provisions, entities, graphs), hybrid search (BM25 + vector + graph + SQL), multi-dimensional document review, and a low-code AI application platform. Success: a visitor trusts the platform enough to upload their organization's documents; a reviewer trusts the citations enough to sign off.
+SemOS (知识通, white-labelled for some tenants) turns documents into searchable, reviewable, actionable, interlinked knowledge: parsing and "smelting" documents into artifacts (summaries, metrics, provisions, entities, graphs), hybrid search (BM25 + vector + graph + SQL), multi-dimensional document review, and a low-code AI application platform. Success: a visitor trusts the platform enough to upload their organization's documents; a reviewer trusts the citations enough to sign off.
 
 ## Brand Personality
 

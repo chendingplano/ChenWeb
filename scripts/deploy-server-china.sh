@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # Deploy ChenWeb linux/amd64 binaries on the China box
-# (onto.bzton.cn / 210.5.158.91, hostname rssvr19).
+# (host details: the private deploy runbook).
 #
 # Build side (Mac):   mise build-server-linux            -> /tmp/chenweb-deploy/
-# Copy:               scp -P 8822 -r /tmp/chenweb-deploy gui@210.5.158.91:~/
+# Copy:               scp -P <port> -r /tmp/chenweb-deploy <user>@<china-box>:~/
 # Deploy side (box):   su -
 #                      bash ~/chenweb-deploy/deploy-server-china.sh ~/chenweb-deploy
 #
@@ -176,7 +176,7 @@ echo
 # intentionally absent from the payload. Unlike migrations, mirrored with
 # --delete: a prompt renamed/removed on the source should not keep being read
 # on the box (there's no "already applied" tracking to protect, unlike goose).
-# This bit onto.bzton.cn for real (2026-09-22: stale product-mention /
+# This bit production for real (2026-09-22: stale product-mention /
 # product-extraction prompts after a rename went undeployed for days).
 step prompts
 echo "== prompts =="
@@ -223,7 +223,7 @@ echo
 # config.toml (root) and the config/ tree are read from disk at runtime
 # (config.LoadConfig / /api/site-config's LoadSiteConfig), not compiled into
 # the binary -- same class of bug as prompts/ and the reviewer configs above.
-# Hit for real on onto.bzton.cn 2026-09-23: the box's config.toml predated the
+# Hit for real in production 2026-09-23: the box's config.toml predated the
 # 2026-09-17 commit that moved [doc-processing] required_processors out of
 # config.toml into config.local.toml-only, so the box's stale copy kept
 # silently overriding every config.local.toml edit no matter how many times

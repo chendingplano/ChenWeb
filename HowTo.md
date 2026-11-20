@@ -4806,7 +4806,7 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 
 # Operations
 
-**Scope:** `192.168.29.96` (ssh port `8822`, user `cding`) — the Linux box, eventually the production host for `dingbo.bzton.cn`. Full install details/gotchas: `KnowledgeStore/doc-repo/devdocs/202607/2026072401-devdoc-deploy-production.md`.
+**Scope:** `192.168.29.96` (ssh port `8822`, user `cding`) — the Linux box, eventually a production host. Full install details/gotchas: `KnowledgeStore/doc-repo/devdocs/202607/2026072401-devdoc-deploy-production.md`.
 
 Unlike the MacMini's tmux list above, **every service on `.96` runs under systemd and is `enable`d** — after a reboot, everything comes back up on its own in the right order (each unit's `After=`/`Wants=` chains it to the ones it depends on). You should not normally need to start anything by hand. This section is for checking status and for the rare manual restart.
 
@@ -4819,7 +4819,7 @@ Unlike the MacMini's tmux list above, **every service on `.96` runs under system
 | `chenweb` | Main Go backend (`deepdoc`) | `8080` | `nats-server`, `kratos`, `docker` (ParadeDB) |
 | `doc-processor` | NATS worker: chunking/extraction/doc-review pipeline | — (no HTTP port) | `nats-server`, `kratos`, `docker` |
 | `parser-result-converter` | NATS worker: converts MinerU/pdf-parser output to line-files | — (no HTTP port) | `nats-server`, `kratos`, `docker` |
-| `caddy` | Reverse proxy for `dingbo.bzton.cn` → ChenWeb/Kratos | `80`, `443` | `chenweb`, `kratos` |
+| `caddy` | Reverse proxy for the production domain → ChenWeb/Kratos | `80`, `443` | `chenweb`, `kratos` |
 
 Not (yet) under systemd — still started manually:
 * `python/pdf-parser` — `cd ~/Workspace/ChenWeb/python/pdf-parser && mise ocr-service-start` (or `-start-sync` to run in the foreground)
@@ -4874,7 +4874,7 @@ sudo systemctl restart caddy
 
 ## Known limitations on this box right now
 
-* `dingbo.bzton.cn` isn't pointed at `.96` yet — Caddy is up and correctly redirecting HTTP→HTTPS, but can't get a real cert until DNS is cut over. Not a bug; resolves itself once DNS points here.
+* The production domain isn't pointed at `.96` yet — Caddy is up and correctly redirecting HTTP→HTTPS, but can't get a real cert until DNS is cut over. Not a bug; resolves itself once DNS points here.
 * Google OAuth and outbound email (SMTP) are intentionally left unconfigured on Kratos — password login only, for now.
 * `pdf-parser` has no systemd unit yet.
 
@@ -5026,7 +5026,7 @@ for domain names in China. Do the following (assuming this is on MacMini):
 ```text
 sudo networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
-dig +short onto.bzton.cn        # should print 210.5.158.91
+dig +short <production-domain>  # should print the production host's IP
 ```
 
 # How to update deepseek API key

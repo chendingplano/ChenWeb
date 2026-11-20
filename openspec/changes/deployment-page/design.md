@@ -7,7 +7,7 @@ A deployment today:
    `/tmp/chenweb-deploy`), stages Document Builder files and pdf-parser sources, packs
    `/tmp/runshen-depoly-<YYYYmmdd-HHMM>.tar.gz` and copies it with `scp` to the relay
    `cding@192.168.29.96:/home/cding/Backups`.
-2. **China box (deployment machine, 210.5.158.91).** As root, `shell_server_deploy.sh`
+2. **China box (deployment machine).** As root, `shell_server_deploy.sh`
    downloads the newest `runshen-*.tar.gz` from the relay (reached from outside as
    `47.189.245.217:8896`), extracts it and calls `deploy-server-china.sh`. That script
    syncs migrations, prompts and configs, then for each binary verifies the checksum,
