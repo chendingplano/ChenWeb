@@ -317,13 +317,14 @@ type SiteConfigSection struct {
 
 // BrandingSection holds this deployment's tenant branding, so it stays out of the
 // repository: the logo image files (absolute paths or relative to the ChenWeb
-// directory) and the footer contact email. Configured via [branding] in
+// directory) and the footer contact email and address. Configured via [branding] in
 // config.local.toml. Each value that is set replaces the matching field of the site
 // config served by /api/site-config.
 type BrandingSection struct {
 	LogoFile      string `mapstructure:"logo_file"`
 	LogoWhiteFile string `mapstructure:"logo_white_file"`
 	FooterEmail   string `mapstructure:"footer_email"`
+	FooterAddress string `mapstructure:"footer_address"`
 }
 
 var AppConfig AppConfigDef
@@ -651,14 +652,23 @@ func GetSiteConfigFilename() string {
 	return AppConfig.SiteConfig.ConfigFilename
 }
 
+// GetBranding returns [branding] with surrounding whitespace trimmed from each value;
+// values that are not configured are "".
+func GetBranding() BrandingSection {
+	b := AppConfig.Branding
+	return BrandingSection{
+		LogoFile:      strings.TrimSpace(b.LogoFile),
+		LogoWhiteFile: strings.TrimSpace(b.LogoWhiteFile),
+		FooterEmail:   strings.TrimSpace(b.FooterEmail),
+		FooterAddress: strings.TrimSpace(b.FooterAddress),
+	}
+}
+
 // GetLogoFile returns [branding].logo_file, or "" when it is not configured.
-func GetLogoFile() string { return strings.TrimSpace(AppConfig.Branding.LogoFile) }
+func GetLogoFile() string { return GetBranding().LogoFile }
 
 // GetLogoWhiteFile returns [branding].logo_white_file, or "" when it is not configured.
-func GetLogoWhiteFile() string { return strings.TrimSpace(AppConfig.Branding.LogoWhiteFile) }
-
-// GetFooterEmail returns [branding].footer_email, or "" when it is not configured.
-func GetFooterEmail() string { return strings.TrimSpace(AppConfig.Branding.FooterEmail) }
+func GetLogoWhiteFile() string { return GetBranding().LogoWhiteFile }
 
 // GetDefaultKnowledgeStoreName returns [frontend].default_knowledge_store, or
 // "" when it is not configured.

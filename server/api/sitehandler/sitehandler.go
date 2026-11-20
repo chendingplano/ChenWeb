@@ -33,17 +33,21 @@ const (
 )
 
 // applyLocalBranding applies [branding] from config.local.toml: logos point at the
-// logo endpoints when a file is named for them, and footer_email replaces the footer
-// email. Values that are not set leave the site file's values in place.
-func applyLocalBranding(cfg *SiteConfig, logoFile, logoWhiteFile, footerEmail string) {
-	if logoFile != "" {
+// logo endpoints when a file is named for them, and footer_email / footer_address
+// replace the footer's email and address. Values that are not set leave the site
+// file's values in place.
+func applyLocalBranding(cfg *SiteConfig, b config.BrandingSection) {
+	if b.LogoFile != "" {
 		cfg.Branding.LogoImage = logoURL
 	}
-	if logoWhiteFile != "" {
+	if b.LogoWhiteFile != "" {
 		cfg.Branding.LogoImageWhite = logoWhiteURL
 	}
-	if footerEmail != "" {
-		cfg.Footer.Email = footerEmail
+	if b.FooterEmail != "" {
+		cfg.Footer.Email = b.FooterEmail
+	}
+	if b.FooterAddress != "" {
+		cfg.Footer.Address = b.FooterAddress
 	}
 }
 
@@ -198,7 +202,7 @@ func GetSiteConfig(c echo.Context) error {
 		log.Printf("***** Alarm: LoadSiteConfig failed: %v (CWB_SITE_006)", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	applyLocalBranding(cfg, config.GetLogoFile(), config.GetLogoWhiteFile(), config.GetFooterEmail())
+	applyLocalBranding(cfg, config.GetBranding())
 	log.Printf("Served site config from %s (CWB_SITE_201)", path)
 	return c.JSON(http.StatusOK, cfg)
 }

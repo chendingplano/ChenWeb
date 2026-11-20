@@ -67,7 +67,9 @@ href = "/home3"
 
 [footer]
 text = "SemOS — Knowledge Management AI Application System"
-address = """上海市杨浦区长阳路1687号1号楼"""
+# The tenant's address (left empty in this demo). [branding].footer_address in
+# config.local.toml applies only to the site-wide config, not to tenant files.
+address = ""
 newsletter = "Get the latest on knowledge management and AI."
 # The tenant's contact email (left empty in this demo). [branding].footer_email in
 # config.local.toml applies only to the site-wide config, not to tenant files.
