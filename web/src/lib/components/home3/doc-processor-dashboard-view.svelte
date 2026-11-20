@@ -44,6 +44,7 @@
 	} from './doc-processor-dashboard-state';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
+	let dashboardRoot: HTMLElement;
 
 	// Design tokens
 	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -241,6 +242,7 @@
 	}
 
 	async function pollPdfParsing() {
+		if (!dashboardRoot || dashboardRoot.closest('[hidden]')) return;
 		const base = {
 			docType: 'all',
 			parseState: 'all' as ParseState,
@@ -449,6 +451,7 @@
 	// ── API calls ──────────────────────────────────────────────────────────
 
 	async function pollPipelines() {
+		if (!dashboardRoot || dashboardRoot.closest('[hidden]')) return;
 		const prevCount = prevActivePipelinesCount;
 		try {
 			const waiting: KbInputRecord[] = [];
@@ -983,7 +986,7 @@
 <!-- ══════════════════════════════════════════════════════════════
      Root
 ══════════════════════════════════════════════════════════════ -->
-<div class="flex flex-col select-text" style="min-height:100%;">
+<div bind:this={dashboardRoot} class="flex flex-col select-text" style="min-height:100%;">
 	<!-- ── Toast ─────────────────────────────────────────────── -->
 	{#if launchToast}
 		<div
@@ -1364,6 +1367,9 @@
 				</div>
 			</div>
 		{/if}
+		<div class="mt-4">
+			<SystemMonitorView {darkMode} sourceId="doc-processor" />
+		</div>
 	</section>
 
 	<!-- ── Section divider ────────────────────────────────────── -->

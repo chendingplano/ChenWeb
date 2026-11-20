@@ -232,6 +232,7 @@
 
 	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
 	const retainedPages = [
+		{ id: 'doc-processor-dashboard', component: DocProcessorDashboardView },
 		{ id: 'sysadmin-resources-sync-data', component: SyncDataView },
 		{ id: 'sysadmin-llm-compliance-gold', component: ComplianceGoldView },
 		{ id: 'sysadmin-jetstream-events', component: JetStreamEventsView },
@@ -429,8 +430,6 @@
 				title={m.nav_dev_demos_customers()}
 				class="h-full w-full border-0 select-text"
 			></iframe>
-		{:else if activeMenu?.childId === 'doc-processor-dashboard'}
-			<DocProcessorDashboardView {darkMode} />
 		{:else if activeMenu?.childId === 'llm-activities'}
 			<LLMActivitiesView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-search-lab'}

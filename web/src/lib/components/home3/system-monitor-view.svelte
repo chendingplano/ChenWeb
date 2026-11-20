@@ -3,12 +3,13 @@
  import { m } from '$lib/paraglide/messages.js';
  let { darkMode = true, sourceId = '' }: { darkMode: boolean; sourceId?: string } = $props();
  type Log = { id:string; content:string; state:string; truncated:boolean; restartable:boolean };
- type WindowState = { id:string; name:string; visible:boolean; paused:boolean; text:string; state:string; truncated:boolean; restartable:boolean; busy:boolean; notice:string; search:string; match:number; from:string; to:string; width:number; height:number; x:number; y:number; z:number };
+ type WindowState = { id:string; name:()=>string; visible:boolean; paused:boolean; text:string; state:string; truncated:boolean; restartable:boolean; busy:boolean; notice:string; search:string; match:number; from:string; to:string; width:number; height:number; x:number; y:number; z:number };
  const names = [['chenweb','ChenWeb'],['doc-processor','Doc Processor'],['kratos','Kratos'],['nats','NATS'],['doc-service','Doc Service'],['pdf-parser','pdf-parser'],['caddy','Caddy'],['parser-result-converter','parser-result-converter'],['deepseek-watcher','deepseek-watcher']];
- let windows = $state<WindowState[]>(names.filter(([id]) => !sourceId || id === sourceId).map(([id,name])=>({id,name,visible:true,paused:false,text:'',state:'',truncated:false,restartable:false,busy:false,notice:'',search:'',match:0,from:'',to:'',width:sourceId ? 1600 : 520,height:sourceId ? 450 : 320,x:0,y:0,z:0})));
+ let windows = $state<WindowState[]>(names.filter(([id]) => !sourceId || id === sourceId).map(([id,name])=>({id,name:id === 'doc-processor' ? m.nav_doc_processor_dashboard : () => name,visible:true,paused:false,text:'',state:'',truncated:false,restartable:false,busy:false,notice:'',search:'',match:0,from:'',to:'',width:sourceId ? 1600 : 520,height:sourceId ? 450 : 320,x:0,y:0,z:0})));
  let error=$state(false), popup=$state<string|null>(null), popupLeft=$state(0), popupTop=$state(0);
  let drag:{x:number;y:number;left:number;top:number}|null=null, loading=false;
  let bodies:Record<string,HTMLElement>={};
+ let monitorRoot: HTMLDivElement;
  let windowsMenu = $state<HTMLDetailsElement>();
  let topZ=0;
  let interaction: { id:string; type:'move'|'resize'; pointer:number; startX:number; startY:number; x:number; y:number; width:number; height:number } | null = null;
@@ -34,7 +35,7 @@
  }
 
  async function refresh() {
-  if(loading)return; loading=true;
+  if(loading || !monitorRoot || monitorRoot.closest('[hidden]'))return; loading=true;
   try { const res=await fetch(sourceId ? `/api/v1/system-admin/system-monitor?source=${encodeURIComponent(sourceId)}` : '/api/v1/system-admin/system-monitor',{credentials:'same-origin'}); if(!res.ok)throw new Error(); const data:{sources:Log[]}=await res.json();
    const follow=new Set(windows.filter(w=>{const el=bodies[w.id];return el && el.scrollHeight-el.scrollTop-el.clientHeight<32}).map(w=>w.id));
    for(const log of data.sources){const w=windows.find(item=>item.id===log.id);if(w){w.restartable=log.restartable;if(!w.paused){w.text=log.content;w.state=log.state;w.truncated=log.truncated}}}
@@ -44,10 +45,10 @@
  onMount(()=>{refresh();const timer=setInterval(refresh,1000);return()=>clearInterval(timer)});
  async function restart(w:WindowState){
   if(!w.restartable||w.busy)return;
-  if(!confirm(m.sm_restart_confirm({name:w.name})))return;
+  if(!confirm(m.sm_restart_confirm({name:w.name()})))return;
   w.busy=true;w.notice='';
-  try{const res=await fetch(`/api/v1/system-admin/system-monitor/${encodeURIComponent(w.id)}/restart`,{method:'POST',credentials:'same-origin'});const body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body.error_msg||'');w.notice=m.sm_restarted({name:w.name})}
-  catch(e){w.notice=m.sm_restart_failed({name:w.name})+(e instanceof Error&&e.message?`: ${e.message}`:'')}
+  try{const res=await fetch(`/api/v1/system-admin/system-monitor/${encodeURIComponent(w.id)}/restart`,{method:'POST',credentials:'same-origin'});const body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body.error_msg||'');w.notice=m.sm_restarted({name:w.name()})}
+  catch(e){w.notice=m.sm_restart_failed({name:w.name()})+(e instanceof Error&&e.message?`: ${e.message}`:'')}
   finally{w.busy=false}
  }
  function filtered(w:WindowState){if(!w.from&&!w.to)return w.text;const from=w.from?new Date(w.from).getTime():-Infinity,to=w.to?new Date(w.to).getTime():Infinity;let include=false;return w.text.split('\n').filter(line=>{const match=line.match(/\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?/);if(match){const t=Date.parse(match[0]);if(!Number.isNaN(t))include=t>=from&&t<=to}return include}).join('\n')}
@@ -58,21 +59,21 @@
  function moveDrag(e:PointerEvent){if(drag){popupLeft=Math.max(0,Math.min(innerWidth-100,drag.left+e.clientX-drag.x));popupTop=Math.max(0,Math.min(innerHeight-50,drag.top+e.clientY-drag.y))}}
 </script>
 <svelte:window onpointerdown={dismissMenu} />
-<div class:light={!darkMode} class:embedded={!!sourceId} class="monitor select-text">
- {#if !sourceId}<header><div><h1>{m.sm_title()}</h1><p>{m.sm_description()}</p></div><details bind:this={windowsMenu}><summary>{m.sm_windows()}</summary><div class="choices">{#each windows as w}<label><input type="checkbox" bind:checked={w.visible}/> {w.name}</label>{/each}</div></details></header>{/if}
+<div bind:this={monitorRoot} class:light={!darkMode} class:embedded={!!sourceId} class="monitor select-text">
+ {#if !sourceId}<header><div><h1>{m.sm_title()}</h1><p>{m.sm_description()}</p></div><details bind:this={windowsMenu}><summary>{m.sm_windows()}</summary><div class="choices">{#each windows as w}<label><input type="checkbox" bind:checked={w.visible}/> {w.name()}</label>{/each}</div></details></header>{/if}
  {#if error}<p role="alert">{m.sm_load_error()}</p>{/if}
  <div class="grid">{#each windows as w (w.id)}{#if w.visible}
   <section class="window" style:width="100%"style:height="{w.height}px" style:transform="translate({w.x}px, {w.y}px)" style:z-index={w.z}>
-   <div class="bar"><button type="button" class="move-handle" aria-label={m.sm_move_window({name:w.name})} title={m.sm_move_window({name:w.name})} onpointerdown={(e)=>beginWindowInteraction(e,w,'move')} onpointermove={updateWindowInteraction} onpointerup={endWindowInteraction} onpointercancel={endWindowInteraction} onkeydown={(e)=>keyboardWindow(e,w,'move')}>⠿</button><strong><span class:paused={w.paused} class="dot"></span>{w.name}</strong><div class="actions"><button type="button" class="restart" disabled={!w.restartable||w.busy} title={w.restartable ? m.sm_restart_title({name:w.name}) : m.sm_restart_unavailable()} onclick={()=>restart(w)}>{w.busy ? m.sm_restarting() : m.sm_restart()}</button><button type="button" onclick={()=>w.paused=!w.paused}>{w.paused?m.sm_resume():m.sm_pause()}</button><button type="button" onclick={(e)=>openFilter(e,w.id)}>{m.sm_filter()}</button><button type="button" aria-label={sourceId ? m.sm_collapse() : m.sm_close()} title={sourceId ? m.sm_collapse() : m.sm_close()} onclick={()=>{w.visible=false;popup=null}}>×</button></div></div>
+   <div class="bar"><button type="button" class="move-handle" aria-label={m.sm_move_window({name:w.name()})} title={m.sm_move_window({name:w.name()})} onpointerdown={(e)=>beginWindowInteraction(e,w,'move')} onpointermove={updateWindowInteraction} onpointerup={endWindowInteraction} onpointercancel={endWindowInteraction} onkeydown={(e)=>keyboardWindow(e,w,'move')}>⠿</button><strong><span class:paused={w.paused} class="dot"></span>{w.name()}</strong><div class="actions"><button type="button" class="restart" disabled={!w.restartable||w.busy} title={w.restartable ? m.sm_restart_title({name:w.name()}) : m.sm_restart_unavailable()} onclick={()=>restart(w)}>{w.busy ? m.sm_restarting() : m.sm_restart()}</button><button type="button" onclick={()=>w.paused=!w.paused}>{w.paused?m.sm_resume():m.sm_pause()}</button><button type="button" onclick={(e)=>openFilter(e,w.id)}>{m.sm_filter()}</button><button type="button" aria-label={sourceId ? m.sm_collapse() : m.sm_close()} title={sourceId ? m.sm_collapse() : m.sm_close()} onclick={()=>{w.visible=false;popup=null}}>×</button></div></div>
    <div class="controls"><input type="search" placeholder={m.sm_search()} aria-label={m.sm_search()} bind:value={w.search} oninput={()=>w.match=0}/><button type="button" aria-label={m.sm_prev()} title={m.sm_prev()} onclick={()=>navigate(w,-1)}>↑</button><button type="button" aria-label={m.sm_next()} title={m.sm_next()} onclick={()=>navigate(w,1)}>↓</button><label>{m.sm_height()} <input type="number" min="180" max="1400" step="20" bind:value={w.height}/></label></div>
    {#if w.truncated}<div class="notice">{m.sm_truncated()}</div>{/if}
    {#if w.notice}<div class="notice" role="status">{w.notice}</div>{/if}
    <div class="log" bind:this={bodies[w.id]}>{#if w.state==='missing'}{m.sm_missing()}{:else if w.state==='error'}{m.sm_error()}{:else if !filtered(w)}{m.sm_empty()}{:else}<pre>{#each pieces(w) as part}{#if part.hit}<mark class:current={part.index===w.match} data-match={part.index}>{part.text}</mark>{:else}{part.text}{/if}{/each}</pre>{/if}</div>
-   <button type="button" class="resize-handle" aria-label={m.sm_resize_window({name:w.name})} title={m.sm_resize_window({name:w.name})} onpointerdown={(e)=>beginWindowInteraction(e,w,'resize')} onpointermove={updateWindowInteraction} onpointerup={endWindowInteraction} onpointercancel={endWindowInteraction} onkeydown={(e)=>keyboardWindow(e,w,'resize')}>◢</button>
-  </section>{:else if sourceId}<button type="button" class="reopen" onclick={()=>w.visible=true}>{m.sm_show_window({name:w.name})}</button>{/if}{/each}</div>
+   <button type="button" class="resize-handle" aria-label={m.sm_resize_window({name:w.name()})} title={m.sm_resize_window({name:w.name()})} onpointerdown={(e)=>beginWindowInteraction(e,w,'resize')} onpointermove={updateWindowInteraction} onpointerup={endWindowInteraction} onpointercancel={endWindowInteraction} onkeydown={(e)=>keyboardWindow(e,w,'resize')}>◢</button>
+  </section>{:else if sourceId}<button type="button" class="reopen" onclick={()=>w.visible=true}>{m.sm_show_window({name:w.name()})}</button>{/if}{/each}</div>
  {#if popup}{@const w=windows.find(item=>item.id===popup)}{#if w}<div class="filter-dialog" role="dialog" aria-label={m.sm_filter()} style:left="{popupLeft}px" style:top="{popupTop}px">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="dialog-head" onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={()=>drag=null} onpointercancel={()=>drag=null}><strong>{m.sm_filter()} · {w.name}</strong><button type="button" aria-label={m.sm_close()} onclick={()=>popup=null}>×</button></div>
+  <div class="dialog-head" onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={()=>drag=null} onpointercancel={()=>drag=null}><strong>{m.sm_filter()} · {w.name()}</strong><button type="button" aria-label={m.sm_close()} onclick={()=>popup=null}>×</button></div>
   <label>{m.sm_from()}<input type="datetime-local" bind:value={w.from}/></label><label>{m.sm_to()}<input type="datetime-local" bind:value={w.to}/></label><p>{m.sm_filter_info()}</p><button type="button" onclick={()=>{w.from='';w.to=''}}>{m.sm_reset()}</button>
  </div>{/if}{/if}
 </div>
