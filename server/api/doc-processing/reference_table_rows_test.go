@@ -101,3 +101,25 @@ func TestReferenceTableRowsKeyIgnoresHashesAndOrder(t *testing.T) {
 		t.Fatal("row order and content hashes must not change occurrence identity")
 	}
 }
+
+func TestReferenceTableRowsHeaderlessFirstListedEntry(t *testing.T) {
+	html := "<table><tr><td>ISO 9001</td><td>Quality management</td></tr>"
+	for i := 0; i < 7; i++ {
+		html += "<tr><td>ISO 14001</td><td>Environmental management</td></tr>"
+	}
+	html += "</table>"
+	lines := []Line{{LineNo: 51, LineType: "table", Content: html}}
+	mentions := []RefMention{
+		{RefForm: "listed", CitedRaw: "ISO 9001", SourceLineSpans: []string{"51"}, Evidence: "ISO 9001 | Quality management"},
+		{RefForm: "listed", CitedRaw: "ISO 9001", SourceLineSpans: []string{"51"}, SourceTableRows: []TableRowRef{{Line: 51, Rows: []string{"r1"}}}},
+	}
+	applyReferenceTableRows(lines, mentions, nil, 1)
+	for _, mention := range mentions {
+		if refs := mention.SourceTableRows; len(refs) != 1 || !reflect.DeepEqual(refs[0].Rows, []string{"h0"}) {
+			t.Fatalf("expected first row provenance, got %#v", refs)
+		}
+		if !strings.Contains(mention.Evidence, "Quality management") || strings.Contains(mention.Evidence, "ISO 14001") {
+			t.Fatalf("incorrect reference evidence %q", mention.Evidence)
+		}
+	}
+}

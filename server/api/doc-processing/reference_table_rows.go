@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -46,6 +47,19 @@ func applyReferenceTableRows(lines []Line, mentions []RefMention, logger ApiType
 				refs = append(refs, valid)
 			}
 		}
+		// Without header markup the grid labels the first reference as h0.
+		// A unique exact identifier can recover that row without renumbering
+		// the table or changing an ambiguous citation (ChenWeb#59).
+		if m.RefForm == "listed" && len(m.SourceLineSpans) == 1 {
+			line, end, ok := parseMetricLineSpan(m.SourceLineSpans[0])
+			if ok && line == end {
+				if grid, ok := idx.grid(line); ok {
+					if row, ok := listedReferenceHeaderRow(grid, m.CitedRaw); ok {
+						refs = []TableRowRef{{Line: line, Rows: []string{row.ID}, RowHash: map[string]string{row.ID: row.Hash}}}
+					}
+				}
+			}
+		}
 		res := buildTableMetricContext(idx, map[string]any{
 			"source_line_spans": m.SourceLineSpans,
 			"source_table_rows": refs,
@@ -70,4 +84,18 @@ func applyReferenceTableRows(lines []Line, mentions []RefMention, logger ApiType
 	if len(counts) > 0 && logger != nil {
 		logger.Info("reference table rows applied", "record_id", recordID, "outcomes", counts)
 	}
+}
+
+func listedReferenceHeaderRow(grid *TableGrid, cited string) (TableRow, bool) {
+	id := normalizeTableMatchText(cited)
+	if id == "" || len(grid.Headers) != 1 {
+		return TableRow{}, false
+	}
+	matches := func(row TableRow) bool {
+		return slices.ContainsFunc(row.Cells, func(cell string) bool {
+			return normalizeTableMatchText(cell) == id
+		})
+	}
+	header := grid.Headers[0]
+	return header, matches(header) && !slices.ContainsFunc(grid.Rows, matches)
 }
