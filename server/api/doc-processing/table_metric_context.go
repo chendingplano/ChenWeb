@@ -330,6 +330,25 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 	var blocks []string
 	for _, n := range tableLines {
 		g, _ := idx.grid(n)
+		// Some tables carry quantitative prose in an inferred header row.
+		// Keep an explicit citation to that paragraph instead of choosing a
+		// nearby data row that happens to repeat the same number (ChenWeb#60).
+		if ids := cited[n].Rows; len(ids) == 1 && len(cited[n].Cells) == 0 {
+			if row, ok := g.Row(ids[0]); ok && (cited[n].RowHash[row.ID] == "" || cited[n].RowHash[row.ID] == row.Hash) {
+				if paragraph := metricTableParagraphText(row); paragraph != "" {
+					res.Refs = append(res.Refs, TableRowRef{Line: n, Rows: ids, RowHash: map[string]string{row.ID: row.Hash}})
+					block := "[" + row.ID + "] " + truncateRunesEllipsis(paragraph, tableContextMaxCellRunes)
+					if caption := idx.caption(n); caption != "" {
+						block = caption + "\n" + block
+					}
+					blocks = append(blocks, block)
+					if outcomeRank[tableRowsFromLLM] > outcomeRank[res.Outcome] {
+						res.Outcome = tableRowsFromLLM
+					}
+					continue
+				}
+			}
+		}
 		rows, outcome := selectTableRows(g, cited[n], evidence)
 		needsRow := outcome == tableRowsWholeTable || outcome == tableRowsUnmatched
 		var combinedNameCell string

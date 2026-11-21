@@ -68,6 +68,7 @@ func newMetricSimpleWork(lines []MarkedLine) *metricSimpleWork {
 		}
 		if line.Line.LineType == "table" {
 			if grid, err := ParseTableGrid(line.Line.Content); err == nil && len(grid.Rows) > 0 {
+				addMetricTableParagraphs(grid)
 				w.tables[i] = grid
 				for _, row := range grid.Rows {
 					text := strings.Join(row.Cells, " | ")
@@ -88,6 +89,43 @@ func newMetricSimpleWork(lines []MarkedLine) *metricSimpleWork {
 		w.units = append(w.units, metricSimpleUnit{i, "", estimateMetricSimpleOutput(line.Line.Content, "")})
 	}
 	return w
+}
+
+// A merged cell can contain a paragraph of quoted requirements even when the
+// table grid inferred it was a subheader. Give that paragraph a split owner
+// while preserving the row ID used by the full table (ChenWeb#60).
+func addMetricTableParagraphs(grid *TableGrid) {
+	var paragraphs []TableRow
+	grid.Headers = slices.DeleteFunc(grid.Headers, func(row TableRow) bool {
+		if metricTableParagraphText(row) == "" {
+			return false
+		}
+		paragraphs = append(paragraphs, row)
+		return true
+	})
+	if len(paragraphs) > 0 {
+		grid.Rows = append(paragraphs, grid.Rows...)
+	}
+}
+
+func metricTableParagraphText(row TableRow) string {
+	if !strings.HasPrefix(row.ID, "h") || row.ID == "h0" {
+		return ""
+	}
+	merged := ""
+	for i, cell := range row.Cells {
+		if row.Spans[i] == 0 || strings.TrimSpace(cell) == "" {
+			continue
+		}
+		if row.Spans[i] == 1 || merged != "" {
+			return ""
+		}
+		merged = cell
+	}
+	if !strings.ContainsAny(merged, ";；。") || len(metricSimpleNumbers.FindAllStringIndex(merged, 2)) < 2 {
+		return ""
+	}
+	return merged
 }
 
 func (w *metricSimpleWork) plan(limit int) ([]metricSimpleSelection, int) {
@@ -154,7 +192,7 @@ func (s metricSimpleSelection) lines() []MarkedLine {
 				rowMark := "o"
 				if owned[row.ID] {
 					rowMark = "n"
-				} else if _, full := row.FullWidthText(); !full {
+				} else if _, full := row.FullWidthText(); !full && !strings.HasPrefix(row.ID, "h") {
 					continue
 				}
 				// Keep notes and section labels interleaved in source order. Moving
@@ -303,7 +341,7 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 		for _, ref := range refs {
 			if ref.Line == s.work.source[unit.position].Line.LineNo && containsString(ref.Rows, unit.rowID) {
 				row, _ := s.work.tables[unit.position].Row(unit.rowID)
-				if _, full := row.FullWidthText(); full {
+				if _, full := row.FullWidthText(); full || strings.HasPrefix(row.ID, "h") {
 					if noteOwner == nil {
 						owner := unit
 						noteOwner = &owner

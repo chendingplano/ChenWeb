@@ -539,3 +539,32 @@ func TestSimplePreflightSetAsideAboutTableHeaderHasOneOwner(t *testing.T) {
 		t.Error("a metric citing only a header must still be rejected")
 	}
 }
+
+func TestSimplePreflightGivesMergedMetricParagraphOneOwner(t *testing.T) {
+	html := `<table><tr><td>Item</td><td colspan="3">Quoted requirements</td><td>Location</td></tr>
+<tr><td rowspan="2"></td><td colspan="3">Keep 2 exits; for a small room keep 1 exit and limit occupancy to 20 people.</td><td></td></tr>
+<tr><td>Size</td><td>Class</td><td>Distance</td><td>Section 5</td></tr>
+<tr><td>Example</td><td>Medium</td><td>A</td><td>30</td><td>Section 6</td></tr></table>`
+	work := newMetricSimpleWork([]MarkedLine{simpleLine("n", 20, "table", html)})
+	citation := map[string]any{"t": []any{"20#h1"}}
+	owner := metricSimpleSelection{work: work, units: work.units[:1]}
+	other := metricSimpleSelection{work: work, units: work.units[1:]}
+	if owned, err := owner.accepts(citation, []string{"20"}); err != nil || !owned {
+		t.Fatalf("first fragment should own the paragraph, got %t, %v", owned, err)
+	}
+	if owned, err := other.accepts(citation, []string{"20"}); err != nil || owned {
+		t.Fatalf("later fragment should recognize the citation without owning it, got %t, %v", owned, err)
+	}
+	for _, line := range other.lines() {
+		if line.Mark == "n" && strings.Contains(line.Line.Content, "20#h1:") {
+			t.Fatal("later fragment shows the paragraph as normal input")
+		}
+	}
+	context := buildTableMetricContext(newTableLineIndex([]Line{{LineNo: 20, LineType: "table", Content: html}}), map[string]any{
+		"source_line_spans": []string{"20"}, "source_table_rows": simpleMetricRowRefs(citation),
+		"metric_name": "occupancy", "metric_value": "20", "unit": "people",
+	})
+	if len(context.Refs) != 1 || !containsString(context.Refs[0].Rows, "h1") || !strings.Contains(context.Context, "20 people") {
+		t.Fatalf("saved context must retain the paragraph citation: %+v", context)
+	}
+}
