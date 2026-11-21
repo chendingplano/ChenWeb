@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func (h Handler) Handle(c echo.Context) error {
 	if search == nil {
 		search = runSearch
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 80*time.Second)
 	defer cancel()
 	logger := loggerutil.CreateDefaultLogger("20261121-732")
 	logger.Info("Scientific paper search started")
@@ -57,7 +58,15 @@ func runSearch(ctx context.Context, query string) ([]byte, error) {
 		}
 		binary = filepath.Join(home, "Workspace", "ThirdParty-2", "paper-search-mcp", ".venv", "bin", "paper-search")
 	}
-	cmd := exec.CommandContext(ctx, binary, "search", query, "-s", "fast", "-n", "10", "--source-timeout", "30")
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, binary, "search", query, "-s", cfg.Source, "-n", strconv.Itoa(cfg.MaxResults), "--source-timeout", strconv.Itoa(cfg.Timeout))
+	cmd.Env = os.Environ()
+	for key, value := range cfg.Credentials {
+		cmd.Env = append(cmd.Env, "PAPER_SEARCH_MCP_"+key+"="+value)
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err

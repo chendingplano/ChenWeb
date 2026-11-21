@@ -534,6 +534,7 @@
 								]),
 						...(pageKey === 'development' ? [{ id: 'sysadmin-system-monitor', label: m.nav_sysadmin_system_monitor() }] : []),
 						...(pageKey === 'development' ? [{ id: 'sysadmin-system-deployment', label: m.nav_sysadmin_system_deployment() }] : []),
+						...(pageKey === 'development' ? [{ id: 'sysadmin-system-configurations', label: m.paper_config_nav_group(), children: [{ id: 'sysadmin-scientific-paper-config', label: m.paper_config_title() }] }] : []),
 						{ id: 'sysadmin-system-build-info', label: m.nav_sysadmin_system_build_info() },
 						{ id: 'sysadmin-system-calendar', label: m.nav_sysadmin_system_calendar() },
 						{ id: 'sysadmin-system-peak-hours', label: m.nav_sysadmin_system_peak_hours() },

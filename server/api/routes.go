@@ -337,6 +337,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
 	apiGroup.POST("/scientific-paper-search", (papersearch.Handler{}).Handle)
+	apiGroup.GET("/scientific-paper-search/config", papersearch.GetConfig)
+	apiGroup.PUT("/scientific-paper-search/config", papersearch.PutConfig)
 	apiGroup.GET("/reusable-modules", reusablemodules.Handler(ApiTypes.ProjectDBHandle))
 	docLogger := loggerutil.CreateDefaultLogger("20261110-801")
 	if docStore, err := docbuilder.NewStoreFromEnv(context.Background(), ApiTypes.ProjectDBHandle, ApiTypes.SharedDBHandle,
