@@ -1267,21 +1267,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 
 	// Call the LLM
 	in := newLLMJSONInput(ctx, s.SummaryPromptRef, appendLanguageInstruction(s.SummaryPromptText, inputText), s.SummaryModelName, inputText, "generate_summary", "MID-CWB-GENERATE-SUMMARY")
-	var (
-		parsed      map[string]any
-		rawResponse string
-		err         error
-	)
-	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
-		var result *llmclients.StructuredOutputResult
-		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, summaryExtractionContract())
-		if result != nil {
-			parsed = result.Parsed
-			rawResponse = strings.TrimSpace(result.Raw)
-		}
-	} else {
-		parsed, err = s.Extractor.ExtractJSON(ctx, in)
-	}
+	parsed, rawResponse, err := extractSummaryResponse(ctx, s.Extractor, in)
 	if err != nil {
 		err = fmt.Errorf("(MID-20260429-05) generate summary for level %d seq %d: %w", level, seqNo, err)
 		logSummaryCall(err)
@@ -1435,21 +1421,7 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 	}
 	s.Logger.Info("summary start (batch)", "record_id", recordID, "model", s.SummaryModelName, "prompt", s.SummaryPromptRef, "level", level, "seq", seqNo)
 	in := newLLMJSONInput(ctx, s.SummaryPromptRef, appendLanguageInstruction(s.SummaryPromptText, inputText), s.SummaryModelName, inputText, "generate_summary", "MID-CWB-GENERATE-SUMMARY-BATCH")
-	var (
-		parsed      map[string]any
-		rawResponse string
-		err         error
-	)
-	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
-		var result *llmclients.StructuredOutputResult
-		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, summaryExtractionContract())
-		if result != nil {
-			parsed = result.Parsed
-			rawResponse = strings.TrimSpace(result.Raw)
-		}
-	} else {
-		parsed, err = s.Extractor.ExtractJSON(ctx, in)
-	}
+	parsed, rawResponse, err := extractSummaryResponse(ctx, s.Extractor, in)
 	if err != nil {
 		err = fmt.Errorf("(MID-20260704-02) generate summary batch for level %d seq %d: %w", level, seqNo, err)
 		logSummaryCall(err)
@@ -1503,6 +1475,35 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 	}
 	logSummaryCall(nil)
 	return result, nil
+}
+
+func extractSummaryResponse(ctx context.Context, extractor LLMJSONExtractor, in llmclients.JSONExtractionInput) (map[string]any, string, error) {
+	structured, ok := extractor.(LLMStructuredJSONExtractor)
+	if !ok {
+		parsed, err := extractor.ExtractJSON(ctx, in)
+		return parsed, "", err
+	}
+	var responseWithoutSummary map[string]any
+	contract := summaryExtractionContract()
+	contract.CheckParsed = func(parsed map[string]any) error {
+		if sanitizeTopicText(asString(parsed["summary"])) != "" || sanitizeTopicText(asString(parsed["text"])) != "" {
+			return nil
+		}
+		responseWithoutSummary = parsed
+		return errors.New("The response has no summary text. Set summary to a non-empty summary of the supplied document")
+	}
+	result, err := structured.ExtractStructuredJSON(ctx, in, contract)
+	if result != nil {
+		return result.Parsed, strings.TrimSpace(result.Raw), err
+	}
+	var outputErr *llmclients.StructuredOutputError
+	if ctx.Err() == nil && errors.Is(err, llmclients.ErrStructuredOutputRetriesExhausted) &&
+		errors.Is(err, llmclients.ErrStructuredOutputCheckFailed) && errors.As(err, &outputErr) {
+		// The caller can still build a summary from the source text and keep the
+		// other fields of the model's last response.
+		return responseWithoutSummary, strings.TrimSpace(outputErr.Raw), nil
+	}
+	return nil, "", err
 }
 
 // ExtractTopicsForChunk extracts topics for one chunk using canonical inputText

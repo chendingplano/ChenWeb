@@ -11,6 +11,7 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -196,8 +197,41 @@ func extractReferenceChunk(ctx context.Context, extractor LLMJSONExtractor, in l
 			"type": "object", "required": []string{"references"},
 			"properties": map[string]any{"references": schemaArray()},
 		})
+		var bestPartial map[string]any
+		bestCount := -1
+		contract.CheckParsed = func(payload map[string]any) error {
+			var problems []error
+			items, _ := payload["references"].([]any)
+			validCount := 0
+			for i, item := range items {
+				row, ok := item.(map[string]any)
+				if !ok {
+					problems = append(problems, fmt.Errorf("Reference %d must be an object with citation text (cited_raw) and source lines (source_line_spans)", i+1))
+					continue
+				}
+				missingText := strings.TrimSpace(asString(row["cited_raw"])) == ""
+				missingLines := len(refSpans(row["source_line_spans"])) == 0
+				if missingText {
+					problems = append(problems, fmt.Errorf("Reference %d has no citation text. Set cited_raw to the citation as written in the document", i+1))
+				}
+				if missingLines {
+					problems = append(problems, fmt.Errorf("Reference %d has no source lines. Set source_line_spans to an array of the supplied line numbers containing the citation", i+1))
+				}
+				if !missingText && !missingLines {
+					validCount++
+				}
+			}
+			if len(problems) > 0 && validCount > bestCount {
+				bestPartial, bestCount = payload, validCount
+			}
+			return errors.Join(problems...)
+		}
 		result, err := structured.ExtractStructuredJSON(ctx, in, contract)
 		if err != nil {
+			if bestPartial != nil && ctx.Err() == nil && errors.Is(err, llmclients.ErrStructuredOutputRetriesExhausted) {
+				// Preserve usable references when the model runs out of correction attempts.
+				return bestPartial, nil
+			}
 			return nil, err
 		}
 		return result.Parsed, nil
