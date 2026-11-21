@@ -9120,7 +9120,7 @@
 	"cgv_cosine": "余弦相似度",
 	"cgv_source_unavailable": "当前索引中无原文文本。",
 	"cgv_found_by": "发现途径",
-	"cgv_rationale": "最终判定理由",
+	"cgv_rationale": "关联理由",
 	"cgv_no_candidates": "没有符合这些筛选条件的候选。",
 	"cgv_governs": "适用",
 	"cgv_topical": "主题相关",

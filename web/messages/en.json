@@ -9120,7 +9120,7 @@
 	"cgv_cosine": "Cosine",
 	"cgv_source_unavailable": "Source text is unavailable in the current index.",
 	"cgv_found_by": "Found by",
-	"cgv_rationale": "Final rationale",
+	"cgv_rationale": "Why it is related",
 	"cgv_no_candidates": "No candidates match these filters.",
 	"cgv_governs": "Governs",
 	"cgv_topical": "Topical",

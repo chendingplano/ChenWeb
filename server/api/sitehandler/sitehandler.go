@@ -232,6 +232,10 @@ func serveLogoFile(c echo.Context, key, path string) error {
 			"error": fmt.Sprintf("(CWB_SITE_010) [branding].%s is not a readable file", key),
 		})
 	}
+	// The URL is fixed while the file behind it is replaced by the operator, so
+	// browsers must revalidate (c.File answers If-Modified-Since with 304) instead
+	// of heuristically reusing a stale logo.
+	c.Response().Header().Set("Cache-Control", "no-cache")
 	return c.File(path)
 }
 

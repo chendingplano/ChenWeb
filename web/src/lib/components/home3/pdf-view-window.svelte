@@ -19,6 +19,7 @@
 		fileUrl,
 		page = $bindable(1),
 		zoom = $bindable(0.5),
+		restoreZoom = true,
 		numPages = $bindable(0),
 		highlightVersion = 0,
 		highlightPages,
@@ -53,6 +54,7 @@
 		fileUrl: string;
 		page?: number;
 		zoom?: number;
+		restoreZoom?: boolean;
 		numPages?: number;
 		highlightVersion?: number | string;
 		highlightPages?: number[];
@@ -335,7 +337,7 @@
 			sidebarWidthOptions()
 		);
 		panelWidth = settings.sidebarWidth;
-		zoom = settings.zoom;
+		if (restoreZoom) zoom = settings.zoom;
 		window.addEventListener('click', onClickAway, { capture: true });
 		return () => window.removeEventListener('click', onClickAway, { capture: true });
 	});
