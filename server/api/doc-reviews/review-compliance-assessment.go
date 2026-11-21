@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -326,7 +327,21 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 				own = append(own, v)
 			}
 		}
-		payload, err := r.assessmentCall(ctx, "requirements", cfg, map[string]any{"activity": a, "source": source, "candidates": own})
+		payload, err := r.structuredAssessmentCall(ctx, "requirements", cfg, map[string]any{"activity": a, "source": source, "candidates": own},
+			map[string]any{
+				"type":     "object",
+				"required": []any{"requirements", "dependencies"},
+				"properties": map[string]any{
+					"requirements": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+					"dependencies": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				},
+			}, func(parsed map[string]any) error {
+				reqs, err := complianceArray[complianceRequirement](parsed, "requirements")
+				if err != nil {
+					return err
+				}
+				return checkComplianceRequirementEvidence(reqs, source)
+			})
 		if err != nil {
 			return nil, err
 		}
@@ -338,7 +353,7 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 			if req.Text == "" || (req.Kind != "quantitative" && req.Kind != "qualitative") || !complianceOneOf(req.Binding, "required", "recommended", "informative", "unknown") {
 				return nil, fmt.Errorf("compliance: malformed extracted requirement")
 			}
-			if req.Source.RecordID != art.RecordID || len(req.ArtifactKeys) == 0 {
+			if len(req.ArtifactKeys) == 0 {
 				return nil, fmt.Errorf("compliance: requirement cites an unretrieved source")
 			}
 			for _, key := range req.ArtifactKeys {
@@ -353,17 +368,6 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 				}
 				if !ownKey {
 					return nil, fmt.Errorf("compliance: requirement artifact belongs to another source")
-				}
-			}
-			if err = verifyComplianceEvidence(req.Source, docs); err != nil {
-				return nil, err
-			}
-			for _, e := range req.ScopeEvidence {
-				if e.RecordID != art.RecordID {
-					return nil, fmt.Errorf("compliance: scope evidence belongs to another source")
-				}
-				if err = verifyComplianceEvidence(e, docs); err != nil {
-					return nil, err
 				}
 			}
 			key := fmt.Sprintf("%d/%d/%d/%s", req.Source.RecordID, req.Source.LineStart, req.Source.LineEnd, strings.ToLower(strings.TrimSpace(req.Text)))
@@ -427,6 +431,31 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 		}
 	}
 	return out, nil
+}
+
+// Check quotes against only the source lines sent in this call.
+func checkComplianceRequirementEvidence(reqs []complianceRequirement, source complianceDocument) error {
+	docs := map[int64]complianceDocument{source.RecordID: source}
+	var problems []error
+	for i, req := range reqs {
+		if err := verifyComplianceEvidence(req.Source, docs); err != nil {
+			problems = append(problems, fmt.Errorf("Requirement %d source: %w", i+1, err))
+		}
+		for j, evidence := range req.ScopeEvidence {
+			if err := verifyComplianceEvidence(evidence, docs); err != nil {
+				problems = append(problems, fmt.Errorf("Requirement %d scope_evidence[%d]: %w", i+1, j, err))
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	available := "has no supplied lines"
+	if len(source.Lines) > 0 {
+		available = fmt.Sprintf("has supplied lines %d-%d", source.Lines[0].LineNumber, source.Lines[len(source.Lines)-1].LineNumber)
+	}
+	return fmt.Errorf("%w\nRecord %d %s. Cite only line numbers present in source.lines and copy the exact contiguous text. Omit any requirement or scope evidence that the supplied text cannot support.",
+		errors.Join(problems...), source.RecordID, available)
 }
 
 func (r *complianceReviewer) screenDocument(ctx context.Context, a complianceActivity, cfg ReviewerConfig, reqs []complianceRequirement, doc complianceDocument, coverage *complianceCoverage) ([]complianceScreening, error) {

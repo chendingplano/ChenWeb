@@ -204,6 +204,11 @@ The reviewer SHALL screen all canonical reviewed-document portions within its re
 - **WHEN** a relevant criterion is indexed only as a metric
 - **THEN** metric discovery retrieves it independently and original-source evidence is required before assessment
 
+#### Scenario: Requirement discovery cites lines outside the supplied source
+- **WHEN** a requirement or scope quote fails validation against the supplied source lines
+- **THEN** the structured-output retry SHALL identify the affected fields and the available source lines, asking the model to correct the citations or omit unsupported claims
+- **AND** the reviewer SHALL accept only evidence that passes the same exact quote check
+
 #### Scenario: Supporting detail appears in a later annex
 - **WHEN** an early portion refers to an annex and a later screened portion supplies the actual detail
 - **THEN** the assessment may resolve the reference using exact canonical annex evidence and SHALL NOT report a local omission

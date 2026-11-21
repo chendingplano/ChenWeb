@@ -132,7 +132,7 @@ func boundedComplianceDocument(d complianceDocument, limit int) complianceDocume
 func verifyComplianceEvidence(e complianceEvidence, docs map[int64]complianceDocument) error {
 	d, ok := docs[e.RecordID]
 	if !ok || e.LineStart <= 0 || e.LineEnd < e.LineStart || strings.TrimSpace(e.Quote) == "" {
-		return fmt.Errorf("compliance: invalid evidence anchor %+v", e)
+		return fmt.Errorf("compliance: invalid evidence anchor for record %d lines %d-%d", e.RecordID, e.LineStart, e.LineEnd)
 	}
 	var parts []string
 	start, end := false, false

@@ -252,3 +252,45 @@ func TestComplianceAssessmentCorrectionRetry(t *testing.T) {
 		t.Fatalf("corrected answer not accepted: %+v", verdicts)
 	}
 }
+
+func TestComplianceDiscoveryRetriesQuotesOutsidePinnedSource(t *testing.T) {
+	const draft = `{"requirements":[{"text":"Retain access logs.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":613,"line_end":624,"quote":"Retain access logs."},"scope_evidence":[{"record_id":9,"line_start":625,"line_end":625,"quote":"Applies to access logs."}]}],"dependencies":[]}`
+	const corrected = `{"requirements":[{"text":"Retain access logs.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":486,"line_end":486,"quote":"Retain access logs."}}],"dependencies":[]}`
+	var requests atomic.Int32
+	retryBody := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		content := draft
+		attempt := requests.Add(1)
+		if attempt == 2 {
+			b, _ := io.ReadAll(req.Body)
+			retryBody <- string(b)
+		}
+		if attempt > 1 {
+			content = corrected
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	}))
+	defer srv.Close()
+	doc := complianceDocument{RecordID: 9, Lines: []complianceInputLine{{LineNumber: 485, Content: "Access logs"}, {LineNumber: 486, Content: "Retain access logs."}}}
+	r := &complianceReviewer{
+		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
+		assessmentPrompts: complianceAssessmentPromptRefs(),
+		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
+		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
+	}
+	artifacts := []complianceArtifact{{Type: "provision", ID: "p1", RecordID: 9}}
+	reqs, err := r.discoverRequirements(context.Background(), complianceActivity{}, complianceTestCfg, &artifacts, map[int64]complianceDocument{}, &complianceCoverage{})
+	if err != nil || requests.Load() != 2 {
+		t.Fatalf("requests=%d err=%v; the quote outside the supplied lines must trigger a retry", requests.Load(), err)
+	}
+	secondBody := <-retryBody
+	for _, want := range []string{"Requirement 1 source", "pinned record 9 lines 613-624", "Requirement 1 scope_evidence[0]", "pinned record 9 lines 625-625", "lines 485-486"} {
+		if !strings.Contains(secondBody, want) {
+			t.Errorf("retry request missing %q", want)
+		}
+	}
+	if len(reqs) != 1 || reqs[0].ID != "r1" || reqs[0].Source.LineStart != 486 {
+		t.Fatalf("corrected requirement not accepted: %+v", reqs)
+	}
+}
