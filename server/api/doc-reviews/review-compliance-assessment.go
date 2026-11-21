@@ -344,14 +344,22 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 					return err
 				}
 				// The reviewed passage can describe a criterion without establishing it in
-				// this external source. Drop only copies with a provably foreign citation.
+				// this external source. Drop only copies with a provably foreign citation: the
+				// quote matches the reviewed passage at its own lines and appears nowhere in the
+				// source. A quote the source does contain stays, so the retry can fix its lines.
+				reviewedText := complianceLooseText(a.SourceText)
+				var sourceText strings.Builder
+				for _, line := range source.Lines {
+					sourceText.WriteString(line.Content)
+				}
+				sourceLoose := complianceLooseText(sourceText.String())
 				reqs = slices.DeleteFunc(decoded, func(req complianceRequirement) bool {
 					e := req.Source
+					quote := complianceLooseText(e.Quote)
 					return coverage.ReviewedRecordID > 0 && source.RecordID != coverage.ReviewedRecordID &&
-						e.RecordID == source.RecordID && len(source.Lines) > 0 &&
-						(e.LineEnd < source.Lines[0].LineNumber || e.LineStart > source.Lines[len(source.Lines)-1].LineNumber) &&
+						e.RecordID == source.RecordID &&
 						e.LineStart > 0 && e.LineStart >= a.LineStart && e.LineEnd <= a.LineEnd && e.LineStart <= e.LineEnd &&
-						strings.TrimSpace(e.Quote) != "" && strings.Contains(a.SourceText, e.Quote)
+						quote != "" && strings.Contains(reviewedText, quote) && !strings.Contains(sourceLoose, quote)
 				})
 				discarded = len(decoded) - len(reqs)
 				return checkComplianceRequirementEvidence(reqs, source)

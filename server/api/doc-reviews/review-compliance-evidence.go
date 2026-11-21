@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"golang.org/x/text/unicode/norm"
 )
 
 type complianceArtifact struct {
@@ -127,6 +129,18 @@ func boundedComplianceDocument(d complianceDocument, limit int) complianceDocume
 		n += size
 	}
 	return out
+}
+
+// complianceLooseText keeps only letters and digits, so a model's copy that changes spacing,
+// punctuation, full-width forms or markdown escapes (90%\~105% quoted as 90%~105%) still matches.
+// It identifies where a quote came from; evidence itself must pass verifyComplianceEvidence.
+func complianceLooseText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		return -1
+	}, norm.NFKC.String(s))
 }
 
 func verifyComplianceEvidence(e complianceEvidence, docs map[int64]complianceDocument) error {

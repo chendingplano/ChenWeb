@@ -340,3 +340,94 @@ func TestComplianceDiscoveryDiscardsRequirementsCopiedFromReviewedActivity(t *te
 		t.Fatalf("want a coverage issue for the discarded citations, got %+v", coverage)
 	}
 }
+
+// The external source is longer than the reviewed line numbers, so the copied citations name lines
+// the source has. The second copy also drops a markdown escape from the reviewed text.
+func TestComplianceDiscoveryDiscardsCopiedQuotesAtLinesTheSourceAlsoHas(t *testing.T) {
+	const response = `{"requirements":[
+		{"text":"Efficiency of at least 95%.","kind":"quantitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":201,"line_end":201,"quote":"5.3.4.3 Efficiency shall not be less than 95% of the stated value."},"scope_evidence":[{"record_id":9,"line_start":201,"line_end":201,"quote":"5.3.4.3 Efficiency"}]},
+		{"text":"Heater power within 90% to 105%.","kind":"quantitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":202,"line_end":202,"quote":"5.3.4.4 Heater power shall be 90%~105% of the stated value."}},
+		{"text":"Inspect the installation.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":100,"line_end":100,"quote":"Inspect the installation."}}
+	],"dependencies":[]}`
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": response}}}})
+	}))
+	defer srv.Close()
+	doc := complianceDocument{RecordID: 9, Complete: true, Lines: []complianceInputLine{
+		{LineNumber: 100, Content: "Inspect the installation."},
+		{LineNumber: 201, Content: "5.5.3 Earthing"},
+		{LineNumber: 202, Content: "Earthing terminals serve no other purpose."},
+		{LineNumber: 666, Content: "Bibliography."},
+	}}
+	r := &complianceReviewer{
+		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
+		assessmentPrompts: complianceAssessmentPromptRefs(),
+		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
+		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
+	}
+	activity := complianceActivity{
+		LineStart: 201, LineEnd: 203,
+		SourceText: "5.3.4.3 Efficiency shall not be less than 95% of the stated value.\n5.3.4.4 Heater power shall be 90%\\~105% of the stated value.\n5.3.4.5 Pressure loss shall not exceed 115%.",
+	}
+	artifacts := []complianceArtifact{{Type: "provision", ID: "p1", RecordID: 9}}
+	coverage := complianceCoverage{ReviewedRecordID: 7, SourceComplete: true}
+	reqs, err := r.discoverRequirements(context.Background(), activity, complianceTestCfg, &artifacts, map[int64]complianceDocument{}, &coverage)
+	if err != nil || requests.Load() != 1 {
+		t.Fatalf("requests=%d err=%v; repeating the same request cannot supply the copied source evidence", requests.Load(), err)
+	}
+	if len(reqs) != 1 || reqs[0].Source.LineStart != 100 {
+		t.Fatalf("want only the requirement grounded in the supplied source, got %+v", reqs)
+	}
+	if coverage.SourceComplete || len(coverage.Issues) != 1 || !strings.Contains(coverage.Issues[0], "for 2 proposed requirements") {
+		t.Fatalf("want a coverage issue for the two discarded citations, got %+v", coverage)
+	}
+}
+
+// A reviewed document can repeat an external clause word for word. A quote that the external source
+// does contain is a citation the model can correct, so it is retried, not discarded.
+func TestComplianceDiscoveryRetriesSourceTextCitedAtReviewedLines(t *testing.T) {
+	const draft = `{"requirements":[{"text":"Earthing terminals have no other use.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":201,"line_end":201,"quote":"Earthing terminals serve no other purpose."}}],"dependencies":[]}`
+	const corrected = `{"requirements":[{"text":"Earthing terminals have no other use.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":350,"line_end":350,"quote":"Earthing terminals serve no other purpose."}}],"dependencies":[]}`
+	var requests atomic.Int32
+	retryBody := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		content := draft
+		if requests.Add(1) > 1 {
+			b, _ := io.ReadAll(req.Body)
+			select {
+			case retryBody <- string(b):
+			default:
+			}
+			content = corrected
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+	}))
+	defer srv.Close()
+	doc := complianceDocument{RecordID: 9, Complete: true, Lines: []complianceInputLine{
+		{LineNumber: 201, Content: "5.5.3 Earthing"},
+		{LineNumber: 350, Content: "Earthing terminals serve no other purpose."},
+	}}
+	r := &complianceReviewer{
+		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
+		assessmentPrompts: complianceAssessmentPromptRefs(),
+		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
+		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
+	}
+	activity := complianceActivity{LineStart: 201, LineEnd: 201, SourceText: "Earthing terminals serve no other purpose."}
+	artifacts := []complianceArtifact{{Type: "provision", ID: "p1", RecordID: 9}}
+	coverage := complianceCoverage{ReviewedRecordID: 7, SourceComplete: true}
+	reqs, err := r.discoverRequirements(context.Background(), activity, complianceTestCfg, &artifacts, map[int64]complianceDocument{}, &coverage)
+	if err != nil || requests.Load() != 2 {
+		t.Fatalf("requests=%d err=%v; a quote the source contains must be corrected by a retry", requests.Load(), err)
+	}
+	if body := <-retryBody; !strings.Contains(body, "pinned record 9 lines 201-201") {
+		t.Fatalf("retry request must carry the correction: %s", body)
+	}
+	if len(reqs) != 1 || reqs[0].Source.LineStart != 350 || !coverage.SourceComplete {
+		t.Fatalf("corrected requirement not accepted: reqs=%+v coverage=%+v", reqs, coverage)
+	}
+}

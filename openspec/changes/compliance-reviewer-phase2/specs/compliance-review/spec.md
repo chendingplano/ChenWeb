@@ -204,9 +204,14 @@ The reviewer SHALL screen all canonical reviewed-document portions within its re
 - **WHEN** a relevant criterion is indexed only as a metric
 - **THEN** metric discovery retrieves it independently and original-source evidence is required before assessment
 
-#### Scenario: Requirement discovery cites lines outside the supplied source
-- **WHEN** a proposed requirement quotes the reviewed activity at its original line range and attributes it to lines wholly outside a different supplied source
+#### Scenario: Requirement discovery attributes reviewed text to the supplied source
+- **WHEN** a proposed requirement quotes the reviewed activity at its original line range and attributes it to a different supplied source whose text does not contain the quote, comparing letters and digits only so that spacing, punctuation, full-width forms and markdown escapes do not matter
 - **THEN** the reviewer SHALL discard that requirement, record the source coverage gap, and continue validating the remaining requirements
+- **AND** this SHALL apply whether or not the supplied source has lines with the cited numbers
+
+#### Scenario: The reviewed text repeats the supplied source
+- **WHEN** a requirement quotes text that the supplied source does contain, but cites the reviewed activity's line numbers
+- **THEN** the reviewer SHALL NOT discard it; the structured-output retry SHALL ask the model to correct the citation
 
 #### Scenario: Requirement discovery returns another unverified citation
 - **WHEN** a requirement or scope quote fails validation against the supplied source lines
