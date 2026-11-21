@@ -81,6 +81,7 @@
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
 	import SkillMgmtView from '$lib/components/home3/skill-mgmt-view.svelte';
 	import DocFacetsView from '$lib/components/home3/doc-facets-view.svelte';
+	import ScientificPaperSearchView from '$lib/components/home3/scientific-paper-search-view.svelte';
 	import KbSearchLabView from '$lib/components/home3/kb-search-lab-view.svelte';
 	import VideoManagementView from '$lib/components/home3/video-management-view.svelte';
 	import ExternalTerminologyResourcesView from '$lib/components/home3/external-terminology-resources-view.svelte';
@@ -232,6 +233,7 @@
 
 	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
 	const retainedPages = [
+		{ id: 'scientific-paper-search', component: ScientificPaperSearchView },
 		{ id: 'doc-processor-dashboard', component: DocProcessorDashboardView },
 		{ id: 'kb-import', component: KbImportView },
 		{ id: 'sysadmin-resources-sync-data', component: SyncDataView },

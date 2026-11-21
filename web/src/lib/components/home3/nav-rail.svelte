@@ -232,6 +232,7 @@
 			icon: WorkflowIcon,
 			group: 'Workspace',
 			children: [
+				...(pageKey === 'development' ? [{ id: 'tools-search', label: m.nav_tools_search(), children: [{ id: 'scientific-paper-search', label: m.nav_scientific_paper_search() }] }] : []),
 				{ id: 'kb-search-lab', label: m.nav_kb_search_lab() },
 				{ id: 'flow', label: m.nav_flow() },
 				{ id: 'wpi-editor', label: m.nav_wpi_editor() },

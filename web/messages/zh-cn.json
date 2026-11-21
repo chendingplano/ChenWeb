@@ -9310,5 +9310,20 @@
   "doc_origin_confirmation_skip": "跳过远程文档",
   "doc_origin_confirmation_run": "仍然运行",
   "doc_origin_confirmation_run_all": "全部处理",
-  "doc_origin_imported_line_file": "远程文档使用同步过来的行文件。"
+  "doc_origin_imported_line_file": "远程文档使用同步过来的行文件。",
+  "nav_tools_search": "搜索",
+  "nav_scientific_paper_search": "科学论文搜索",
+  "paper_search_eyebrow": "学术发现",
+  "paper_search_title": "科学论文搜索",
+  "paper_search_intro": "同时搜索多个学术来源并浏览搜索结果。",
+  "paper_search_query": "搜索词",
+  "paper_search_placeholder": "输入主题、标题或关键词",
+  "paper_search_submit": "搜索论文",
+  "paper_search_searching": "正在搜索…",
+  "paper_search_error": "搜索未能完成，请重试。",
+  "paper_search_results": "搜索结果",
+  "paper_search_count": "{count} 条结果",
+  "paper_search_partial": "部分来源搜索失败：{sources}",
+  "paper_search_empty": "未找到论文，请尝试其他搜索词。",
+  "paper_search_doi": "DOI：{doi}"
 }

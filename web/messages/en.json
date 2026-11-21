@@ -9310,5 +9310,20 @@
   "doc_origin_confirmation_skip": "Skip remote",
   "doc_origin_confirmation_run": "Run anyway",
   "doc_origin_confirmation_run_all": "Process all",
-  "doc_origin_imported_line_file": "Remote documents use their synced line files."
+  "doc_origin_imported_line_file": "Remote documents use their synced line files.",
+  "nav_tools_search": "Search",
+  "nav_scientific_paper_search": "Scientific Paper Search",
+  "paper_search_eyebrow": "Research discovery",
+  "paper_search_title": "Scientific Paper Search",
+  "paper_search_intro": "Search academic literature across multiple sources and explore the results.",
+  "paper_search_query": "Search terms",
+  "paper_search_placeholder": "Enter a topic, title, or keywords",
+  "paper_search_submit": "Search papers",
+  "paper_search_searching": "Searching…",
+  "paper_search_error": "Search could not be completed. Please try again.",
+  "paper_search_results": "Results",
+  "paper_search_count": "{count} results",
+  "paper_search_partial": "Some sources could not be searched: {sources}",
+  "paper_search_empty": "No papers found. Try different search terms.",
+  "paper_search_doi": "DOI: {doi}"
 }

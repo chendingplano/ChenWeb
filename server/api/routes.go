@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/chendingplano/deepdoc/server/api/papersearch"
 	"io"
 	"io/fs"
 	"net/http"
@@ -335,6 +336,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")
 	apiGroup.Use(authmiddleware.AuthMiddleware)
+	apiGroup.POST("/scientific-paper-search", (papersearch.Handler{}).Handle)
 	apiGroup.GET("/reusable-modules", reusablemodules.Handler(ApiTypes.ProjectDBHandle))
 	docLogger := loggerutil.CreateDefaultLogger("20261110-801")
 	if docStore, err := docbuilder.NewStoreFromEnv(context.Background(), ApiTypes.ProjectDBHandle, ApiTypes.SharedDBHandle,
