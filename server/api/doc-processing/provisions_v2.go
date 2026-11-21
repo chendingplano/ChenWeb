@@ -30,13 +30,18 @@ func provisionV2Schema() map[string]any {
 	score := map[string]any{"type": "number", "minimum": 0, "maximum": 1}
 	// A string span is a range ("150-151") or a table row as the input labels
 	// it ("1095#r24", "1095#h0"); decodeProvisionV2Spans stores a row as its line.
-	spans := map[string]any{
+	flatSpans := map[string]any{
 		"type": "array", "minItems": 1,
 		"items": map[string]any{"anyOf": []any{
 			map[string]any{"type": "integer", "minimum": 1},
 			map[string]any{"type": "string", "pattern": `^[1-9][0-9]*(-[1-9][0-9]*|#[hr][0-9]+)?$`},
 		}},
 	}
+	// Accept a redundant outer array around a complete citation list (ChenWeb#57).
+	spans := map[string]any{"anyOf": []any{
+		flatSpans,
+		map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": flatSpans},
+	}}
 	objects := schemaArrayOfObjects(map[string]any{
 		"n": text, "t": map[string]any{"type": "string", "pattern": `\S`}, "r": map[string]any{"type": "string", "pattern": `\S`},
 		"s": spans, "q": score, "a": schemaStringArray(), "y": schemaStringArray(), "d": schemaString(),
@@ -157,9 +162,13 @@ func decodeProvisionV2(payload map[string]any) (map[string]any, error) {
 }
 
 func decodeProvisionV2Spans(value any) ([]string, error) {
+	items := value.([]any)
+	if nested, ok := items[0].([]any); ok {
+		items = nested
+	}
 	spans := make([]string, 0)
 	seen := map[string]bool{}
-	for _, item := range value.([]any) {
+	for _, item := range items {
 		var span string
 		if text, ok := item.(string); ok {
 			span = stripTableRowRefs(text)

@@ -431,3 +431,15 @@ func TestProvisionsV2RetriesPrimaryOnDecodeFailure(t *testing.T) {
 		t.Fatalf("provisions=%d, want 1", got)
 	}
 }
+
+func TestProvisionsV2AcceptsOneExtraCitationWrapper(t *testing.T) {
+	wire := `{"v":2,"l":"en","p":[{"n":"Inspection","t":"m","x":"Inspect the panel.","s":[["251","252"]],"lt":"p","q":0.9,"f":1,"o":[{"n":"Panel","t":"eq","r":"reg","s":[["251","252"]],"q":0.9}]}]}`
+	got := extractProvisionTestPayload(t, wire)
+	provision := objectItemsFromValue(got["provisions"])[0]
+	object := objectItemsFromValue(provision["objects"])[0]
+	for _, row := range []map[string]any{provision, object} {
+		if want := []string{"251", "252"}; !reflect.DeepEqual(row["source_line_spans"], want) {
+			t.Fatalf("source_line_spans = %#v, want %v", row["source_line_spans"], want)
+		}
+	}
+}
