@@ -87,7 +87,7 @@ func productMergedV2Schema() map[string]any {
 		"n": text, "r": provisionV2Enum(productV2RelatedRelationships),
 	}, []string{"n", "r"}, false)
 	products := schemaArrayOfObjects(map[string]any{
-		"n": text, "c": schemaString(), "t": provisionV2Enum(productV2Types), "r": schemaString(),
+		"n": text, "c": schemaString(), "t": text, "r": schemaString(),
 		"d": text, "s": spans, "o": provisionV2Enum(productV2Obligations), "x": schemaString(),
 		"cnd": schemaStringArray(), "exc": schemaStringArray(), "p": params, "rp": related, "a": schemaString(),
 		"q": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "cr": schemaString(),
@@ -126,9 +126,24 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 	}
 	items := payload["p"].([]any)
 	products := make([]any, 0, len(items))
-	// This error is the primary's retry text (CheckParsed), so it names every
-	// invalid span at once; one per retry can exhaust the retries (ChenWeb#28).
-	var spanErrs []error
+	// A relation code can land in t. Only recover a valid type when another
+	// row for the same product supplies it consistently (ChenWeb#48).
+	typesByName := make(map[string]string)
+	for _, item := range items {
+		row := item.(map[string]any)
+		code := asString(row["t"])
+		if productV2Types[code] == "" {
+			continue
+		}
+		name := strings.TrimSpace(asString(row["n"]))
+		if previous, exists := typesByName[name]; exists && previous != code {
+			code = ""
+		}
+		typesByName[name] = code
+	}
+	// CheckParsed sends these errors to the primary model for its next attempt.
+	// Report all invalid spans at once so fixing them doesn't use one retry each (ChenWeb#28).
+	var validationErrs []error
 	for i, item := range items {
 		raw := item.(map[string]any)
 		name := strings.TrimSpace(asString(raw["n"]))
@@ -142,6 +157,18 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		relationCode := strings.ToLower(strings.TrimSpace(asString(raw["r"])))
 		if relationCode == "" {
 			return nil, fmt.Errorf("(MID_20261118_003) product %d has a blank relation code", i+1)
+		}
+		typeCode := asString(raw["t"])
+		if productV2Types[typeCode] == "" {
+			if typeCode == relationCode && productV2Relations[typeCode] != "" {
+				typeCode = typesByName[name]
+			}
+			if productV2Types[typeCode] == "" {
+				codes := provisionV2Enum(productV2Types)["enum"].([]string)
+				validationErrs = append(validationErrs, fmt.Errorf("product %d %q: t describes what the product is; r describes its relationship to the requirement. Replace t=%q with one of %s (ChenWeb#48)",
+					i+1, name, asString(raw["t"]), strings.Join(codes, ", ")))
+				continue
+			}
 		}
 		// Packaging requirements use the existing handling relation (ChenWeb#55).
 		if relationCode == "pkg" {
@@ -157,7 +184,7 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		}
 		spans, quote, err := resolveProductV2Spans(evidence, lines)
 		if err != nil {
-			spanErrs = append(spanErrs, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err))
+			validationErrs = append(validationErrs, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err))
 			continue
 		}
 		spans, quote = groundProductV2Spans(name, spans, quote, lines)
@@ -180,7 +207,7 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		}
 		products = append(products, map[string]any{
 			"product_name": name, "canonical_name": firstNonEmptyTrimmed(asString(raw["c"]), name),
-			"product_type": productV2Types[asString(raw["t"])], "relation_type": relationType, "relation_code": relationCode,
+			"product_type": productV2Types[typeCode], "relation_type": relationType, "relation_code": relationCode,
 			"product_summary": summary, "evidence_quote": quote, "evidence_lines": spans,
 			"relation_details": map[string]any{
 				"obligation_level":         productV2Obligations[asString(raw["o"])],
@@ -194,8 +221,8 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 			"confidence": toFloat(raw["q"]), "confidence_reason": strings.TrimSpace(asString(raw["cr"])),
 		})
 	}
-	if len(spanErrs) > 0 {
-		return nil, errors.Join(spanErrs...)
+	if len(validationErrs) > 0 {
+		return nil, errors.Join(validationErrs...)
 	}
 	return map[string]any{"products": products}, nil
 }

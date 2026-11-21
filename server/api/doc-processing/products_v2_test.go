@@ -886,3 +886,22 @@ func TestProductsV2AcceptsSingleLineAndOmitsValuelessParameters(t *testing.T) {
 		t.Fatalf("unexpected parameters: %#v", params)
 	}
 }
+
+func TestProductsV2RecoversUnambiguousTypeFromSameProduct(t *testing.T) {
+	wire := `{"v":2,"p":[{"n":"Panel","t":"eq","r":"use","d":"Panel use","s":[143],"o":"m","q":0.9},{"n":"Panel","t":"perf","r":"perf","d":"Panel rating","s":[144],"o":"m","q":0.9}]}`
+	rows := decodeProductV2Test(t, wire, productSourceLines{143: "Use the panel.", 144: "The panel shall be rated at 12 V."})
+	if rows[1]["product_type"] != "equipment" || rows[1]["relation_code"] != "perf" {
+		t.Fatalf("type or relation lost: %#v", rows[1])
+	}
+}
+
+func TestProductsV2RetryIdentifiesTypeAsSeparateFromRelation(t *testing.T) {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(`{"v":2,"p":[{"n":"Panel","t":"perf","r":"perf","d":"Panel rating","s":[143],"o":"m","q":0.9}]}`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	_, err := decodeProductMergedV2(raw, productSourceLines{143: "Panel rating."})
+	if err == nil || !strings.Contains(err.Error(), `product 1 "Panel": t describes what the product is; r describes its relationship`) {
+		t.Fatalf("missing targeted retry guidance: %v", err)
+	}
+}
