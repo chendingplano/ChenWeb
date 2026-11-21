@@ -60,6 +60,26 @@ For multi-step tasks, state a brief plan:
 * All prompts should be saved in `prompts`. File names must be prefixed with `prompt-` and endded with `-v<number>.md` (for markdown) or `_v<number>.txt` for other types. Example: `prompt-for-my-test-v1.md. Example: `prompt-for-my-test-v1.md`
 * NEVER hard-code prompts in code
 
+## Correction messages for document processors
+
+Every document processor that asks a model for structured output should use the
+shared `ExtractStructuredJSON` retry path. Use the response schema to check the
+required fields and types. Put checks that need the document or task context in
+the contract's `CheckParsed` hook so the same model gets a chance to correct its
+answer within the configured retry limit.
+
+When rejecting an answer in `CheckParsed`, identify the item and field, explain
+what is wrong, and say what to return instead. Give the allowed values or source
+labels when available. Report independent errors together so the model can fix
+them in one attempt. For example, say “Item 2 cites row `10#r4`, which is absent
+from the supplied table. Use an existing row from `10#r1` through `10#r3`.”
+
+Keep these messages separate from the first-request prompt. Apply them to errors
+the model can correct in its answer. Provider failures, canceled requests, and
+database errors follow their existing handling. When adding a response check,
+test that the next request includes the correction and that the software accepts
+a corrected answer. The merged-product extraction path is a working example.
+
 # 3. Internationalization (English + Chinese)
 Every page must work in English and Chinese. Decision and rationale: ADR
 `KnowledgeStore/doc-repo/adrs/202609/2026093001-adr-paraglide-standard-i18n.md`.
