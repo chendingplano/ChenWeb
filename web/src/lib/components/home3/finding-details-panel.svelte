@@ -65,6 +65,42 @@
 	// finding.metadata.related_artifacts, surfaced inline so it's visible
 	// without opening the "View metadata" dialog.
 	let relatedArtifacts = $derived(relatedArtifactsFromMetadata(finding?.metadata));
+
+	// Compliance candidate verdicts (openspec compliance-candidate-verdicts) get a translated label,
+	// a definition tooltip and a colour; other relationship codes (metrics) display as stored.
+	const VERDICTS = ['compliant', 'compatible', 'not_compliant', 'undetermined', 'unqualified'] as const;
+	type Verdict = (typeof VERDICTS)[number];
+	function asVerdict(code: string): Verdict | null {
+		return (VERDICTS as readonly string[]).includes(code) ? (code as Verdict) : null;
+	}
+	function verdictLabel(v: Verdict): string {
+		switch (v) {
+			case 'compliant':
+				return m.finding_details_panel_verdict_compliant();
+			case 'compatible':
+				return m.finding_details_panel_verdict_compatible();
+			case 'not_compliant':
+				return m.finding_details_panel_verdict_not_compliant();
+			case 'undetermined':
+				return m.finding_details_panel_verdict_undetermined();
+			case 'unqualified':
+				return m.finding_details_panel_verdict_unqualified();
+		}
+	}
+	function verdictHint(v: Verdict): string {
+		switch (v) {
+			case 'compliant':
+				return m.finding_details_panel_verdict_compliant_hint();
+			case 'compatible':
+				return m.finding_details_panel_verdict_compatible_hint();
+			case 'not_compliant':
+				return m.finding_details_panel_verdict_not_compliant_hint();
+			case 'undetermined':
+				return m.finding_details_panel_verdict_undetermined_hint();
+			case 'unqualified':
+				return m.finding_details_panel_verdict_unqualified_hint();
+		}
+	}
 	let relatedArtifactLoadingId = $state<string | null>(null);
 
 	// Artifact block display: drop the English (_en) columns and a few noisy
@@ -309,7 +345,7 @@
 					</div>
 					{#if relatedArtifacts.length}
 						<div class="fd-row">
-							<span class="fd-label">{m.finding_details_panel_text_2()}</span>
+							<span class="fd-label">{finding.aspect === 'compliance' ? m.finding_details_panel_candidates() : m.finding_details_panel_text_2()}</span>
 							<div class="fd-related-list">
 								{#each relatedArtifacts as ra, i (i)}
 									<button
@@ -321,12 +357,20 @@
 									>
 										<div class="fd-related-head">
 											{#if ra.relationship}
-												<span class="fd-related-rel">{ra.relationship}</span>
+												{@const verdict = asVerdict(ra.relationship)}
+												{#if verdict}
+													<span class="fd-related-rel fd-verdict fd-verdict-{verdict}" title={verdictHint(verdict)}>{verdictLabel(verdict)}</span>
+												{:else}
+													<span class="fd-related-rel">{ra.relationship}</span>
+												{/if}
 											{/if}
 											<span class="fd-related-ref">{m.finding_details_panel_record({ related_record_id: ra.related_record_id, related_artifact_id: ra.related_artifact_id })}</span>
 										</div>
 										{#if ra.summary}
 											<p class="fd-related-summary">{ra.summary}</p>
+											{#if ra.note}
+												<p class="fd-related-note"><span class="fd-related-note-label">{m.finding_details_panel_verdict_note()}</span> {ra.note}</p>
+											{/if}
 										{:else if ra.fields.length}
 											<div class="fd-related-fields">
 												{#each ra.fields as f (f.label)}
@@ -566,6 +610,34 @@
 		font-size: 0.72rem;
 		font-weight: 600;
 		color: var(--fd-accent);
+	}
+	.fd-verdict {
+		font-family: inherit;
+		padding: 0 0.35rem;
+		border-radius: 0.25rem;
+		border: 1px solid currentColor;
+	}
+	.fd-verdict-compliant {
+		color: #15803d;
+	}
+	.fd-verdict-compatible {
+		color: #b45309;
+	}
+	.fd-verdict-not_compliant {
+		color: #dc2626;
+	}
+	.fd-verdict-undetermined,
+	.fd-verdict-unqualified {
+		color: var(--fd-text-muted);
+	}
+	.fd-related-note {
+		margin: 0.25rem 0 0;
+		font-size: 0.74rem;
+		color: var(--fd-text-muted);
+		white-space: pre-wrap;
+	}
+	.fd-related-note-label {
+		font-weight: 600;
 	}
 	.fd-related-ref {
 		font-family: monospace;

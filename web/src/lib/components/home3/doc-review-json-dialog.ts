@@ -295,6 +295,9 @@ export type RelatedArtifact = {
 	related_record_id: string;
 	related_artifact_id: string;
 	summary: string;
+	// Why a compliance candidate verdict was downgraded or not verified;
+	// present only when the finding stored one.
+	note?: string;
 	// The related artifact's own raw field values (e.g. metric_name,
 	// metric_value), present only for the singular metadata shape below,
 	// where there is no LLM-authored summary to show instead.
@@ -321,13 +324,17 @@ export function relatedArtifactsFromMetadata(metadata: unknown): RelatedArtifact
 
 	const plural = parseJsonLike(metadata.related_artifacts);
 	if (Array.isArray(plural) && plural.length > 0) {
-		return plural.filter(isRecord).map((item) => ({
-			relationship: optionalDisplayValue(item.relationship),
-			related_record_id: displayValue(item.related_record_id),
-			related_artifact_id: displayValue(item.related_artifact_id),
-			summary: optionalDisplayValue(item.summary),
-			fields: []
-		}));
+		return plural.filter(isRecord).map((item) => {
+			const note = optionalDisplayValue(item.note);
+			return {
+				relationship: optionalDisplayValue(item.relationship),
+				related_record_id: displayValue(item.related_record_id),
+				related_artifact_id: displayValue(item.related_artifact_id),
+				summary: optionalDisplayValue(item.summary),
+				...(note ? { note } : {}),
+				fields: []
+			};
+		});
 	}
 
 	if (metadata.related_artifact_id === undefined && metadata.related_record_id === undefined) {

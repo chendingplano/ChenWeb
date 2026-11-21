@@ -78,6 +78,7 @@ type RelatedArtifactAnalysis struct {
 	RelatedRecordID   int64  `json:"related_record_id,omitempty"`
 	Relationship      string `json:"relationship,omitempty"`
 	Summary           string `json:"summary,omitempty"`
+	Note              string `json:"note,omitempty"` // why a compliance verdict was downgraded or not verified
 }
 
 // ReviewStrategy selects how a reviewer processes a document.

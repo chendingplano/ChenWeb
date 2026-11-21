@@ -149,6 +149,18 @@ test('relatedArtifactsFromMetadata parses a JSON-encoded string field', () => {
 	]);
 });
 
+test('relatedArtifactsFromMetadata keeps a compliance verdict note', () => {
+	const result = relatedArtifactsFromMetadata({
+		related_artifacts: [
+			{ summary: 'Requires six months.', relationship: 'undetermined', related_record_id: 9, related_artifact_id: '9_mtc_1', note: 'Source context is incomplete.' }
+		]
+	});
+
+	assert.deepEqual(result, [
+		{ relationship: 'undetermined', related_record_id: '9', related_artifact_id: '9_mtc_1', summary: 'Requires six months.', note: 'Source context is incomplete.', fields: [] }
+	]);
+});
+
 test('relatedArtifactsFromMetadata reads the singular shape (ordinary "issue" findings) and flattens related_artifact_fields', () => {
 	const result = relatedArtifactsFromMetadata({
 		related_artifact_id: '430_mtc_19',

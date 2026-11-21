@@ -24,6 +24,14 @@ func TestComplianceMetricSearchCannotBeCrowdedOut(t *testing.T) {
 	}
 }
 
+func complianceTestPayload2(key1 string, value1 any, key2 string, value2 any) map[string]any {
+	out := complianceTestPayload(key1, value1)
+	for k, v := range complianceTestPayload(key2, value2) {
+		out[k] = v
+	}
+	return out
+}
+
 func complianceTestPayload(key string, value any) map[string]any {
 	b, _ := json.Marshal(map[string]any{key: value})
 	var out map[string]any
@@ -34,14 +42,14 @@ func complianceTestPayload(key string, value any) map[string]any {
 func TestComplianceExpertStagesFindMetricAndVerifyConvertedClaim(t *testing.T) {
 	source := complianceEvidence{RecordID: 9, LineStart: 1, LineEnd: 1, Quote: "Clearance shall be at least 5 mm."}
 	target := complianceEvidence{RecordID: 7, LineStart: 10, LineEnd: 10, Quote: "Clearance is 0.5 cm."}
-	req := complianceRequirement{Text: "Minimum clearance", Kind: "quantitative", Binding: "required", ArtifactKey: "metric/m1", Source: source}
+	req := complianceRequirement{Text: "Minimum clearance", Kind: "quantitative", Binding: "required", ArtifactKeys: []string{"metric/m1"}, Source: source}
 	assessment := complianceAssessment{RequirementID: "r1", Applicability: "applicable", ApplicabilityReason: "The adopted policy covers this design.", Status: "contradicted", Rationale: "Compare the stated clearance.", Evidence: []complianceEvidence{target}, Numeric: &complianceNumeric{Property: "clearance", QuantityKind: "Length", ConditionsMatch: true, MethodsMatch: true, BasisMatch: true, Required: complianceQuantity{Operator: ">=", Value: "5", Unit: "mm"}, Documented: complianceQuantity{Operator: "=", Value: "0.5", Unit: "cm"}}}
 	requirements := complianceTestPayload("requirements", []complianceRequirement{req})
 	requirements["dependencies"] = []any{}
 	fake := &fakeJSONExtractor{seq: []map[string]any{activityPayload("clearance", target.Quote), requirements,
 		complianceTestPayload("screenings", []complianceScreening{{RequirementID: "r1", Evidence: []complianceEvidence{target}}}),
-		complianceTestPayload("assessments", []complianceAssessment{assessment}),
-		complianceTestPayload("checks", []complianceVerification{{RequirementID: "r1", Valid: true, Reason: "Both quotes support the converted inclusive limit."}}),
+		complianceTestPayload2("assessments", []complianceAssessment{assessment}, "candidates", []complianceCandidateVerdict{{ArtifactKey: "metric/m1", Verdict: verdictNotCompliant, RequirementIDs: []string{"r1"}, Summary: "Requires at least 5 mm clearance; the document states 0.5 cm."}}),
+		complianceTestPayload2("checks", []complianceVerification{{RequirementID: "r1", Valid: true, Reason: "Both quotes support the converted inclusive limit."}}, "candidate_checks", []complianceCandidateCheck{{ArtifactKey: "metric/m1", Valid: true, Reason: "Verdict follows the drafted contradiction."}}),
 	}}
 	r := newTestComplianceReviewer(fake, func(_ context.Context, request searchengine.Request) (*searchengine.Response, error) {
 		if request.Filters.ArtifactTypes[0] != "metric" {
@@ -67,6 +75,11 @@ func TestComplianceExpertStagesFindMetricAndVerifyConvertedClaim(t *testing.T) {
 	}
 	if !strings.Contains(string(fs[0].ArtifactFields), `"screened_lines":1`) || fake.calledCount != 5 {
 		t.Fatalf("coverage/calls missing: %s calls=%d", fs[0].ArtifactFields, fake.calledCount)
+	}
+	// The drafted contradiction became documentary support after the numeric check, so the drafted
+	// not_compliant verdict is no longer supported: code downgrades it, never raises it.
+	if len(fs[0].RelatedArtifacts) != 1 || fs[0].RelatedArtifacts[0].Relationship != verdictUndetermined || !strings.Contains(fs[0].RelatedArtifacts[0].Note, "r1 is supported") {
+		t.Fatalf("numeric disagreement must downgrade the verdict: %+v", fs[0].RelatedArtifacts)
 	}
 }
 

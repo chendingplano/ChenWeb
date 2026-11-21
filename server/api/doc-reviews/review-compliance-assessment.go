@@ -11,10 +11,10 @@ import (
 
 func complianceAssessmentPromptRefs() map[string]string {
 	return map[string]string{
-		"requirements": "prompt-review-compliance-requirements-v1.md",
+		"requirements": "prompt-review-compliance-requirements-v2.md",
 		"screen":       "prompt-review-compliance-evidence-v1.md",
-		"assess":       "prompt-review-compliance-assessment-v1.md",
-		"verify":       "prompt-review-compliance-verifier-v1.md",
+		"assess":       "prompt-review-compliance-assessment-v2.md",
+		"verify":       "prompt-review-compliance-verifier-v2.md",
 	}
 }
 
@@ -23,7 +23,7 @@ type complianceRequirement struct {
 	Text          string               `json:"text"`
 	Kind          string               `json:"kind"`
 	Binding       string               `json:"binding"`
-	ArtifactKey   string               `json:"artifact_key"`
+	ArtifactKeys  []string             `json:"artifact_keys"` // every candidate of the source that expresses it
 	Source        complianceEvidence   `json:"source"`
 	Conditions    string               `json:"conditions"`
 	ScopeEvidence []complianceEvidence `json:"scope_evidence"`
@@ -45,6 +45,8 @@ type complianceAssessment struct {
 	NumericCheck        string                          `json:"numeric_check,omitempty"`
 	Verification        string                          `json:"verification,omitempty"`
 	References          []complianceReferenceResolution `json:"reference_resolutions,omitempty"`
+	// ResultNote says why the server or the verifier changed the drafted status.
+	ResultNote string `json:"result_note,omitempty"`
 }
 type complianceLineRange struct {
 	Start int `json:"start"`
@@ -142,28 +144,31 @@ func (r *complianceReviewer) assessActivity(ctx context.Context, recordID int64,
 	for _, art := range artifacts[initialCandidates:] {
 		f.Description += fmt.Sprintf("- [%s %s] record %d dependency discovery\n", art.Type, art.ID, art.RecordID)
 	}
-	if len(requirements) == 0 {
-		coverage.EvidenceComplete = false
-		f.Description += "\nSource analysis found no assessable governing requirement. Retrieved candidates are not a compliance pass."
-		metadata["version"] = 1
-		metadata["activity"] = a
-		metadata["coverage"] = coverage
-		metadata["sources"] = complianceManifests(docs)
-		metadata["requirements"] = requirements
-		f.ArtifactFields, _ = json.Marshal(metadata)
-		return f, nil
-	}
-	screenings, err := r.screenDocument(ctx, a, cfg, requirements, doc, &coverage)
+	candidates, err := r.complianceCandidateInputs(ctx, artifacts, requirements)
 	if err != nil {
 		return f, err
 	}
-	payload, err := r.assessmentCall(ctx, "assess", cfg, map[string]any{
-		"activity": a, "document_context": doc.Context, "assessment_date": r.assessmentDate, "requirements": requirements, "screenings": screenings, "coverage": coverage,
+	// Activities whose candidates yield no requirement still get a verdict per candidate; there is
+	// nothing to screen the document for.
+	var screenings []complianceScreening
+	if len(requirements) == 0 {
+		coverage.EvidenceComplete = false
+	} else if screenings, err = r.screenDocument(ctx, a, cfg, requirements, doc, &coverage); err != nil {
+		return f, err
+	}
+	payload, err := r.structuredAssessmentCall(ctx, "assess", cfg, map[string]any{
+		"activity": a, "document_context": doc.Context, "assessment_date": r.assessmentDate, "requirements": requirements, "screenings": screenings, "coverage": coverage, "candidates": candidates,
+	}, complianceAssessmentSchema(), func(parsed map[string]any) error {
+		drafts, verdicts, derr := complianceDecodeAssessment(parsed)
+		if derr != nil {
+			return derr
+		}
+		return checkComplianceCandidateDrafts(verdicts, candidates, requirements, drafts)
 	})
 	if err != nil {
 		return f, err
 	}
-	assessments, err := complianceArray[complianceAssessment](payload, "assessments")
+	assessments, verdicts, err := complianceDecodeAssessment(payload)
 	if err != nil {
 		return f, err
 	}
@@ -174,11 +179,22 @@ func (r *complianceReviewer) assessActivity(ctx context.Context, recordID int64,
 		return f, err
 	}
 	// A separate semantic check is necessary: matching quote bytes does not prove entailment.
-	verified, err := r.assessmentCall(ctx, "verify", cfg, map[string]any{"activity": a, "assessment_date": r.assessmentDate, "requirements": requirements, "assessments": assessments, "screenings": screenings, "coverage": coverage})
+	verified, err := r.structuredAssessmentCall(ctx, "verify", cfg, map[string]any{"activity": a, "assessment_date": r.assessmentDate, "requirements": requirements, "assessments": assessments, "screenings": screenings, "coverage": coverage, "candidates": candidates, "candidate_verdicts": verdicts},
+		complianceVerifierSchema(), func(parsed map[string]any) error {
+			candidateChecks, derr := complianceArray[complianceCandidateCheck](parsed, "candidate_checks")
+			if derr != nil {
+				return derr
+			}
+			return checkComplianceCandidateChecks(candidateChecks, candidates)
+		})
 	if err != nil {
 		return f, err
 	}
 	checks, err := complianceArray[complianceVerification](verified, "checks")
+	if err != nil {
+		return f, err
+	}
+	candidateChecks, err := complianceArray[complianceCandidateCheck](verified, "candidate_checks")
 	if err != nil {
 		return f, err
 	}
@@ -193,11 +209,16 @@ func (r *complianceReviewer) assessActivity(ctx context.Context, recordID int64,
 		byID[check.RequirementID] = check
 	}
 	var b strings.Builder
-	b.WriteString(strings.ReplaceAll(f.Description, "Candidates are search results; applicability and requirement comparison are not assessed.", "Candidates are search results; the requirement assessments below record applicability and document evidence."))
+	b.WriteString(strings.ReplaceAll(f.Description, "Candidates are search results; applicability and requirement comparison are not assessed.", "Candidates are search results; the candidate verdicts above and the requirement assessments below record applicability and document evidence."))
+	if len(requirements) == 0 {
+		b.WriteString("\nSource analysis found no assessable governing requirement. Retrieved candidates are not a compliance pass.\n")
+	}
 	for _, req := range requirements {
 		fmt.Fprintf(&b, "\nRequirement %s [%s]: %s\nSource: record %d lines %d-%d: %s\n", req.ID, req.Binding, req.Text, req.Source.RecordID, req.Source.LineStart, req.Source.LineEnd, req.Source.Quote)
 	}
-	b.WriteString("\nRequirement assessments (documentary evidence only):\n")
+	if len(requirements) > 0 {
+		b.WriteString("\nRequirement assessments (documentary evidence only):\n")
+	}
 	for i := range assessments {
 		result := &assessments[i]
 		check, ok := byID[result.RequirementID]
@@ -211,6 +232,7 @@ func (r *complianceReviewer) assessActivity(ctx context.Context, recordID int64,
 			result.Suggestion = ""
 			result.Rationale = "The draft conclusion is unresolved: " + check.Reason
 			result.ApplicabilityReason = check.Reason
+			result.ResultNote = "Verification rejected the draft: " + check.Reason
 		}
 		if check.Valid && result.Applicability == "applicable" && complianceOneOf(result.Status, "contradicted", "not_documented") {
 			f.Severity = "medium"
@@ -231,21 +253,27 @@ func (r *complianceReviewer) assessActivity(ctx context.Context, recordID int64,
 	for _, issue := range coverage.Issues {
 		fmt.Fprintf(&b, "- Coverage limit: %s\n", issue)
 	}
-	f.Description = b.String()
-	f.FindingType = "compliance_assessment"
-	f.ResultKind = "compliance_assessment"
-	label := a.Activity
-	if a.DocumentLevel {
-		label = "document: " + a.Object
+	finalizeComplianceVerdicts(verdicts, candidates, requirements, assessments, candidateChecks)
+	related, verdictText := complianceVerdictRows(verdicts, candidates)
+	f.RelatedArtifacts = related
+	f.Description = verdictText + b.String()
+	if len(requirements) > 0 {
+		f.FindingType = "compliance_assessment"
+		f.ResultKind = "compliance_assessment"
+		label := a.Activity
+		if a.DocumentLevel {
+			label = "document: " + a.Object
+		}
+		f.Title = "Compliance assessment: " + label
 	}
-	f.Title = "Compliance assessment: " + label
-	metadata["version"] = 1
+	metadata["version"] = 2
 	metadata["activity"] = a
 	metadata["requirements"] = requirements
 	metadata["assessments"] = assessments
 	metadata["coverage"] = coverage
 	metadata["sources"] = complianceManifests(docs)
 	metadata["screenings"] = screenings
+	metadata["candidate_verdicts"] = orderComplianceVerdicts(verdicts)
 	f.ArtifactFields, _ = json.Marshal(metadata)
 	return f, nil
 }
@@ -310,17 +338,22 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 			if req.Text == "" || (req.Kind != "quantitative" && req.Kind != "qualitative") || !complianceOneOf(req.Binding, "required", "recommended", "informative", "unknown") {
 				return nil, fmt.Errorf("compliance: malformed extracted requirement")
 			}
-			if req.Source.RecordID != art.RecordID || !seenArtifact[req.ArtifactKey] {
+			if req.Source.RecordID != art.RecordID || len(req.ArtifactKeys) == 0 {
 				return nil, fmt.Errorf("compliance: requirement cites an unretrieved source")
 			}
-			ownKey := false
-			for _, v := range own {
-				if v.key() == req.ArtifactKey {
-					ownKey = true
+			for _, key := range req.ArtifactKeys {
+				if !seenArtifact[key] {
+					return nil, fmt.Errorf("compliance: requirement cites an unretrieved source")
 				}
-			}
-			if !ownKey {
-				return nil, fmt.Errorf("compliance: requirement artifact belongs to another source")
+				ownKey := false
+				for _, v := range own {
+					if v.key() == key {
+						ownKey = true
+					}
+				}
+				if !ownKey {
+					return nil, fmt.Errorf("compliance: requirement artifact belongs to another source")
+				}
 			}
 			if err = verifyComplianceEvidence(req.Source, docs); err != nil {
 				return nil, err
@@ -493,11 +526,13 @@ func validateComplianceAssessments(results []complianceAssessment, reqs []compli
 		if !coverage.SourceComplete {
 			result.Status = "insufficient_evidence"
 			result.Suggestion = ""
+			result.ResultNote = "Source context is incomplete."
 			continue
 		}
 		if result.Status == "not_documented" && (!coverage.EvidenceComplete || coverage.ScreenedLines != coverage.TotalLines || coverage.TotalLines == 0) {
 			result.Status = "insufficient_evidence"
 			result.Suggestion = ""
+			result.ResultNote = "Whole-document screening is incomplete, so an omission cannot be concluded."
 		}
 		targetEvidence := false
 		for _, e := range result.Evidence {
@@ -508,6 +543,7 @@ func validateComplianceAssessments(results []complianceAssessment, reqs []compli
 		if complianceOneOf(result.Status, "supported", "contradicted", "partially_supported") && !targetEvidence {
 			result.Status = "insufficient_evidence"
 			result.Suggestion = ""
+			result.ResultNote = "No reviewed-document evidence was cited."
 		}
 		if req.Kind == "quantitative" && complianceOneOf(result.Status, "supported", "contradicted", "partially_supported") {
 			if result.Numeric == nil {
