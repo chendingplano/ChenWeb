@@ -189,7 +189,7 @@ func TestProductsV2RejectsInvalidWireRecords(t *testing.T) {
 		func(r map[string]any) { r["product_summary_en"] = "translation" },
 		func(r map[string]any) { r["relation_details"] = map[string]any{} },
 		func(r map[string]any) { r["cnd"] = "使用期间" },
-		func(r map[string]any) { r["p"] = []any{map[string]any{"n": "容量"}} },
+		func(r map[string]any) { r["p"] = []any{map[string]any{"n": "容量", "v": nil}} },
 		func(r map[string]any) { r["p"] = []any{map[string]any{"n": "容量", "v": "240", "unit": "L"}} },
 		func(r map[string]any) { r["rp"] = []any{map[string]any{"n": "内胆", "r": "cmp"}} },
 		func(r map[string]any) { r["rp"] = []any{map[string]any{"r": "has"}} },
@@ -872,5 +872,17 @@ func TestProductsMergedV2RetryNamesEveryInvalidSpan(t *testing.T) {
 	}
 	if rows := payload["products"].([]any); len(rows) != 12 {
 		t.Fatalf("products=%d, want the 12 of the corrected response", len(rows))
+	}
+}
+
+func TestProductsV2AcceptsSingleLineAndOmitsValuelessParameters(t *testing.T) {
+	wire := `{"v":2,"p":[{"n":"Panel","t":"eq","r":"perf","d":"Panel rating","s":143,"o":"m","q":0.9,"p":[{"n":"current","u":"A"},{"n":"voltage","v":0,"u":"V"}]}]}`
+	rows := decodeProductV2Test(t, wire, productSourceLines{143: "Panel rating: 0 V"})
+	if want := []string{"143"}; !reflect.DeepEqual(rows[0]["evidence_lines"], want) {
+		t.Fatalf("evidence_lines = %#v, want %v", rows[0]["evidence_lines"], want)
+	}
+	params := objectItemsFromValue(rows[0]["relation_details"].(map[string]any)["thresholds_or_parameters"])
+	if len(params) != 1 || params[0]["name"] != "voltage" || params[0]["value"] != "0" {
+		t.Fatalf("unexpected parameters: %#v", params)
 	}
 }

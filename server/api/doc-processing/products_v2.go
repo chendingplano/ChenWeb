@@ -70,16 +70,19 @@ func productMergedPromptUsesV2(ref string) bool {
 // The same schema governs provider retries and decoding plain JSON clients.
 func productMergedV2Schema() map[string]any {
 	text := map[string]any{"type": "string", "minLength": 1}
-	spans := map[string]any{
+	lineNumber := map[string]any{"type": "integer", "minimum": 1}
+	spanList := map[string]any{
 		"type": "array", "minItems": 1,
 		"items": map[string]any{"anyOf": []any{
-			map[string]any{"type": "integer", "minimum": 1},
+			lineNumber,
 			map[string]any{"type": "string", "pattern": productV2Span.String()},
 		}},
 	}
+	// A single line number carries the same evidence as a one-item array (ChenWeb#58).
+	spans := map[string]any{"anyOf": []any{spanList, lineNumber}}
 	params := schemaArrayOfObjects(map[string]any{
 		"n": text, "v": schemaScalar("string", "number"), "u": schemaString(),
-	}, []string{"n", "v"}, false)
+	}, []string{"n"}, false)
 	related := schemaArrayOfObjects(map[string]any{
 		"n": text, "r": provisionV2Enum(productV2RelatedRelationships),
 	}, []string{"n", "r"}, false)
@@ -148,7 +151,11 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		if relationType == "" {
 			relationType = relationCode
 		}
-		spans, quote, err := resolveProductV2Spans(raw["s"].([]any), lines)
+		evidence, ok := raw["s"].([]any)
+		if !ok {
+			evidence = []any{raw["s"]}
+		}
+		spans, quote, err := resolveProductV2Spans(evidence, lines)
 		if err != nil {
 			spanErrs = append(spanErrs, fmt.Errorf("(MID_20261107_843) product %d evidence_lines: %w", i+1, err))
 			continue
@@ -156,8 +163,12 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		spans, quote = groundProductV2Spans(name, spans, quote, lines)
 		params := make([]any, 0)
 		for _, param := range objectItemsFromValue(raw["p"]) {
+			value, hasValue := param["v"]
+			if !hasValue {
+				continue
+			}
 			params = append(params, map[string]any{
-				"name": strings.TrimSpace(asString(param["n"])), "value": productV2ScalarText(param["v"]),
+				"name": strings.TrimSpace(asString(param["n"])), "value": productV2ScalarText(value),
 				"unit": strings.TrimSpace(asString(param["u"])),
 			})
 		}
