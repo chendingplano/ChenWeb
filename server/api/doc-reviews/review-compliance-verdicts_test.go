@@ -294,3 +294,49 @@ func TestComplianceDiscoveryRetriesQuotesOutsidePinnedSource(t *testing.T) {
 		t.Fatalf("corrected requirement not accepted: %+v", reqs)
 	}
 }
+
+func TestComplianceDiscoveryDiscardsRequirementsCopiedFromReviewedActivity(t *testing.T) {
+	const response = `{"requirements":[
+		{"text":"Use the annual efficiency formula.","kind":"quantitative","binding":"required","artifact_keys":["provision/p1","metric/m1"],"source":{"record_id":9,"line_start":613,"line_end":624,"quote":"Calculate annual efficiency using formula (B.5)."},"scope_evidence":[{"record_id":9,"line_start":22,"line_end":22,"quote":"Applies to commercial equipment."}]},
+		{"text":"Use heating output as an input.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1","metric/m2"],"source":{"record_id":9,"line_start":613,"line_end":624,"quote":"Heating output is an input to the calculation."}},
+		{"text":"Inspect the installation.","kind":"qualitative","binding":"required","artifact_keys":["provision/p1"],"source":{"record_id":9,"line_start":100,"line_end":100,"quote":"Inspect the installation."}}
+	],"dependencies":[]}`
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": response}}}})
+	}))
+	defer srv.Close()
+	doc := complianceDocument{RecordID: 9, Complete: true, Lines: []complianceInputLine{
+		{LineNumber: 22, Content: "Applies to commercial equipment."},
+		{LineNumber: 100, Content: "Inspect the installation."},
+		{LineNumber: 486, Content: "Bibliography."},
+	}}
+	r := &complianceReviewer{
+		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
+		assessmentPrompts: complianceAssessmentPromptRefs(),
+		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
+		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
+	}
+	activity := complianceActivity{
+		LineStart: 613, LineEnd: 624,
+		SourceText: "Calculate annual efficiency using formula (B.5).\nHeating output is an input to the calculation.",
+	}
+	artifacts := []complianceArtifact{
+		{Type: "provision", ID: "p1", RecordID: 9},
+		{Type: "metric", ID: "m1", RecordID: 9},
+		{Type: "metric", ID: "m2", RecordID: 9},
+	}
+	coverage := complianceCoverage{ReviewedRecordID: 7, SourceComplete: true}
+	reqs, err := r.discoverRequirements(context.Background(), activity, complianceTestCfg, &artifacts, map[int64]complianceDocument{}, &coverage)
+	if err != nil || requests.Load() != 1 {
+		t.Fatalf("requests=%d err=%v; repeating the same request cannot supply the copied source evidence", requests.Load(), err)
+	}
+	if len(reqs) != 1 || reqs[0].ID != "r1" || reqs[0].Source.LineStart != 100 {
+		t.Fatalf("want only the requirement grounded in the supplied source, got %+v", reqs)
+	}
+	if coverage.SourceComplete || len(coverage.Issues) != 1 || !strings.Contains(coverage.Issues[0], "record 9") {
+		t.Fatalf("want a coverage issue for the discarded citations, got %+v", coverage)
+	}
+}

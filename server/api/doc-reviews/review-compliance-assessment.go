@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/searchengine"
@@ -327,6 +328,8 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 				own = append(own, v)
 			}
 		}
+		var reqs []complianceRequirement
+		var discarded int
 		payload, err := r.structuredAssessmentCall(ctx, "requirements", cfg, map[string]any{"activity": a, "source": source, "candidates": own},
 			map[string]any{
 				"type":     "object",
@@ -336,18 +339,29 @@ func (r *complianceReviewer) discoverRequirements(ctx context.Context, a complia
 					"dependencies": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				},
 			}, func(parsed map[string]any) error {
-				reqs, err := complianceArray[complianceRequirement](parsed, "requirements")
+				decoded, err := complianceArray[complianceRequirement](parsed, "requirements")
 				if err != nil {
 					return err
 				}
+				// The reviewed passage can describe a criterion without establishing it in
+				// this external source. Drop only copies with a provably foreign citation.
+				reqs = slices.DeleteFunc(decoded, func(req complianceRequirement) bool {
+					e := req.Source
+					return coverage.ReviewedRecordID > 0 && source.RecordID != coverage.ReviewedRecordID &&
+						e.RecordID == source.RecordID && len(source.Lines) > 0 &&
+						(e.LineEnd < source.Lines[0].LineNumber || e.LineStart > source.Lines[len(source.Lines)-1].LineNumber) &&
+						e.LineStart > 0 && e.LineStart >= a.LineStart && e.LineEnd <= a.LineEnd && e.LineStart <= e.LineEnd &&
+						strings.TrimSpace(e.Quote) != "" && strings.Contains(a.SourceText, e.Quote)
+				})
+				discarded = len(decoded) - len(reqs)
 				return checkComplianceRequirementEvidence(reqs, source)
 			})
 		if err != nil {
 			return nil, err
 		}
-		reqs, err := complianceArray[complianceRequirement](payload, "requirements")
-		if err != nil {
-			return nil, err
+		if discarded > 0 {
+			coverage.SourceComplete = false
+			coverage.Issues = append(coverage.Issues, fmt.Sprintf("Source record %d lacked anchors for %d proposed requirements quoted from reviewed record %d.", source.RecordID, discarded, coverage.ReviewedRecordID))
 		}
 		for _, req := range reqs {
 			if req.Text == "" || (req.Kind != "quantitative" && req.Kind != "qualitative") || !complianceOneOf(req.Binding, "required", "recommended", "informative", "unknown") {
