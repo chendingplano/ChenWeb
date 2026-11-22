@@ -230,7 +230,7 @@
 				{/each}
 			{/if}
 		</section>
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 		<div class="act-splitter" role="separator" aria-orientation="vertical" aria-label={m.cgv_resize_activities()} tabindex="0"
 			aria-valuemin={MIN_ACTIVITIES} aria-valuenow={activitiesWidth}
 			onpointerdown={startResizeActivities} onpointermove={moveResizeActivities} onpointerup={endResizeActivities} onpointercancel={endResizeActivities}
@@ -258,7 +258,7 @@
 				</div>
 			{:else}<p class="empty">{m.cgv_select_activity()}</p>{/if}
 		</section>
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 		<div class="splitter" role="separator" aria-orientation="vertical" aria-label={m.cgv_resize_panels()} tabindex="0"
 			aria-valuemin={MIN_PANEL} aria-valuenow={panelWidth}
 			onpointerdown={startResize} onpointermove={moveResize} onpointerup={endResize} onpointercancel={endResize}
