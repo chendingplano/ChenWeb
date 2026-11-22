@@ -11,13 +11,33 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/searchengine"
 )
 
-func complianceAssessmentPromptRefs() map[string]string {
+// complianceAssessmentPromptKeys maps each assessment stage to the [reviewers.compliance] key in
+// doc-review.local.toml that names its prompt file.
+var complianceAssessmentPromptKeys = map[string]string{
+	"requirements": "requirements_prompt",
+	"screen":       "evidence_prompt",
+	"assess":       "assessment_prompt",
+	"verify":       "verifier_prompt",
+}
+
+// complianceAssessmentPromptRefs returns the configured prompt file of each assessment stage. An
+// unset key stays empty, and the stage that needs it fails naming the key.
+func complianceAssessmentPromptRefs(rc ReviewAspectConfig) map[string]string {
 	return map[string]string{
-		"requirements": "prompt-review-compliance-requirements-v2.md",
-		"screen":       "prompt-review-compliance-evidence-v1.md",
-		"assess":       "prompt-review-compliance-assessment-v2.md",
-		"verify":       "prompt-review-compliance-verifier-v2.md",
+		"requirements": strings.TrimSpace(rc.RequirementsPrompt),
+		"screen":       strings.TrimSpace(rc.EvidencePrompt),
+		"assess":       strings.TrimSpace(rc.AssessmentPrompt),
+		"verify":       strings.TrimSpace(rc.VerifierPrompt),
 	}
+}
+
+// assessmentPrompt loads the prompt of one assessment stage.
+func (r *complianceReviewer) assessmentPrompt(stage string) (text, resolved string, err error) {
+	ref := r.assessmentPrompts[stage]
+	if ref == "" || r.loadPrompt == nil {
+		return "", "", fmt.Errorf("compliance: %s is not set in [reviewers.compliance] of doc-review.local.toml", complianceAssessmentPromptKeys[stage])
+	}
+	return r.loadPrompt(ref)
 }
 
 type complianceRequirement struct {
@@ -100,11 +120,7 @@ func complianceArray[T any](payload map[string]any, key string) ([]T, error) {
 }
 
 func (r *complianceReviewer) assessmentCall(ctx context.Context, stage string, cfg ReviewerConfig, input any) (map[string]any, error) {
-	ref := r.assessmentPrompts[stage]
-	if ref == "" || r.loadPrompt == nil {
-		return nil, fmt.Errorf("compliance: %s prompt not configured", stage)
-	}
-	text, resolved, err := r.loadPrompt(ref)
+	text, resolved, err := r.assessmentPrompt(stage)
 	if err != nil {
 		return nil, err
 	}

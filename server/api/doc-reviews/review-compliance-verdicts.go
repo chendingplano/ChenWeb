@@ -428,11 +428,7 @@ func (r *complianceReviewer) structuredAssessmentCall(ctx context.Context, stage
 		}
 		return payload, nil
 	}
-	ref := r.assessmentPrompts[stage]
-	if ref == "" || r.loadPrompt == nil {
-		return nil, fmt.Errorf("compliance: %s prompt not configured", stage)
-	}
-	text, resolved, err := r.loadPrompt(ref)
+	text, resolved, err := r.assessmentPrompt(stage)
 	if err != nil {
 		return nil, err
 	}

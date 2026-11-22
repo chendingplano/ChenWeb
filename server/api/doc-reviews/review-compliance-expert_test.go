@@ -57,7 +57,7 @@ func TestComplianceExpertStagesFindMetricAndVerifyConvertedClaim(t *testing.T) {
 		}
 		return &searchengine.Response{Results: []searchengine.Result{{ArtifactType: "metric", ArtifactID: "m1", InputRecordID: 9, Snippet: source.Quote}}}, nil
 	})
-	r.assessmentPrompts = complianceAssessmentPromptRefs()
+	r.assessmentPrompts = complianceTestAssessmentPrompts()
 	r.loadPrompt = func(ref string) (string, string, error) { return "test prompt", ref, nil }
 	r.loadDocument = func(_ context.Context, id int64) (complianceDocument, error) {
 		e := source
@@ -106,7 +106,7 @@ func TestComplianceExpertCanonicalLoadErrorAborts(t *testing.T) {
 	r := newTestComplianceReviewer(&fakeJSONExtractor{out: activityPayload("a", "source")}, func(context.Context, searchengine.Request) (*searchengine.Response, error) {
 		return &searchengine.Response{Results: []searchengine.Result{{ArtifactType: "metric", ArtifactID: "m1", InputRecordID: 9}}}, nil
 	})
-	r.assessmentPrompts = complianceAssessmentPromptRefs()
+	r.assessmentPrompts = complianceTestAssessmentPrompts()
 	boom := errors.New("canonical source unavailable")
 	r.loadDocument = func(context.Context, int64) (complianceDocument, error) { return complianceDocument{}, boom }
 	fs, err := r.processChunk(context.Background(), 7, 1, complianceTestCfg, chunkInput{})

@@ -20,6 +20,37 @@ type GoldConfig struct {
 	// default DefaultMaxCandidates). It is the labelling workload per activity; the reviewer's own search
 	// does not read it.
 	MaxCandidates int
+	// Panel is [compliance-review.gold-panel]: the prompt files of the model panel.
+	Panel PanelConfig
+}
+
+// GoldPanelTable is the config table that names the model panel's prompt files.
+const GoldPanelTable = "[compliance-review.gold-panel]"
+
+// PanelConfig names the model panel's prompt files (in ChenWeb/prompts) and the version of the
+// labelling rules that the rules prompt holds, which is stored with each panel run.
+type PanelConfig struct {
+	RulesPrompt        string `toml:"rules_prompt"`
+	RulesVersion       string `toml:"rules_version"`
+	ActivitiesPrompt   string `toml:"activities_prompt"`
+	JudgePrompt        string `toml:"judge_prompt"`
+	AdjActivityPrompt  string `toml:"adjudicate_activity_prompt"`
+	AdjJudgementPrompt string `toml:"adjudicate_judgement_prompt"`
+}
+
+// Missing lists the unset settings in table order.
+func (c PanelConfig) Missing() []string {
+	var out []string
+	for _, kv := range [][2]string{
+		{"rules_prompt", c.RulesPrompt}, {"rules_version", c.RulesVersion}, {"activities_prompt", c.ActivitiesPrompt},
+		{"judge_prompt", c.JudgePrompt}, {"adjudicate_activity_prompt", c.AdjActivityPrompt},
+		{"adjudicate_judgement_prompt", c.AdjJudgementPrompt},
+	} {
+		if kv[1] == "" {
+			out = append(out, kv[0])
+		}
+	}
+	return out
 }
 
 // DefaultMaxCandidates applies when [reviewers.compliance].max_candidates is absent.
@@ -36,7 +67,8 @@ const GoldDocsTable = "[compliance-review.gold-docs]"
 
 type goldFile struct {
 	ComplianceReview struct {
-		GoldDocs map[string]string `toml:"gold-docs"`
+		GoldDocs  map[string]string `toml:"gold-docs"`
+		GoldPanel PanelConfig       `toml:"gold-panel"`
 	} `toml:"compliance-review"`
 	Reviewers struct {
 		Compliance struct {
@@ -64,7 +96,7 @@ func ParseGoldConfig(raw []byte) (*GoldConfig, error) {
 			return nil, fmt.Errorf("[compliance-review.covered-docs] and [compliance-review.uncovered-docs] were merged into %s on 2026-11-14; move their entries there and remove the old tables", GoldDocsTable)
 		}
 	}
-	c := &GoldConfig{Docs: f.ComplianceReview.GoldDocs, MaxCandidates: DefaultMaxCandidates}
+	c := &GoldConfig{Docs: f.ComplianceReview.GoldDocs, MaxCandidates: DefaultMaxCandidates, Panel: f.ComplianceReview.GoldPanel}
 	if v := f.Reviewers.Compliance.MaxCandidates; v != nil {
 		if *v <= 0 {
 			return nil, fmt.Errorf("[reviewers.compliance] max_candidates must be a positive number, got %d", *v)

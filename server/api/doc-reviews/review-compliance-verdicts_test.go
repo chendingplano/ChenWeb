@@ -32,7 +32,7 @@ func verdictTestReviewer(fake *fakeJSONExtractor) *complianceReviewer {
 		}
 		return &searchengine.Response{}, nil
 	})
-	r.assessmentPrompts = complianceAssessmentPromptRefs()
+	r.assessmentPrompts = complianceTestAssessmentPrompts()
 	r.loadPrompt = func(ref string) (string, string, error) { return "test prompt", ref, nil }
 	r.loadArtifacts = func(_ context.Context, refs []searchengine.ArtifactRef) ([]searchengine.Result, error) {
 		var out []searchengine.Result
@@ -232,7 +232,7 @@ func TestComplianceAssessmentCorrectionRetry(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
 	}))
 	defer srv.Close()
-	r := &complianceReviewer{client: &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()}, assessmentPrompts: complianceAssessmentPromptRefs(),
+	r := &complianceReviewer{client: &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()}, assessmentPrompts: complianceTestAssessmentPrompts(),
 		loadPrompt: func(ref string) (string, string, error) { return "test prompt", ref, nil }}
 	payload, err := r.structuredAssessmentCall(context.Background(), "assess", complianceTestCfg, map[string]any{"candidates": cands}, complianceAssessmentSchema(), func(parsed map[string]any) error {
 		drafts, verdicts, derr := complianceDecodeAssessment(parsed)
@@ -275,7 +275,7 @@ func TestComplianceDiscoveryRetriesQuotesOutsidePinnedSource(t *testing.T) {
 	doc := complianceDocument{RecordID: 9, Lines: []complianceInputLine{{LineNumber: 485, Content: "Access logs"}, {LineNumber: 486, Content: "Retain access logs."}}}
 	r := &complianceReviewer{
 		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
-		assessmentPrompts: complianceAssessmentPromptRefs(),
+		assessmentPrompts: complianceTestAssessmentPrompts(),
 		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
 		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
 	}
@@ -315,7 +315,7 @@ func TestComplianceDiscoveryDiscardsRequirementsCopiedFromReviewedActivity(t *te
 	}}
 	r := &complianceReviewer{
 		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
-		assessmentPrompts: complianceAssessmentPromptRefs(),
+		assessmentPrompts: complianceTestAssessmentPrompts(),
 		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
 		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
 	}
@@ -364,7 +364,7 @@ func TestComplianceDiscoveryDiscardsCopiedQuotesAtLinesTheSourceAlsoHas(t *testi
 	}}
 	r := &complianceReviewer{
 		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
-		assessmentPrompts: complianceAssessmentPromptRefs(),
+		assessmentPrompts: complianceTestAssessmentPrompts(),
 		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
 		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
 	}
@@ -413,7 +413,7 @@ func TestComplianceDiscoveryRetriesSourceTextCitedAtReviewedLines(t *testing.T) 
 	}}
 	r := &complianceReviewer{
 		client:            &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test-key", ModelName: "test", HTTPClient: srv.Client()},
-		assessmentPrompts: complianceAssessmentPromptRefs(),
+		assessmentPrompts: complianceTestAssessmentPrompts(),
 		loadPrompt:        func(ref string) (string, string, error) { return "test prompt", ref, nil },
 		loadDocument:      func(context.Context, int64) (complianceDocument, error) { return doc, nil },
 	}

@@ -53,24 +53,23 @@ type complianceReviewer struct {
 
 func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, db *sql.DB, maxTasks int) *complianceReviewer {
 	cfg := searchengine.LoadConfig()
-	docPrompt := ""
-	minCosine := 0.0
+	var rc ReviewAspectConfig
 	if dc, _ := GetDocReviewConfig(); dc != nil {
-		rc := dc.Reviewers["compliance"]
-		docPrompt = strings.TrimSpace(rc.DocActivityPrompt)
-		if rc.MinCosine != nil {
-			minCosine = *rc.MinCosine
-		}
+		rc = dc.Reviewers["compliance"]
+	}
+	minCosine := 0.0
+	if rc.MinCosine != nil {
+		minCosine = *rc.MinCosine
 	}
 	return &complianceReviewer{
-		assessmentPrompts: complianceAssessmentPromptRefs(),
+		assessmentPrompts: complianceAssessmentPromptRefs(rc),
 		loadDocument: func(ctx context.Context, id int64) (complianceDocument, error) {
 			return loadComplianceDocument(ctx, db, id)
 		},
 		maxSourceRecords:     8,
 		maxEvidenceChunks:    32,
 		assessmentDate:       time.Now().UTC().Format("2006-01-02"),
-		docActivityPromptRef: docPrompt,
+		docActivityPromptRef: strings.TrimSpace(rc.DocActivityPrompt),
 		minCosine:            minCosine,
 		duplicateIDs:         func(ctx context.Context, id int64) ([]int64, error) { return sameMD5RecordIDs(ctx, db, id) },
 		client:               client,

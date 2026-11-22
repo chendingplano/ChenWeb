@@ -17,6 +17,8 @@
 //
 // panel runs the deferred model-panel labelling: two model annotators and a model adjudicator named
 // by COMPLIANCE_REVIEWER_ANNOTATOR_1, COMPLIANCE_REVIEWER_ANNOTATOR_2 and COMPLIANCE_ADJUDICATOR.
+// Its prompt files and rules version are named in [compliance-review.gold-panel] of
+// doc-review.local.toml.
 //
 //	compliance-gold panel -snapshot 3 -user <user id> [-check]
 //
@@ -681,6 +683,13 @@ func cmdPanel(args []string) error {
 	if err != nil {
 		return err
 	}
+	prompts, err := complianceeval.LoadPrompts(cfg.Panel, func(ref string) (string, error) {
+		text, _, _, err := docprocessing.LoadPromptByRef(ref)
+		return text, err
+	})
+	if err != nil {
+		return err
+	}
 	db, err := complianceeval.OpenDB()
 	if err != nil {
 		return err
@@ -706,7 +715,7 @@ func cmdPanel(args []string) error {
 		}
 		return complianceeval.Labeller{Name: ref, Model: model, Client: c}, nil
 	}
-	p := complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Search: searchFunc(db), Load: loadFunc(db)}
+	p := complianceeval.Pipeline{MaxCandidates: cfg.MaxCandidates, Prompts: prompts, Search: searchFunc(db), Load: loadFunc(db)}
 	if p.A1, err = build(profiles.Annotator1); err != nil {
 		return err
 	}
@@ -714,12 +723,6 @@ func cmdPanel(args []string) error {
 		return err
 	}
 	if p.Adj, err = build(profiles.Adjudicator); err != nil {
-		return err
-	}
-	if p.Prompts, err = complianceeval.LoadPrompts(func(ref string) (string, error) {
-		text, _, _, err := docprocessing.LoadPromptByRef(ref)
-		return text, err
-	}); err != nil {
 		return err
 	}
 	p.Chunks = func(ctx context.Context, id int64) ([]docreviews.GoldChunk, error) {
@@ -731,8 +734,8 @@ func cmdPanel(args []string) error {
 	}
 
 	run := &complianceeval.GoldRun{
-		Method: complianceeval.MethodModelPanel, SnapshotID: *snapshot, RulesFile: complianceeval.RulesFile,
-		RulesVersion: "2.0.0", RulesSHA256: p.Prompts.RulesSHA256, Profiles: profiles, MaxCandidates: cfg.MaxCandidates,
+		Method: complianceeval.MethodModelPanel, SnapshotID: *snapshot, RulesFile: cfg.Panel.RulesPrompt,
+		RulesVersion: cfg.Panel.RulesVersion, RulesSHA256: prompts.RulesSHA256, Profiles: profiles, MaxCandidates: cfg.MaxCandidates,
 	}
 	for _, d := range docs {
 		start := time.Now()

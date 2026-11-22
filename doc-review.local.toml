@@ -814,6 +814,10 @@ input = "per-chunk"
 model = "deepseek-flash-processor"
 prompt = "prompt-review-compliance-v3.md"
 doc_activity_prompt = "prompt-review-compliance-document-activity-v3.md"
+requirements_prompt = "prompt-review-compliance-requirements-v2.md"   # lists one source's requirements for an activity
+evidence_prompt = "prompt-review-compliance-evidence-v1.md"           # collects evidence for each requirement from one chunk
+assessment_prompt = "prompt-review-compliance-assessment-v2.md"       # decides applicability, evidence and candidate verdicts
+verifier_prompt = "prompt-review-compliance-verifier-v2.md"           # checks requirements, numbers and verdicts against their sources
 thinking_type = "disabled"   # structured staged assessment; reviewer profile controls the model
 max_candidates = 50   # gold set only: candidates pooled per activity for labelling (default 100); the reviewer's own search ignores it
 # min_cosine = 0.55   # relevance floor 0..1 for candidates; unset = no floor. Do not set before the gold set shows a value (openspec compliance-reviewer-phase2).
@@ -829,6 +833,17 @@ max_candidates = 50   # gold set only: candidates pooled per activity for labell
 # compliance-score report how many gold activities have a governing passage and how many have none,
 # so pick documents that give both. (The covered-docs and uncovered-docs tables were merged into this
 # one on 2026-11-14; the old tables are refused.)
+[compliance-review.gold-panel]
+# Prompt files of the deferred model panel (compliance-gold panel), in prompts/. The rules prompt is
+# placed at the start of each of the other four. rules_version is the version of the labelling rules
+# the rules prompt holds; it is stored with each panel run, so change it whenever rules_prompt changes.
+rules_prompt = "prompt-compliance-gold-rules-v2.md"
+rules_version = "2.0.0"
+activities_prompt = "prompt-compliance-gold-activities-v2.md"                       # lists the activities in one chunk
+judge_prompt = "prompt-compliance-gold-judge-v2.md"                                 # labels a batch of candidates for one activity
+adjudicate_activity_prompt = "prompt-compliance-gold-adjudicate-activity-v2.md"     # keeps or drops an activity only one labeller found
+adjudicate_judgement_prompt = "prompt-compliance-gold-adjudicate-judgement-v2.md"   # settles a label the two labellers disagree on
+
 [compliance-review.gold-docs]
 # 416 = "rural waste sorting standard"
 # 799 = "AI agent research paper"

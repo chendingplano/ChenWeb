@@ -28,10 +28,20 @@ func (f *fakeModel) ExtractJSON(_ context.Context, in llmclients.JSONExtractionI
 
 const chunkJSON = `{"doc_context":"D","lines":[["flag","line_number","page_number","line_type","content"],["n",1,1,"heading","Title"],["n",2,1,"paragraph","The operator logs user actions."],["n",3,1,"paragraph","Logs are kept six months."]]}`
 
+// Synthetic prompt files: the fake models route calls by prompt name.
+const (
+	testJudgePrompt        = "prompt-judge.md"
+	testAdjActivityPrompt  = "prompt-adjudicate-activity.md"
+	testAdjJudgementPrompt = "prompt-adjudicate-judgement.md"
+)
+
+var testPanel = PanelConfig{RulesPrompt: "prompt-rules.md", RulesVersion: "9.9.9", ActivitiesPrompt: "prompt-activities.md",
+	JudgePrompt: testJudgePrompt, AdjActivityPrompt: testAdjActivityPrompt, AdjJudgementPrompt: testAdjJudgementPrompt}
+
 func testPipeline(a1, a2, adj *fakeModel, search func(searchengine.Request) *searchengine.Response) *Pipeline {
 	return &Pipeline{
 		A1: Labeller{"p1", "m1", a1}, A2: Labeller{"p2", "m2", a2}, Adj: Labeller{"pa", "ma", adj},
-		Prompts:       Prompts{Activities: "rules\n\nact", Judge: "rules\n\njudge", AdjActivity: "rules\n\nadja", AdjJudgement: "rules\n\nadjj"},
+		Prompts:       Prompts{Activities: "rules\n\nact", Judge: "rules\n\njudge", AdjActivity: "rules\n\nadja", AdjJudgement: "rules\n\nadjj", Config: testPanel},
 		MaxCandidates: 50,
 		Chunks: func(context.Context, int64) ([]docreviews.GoldChunk, error) {
 			return []docreviews.GoldChunk{{Index: 0, StartLine: 1, EndLine: 3, InputJSON: chunkJSON}}, nil
@@ -81,13 +91,13 @@ func TestLabelDocumentAgreementAdjudicationAndPool(t *testing.T) {
 	// A1 finds two activities, A2 finds the first (same span) and a document-level one; the adjudicator
 	// keeps A1's second and rejects A2's document-level.
 	a1 := &fakeModel{handle: func(p, in string) map[string]any {
-		if p == JudgePromptFile {
+		if p == testJudgePrompt {
 			return judgeAll(map[string]string{"chunk/c1": "governs", "chunk/c2": "topical"})(p, in)
 		}
 		return acts(act("log_user_actions", 2, 2), act("retain_logs", 3, 3))
 	}}
 	a2 := &fakeModel{handle: func(p, in string) map[string]any {
-		if p == JudgePromptFile {
+		if p == testJudgePrompt {
 			return judgeAll(map[string]string{"chunk/c1": "governs", "chunk/c2": "unrelated"})(p, in)
 		}
 		r := acts(act("log_actions", 2, 3))
@@ -96,7 +106,7 @@ func TestLabelDocumentAgreementAdjudicationAndPool(t *testing.T) {
 	}}
 	var adjActivities []string
 	adj := &fakeModel{handle: func(p, in string) map[string]any {
-		if p == AdjActivityPromptFile {
+		if p == testAdjActivityPrompt {
 			adjActivities = append(adjActivities, in)
 			return map[string]any{"keep": !strings.Contains(in, "document_x"), "rationale": "why"}
 		}
@@ -142,8 +152,8 @@ func TestLabelDocumentAgreementAdjudicationAndPool(t *testing.T) {
 	if j := byID["chunk/c2"]; j.Final != "topical" || !j.Adjudicated || j.Rationale != "resolved" || j.Candidate.Cosine == nil || *j.Candidate.Cosine != 0.4 {
 		t.Errorf("disputed candidate = %+v", j)
 	}
-	if adj.calls[AdjJudgementPromptFile] != 2 { // one disagreement per final activity
-		t.Errorf("judgement adjudications = %d", adj.calls[AdjJudgementPromptFile])
+	if adj.calls[testAdjJudgementPrompt] != 2 { // one disagreement per final activity
+		t.Errorf("judgement adjudications = %d", adj.calls[testAdjJudgementPrompt])
 	}
 }
 
@@ -157,7 +167,7 @@ func TestActivityOutsideChunkIsRefused(t *testing.T) {
 
 func TestMissingLabelIsRefused(t *testing.T) {
 	a1 := &fakeModel{handle: func(p, in string) map[string]any {
-		if p == JudgePromptFile {
+		if p == testJudgePrompt {
 			return judgeAll(map[string]string{"chunk/c1": "governs"})(p, in) // c2 gets label ""
 		}
 		return acts(act("a", 2, 2))
@@ -199,7 +209,7 @@ func TestMissingLabelIsRetriedForMissingCandidatesOnly(t *testing.T) {
 	asked := map[int][]string{}
 	n := 0
 	a1 := &fakeModel{handle: func(p, in string) map[string]any {
-		if p != JudgePromptFile {
+		if p != testJudgePrompt {
 			return acts(act("a", 2, 2))
 		}
 		n++
@@ -218,7 +228,7 @@ func TestMissingLabelIsRetriedForMissingCandidatesOnly(t *testing.T) {
 		return map[string]any{"labels": ls}
 	}}
 	a2 := &fakeModel{handle: func(p, in string) map[string]any {
-		if p != JudgePromptFile {
+		if p != testJudgePrompt {
 			return acts(act("a", 2, 2))
 		}
 		return judgeAll(map[string]string{"chunk/c1": "topical", "chunk/c2": "topical"})(p, in)
@@ -374,12 +384,12 @@ func TestPanelV2AcceptsAmbiguousMetricJudgement(t *testing.T) {
 	model := &fakeModel{handle: func(_, _ string) map[string]any {
 		return map[string]any{"labels": []any{map[string]any{"id": "metric/m1", "label": "ambiguous", "reason": "source provenance is incomplete"}}}
 	}}
-	p := &Pipeline{Prompts: Prompts{Judge: "rules"}}
+	p := &Pipeline{Prompts: Prompts{Judge: "rules", Config: testPanel}}
 	labels, err := p.judgeBy(context.Background(), Labeller{Name: "synthetic", Model: "synthetic", Client: model}, Activity{Name: "inspect"}, []Candidate{{ArtifactType: "metric", ArtifactID: "m1"}})
 	if err != nil || labels["metric/m1"].label != "ambiguous" {
 		t.Fatalf("labels=%v err=%v", labels, err)
 	}
-	if model.calls[JudgePromptFile] != 1 {
+	if model.calls[testJudgePrompt] != 1 {
 		t.Fatalf("valid ambiguous label retried: %v", model.calls)
 	}
 }

@@ -14,15 +14,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/searchengine"
 )
 
-// Prompt files (in ChenWeb/prompts). The rules file is frozen per version and prepended to every
-// task prompt; its SHA-256 is stored with the run.
 const (
-	RulesFile              = "prompt-compliance-gold-rules-v2.md"
-	ActivitiesPromptFile   = "prompt-compliance-gold-activities-v2.md"
-	JudgePromptFile        = "prompt-compliance-gold-judge-v2.md"
-	AdjActivityPromptFile  = "prompt-compliance-gold-adjudicate-activity-v2.md"
-	AdjJudgementPromptFile = "prompt-compliance-gold-adjudicate-judgement-v2.md"
-
 	judgeBatch       = 10
 	candidateTextMax = 1200
 	activityTextMax  = 600
@@ -36,24 +28,30 @@ const (
 	agreeSingle      = "single" // agent runs: one labeller
 )
 
-// Prompts are the composed (rules + task) prompt texts.
+// Prompts are the composed (rules + task) prompt texts, and the settings that named their files.
 type Prompts struct {
 	Activities, Judge, AdjActivity, AdjJudgement string
 	RulesSHA256                                  string
+	Config                                       PanelConfig
 }
 
-// LoadPrompts reads the rules and the four task prompts through load (docprocessing.LoadPromptByRef
-// in production) and composes them.
-func LoadPrompts(load func(ref string) (string, error)) (Prompts, error) {
-	rules, err := load(RulesFile)
+// LoadPrompts reads the rules and the four task prompts that cfg names through load
+// (docprocessing.LoadPromptByRef in production) and composes them. The rules file is frozen per
+// version and prepended to every task prompt; its SHA-256 is stored with the run. An unset setting
+// is an error naming it.
+func LoadPrompts(cfg PanelConfig, load func(ref string) (string, error)) (Prompts, error) {
+	if missing := cfg.Missing(); len(missing) > 0 {
+		return Prompts{}, fmt.Errorf("set %s in %s of doc-review.local.toml", strings.Join(missing, ", "), GoldPanelTable)
+	}
+	rules, err := load(cfg.RulesPrompt)
 	if err != nil {
-		return Prompts{}, fmt.Errorf("load %s: %w", RulesFile, err)
+		return Prompts{}, fmt.Errorf("load %s: %w", cfg.RulesPrompt, err)
 	}
 	sum := sha256.Sum256([]byte(rules))
-	p := Prompts{RulesSHA256: hex.EncodeToString(sum[:])}
+	p := Prompts{RulesSHA256: hex.EncodeToString(sum[:]), Config: cfg}
 	for ref, dst := range map[string]*string{
-		ActivitiesPromptFile: &p.Activities, JudgePromptFile: &p.Judge,
-		AdjActivityPromptFile: &p.AdjActivity, AdjJudgementPromptFile: &p.AdjJudgement,
+		cfg.ActivitiesPrompt: &p.Activities, cfg.JudgePrompt: &p.Judge,
+		cfg.AdjActivityPrompt: &p.AdjActivity, cfg.AdjJudgementPrompt: &p.AdjJudgement,
 	} {
 		task, err := load(ref)
 		if err != nil {
@@ -191,7 +189,7 @@ func (p *Pipeline) extract(ctx context.Context, lab Labeller, chunks []docreview
 	var out []Activity
 	for _, ch := range chunks {
 		in := fmt.Sprintf(`{"first_chunk":%t,"chunk":%s}`, ch.Index == 0, ch.InputJSON)
-		resp, err := p.call(ctx, lab, p.Prompts.Activities, ActivitiesPromptFile, in, "compliance_gold_activities")
+		resp, err := p.call(ctx, lab, p.Prompts.Activities, p.Prompts.Config.ActivitiesPrompt, in, "compliance_gold_activities")
 		if err != nil {
 			return nil, err
 		}
@@ -304,7 +302,7 @@ func (p *Pipeline) merge(ctx context.Context, a1, a2 []Activity) (final []Activi
 		in, _ := json.Marshal(map[string]any{"activity": map[string]any{
 			"activity": s.a.Name, "object": s.a.Object, "line_start": s.a.LineStart, "line_end": s.a.LineEnd,
 			"source_text": truncate(s.a.SourceText, activityTextMax)}, "proposed_by": s.by})
-		resp, err := p.call(ctx, p.Adj, p.Prompts.AdjActivity, AdjActivityPromptFile, string(in), "compliance_gold_adjudicate_activity")
+		resp, err := p.call(ctx, p.Adj, p.Prompts.AdjActivity, p.Prompts.Config.AdjActivityPrompt, string(in), "compliance_gold_adjudicate_activity")
 		if err != nil {
 			return nil, 0, err
 		}
@@ -538,7 +536,7 @@ func (p *Pipeline) judgeBy(ctx context.Context, lab Labeller, a Activity, pool [
 			}
 			in, _ := json.Marshal(map[string]any{"activity": map[string]any{"activity": a.Name, "object": a.Object,
 				"source_text": truncate(a.SourceText, activityTextMax)}, "candidates": cs})
-			resp, err := p.call(ctx, lab, p.Prompts.Judge, JudgePromptFile, string(in), "compliance_gold_judge")
+			resp, err := p.call(ctx, lab, p.Prompts.Judge, p.Prompts.Config.JudgePrompt, string(in), "compliance_gold_judge")
 			if err != nil {
 				return nil, err
 			}
@@ -594,7 +592,7 @@ func (p *Pipeline) judge(ctx context.Context, a Activity, pool []Candidate) ([]J
 				"annotator_1": map[string]any{"label": x.label, "reason": x.reason},
 				"annotator_2": map[string]any{"label": y.label, "reason": y.reason},
 			})
-			resp, err := p.call(ctx, p.Adj, p.Prompts.AdjJudgement, AdjJudgementPromptFile, string(in), "compliance_gold_adjudicate_judgement")
+			resp, err := p.call(ctx, p.Adj, p.Prompts.AdjJudgement, p.Prompts.Config.AdjJudgementPrompt, string(in), "compliance_gold_adjudicate_judgement")
 			if err != nil {
 				return nil, err
 			}

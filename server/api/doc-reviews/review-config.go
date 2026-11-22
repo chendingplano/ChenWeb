@@ -59,6 +59,11 @@ type ReviewAspectConfig struct {
 	Prompt   string `toml:"prompt"`
 	// DocActivityPrompt is the compliance reviewer's document-level activity prompt.
 	DocActivityPrompt string `toml:"doc_activity_prompt"`
+	// The compliance reviewer's four assessment prompts (see complianceAssessmentPromptKeys).
+	RequirementsPrompt string `toml:"requirements_prompt"`
+	EvidencePrompt     string `toml:"evidence_prompt"`
+	AssessmentPrompt   string `toml:"assessment_prompt"`
+	VerifierPrompt     string `toml:"verifier_prompt"`
 	// ThinkingType overrides the model profile's thinking_type for this reviewer
 	// (e.g. "disabled"). Empty keeps the profile's setting.
 	ThinkingType string `toml:"thinking_type"`

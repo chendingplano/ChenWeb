@@ -1,6 +1,8 @@
 package complianceeval
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,6 +67,59 @@ func TestParseGoldConfigMaxCandidates(t *testing.T) {
 	}
 	if _, ok := c.Find(1); ok {
 		t.Errorf("record 1 is not listed")
+	}
+}
+
+func TestPanelPromptsComeFromConfig(t *testing.T) {
+	c, err := ParseGoldConfig([]byte(`
+[compliance-review.gold-panel]
+rules_prompt = "prompt-r.md"
+rules_version = "3.1.0"
+activities_prompt = "prompt-a.md"
+judge_prompt = "prompt-j.md"
+adjudicate_activity_prompt = "prompt-aa.md"
+adjudicate_judgement_prompt = "prompt-aj.md"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadPrompts(c.Panel, func(ref string) (string, error) { return "<" + ref + ">", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Judge != "<prompt-r.md>\n\n---\n\n<prompt-j.md>" || p.Activities != "<prompt-r.md>\n\n---\n\n<prompt-a.md>" ||
+		p.AdjActivity != "<prompt-r.md>\n\n---\n\n<prompt-aa.md>" || p.AdjJudgement != "<prompt-r.md>\n\n---\n\n<prompt-aj.md>" {
+		t.Errorf("composed prompts = %+v", p)
+	}
+	if p.Config != c.Panel || p.Config.RulesVersion != "3.1.0" || p.RulesSHA256 == "" {
+		t.Errorf("config=%+v sha=%q", p.Config, p.RulesSHA256)
+	}
+
+	// No built-in file stands in for an unset setting; nothing is loaded and the error names each one.
+	c, _ = ParseGoldConfig([]byte("[compliance-review.gold-panel]\nrules_prompt = \"prompt-r.md\"\njudge_prompt = \"prompt-j.md\"\n"))
+	_, err = LoadPrompts(c.Panel, func(ref string) (string, error) { t.Errorf("loaded %s", ref); return "", nil })
+	want := "set rules_version, activities_prompt, adjudicate_activity_prompt, adjudicate_judgement_prompt in [compliance-review.gold-panel]"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+// The shipped doc-review.local.toml names every panel setting, and each prompt file exists.
+func TestShippedConfigNamesEveryPanelPrompt(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, "doc-review.local.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := ParseGoldConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPrompts(c.Panel, func(ref string) (string, error) {
+		b, err := os.ReadFile(filepath.Join(root, "prompts", ref))
+		return string(b), err
+	}); err != nil {
+		t.Error(err)
 	}
 }
 

@@ -3,6 +3,8 @@ package docreviews
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,6 +24,61 @@ func newTestComplianceReviewer(fake *fakeJSONExtractor, s complianceSearchFunc) 
 }
 
 var complianceTestCfg = ReviewerConfig{ModelName: "m", PromptText: "t", PromptRef: "prompt-review-compliance-v1.md"}
+
+// complianceTestAssessmentPrompts names a synthetic prompt file for each assessment stage.
+func complianceTestAssessmentPrompts() map[string]string {
+	return complianceAssessmentPromptRefs(ReviewAspectConfig{RequirementsPrompt: "prompt-requirements.md",
+		EvidencePrompt: "prompt-evidence.md", AssessmentPrompt: "prompt-assessment.md", VerifierPrompt: "prompt-verifier.md"})
+}
+
+func TestComplianceAssessmentPromptsComeFromConfig(t *testing.T) {
+	cfg, err := parseDocReviewConfig([]byte(`
+[reviewers.compliance]
+requirements_prompt = " prompt-r.md "
+evidence_prompt = "prompt-e.md"
+assessment_prompt = "prompt-a.md"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &complianceReviewer{assessmentPrompts: complianceAssessmentPromptRefs(cfg.Reviewers["compliance"]),
+		loadPrompt: func(ref string) (string, string, error) { return "text of " + ref, ref, nil }}
+	for stage, want := range map[string]string{"requirements": "prompt-r.md", "screen": "prompt-e.md", "assess": "prompt-a.md"} {
+		if text, ref, err := r.assessmentPrompt(stage); err != nil || ref != want || text != "text of "+want {
+			t.Errorf("%s: text=%q ref=%q err=%v", stage, text, ref, err)
+		}
+	}
+	// No built-in file stands in for an unset key; the error names the key to set.
+	if _, _, err := r.assessmentPrompt("verify"); err == nil || !strings.Contains(err.Error(), "verifier_prompt is not set in [reviewers.compliance]") {
+		t.Errorf("unset verifier_prompt: err = %v", err)
+	}
+}
+
+// The shipped doc-review.local.toml names an existing prompt file for every compliance prompt key.
+func TestShippedConfigNamesEveryCompliancePrompt(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, "doc-review.local.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := parseDocReviewConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := cfg.Reviewers["compliance"]
+	refs := complianceAssessmentPromptRefs(rc)
+	keys := map[string]string{"prompt": rc.Prompt, "doc_activity_prompt": rc.DocActivityPrompt}
+	for stage, key := range complianceAssessmentPromptKeys {
+		keys[key] = refs[stage]
+	}
+	for key, file := range keys {
+		if file == "" {
+			t.Errorf("[reviewers.compliance] %s is not set", key)
+		} else if _, err := os.Stat(filepath.Join(root, "prompts", file)); err != nil {
+			t.Errorf("[reviewers.compliance] %s: %v", key, err)
+		}
+	}
+}
 
 func TestComplianceChunkNoGroundingIsNormalResult(t *testing.T) {
 	fake := &fakeJSONExtractor{out: activityPayload("record_user_activity", "Log user activities in a database table")}
