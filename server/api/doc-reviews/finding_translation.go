@@ -682,6 +682,9 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 			RelatedArtifactFields: finding.RelatedArtifactFields,
 			RelatedArtifacts:      finding.RelatedArtifacts,
 			ModelName:             finding.ModelName,
+			CitedDocuments:        finding.CitedDocuments,
+			ErrorMsg:              finding.ErrorMsg,
+			ProcStatus:            finding.ProcStatus,
 		},
 		Metadata: FindingMetadataEnvelope{
 			I18N: FindingI18NMetadata{
@@ -742,6 +745,9 @@ func prepareFindingForStorageWithoutTranslation(finding ReviewFinding) preparedF
 			RelatedArtifactFields: finding.RelatedArtifactFields,
 			RelatedArtifacts:      finding.RelatedArtifacts,
 			ModelName:             finding.ModelName,
+			CitedDocuments:        finding.CitedDocuments,
+			ErrorMsg:              finding.ErrorMsg,
+			ProcStatus:            finding.ProcStatus,
 		},
 		Metadata: FindingMetadataEnvelope{
 			I18N: FindingI18NMetadata{

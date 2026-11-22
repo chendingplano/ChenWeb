@@ -805,22 +805,27 @@ max_tool_turns = 0
 [reviewers.compliance]
 name_en = "Compliance Review"
 name_zh_cn = "合规审查"
-desc_en = "Detects the activities the document describes and searches the knowledge base for artifacts that could govern each."
-desc_zh_cn = "识别文档描述的活动，并在知识库中检索可能约束这些活动的文件。"
+desc_en = "Checks the document's metrics, provisions and activities against the rules in the knowledge base that could govern them."
+desc_zh_cn = "将文档的指标、条款和活动与知识库中可能约束它们的规则逐一核对。"
 enabled = true
 checked = false
 group = "P5"
 input = "per-chunk"
-model = "deepseek-flash-processor"
-prompt = "prompt-review-compliance-v3.md"
+model = "deepseek-flash-processor"   # first try of every structured call; DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME and DOC_REVIEWER_FALLBACK_MODEL_NAME are the second and third
+prompt = "prompt-review-compliance-v4.md"                                # finds text activities in one chunk, skipping what its metrics and provisions state
 doc_activity_prompt = "prompt-review-compliance-document-activity-v3.md"
-requirements_prompt = "prompt-review-compliance-requirements-v2.md"   # lists one source's requirements for an activity
-evidence_prompt = "prompt-review-compliance-evidence-v1.md"           # collects evidence for each requirement from one chunk
-assessment_prompt = "prompt-review-compliance-assessment-v2.md"       # decides applicability, evidence and candidate verdicts
-verifier_prompt = "prompt-review-compliance-verifier-v2.md"           # checks requirements, numbers and verdicts against their sources
-thinking_type = "disabled"   # structured staged assessment; reviewer profile controls the model
+relevance_prompt = "prompt-review-compliance-relevance-v2.md"            # decision-model question: could a candidate apply to the activity (DOC_REVIEWER_RELEVANCE_MODEL_NAME)
+judgement_prompt = "prompt-review-compliance-judgement-v1.md"            # one call per activity or activity group: verdict, summary and quotes per candidate
+verifier_prompt = "prompt-review-compliance-verifier-v3.md"              # checks compliant and not compliant verdicts
+correction_prompt = "prompt-review-compliance-correction-v1.md"          # added to a request whose answer was wrong, for the second and third tries
+thinking_type = "disabled"   # reviewer profile controls the model
+top_metrics = 30          # candidates a metric activity keeps from its metric search
+top_provisions = 30       # candidates a provision activity keeps from its provision search
+top_artifacts = 30        # candidates a text activity keeps from its provision, metric and passage search
+max_cited_documents = 0   # cited documents an activity searches; 0 = none (their names are still saved)
+max_metrics = 100         # metric activities checked per document, after exact copies merge; the rest are counted as unchecked
+max_provisions = 100      # provision activities checked per document, after exact copies merge
 max_candidates = 50   # gold set only: candidates pooled per activity for labelling (default 100); the reviewer's own search ignores it
-# min_cosine = 0.55   # relevance floor 0..1 for candidates; unset = no floor. Do not set before the gold set shows a value (openspec compliance-reviewer-phase2).
 
 # ---------------------------------------------------------------------------
 # Compliance Review gold set (openspec compliance-reviewer-phase2), read by the compliance-gold command.

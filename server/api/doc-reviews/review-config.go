@@ -59,16 +59,24 @@ type ReviewAspectConfig struct {
 	Prompt   string `toml:"prompt"`
 	// DocActivityPrompt is the compliance reviewer's document-level activity prompt.
 	DocActivityPrompt string `toml:"doc_activity_prompt"`
-	// The compliance reviewer's four assessment prompts (see complianceAssessmentPromptKeys).
-	RequirementsPrompt string `toml:"requirements_prompt"`
-	EvidencePrompt     string `toml:"evidence_prompt"`
-	AssessmentPrompt   string `toml:"assessment_prompt"`
-	VerifierPrompt     string `toml:"verifier_prompt"`
+	// The compliance reviewer's relevance, judgement, verification and correction prompts
+	// (openspec compliance-reviewer-redesign).
+	RelevancePrompt  string `toml:"relevance_prompt"`
+	JudgementPrompt  string `toml:"judgement_prompt"`
+	VerifierPrompt   string `toml:"verifier_prompt"`
+	CorrectionPrompt string `toml:"correction_prompt"`
+	// The compliance reviewer's search sizes and activity limits. Unset means the default
+	// (complianceDefaultTop for top_*, 0 for max_cited_documents, complianceDefaultMaxActivities
+	// for max_metrics and max_provisions).
+	TopMetrics        *int `toml:"top_metrics"`
+	TopProvisions     *int `toml:"top_provisions"`
+	TopArtifacts      *int `toml:"top_artifacts"`
+	MaxCitedDocuments *int `toml:"max_cited_documents"`
+	MaxMetrics        *int `toml:"max_metrics"`
+	MaxProvisions     *int `toml:"max_provisions"`
 	// ThinkingType overrides the model profile's thinking_type for this reviewer
 	// (e.g. "disabled"). Empty keeps the profile's setting.
-	ThinkingType string `toml:"thinking_type"`
-	// MinCosine is the compliance reviewer's relevance floor (0..1). Unset or 0 means no floor.
-	MinCosine     *float64 `toml:"min_cosine"`
+	ThinkingType  string   `toml:"thinking_type"`
 	MaxToolTurns  *int     `toml:"max_tool_turns"`
 	MaxToolTokens *int     `toml:"max_tool_tokens"`
 	MaxFindings   []int    `toml:"max_findings"`
@@ -188,8 +196,15 @@ func parseDocReviewConfig(raw []byte) (*DocReviewConfig, error) {
 		if err := validateOutputLimitArray(scope, "max_analyses", reviewer.MaxAnalyses); err != nil {
 			return nil, err
 		}
-		if reviewer.MinCosine != nil && (*reviewer.MinCosine < 0 || *reviewer.MinCosine > 1) {
-			return nil, fmt.Errorf("%s min_cosine must be between 0 and 1", scope)
+		for name, v := range map[string]*int{"top_metrics": reviewer.TopMetrics, "top_provisions": reviewer.TopProvisions, "top_artifacts": reviewer.TopArtifacts} {
+			if v != nil && *v <= 0 {
+				return nil, fmt.Errorf("%s %s must be a positive integer", scope, name)
+			}
+		}
+		for name, v := range map[string]*int{"max_cited_documents": reviewer.MaxCitedDocuments, "max_metrics": reviewer.MaxMetrics, "max_provisions": reviewer.MaxProvisions} {
+			if v != nil && *v < 0 {
+				return nil, fmt.Errorf("%s %s must not be negative", scope, name)
+			}
 		}
 	}
 	return &cfg, nil

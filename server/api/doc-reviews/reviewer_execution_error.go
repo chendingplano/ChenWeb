@@ -42,3 +42,33 @@ func (p *ReviewProcessor) finishReviewAspects(ctx context.Context, runID int64, 
 	}
 	return statusErrors
 }
+
+// applyFindingProcStatus sets every finding's processing status once all reviewers have finished:
+// "failed" for each aspect with a finding that records an error, otherwise "success". It returns
+// one error per failed aspect, tied to that aspect, so only that aspect's status becomes failed
+// while its findings are still saved (openspec compliance-reviewer-redesign).
+func applyFindingProcStatus(findings []ReviewFinding) []error {
+	failed := map[string][]string{}
+	var order []string
+	for _, f := range findings {
+		if f.ErrorMsg == "" {
+			continue
+		}
+		if _, seen := failed[f.Aspect]; !seen {
+			order = append(order, f.Aspect)
+		}
+		failed[f.Aspect] = append(failed[f.Aspect], f.Title+": "+f.ErrorMsg)
+	}
+	for i := range findings {
+		findings[i].ProcStatus = "success"
+		if _, ok := failed[findings[i].Aspect]; ok {
+			findings[i].ProcStatus = "failed"
+		}
+	}
+	var errs []error
+	for _, aspect := range order {
+		msgs := failed[aspect]
+		errs = append(errs, &reviewerExecutionError{Aspect: aspect, Err: fmt.Errorf("%d finding(s) record errors; first: %s", len(msgs), msgs[0])})
+	}
+	return errs
+}

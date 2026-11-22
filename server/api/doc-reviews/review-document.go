@@ -69,6 +69,15 @@ type ReviewFinding struct {
 	// ModelName is the LLM model that generated this finding (ADR 2026070201
 	// change log), resolved from ReviewerConfig.ModelName at call time.
 	ModelName string `json:"model_name,omitempty"`
+
+	// CitedDocuments are the names of the documents the finding's activity cites
+	// (kb.doc_review_findings.cited_documents). ErrorMsg is the error that stopped
+	// the review of this finding's activity. ProcStatus ("success" or "failed") is
+	// set for every finding once all reviewers finish: failed when any finding of
+	// the same aspect has an ErrorMsg (openspec compliance-reviewer-redesign).
+	CitedDocuments []string `json:"cited_documents,omitempty"`
+	ErrorMsg       string   `json:"error_msg,omitempty"`
+	ProcStatus     string   `json:"proc_status,omitempty"`
 }
 
 // RelatedArtifactAnalysis is one candidate's comparison result within a
@@ -256,8 +265,9 @@ func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64
 	const stmt = `
 INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id,
+     cited_documents, error_msg, proc_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 
 	languages := s.Languages
 	if len(languages) == 0 {
@@ -300,9 +310,25 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 			artifactID = prepared.Canonical.ArtifactID
 		}
 
+		var citedDocuments, errorMsg, procStatus any
+		if len(prepared.Canonical.CitedDocuments) > 0 {
+			b, err := json.Marshal(prepared.Canonical.CitedDocuments)
+			if err != nil {
+				return inserted, fmt.Errorf("marshal finding cited documents: %w", err)
+			}
+			citedDocuments = string(b)
+		}
+		if prepared.Canonical.ErrorMsg != "" {
+			errorMsg = prepared.Canonical.ErrorMsg
+		}
+		if prepared.Canonical.ProcStatus != "" {
+			procStatus = prepared.Canonical.ProcStatus
+		}
+
 		_, err = s.DB.ExecContext(ctx, stmt,
 			recordID, runID, prepared.Canonical.Pass, prepared.Canonical.Aspect, prepared.Canonical.Severity, prepared.Canonical.FindingType,
 			prepared.Canonical.Title, prepared.Canonical.Description, evidence, location, suggestion, confidence, metadata, artifactID,
+			citedDocuments, errorMsg, procStatus,
 		)
 		if err != nil {
 			return inserted, fmt.Errorf("insert review finding: %w", err)
@@ -1289,6 +1315,7 @@ func (p *ReviewProcessor) HandleEvent(ctx context.Context, payload []byte) error
 func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
 	ctx = withLLMRecordID(ctx, recordID)
 	ctx = withLLMRunID(ctx, p.LLMRunID)
+	ctx = withReviewRunID(ctx, p.RunID)
 	start := p.Now()
 	p.Logger.Info("document review start", "record_id", recordID)
 
@@ -1343,6 +1370,7 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 
 	allFindings, errs := p.runReviewersPromptCacheOptimized(ctx, recordID, rec, reviewers, p.RunID)
 	errs = append(errs, unavailable...)
+	errs = append(errs, applyFindingProcStatus(allFindings)...)
 
 	if len(allFindings) > 0 {
 		inserted, err := p.FindingsStore.SaveFindings(ctx, recordID, p.RunID, allFindings)

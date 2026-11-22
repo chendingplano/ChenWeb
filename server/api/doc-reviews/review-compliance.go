@@ -4,88 +4,194 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/searchengine"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
-// Compliance Review detects activities per chunk, independently of the knowledge base, then
-// searches provisions, metrics and chunks independently. Production reviewers assess original
-// source requirements against the whole canonical reviewed document, verify quoted evidence and
-// quantitative comparisons, and retain coverage and uncertainty. No document/block fallback.
-// A completed empty search means no candidates found, never that an activity is unregulated.
+// Compliance Review (openspec compliance-reviewer-redesign; devdoc 2026111201). For each chunk the
+// reviewer collects metric, provision and text activities, groups metrics and provisions that share
+// lines, searches the knowledge base per activity kind, removes unrelated candidates with a decision
+// model, judges each activity or group in one call and verifies the strong verdicts. An error for one
+// activity is recorded with its finding and never stops the reviewer; only a missing prerequisite or
+// setting does. A completed empty search means no candidates found, never that an activity is
+// unregulated.
 const (
-	complianceSearchLimit = 10
-	complianceMaxQueries  = 3
+	complianceDefaultTop           = 30
+	complianceDefaultMaxActivities = 100
+	complianceMaxQueries           = 3
 	// complianceEvidenceMax caps the evidence quote derived from the document lines.
 	complianceEvidenceMax = 400
+	// complianceUnitConcurrency bounds the activities and groups of one chunk reviewed at once;
+	// chunks already run in parallel under MAX_DOC_REVIEWER_TASKS.
+	complianceUnitConcurrency = 4
+
+	envComplianceCorrectionModel = "DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME"
+	envComplianceFallbackModel   = "DOC_REVIEWER_FALLBACK_MODEL_NAME"
+	envComplianceRelevanceModel  = "DOC_REVIEWER_RELEVANCE_MODEL_NAME"
 )
+
+// complianceStageSettings maps each prompt stage to its [reviewers.compliance] key. The detect
+// prompt (`prompt`) is resolved by the review processor and arrives in ReviewerConfig.
+var complianceStageSettings = map[string]string{
+	"doc_activity": "doc_activity_prompt",
+	"relevance":    "relevance_prompt",
+	"judgement":    "judgement_prompt",
+	"verify":       "verifier_prompt",
+	"correction":   "correction_prompt",
+}
 
 type complianceSearchFunc func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error)
 
-type complianceReviewer struct {
-	client        LLMJSONExtractor
-	logger        ApiTypes.JimoLogger
-	search        complianceSearchFunc
-	loadArtifacts func(context.Context, []searchengine.ArtifactRef) ([]searchengine.Result, error)
-	// loadPrompt resolves the document-level activity prompt (a field so tests need no prompts dir).
-	loadPrompt func(ref string) (text, ref2 string, err error)
-	// docActivityPromptRef is [reviewers.compliance].doc_activity_prompt in doc-review.local.toml.
-	docActivityPromptRef string
-	maxTasks             int
-	// minCosine is [reviewers.compliance].min_cosine; 0 means no relevance floor.
-	minCosine float64
-	// duplicateIDs returns the reviewed record and every record with the same md5 (a field so
-	// tests need no database). Nil means the record alone.
-	duplicateIDs      func(ctx context.Context, recordID int64) ([]int64, error)
-	excluded          sync.Map // recordID -> []int64, one lookup per review
-	assessmentPrompts map[string]string
-	loadDocument      func(context.Context, int64) (complianceDocument, error)
-	documents         sync.Map
-	maxSourceRecords  int
-	maxEvidenceChunks int
-	assessmentDate    string
+type complianceSettings struct {
+	TopMetrics, TopProvisions, TopArtifacts      int
+	MaxCitedDocuments, MaxMetrics, MaxProvisions int
 }
 
-func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, db *sql.DB, maxTasks int) *complianceReviewer {
+func complianceSettingsFrom(rc ReviewAspectConfig) complianceSettings {
+	pick := func(v *int, def int) int {
+		if v != nil {
+			return *v
+		}
+		return def
+	}
+	return complianceSettings{
+		TopMetrics:        pick(rc.TopMetrics, complianceDefaultTop),
+		TopProvisions:     pick(rc.TopProvisions, complianceDefaultTop),
+		TopArtifacts:      pick(rc.TopArtifacts, complianceDefaultTop),
+		MaxCitedDocuments: pick(rc.MaxCitedDocuments, 0),
+		MaxMetrics:        pick(rc.MaxMetrics, complianceDefaultMaxActivities),
+		MaxProvisions:     pick(rc.MaxProvisions, complianceDefaultMaxActivities),
+	}
+}
+
+type compliancePrompt struct {
+	Text, Ref string
+}
+
+type complianceReviewer struct {
+	// client answers the first try of every structured call; correction and fallback answer the
+	// second and third (see callWithTries).
+	client               LLMJSONExtractor
+	correction, fallback complianceTry
+	relevance            complianceRelevanceDecider
+	logger               ApiTypes.JimoLogger
+	store                complianceStore
+	search               complianceSearchFunc
+	loadArtifacts        func(context.Context, []searchengine.ArtifactRef) ([]searchengine.Result, error)
+	// prompts holds the loaded prompt of each stage in complianceStageSettings.
+	prompts  map[string]compliancePrompt
+	settings complianceSettings
+	// configErr is a missing setting, prompt or model variable; every chunk task returns it.
+	configErr error
+	// duplicateIDs returns the reviewed record and every record with the same md5 (a field so
+	// tests need no database). Nil means the record alone.
+	duplicateIDs   func(ctx context.Context, recordID int64) ([]int64, error)
+	excluded       sync.Map // recordID -> []int64, one lookup per review
+	plans          sync.Map // recordID -> *compliancePlanEntry
+	mentions       sync.Map // recordID -> *complianceMentionsEntry
+	recordFailed   func(ctx context.Context, call llmusage.FailedCall)
+	assessmentDate string
+}
+
+func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, db *sql.DB, _ int) *complianceReviewer {
 	cfg := searchengine.LoadConfig()
 	var rc ReviewAspectConfig
 	if dc, _ := GetDocReviewConfig(); dc != nil {
 		rc = dc.Reviewers["compliance"]
 	}
-	minCosine := 0.0
-	if rc.MinCosine != nil {
-		minCosine = *rc.MinCosine
-	}
-	return &complianceReviewer{
-		assessmentPrompts: complianceAssessmentPromptRefs(rc),
-		loadDocument: func(ctx context.Context, id int64) (complianceDocument, error) {
-			return loadComplianceDocument(ctx, db, id)
-		},
-		maxSourceRecords:     8,
-		maxEvidenceChunks:    32,
-		assessmentDate:       time.Now().UTC().Format("2006-01-02"),
-		docActivityPromptRef: strings.TrimSpace(rc.DocActivityPrompt),
-		minCosine:            minCosine,
-		duplicateIDs:         func(ctx context.Context, id int64) ([]int64, error) { return sameMD5RecordIDs(ctx, db, id) },
-		client:               client,
-		logger:               logger,
-		maxTasks:             maxTasks,
-		loadPrompt: func(ref string) (string, string, error) {
-			text, out, _, err := loadPromptByRef(ref)
-			return text, out, err
-		},
+	r := &complianceReviewer{
+		client:         client,
+		logger:         logger,
+		store:          complianceSQLStore{db: db},
+		settings:       complianceSettingsFrom(rc),
+		assessmentDate: time.Now().UTC().Format("2006-01-02"),
+		duplicateIDs:   func(ctx context.Context, id int64) ([]int64, error) { return sameMD5RecordIDs(ctx, db, id) },
 		search: func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error) {
 			return searchengine.Search(ctx, db, cfg, req)
 		},
 		loadArtifacts: func(ctx context.Context, refs []searchengine.ArtifactRef) ([]searchengine.Result, error) {
 			return searchengine.Load(ctx, db, cfg, refs)
 		},
+		recordFailed: func(ctx context.Context, call llmusage.FailedCall) {
+			llmusage.RecordFailedCall(ctx, db, logger, call)
+		},
 	}
+	r.configErr = r.configure(rc)
+	return r
+}
+
+// configure loads the stage prompts and builds the correction, fallback and relevance clients.
+// It reports every missing setting and variable at once, naming each.
+func (r *complianceReviewer) configure(rc ReviewAspectConfig) error {
+	var problems []string
+	refs := map[string]string{
+		"doc_activity": rc.DocActivityPrompt,
+		"relevance":    rc.RelevancePrompt,
+		"judgement":    rc.JudgementPrompt,
+		"verify":       rc.VerifierPrompt,
+		"correction":   rc.CorrectionPrompt,
+	}
+	r.prompts = map[string]compliancePrompt{}
+	for stage, ref := range refs {
+		key := complianceStageSettings[stage]
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			problems = append(problems, key+" is not set in [reviewers.compliance] of doc-review.local.toml")
+			continue
+		}
+		text, resolved, _, err := loadPromptByRef(ref)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s names %s, which cannot be loaded: %v", key, ref, err))
+			continue
+		}
+		r.prompts[stage] = compliancePrompt{Text: text, Ref: resolved}
+	}
+	if _, ok := r.client.(docprocessing.LLMStructuredJSONExtractor); !ok {
+		problems = append(problems, "the reviewer's model client does not support structured output")
+	}
+	var err error
+	if r.correction, err = complianceTryFromEnv(envComplianceCorrectionModel, "correction"); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if r.fallback, err = complianceTryFromEnv(envComplianceFallbackModel, "fallback"); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if p, ok := r.prompts["relevance"]; ok {
+		if r.relevance, err = newComplianceRelevanceDeciderFromEnv(r.logger, p); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("compliance: configuration incomplete: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// complianceTryFromEnv builds the client of the second or third try from a model profile named by
+// an environment variable. The profile's own thinking setting applies.
+func complianceTryFromEnv(env, label string) (complianceTry, error) {
+	ref := strings.TrimSpace(os.Getenv(env))
+	if ref == "" {
+		return complianceTry{}, fmt.Errorf("%s is not set (the %s model of Compliance Review)", env, label)
+	}
+	client, model, err := docprocessing.BuildReviewerLLMClientWithThinking(ref, "")
+	if err != nil {
+		return complianceTry{}, fmt.Errorf("%s=%q cannot be used: %v", env, ref, err)
+	}
+	structured, ok := client.(docprocessing.LLMStructuredJSONExtractor)
+	if !ok {
+		return complianceTry{}, fmt.Errorf("%s=%q: client does not support structured output", env, ref)
+	}
+	return complianceTry{client: structured, model: model, label: label}, nil
 }
 
 func (r *complianceReviewer) Name() string             { return "compliance" }
@@ -97,6 +203,7 @@ func (r *complianceReviewer) ReviewDocument(context.Context, int64, ReviewerConf
 	return nil, fmt.Errorf("compliance: runs per chunk only; no document-level fallback")
 }
 
+// complianceActivity is a text activity: one the model found in the chunk.
 type complianceActivity struct {
 	Activity      string                  `json:"activity"`
 	SourceText    string                  `json:"source_text"`
@@ -124,164 +231,236 @@ type complianceContextFact struct {
 	Rationale string `json:"rationale"`
 }
 
+// processChunk reviews one chunk. Only a configuration error, a missing prerequisite or a failed
+// plan load returns an error (and so aborts the aspect); every other failure stays with its finding.
 func (r *complianceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) ([]ReviewFinding, error) {
-	start := time.Now()
-	activities, err := r.detect(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, input, false)
+	if r.configErr != nil {
+		return nil, r.configErr
+	}
+	plan, err := r.plan(ctx, recordID)
 	if err != nil {
-		r.logger.Warn("compliance activity detection failed; aborting reviewer", "record_id", recordID, "chunk", index, "error", err)
 		return nil, err
 	}
-	if index == 0 {
-		if r.docActivityPromptRef == "" {
-			return nil, fmt.Errorf("compliance: doc_activity_prompt is not set in [reviewers.compliance] of doc-review.local.toml")
-		}
-		text, ref, perr := r.loadPrompt(r.docActivityPromptRef)
-		if perr != nil {
-			return nil, fmt.Errorf("compliance: load %s: %w", r.docActivityPromptRef, perr)
-		}
-		docActs, derr := r.detect(ctx, ref, text, cfg.ModelName, input, true)
-		if derr != nil {
-			r.logger.Warn("compliance document-level activity failed; aborting reviewer", "record_id", recordID, "error", derr)
-			return nil, derr
-		}
-		activities = append(docActs, activities...)
-	}
-
+	start := time.Now()
+	members := plan.membersIn(input.startLine, input.endLine)
 	var findings []ReviewFinding
-	for _, a := range activities {
-		f, err := r.ground(ctx, recordID, a, input)
-		if err != nil {
-			r.logger.Warn("compliance knowledge-base search failed; aborting reviewer",
-				"record_id", recordID, "chunk", index, "activity", a.Activity, "error", err)
-			return nil, err
-		}
-		f.ModelName = cfg.ModelName
-		findings = append(findings, f)
-		if r.assessmentPrompts != nil && f.FindingType != "compliance_no_grounding" {
-			assessed, aerr := r.assessActivity(ctx, recordID, a, cfg, f)
-			if aerr != nil {
-				r.logger.Warn("compliance assessment failed; aborting reviewer", "record_id", recordID, "chunk", index, "activity", a.Activity, "error", aerr)
-				return nil, aerr
-			}
-			findings[len(findings)-1] = assessed
+	if index == 0 {
+		if f, ok := complianceUncheckedFinding(plan, r.settings, input, cfg.ModelName); ok {
+			findings = append(findings, f)
 		}
 	}
+	texts, detectErrs := r.detectTextActivities(ctx, recordID, index, cfg, input, members)
+	if len(detectErrs) > 0 {
+		findings = append(findings, complianceDetectFailureFinding(input, errors.Join(detectErrs...), cfg.ModelName))
+	}
+	units := buildComplianceUnits(members, texts)
+	unitFindings, err := runConcurrent(ctx, complianceUnitConcurrency, len(units), func(unitCtx context.Context, i int) (ReviewFinding, error) {
+		return r.reviewUnit(unitCtx, recordID, index, cfg, input, units[i]), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, unitFindings...)
 	r.logger.Info("compliance review chunk end", "record_id", recordID, "chunk", index,
-		"activities", len(activities), "ms_used", time.Since(start).Milliseconds())
+		"metric_provision_activities", len(members), "text_activities", len(texts), "units", len(units),
+		"ms_used", time.Since(start).Milliseconds())
 	return findings, nil
 }
 
-func (r *complianceReviewer) detect(ctx context.Context, promptRef, promptText, model string, input chunkInput, docLevel bool) ([]complianceActivity, error) {
-	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, promptRef, promptText, model, input.inputJSON,
-		"review_compliance", "MID-20261112-01"))
+// detectTextActivities finds the chunk's text activities (and, for the first chunk, the document's
+// own activity) through three tries each, then drops text activities whose lines the chunk's
+// metrics and provisions already cover.
+func (r *complianceReviewer) detectTextActivities(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput, members []*complianceMember) ([]complianceActivity, []error) {
+	var out []complianceActivity
+	var errs []error
+	chunk := index
+	if index == 0 {
+		p := r.prompts["doc_activity"]
+		docActs, err := r.detect(ctx, recordID, &chunk, cfg, input, p.Ref, p.Text, "doc_activity", input.inputJSON, true)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("document activity: %w", err))
+		}
+		out = append(out, docActs...)
+	}
+	acts, err := r.detect(ctx, recordID, &chunk, cfg, input, cfg.PromptRef, cfg.PromptText, "detect", complianceDetectInput(input.inputJSON, members), false)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("text activities: %w", err))
+	}
+	covered := complianceCoveredLines(members)
+	for _, a := range acts {
+		if complianceLinesCovered(covered, a.LineStart, a.LineEnd) {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, errs
+}
+
+func (r *complianceReviewer) detect(ctx context.Context, recordID int64, chunk *int, cfg ReviewerConfig, input chunkInput, promptRef, promptText, stage, inputText string, docLevel bool) ([]complianceActivity, error) {
+	var acts []complianceActivity
+	_, _, err := r.callWithTries(ctx, cfg, complianceCall{
+		Stage: stage, PromptRef: promptRef, PromptText: promptText, Input: inputText,
+		Schema:   map[string]any{"type": "object", "required": []any{"activities"}, "properties": map[string]any{"activities": map[string]any{"type": "array"}}},
+		RecordID: recordID, ChunkIndex: chunk,
+		Check: func(parsed map[string]any) error {
+			var perr error
+			acts, perr = parseComplianceActivities(parsed, docLevel, input)
+			return perr
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	return parseComplianceActivities(payload, docLevel, input)
+	return acts, nil
 }
 
+// complianceDetectInput adds the chunk's metric and provision activities to the detect input as
+// existing_activities, inside the JSON envelope so the chunk prefix stays byte-identical for prompt
+// caching. A bare compact table (no envelope) is left as it is.
+func complianceDetectInput(inputJSON string, members []*complianceMember) string {
+	if len(members) == 0 {
+		return inputJSON
+	}
+	trimmed := strings.TrimRight(inputJSON, " \t\r\n")
+	if !strings.HasPrefix(strings.TrimSpace(trimmed), "{") || !strings.HasSuffix(trimmed, "}") {
+		return inputJSON
+	}
+	items := make([]map[string]any, 0, len(members))
+	for _, m := range members {
+		items = append(items, map[string]any{"kind": m.Kind, "label": m.Label, "line_start": m.LineStart, "line_end": m.LineEnd, "text": complianceCap(m.Text, 300)})
+	}
+	b, err := json.Marshal(items)
+	if err != nil {
+		return inputJSON
+	}
+	return trimmed[:len(trimmed)-1] + `,"existing_activities":` + string(b) + "}"
+}
+
+// parseComplianceActivities reads and checks the model's activities. It reports the problems of
+// every activity at once, so one correction request can fix them all.
 func parseComplianceActivities(payload map[string]any, docLevel bool, input chunkInput) ([]complianceActivity, error) {
 	raw, ok := payload["activities"]
 	if !ok {
-		return nil, fmt.Errorf("compliance model response: missing activities array")
+		return nil, fmt.Errorf("compliance model response: missing activities array; return {\"activities\":[...]}")
 	}
 	arr, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("compliance model response: activities must be an array")
 	}
-	str := func(m map[string]any, k string) string { s, _ := m[k].(string); return strings.TrimSpace(s) }
-	num := func(m map[string]any, k string, def int) int {
+	var out []complianceActivity
+	var problems []string
+	for i, item := range arr {
+		a, err := parseComplianceActivity(i, item, docLevel, input)
+		if err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		out = append(out, a)
+	}
+	if len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "\n"))
+	}
+	return out, nil
+}
+
+func parseComplianceActivity(i int, item any, docLevel bool, input chunkInput) (complianceActivity, error) {
+	m, ok := item.(map[string]any)
+	if !ok {
+		return complianceActivity{}, fmt.Errorf("activity %d must be an object", i+1)
+	}
+	str := func(k string) string { s, _ := m[k].(string); return strings.TrimSpace(s) }
+	num := func(k string, def int) int {
 		if f, ok := m[k].(float64); ok {
 			return int(f)
 		}
 		return def
 	}
-	var out []complianceActivity
-	for i, item := range arr {
-		m, ok := item.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("compliance model response: activity %d must be an object", i)
-		}
-		a := complianceActivity{
-			Activity:      str(m, "activity"),
-			SourceText:    str(m, "source_text"),
-			LineStart:     num(m, "line_start", input.startLine),
-			LineEnd:       num(m, "line_end", input.endLine),
-			Actor:         str(m, "actor"),
-			Action:        str(m, "action"),
-			Object:        str(m, "object"),
-			Purpose:       str(m, "purpose"),
-			DocumentLevel: docLevel,
-			Relationship:  str(m, "document_relationship"),
-			DocumentType:  str(m, "document_type"),
-		}
-		derivedEvidence := a.SourceText == ""
-		if a.SourceText == "" && a.Activity != "" {
-			a.SourceText = complianceLinesText(input.inputJSON, a.LineStart, a.LineEnd)
-		}
-		if lines, valid := parseComplianceInput(input.inputJSON); valid {
-			quote := a.SourceText
-			if derivedEvidence {
-				quote = strings.TrimSuffix(quote, "…")
-			}
-			if err := verifyComplianceEvidence(complianceEvidence{RecordID: 1, LineStart: a.LineStart, LineEnd: a.LineEnd, Quote: quote}, map[int64]complianceDocument{1: {RecordID: 1, Lines: lines}}); err != nil {
-				return nil, err
-			}
-		}
-		if rawFacts, exists := m["context_facts"]; exists {
-			facts, err := complianceArray[complianceContextFact](map[string]any{"context_facts": rawFacts}, "context_facts")
-			if err != nil {
-				return nil, err
-			}
-			lines, valid := parseComplianceInput(input.inputJSON)
-			for _, fact := range facts {
-				if fact.Name == "" || !complianceOneOf(fact.Status, "explicit", "inferred", "unknown", "conflicting") || (fact.Status == "inferred" && fact.Rationale == "") || (fact.Status == "unknown" && fact.Value != "") {
-					return nil, fmt.Errorf("compliance: malformed activity context fact")
-				}
-				if fact.Status != "unknown" {
-					if !valid {
-						return nil, fmt.Errorf("compliance: context facts need canonical lines")
-					}
-					if err = verifyComplianceEvidence(complianceEvidence{RecordID: 1, LineStart: fact.LineStart, LineEnd: fact.LineEnd, Quote: fact.Quote}, map[int64]complianceDocument{1: {Lines: lines}}); err != nil {
-						return nil, err
-					}
-				}
-			}
-			a.ContextFacts = facts
-		}
-		if a.Activity == "" || a.SourceText == "" {
-			entry, _ := json.Marshal(m)
-			if len(entry) > 300 {
-				entry = entry[:300]
-			}
-			return nil, fmt.Errorf("compliance model response: activity %d needs activity and source_text (chunk lines %d-%d, entry %s)", i, input.startLine, input.endLine, entry)
-		}
-		if qs, ok := m["search_queries"].([]any); ok {
-			for _, q := range qs {
-				if len(a.Queries) >= complianceMaxQueries {
-					break
-				}
-				if cq, ok := parseComplianceQuery(q); ok {
-					a.Queries = append(a.Queries, cq)
-				}
-			}
-		}
-		if refs, exists := m["cited_docs"]; exists {
-			list, err := complianceArray[string](map[string]any{"cited_docs": refs}, "cited_docs")
-			if err != nil {
-				return nil, err
-			}
-			if len(list) > 10 {
-				return nil, fmt.Errorf("compliance: too many cited documents")
-			}
-			a.CitedDocs = list
-		}
-		if len(a.Queries) == 0 {
-			a.Queries = []complianceQuery{{Text: a.SourceText}}
-		}
-		out = append(out, a)
+	a := complianceActivity{
+		Activity:      str("activity"),
+		SourceText:    str("source_text"),
+		LineStart:     num("line_start", input.startLine),
+		LineEnd:       num("line_end", input.endLine),
+		Actor:         str("actor"),
+		Action:        str("action"),
+		Object:        str("object"),
+		Purpose:       str("purpose"),
+		DocumentLevel: docLevel,
+		Relationship:  str("document_relationship"),
+		DocumentType:  str("document_type"),
 	}
-	return out, nil
+	label := fmt.Sprintf("activity %d (%q, lines %d-%d)", i+1, a.Activity, a.LineStart, a.LineEnd)
+	if a.Activity == "" {
+		return a, fmt.Errorf("%s: field activity is empty; give a short normalized name", label)
+	}
+	derivedEvidence := a.SourceText == ""
+	if derivedEvidence {
+		a.SourceText = complianceLinesText(input.inputJSON, a.LineStart, a.LineEnd)
+	}
+	if a.SourceText == "" {
+		return a, fmt.Errorf("%s: lines %d-%d are not lines of this chunk (%d-%d); use line numbers from the lines table", label, a.LineStart, a.LineEnd, input.startLine, input.endLine)
+	}
+	lines, valid := parseComplianceInput(input.inputJSON)
+	if valid {
+		quote := a.SourceText
+		if derivedEvidence {
+			quote = strings.TrimSuffix(quote, "…")
+		}
+		if err := complianceQuoteInLines(lines, a.LineStart, a.LineEnd, quote, false); err != nil {
+			return a, fmt.Errorf("%s: source_text %v; quote the lines exactly or leave source_text out", label, err)
+		}
+	}
+	if rawFacts, exists := m["context_facts"]; exists {
+		facts, err := complianceArray[complianceContextFact](map[string]any{"context_facts": rawFacts}, "context_facts")
+		if err != nil {
+			return a, fmt.Errorf("%s: context_facts: %v", label, err)
+		}
+		for j, fact := range facts {
+			where := fmt.Sprintf("%s: context fact %d (%q)", label, j+1, fact.Name)
+			switch {
+			case fact.Name == "":
+				return a, fmt.Errorf("%s: field name is empty", where)
+			case !complianceOneOf(fact.Status, "explicit", "inferred", "unknown", "conflicting"):
+				return a, fmt.Errorf("%s: status %q is not one of explicit, inferred, unknown, conflicting", where, fact.Status)
+			case fact.Status == "inferred" && fact.Rationale == "":
+				return a, fmt.Errorf("%s: an inferred fact needs a rationale", where)
+			case fact.Status == "unknown" && fact.Value != "":
+				return a, fmt.Errorf("%s: an unknown fact must have an empty value, not %q", where, fact.Value)
+			}
+			if fact.Status != "unknown" {
+				if !valid {
+					return a, fmt.Errorf("%s: context facts need the chunk's lines", where)
+				}
+				if err := complianceQuoteInLines(lines, fact.LineStart, fact.LineEnd, fact.Quote, false); err != nil {
+					return a, fmt.Errorf("%s: quote %v; quote lines %d-%d exactly", where, err, fact.LineStart, fact.LineEnd)
+				}
+			}
+		}
+		a.ContextFacts = facts
+	}
+	if qs, ok := m["search_queries"].([]any); ok {
+		for _, q := range qs {
+			if len(a.Queries) >= complianceMaxQueries {
+				break
+			}
+			if cq, ok := parseComplianceQuery(q); ok {
+				a.Queries = append(a.Queries, cq)
+			}
+		}
+	}
+	if refs, exists := m["cited_docs"]; exists {
+		list, err := complianceArray[string](map[string]any{"cited_docs": refs}, "cited_docs")
+		if err != nil {
+			return a, fmt.Errorf("%s: cited_docs: %v", label, err)
+		}
+		if len(list) > 10 {
+			return a, fmt.Errorf("%s: cited_docs lists %d documents; list at most 10", label, len(list))
+		}
+		a.CitedDocs = list
+	}
+	if len(a.Queries) == 0 {
+		a.Queries = []complianceQuery{{Text: a.SourceText}}
+	}
+	return a, nil
 }
 
 type complianceInputLine struct {
@@ -350,7 +529,7 @@ func complianceLinesText(inputJSON string, start, end int) string {
 	return text
 }
 
-// complianceQuery is one knowledge-base search for an activity. The model gives it as bilingual
+// complianceQuery is one knowledge-base search for a text activity. The model gives it as bilingual
 // keywords, which go to the engine as the keyword list, so the engine's keyword LLM call is skipped;
 // Text (the keywords joined) feeds the vector side. A plain-string query has no Keywords and takes
 // the engine's default keyword handling.
@@ -395,16 +574,6 @@ func parseComplianceQuery(raw any) (complianceQuery, bool) {
 	return q, len(terms) > 0
 }
 
-type complianceCandidate struct {
-	artifactType string
-	artifactID   string
-	recordID     int64
-	title        string
-	snippet      string
-	rank         int
-	cosine       *float64
-}
-
 // sameMD5RecordIDs returns recordID plus every other record with the same non-empty md5 (a
 // re-uploaded copy of the reviewed file must not ground it).
 func sameMD5RecordIDs(ctx context.Context, db *sql.DB, recordID int64) ([]int64, error) {
@@ -441,94 +610,38 @@ func (r *complianceReviewer) excludeIDs(ctx context.Context, recordID int64) ([]
 	return ids, nil
 }
 
-// ground searches the knowledge base for one activity and builds its report row.
-func (r *complianceReviewer) ground(ctx context.Context, recordID int64, a complianceActivity, input chunkInput) (ReviewFinding, error) {
-	exclude, err := r.excludeIDs(ctx, recordID)
+func complianceArray[T any](payload map[string]any, key string) ([]T, error) {
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return nil, fmt.Errorf("missing %s array", key)
+	}
+	b, err := json.Marshal(value)
 	if err != nil {
-		return ReviewFinding{}, err
+		return nil, err
 	}
-	seen := map[string]bool{}
-	var cands []complianceCandidate
-	var traces []complianceRetrievalTrace
-	queries := append([]complianceQuery(nil), a.Queries...)
-	for _, citation := range a.CitedDocs {
-		queries = append(queries, complianceQuery{Text: citation})
+	if len(b) == 0 || b[0] != '[' {
+		return nil, fmt.Errorf("%s must be an array", key)
 	}
-	for _, q := range queries {
-		for _, artifactType := range []string{"provision", "metric", "chunk"} {
-			floor := r.minCosine
-			if r.assessmentPrompts != nil {
-				floor = 0
-			}
-			results, err := r.searchCandidates(ctx, searchengine.Request{
-				Query:    searchengine.Query{Text: q.Text},
-				Criteria: searchengine.Criteria{Keywords: q.Keywords, MinCosine: floor},
-				Filters: searchengine.Filters{
-					ArtifactTypes:    []string{artifactType},
-					ExcludeRecordIDs: exclude,
-				},
-				Options: searchengine.Options{Limit: complianceSearchLimit},
-			})
-			if err != nil {
-				return ReviewFinding{}, fmt.Errorf("compliance search %q: %w", q.Text, err)
-			}
-			traces = append(traces, complianceRetrievalTrace{Query: q.Text, ArtifactType: artifactType, Limit: complianceSearchLimit, PotentiallyTruncated: len(results) >= complianceSearchLimit, Results: results})
-			for _, res := range results {
-				key := res.ArtifactType + "/" + res.ArtifactID
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				title := res.SourceTitle
-				if title == "" {
-					title = res.SourceFilename
-				}
-				cands = append(cands, complianceCandidate{res.ArtifactType, res.ArtifactID, res.InputRecordID, title, res.Snippet, len(cands) + 1, res.Diag.Cosine})
-			}
-		}
+	var out []T
+	if err = json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", key, err)
 	}
+	return out, nil
+}
 
-	label := a.Activity
-	if a.DocumentLevel {
-		label = "document: " + a.Object
-	}
-	f := ReviewFinding{
-		Pass:       "P5",
-		Aspect:     "compliance",
-		Severity:   "info",
-		ResultKind: "compliance_activity",
-		Evidence:   a.SourceText,
-		Location:   fmt.Sprintf("%d-%d", a.LineStart, a.LineEnd),
-		Confidence: 0,
-	}
-	f.ArtifactFields, _ = json.Marshal(map[string]any{"activity": a, "assessment_date": r.assessmentDate, "retrieval_trace": traces, "searched_artifact_types": []string{"provision", "metric", "chunk"}, "authority_discovery_uses_cosine_floor": r.assessmentPrompts == nil && r.minCosine > 0})
-	if len(cands) == 0 {
-		f.FindingType = "compliance_no_grounding"
-		f.Title = "Activity with no grounding candidates found: " + label
-		f.Description = "A completed search of the knowledge base returned no candidate artifact for this activity. " +
-			"This does not mean the activity is unregulated."
-		return f, nil
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Activity: %s\n\n", label)
-	fmt.Fprintf(&b, "Retrieved %d candidate artifact(s) from the knowledge base that may govern this activity. "+
-		"Candidates are search results; applicability and requirement comparison are not assessed.\n", len(cands))
-	for _, c := range cands {
-		cos := ""
-		if c.cosine != nil {
-			cos = fmt.Sprintf(" (cosine %.3f)", *c.cosine)
+func complianceOneOf(s string, values ...string) bool {
+	for _, v := range values {
+		if s == v {
+			return true
 		}
-		fmt.Fprintf(&b, "- [%s %s]%s record %d %s: %s\n", c.artifactType, c.artifactID, cos, c.recordID, c.title, strings.TrimSpace(c.snippet))
 	}
-	f.FindingType = "compliance_grounding_candidates"
-	f.Title = "Grounding candidates found: " + label
-	f.Description = b.String()
-	f.RelatedArtifactID = cands[0].artifactID
-	f.RelatedRecordID = cands[0].recordID
-	refs := make([]complianceArtifact, 0, len(cands))
-	for _, c := range cands {
-		refs = append(refs, complianceArtifact{Type: c.artifactType, ID: c.artifactID, RecordID: c.recordID})
+	return false
+}
+
+func complianceCap(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
 	}
-	f.RelatedArtifactFields, _ = json.Marshal(refs)
-	return f, nil
+	return s
 }

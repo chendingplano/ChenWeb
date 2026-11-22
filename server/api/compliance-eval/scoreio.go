@@ -131,8 +131,19 @@ func LoadReviewRows(ctx context.Context, db *sql.DB, runID int64) ([]ReviewRow, 
 		}
 		return nil, err
 	}
+	// A run whose Compliance Review recorded errors is partial; scoring it would read missing
+	// activities as reviewer mistakes (openspec compliance-reviewer-redesign).
+	var failed int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM kb.doc_review_findings
+		WHERE run_id = $1 AND aspect = 'compliance' AND proc_status = 'failed'`, runID).Scan(&failed); err != nil {
+		return nil, err
+	}
+	if failed > 0 {
+		return nil, fmt.Errorf("review run %d is marked failed (its Compliance Review recorded errors); the scorer refuses failed runs", runID)
+	}
+	// compliance_unchecked reports activities skipped by the limits; it is not an activity.
 	rs, err := db.QueryContext(ctx, `SELECT finding_type, title, COALESCE(location, ''), COALESCE(description, '')
-		FROM kb.doc_review_findings WHERE run_id = $1 AND aspect = 'compliance' ORDER BY id`, runID)
+		FROM kb.doc_review_findings WHERE run_id = $1 AND aspect = 'compliance' AND finding_type <> 'compliance_unchecked' ORDER BY id`, runID)
 	if err != nil {
 		return nil, err
 	}

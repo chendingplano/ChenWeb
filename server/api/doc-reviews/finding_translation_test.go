@@ -718,11 +718,13 @@ func TestSaveFindingsStoresCanonicalEnglishAndI18NMetadata(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id,
+     cited_documents, error_msg, proc_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`)).
 		WithArgs(
 			int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
 			"Undefined scope term", "The term is used before it is defined.", "范围见下文", "44", "Define the term when it first appears.", 0.88, sqlmock.AnyArg(), "1_m_1",
+			nil, nil, nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -759,8 +761,9 @@ func TestSaveFindingsStoresAnalysisMetadata(t *testing.T) {
 	store := ReviewFindingsSQLStore{DB: db, Languages: []string{"en"}}
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id,
+     cited_documents, error_msg, proc_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`)).
 		WithArgs(
 			int64(100), int64(200), "P5", "provisions", "info", "analysis",
 			"Provision comparison: 1_prv_1 vs 2_prv_9", "Equivalent requirement.", "relationship=same_subject", "20:24", nil, 1.0,
@@ -771,6 +774,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
 				"related_record_id":     float64(2),
 			}},
 			"1_prv_1",
+			nil, nil, nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -835,11 +839,13 @@ func TestSaveFindingsUsesReportLanguageEnvWhenLanguagesUnset(t *testing.T) {
 
 			mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id,
+     cited_documents, error_msg, proc_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`)).
 				WithArgs(
 					int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
 					"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(), sqlmock.AnyArg(),
+					nil, nil, nil,
 				).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -902,11 +908,13 @@ func TestSaveFindingsPreparesTranslationsConcurrently(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id,
+     cited_documents, error_msg, proc_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`)).
 			WithArgs(
 				int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
 				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(), sqlmock.AnyArg(),
+				nil, nil, nil,
 			).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
@@ -974,11 +982,13 @@ func TestSaveFindingsNormalizesConcurrentlyWithDefaultTranslator(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id,
+     cited_documents, error_msg, proc_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`)).
 			WithArgs(
 				int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
 				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(), sqlmock.AnyArg(),
+				nil, nil, nil,
 			).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
@@ -1490,5 +1500,36 @@ func TestTranslateFindingRejectsUnsupportedLanguage(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v (no DB query expected before language validation)", err)
+	}
+}
+
+func TestSaveFindingsStoresCitedDocumentsErrorAndProcStatus(t *testing.T) {
+	t.Setenv("DOC_REVIEW_TRANSLATION", "on-demand")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := ReviewFindingsSQLStore{DB: db, Languages: []string{"en"}}
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings`)).
+		WithArgs(
+			int64(100), int64(200), "P5", "compliance", "info", "compliance_incomplete",
+			"Compliance review incomplete: activity", "Search failed.", nil, "3-4", nil, 0.5, sqlmock.AnyArg(), nil,
+			`["GB/T 1234","ISO 9001"]`, "search failed", "failed",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	_, err = store.SaveFindings(context.Background(), 100, 200, []ReviewFinding{{
+		Pass: "P5", Aspect: "compliance", Severity: "info", FindingType: "compliance_incomplete",
+		Title: "Compliance review incomplete: activity", Description: "Search failed.", Location: "3-4",
+		CitedDocuments: []string{"GB/T 1234", "ISO 9001"}, ErrorMsg: "search failed", ProcStatus: "failed",
+	}})
+	if err != nil {
+		t.Fatalf("SaveFindings: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
