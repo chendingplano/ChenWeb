@@ -75,19 +75,15 @@
 	let activeKey = $state<string | null>(null);
 
 	// DR16: live findings (with ids + review_status) drive the action buttons.
-	let baseFindings = $state<FindingItem[]>([]);
 	let findings = $state<FindingItem[]>([]);
 	// The finding shown in the Document Structure panel's Finding Details view.
 	let selectedFinding = $derived(findings.find((f) => String(f.id) === activeKey) ?? null);
 	let packages = $state<ReviewPackageInfo[]>([]);
-	let selectedLanguage = $state('en');
 	let supportedLanguages = $state<string[]>(['en']);
 	let defaultLanguage = $state('en');
 	let findingLanguage = $state<Record<number, string>>({});
 	let translatingId = $state<number | null>(null);
 	let pendingConfirm = $state<{ id: number; language: string } | null>(null);
-	let languageLoading = $state(false);
-	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
 	// View mode: 'all' (flat, line-ordered), 'packages' (by P1-P6), or 'severity'
 	// (by High/Medium/Low).
 	let viewMode = $state<'all' | 'packages' | 'severity'>('packages');
@@ -113,60 +109,9 @@
 		expandedSeverities[sev] = !isSeverityExpanded(sev);
 	}
 
-	function cloneFindings(items: FindingItem[]): FindingItem[] {
-		return items.map((item) => ({ ...item }));
-	}
-	function mergeLocalizedFindings(localized: FindingItem[]) {
-		if (localized.length === 0) return;
-		const byId = new Map(localized.map((item) => [item.id, item]));
-		findings = findings.map((item) => {
-			const translated = byId.get(item.id);
-			return translated ? { ...item, ...translated } : item;
-		});
-	}
-	async function ensureReviewerLocalized(pass: string, aspect: string) {
-		if (requestId == null || selectedLanguage === 'en') return;
-		const cacheKey = `${selectedLanguage}::${pass}::${aspect}`;
-		const cached = localizedReviewerCache[cacheKey];
-		if (cached) {
-			mergeLocalizedFindings(cached);
-			return;
-		}
-		console.info('[doc-review-report] lazily translating reviewer findings', {
-			reportId,
-			requestId,
-			selectedLanguage,
-			pass,
-			aspect
-		});
-		const reqData = await getRequest(requestId, {
-			language: selectedLanguage,
-			pass,
-			aspect,
-			runId: reportRunId ?? undefined
-		});
-		const localized = reqData.findings ?? [];
-		localizedReviewerCache[cacheKey] = localized;
-		mergeLocalizedFindings(localized);
-	}
-	async function toggleReviewer(pass: string, aspect: string) {
+	function toggleReviewer(pass: string, aspect: string) {
 		const key = reviewerKey(pass, aspect);
-		const next = !isReviewerExpanded(key);
-		expandedReviewers[key] = next;
-		if (!next) return;
-		try {
-			await ensureReviewerLocalized(pass, aspect);
-		} catch (e) {
-			console.error('[doc-review-report] failed to lazily translate reviewer findings', {
-				reportId,
-				requestId,
-				selectedLanguage,
-				pass,
-				aspect,
-				error: e
-			});
-			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_lazy_translation_failed(), 8000);
-		}
+		expandedReviewers[key] = !isReviewerExpanded(key);
 	}
 	let busyId = $state<number | null>(null);
 	let editFindingId = $state<number | null>(null);
@@ -395,7 +340,7 @@
 	function onFocusReviewer(pass: string, aspect: string, items: FindingItem[]) {
 		activeKey = null;
 		activeFindings = items;
-		void toggleReviewer(pass, aspect);
+		toggleReviewer(pass, aspect);
 		jumpToFirst(items);
 	}
 
@@ -445,8 +390,6 @@
 		findingShelf.onCloseMatchedUnits = sv ? () => sv.backToLockedRecord() : null;
 	});
 
-	const LANG_STORAGE_KEY = 'doc-review-language';
-
 	async function load() {
 		loading = true;
 		errorMsg = '';
@@ -458,10 +401,6 @@
 			} catch {
 				supportedLanguages = ['en'];
 				defaultLanguage = 'en';
-			}
-			if (!supportedLanguages.includes(selectedLanguage)) {
-				selectedLanguage = supportedLanguages.includes(defaultLanguage) ? defaultLanguage : (supportedLanguages[0] ?? defaultLanguage);
-				localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
 			}
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
@@ -484,8 +423,7 @@
 			if (requestId != null) {
 				try {
 					const reqData = await getRequest(requestId, { runId: reportRunId ?? undefined });
-					baseFindings = reqData.findings ?? [];
-					findings = cloneFindings(baseFindings);
+					findings = reqData.findings ?? [];
 					packages = reqData.packages ?? [];
 				} catch (e) {
 					showToast('warn', msg.doc_review_report_could_not_load_editable_findings() + (e instanceof Error ? e.message : String(e)));
@@ -498,48 +436,8 @@
 		}
 	}
 
-	async function reloadFindingsForLanguage() {
-		findingLanguage = {};
-		pendingConfirm = null;
-		localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
-		languageLoading = true;
-		console.info('[doc-review-report] reloading findings for language', {
-			reportId,
-			requestId,
-			selectedLanguage
-		});
-		try {
-			findings = cloneFindings(baseFindings);
-			if (selectedLanguage !== 'en') {
-				for (const group of livePassGroups) {
-					for (const rv of group.reviewers) {
-						if (!isReviewerExpanded(reviewerKey(group.pass, rv.aspect))) continue;
-						await ensureReviewerLocalized(group.pass, rv.aspect);
-					}
-				}
-			}
-			console.info('[doc-review-report] language state refreshed', {
-				reportId,
-				requestId,
-				selectedLanguage,
-				findingCount: findings.length
-			});
-		} catch (e) {
-			console.error('[doc-review-report] failed to reload findings for language', {
-				reportId,
-				requestId,
-				selectedLanguage,
-				error: e
-			});
-			showToast('error', e instanceof Error ? e.message : msg.doc_review_report_language_change_failed(), 8000);
-		} finally {
-			languageLoading = false;
-		}
-	}
-
 	function setFindingStatus(id: number, status: string) {
 		findings = findings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
-		baseFindings = baseFindings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
 	}
 
 	function applyTranslatedFinding(id: number, translated: FindingItem, language: string) {
@@ -684,8 +582,6 @@
 	}
 
 	onMount(() => {
-		const stored = localStorage.getItem(LANG_STORAGE_KEY);
-		if (stored) selectedLanguage = stored;
 		void load();
 		// Initial left panel: 45% minus 400px so the PDF gets more room by default.
 		if (containerEl) {
@@ -745,14 +641,6 @@
 			<div class="left-header">
 			<div class="title-row">
 				<h1 class="report-title">{msg.doc_review_report_document_review_report()}</h1>
-				<label class="language-picker">
-					<span>{msg.doc_review_report_language()}</span>
-					<select bind:value={selectedLanguage} onchange={reloadFindingsForLanguage} disabled={languageLoading}>
-						{#each supportedLanguages as lang (lang)}
-							<option value={lang}>{lang}</option>
-						{/each}
-					</select>
-				</label>
 			</div>
 			<p class="meta">
 				{msg.doc_review_report_document_id({ document_title: skeleton.meta?.document_title || '—', inputRecordId: inputRecordId ?? '—' })}<br />
