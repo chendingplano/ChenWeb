@@ -2,7 +2,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getDocReviewLogsFor, type FindingItem, type DocReviewLogRow } from '$lib/services/docReviewService';
 	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
-	import { compliancePanelDescription } from './compliance-panel-description.js';
+	import { complianceActivities, complianceSearchCounts, withoutActivityLines } from './compliance-finding-panel.js';
 	import { getLLMUsageEventsByIds, type LLMUsageEventDetail } from './llm-activities-client.js';
 	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, lineNumbersFromSpans, matchedUnitFocusTarget, matchedUnitLabel, relatedArtifactsFromMetadata, type JsonDialogSection, type JsonTreeNode, type RelatedArtifact } from './doc-review-json-dialog.js';
 	import JsonTreeDialog from './json-tree-dialog.svelte';
@@ -66,6 +66,34 @@
 	// finding.metadata.related_artifacts, surfaced inline so it's visible
 	// without opening the "View metadata" dialog.
 	let relatedArtifacts = $derived(relatedArtifactsFromMetadata(finding?.metadata));
+
+	// A compliance activity finding shows its activities in their own row, and a compliance
+	// assessment's Description shows the search and relevance counts instead of the stored text.
+	let complianceActivityText = $derived(
+		finding?.aspect === 'compliance'
+			? complianceActivities(finding.metadata)
+					.map((a) => m.finding_details_panel_activity_value({ label: a.label, kind: a.kind, start: a.lineStart, end: a.lineEnd }))
+					.join('\n')
+			: ''
+	);
+	let descriptionText = $derived.by(() => {
+		if (!finding) return '';
+		const counts = finding.aspect === 'compliance' && finding.finding_type === 'compliance_assessment' ? complianceSearchCounts(finding.metadata) : null;
+		if (counts) {
+			const plural = (n: number) => (n === 1 ? '' : 's');
+			return [
+				m.finding_details_panel_searched({ count: counts.searched }),
+				m.finding_details_panel_selected({ count: counts.selected, plural: plural(counts.selected) }),
+				m.finding_details_panel_judged_relevance({
+					relevant: counts.relevant,
+					relevantPlural: plural(counts.relevant),
+					irrelevant: counts.irrelevant,
+					irrelevantPlural: plural(counts.irrelevant)
+				})
+			].join('\n');
+		}
+		return complianceActivityText ? withoutActivityLines(finding.description ?? '') : (finding.description ?? '');
+	});
 
 	// Compliance candidate verdicts (openspec compliance-candidate-verdicts) get a translated label,
 	// a definition tooltip and a colour; other relationship codes (metrics) display as stored.
@@ -337,7 +365,10 @@
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_severity()}</span><span class="fd-value">{finding.severity}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_finding_type()}</span><span class="fd-value">{finding.finding_type}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_title()}</span><span class="fd-value">{finding.title}</span></div>
-					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_text()}</span><span class="fd-value">{compliancePanelDescription(finding.description ?? '') || '—'}</span></div>
+					{#if complianceActivityText}
+						<div class="fd-row"><span class="fd-label">{m.finding_details_panel_activity()}</span><span class="fd-value">{complianceActivityText}</span></div>
+					{/if}
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_text()}</span><span class="fd-value">{descriptionText || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_suggestion()}</span><span class="fd-value">{finding.suggestion || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_confidence()}</span><span class="fd-value">{formatConfidence(finding.confidence)}</span></div>
 					<div class="fd-row">
