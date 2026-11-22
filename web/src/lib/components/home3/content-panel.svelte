@@ -28,6 +28,7 @@
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
 	import DocReviewLogsView from '$lib/components/home3/doc-review-logs-view.svelte';
+	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
 	import FailedLLMCallsView from '$lib/components/home3/failed-llm-calls-view.svelte';
 	import AlertLogsView from '$lib/components/home3/alert-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
@@ -307,8 +308,10 @@
 	// Flow pages scroll naturally and show the footer at the bottom.
 	// App-shell pages (chat, resolve-ambiguous, llm-usage-logs) fill the viewport, manage their
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
+	// An open Document Review report (findingShelf.active) hides it too.
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
+			!findingShelf.active &&
 			activeMenu?.childId !== 'sysadmin-system-monitor' &&
 			activeMenu?.childId !== 'dev-demos-customers' &&
 			activeMenu?.childId !== 'sysadmin-question-generator' &&

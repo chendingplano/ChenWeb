@@ -2,6 +2,7 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getDocReviewLogsFor, type FindingItem, type DocReviewLogRow } from '$lib/services/docReviewService';
 	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
+	import { compliancePanelDescription } from './compliance-panel-description.js';
 	import { getLLMUsageEventsByIds, type LLMUsageEventDetail } from './llm-activities-client.js';
 	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, lineNumbersFromSpans, matchedUnitFocusTarget, matchedUnitLabel, relatedArtifactsFromMetadata, type JsonDialogSection, type JsonTreeNode, type RelatedArtifact } from './doc-review-json-dialog.js';
 	import JsonTreeDialog from './json-tree-dialog.svelte';
@@ -336,7 +337,7 @@
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_severity()}</span><span class="fd-value">{finding.severity}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_finding_type()}</span><span class="fd-value">{finding.finding_type}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_title()}</span><span class="fd-value">{finding.title}</span></div>
-					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_text()}</span><span class="fd-value">{finding.description || '—'}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_text()}</span><span class="fd-value">{compliancePanelDescription(finding.description ?? '') || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_suggestion()}</span><span class="fd-value">{finding.suggestion || '—'}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_confidence()}</span><span class="fd-value">{formatConfidence(finding.confidence)}</span></div>
 					<div class="fd-row">

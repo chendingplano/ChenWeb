@@ -32,6 +32,7 @@
 	// Design tokens (mirror doc-review-results-view.svelte for visual parity).
 	let pageBg = $derived(dark ? '#15181F' : '#F5F1E8');
 	let cardBg = $derived(dark ? '#1F2333' : '#FFFFFF');
+	let cardActiveBg = $derived(dark ? '#2B314A' : '#EEF0FF');
 	let borderColor = $derived(dark ? '#2D3348' : '#E4E6EB');
 	let accent = $derived(dark ? '#818CF8' : '#6366F1');
 	let accentTint = $derived(dark ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
@@ -732,7 +733,7 @@
 <div
 	class="report-page"
 	bind:this={containerEl}
-	style="--page-bg:{pageBg}; --card-bg:{cardBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --scroll-thumb:{scrollThumb};"
+	style="--page-bg:{pageBg}; --card-bg:{cardBg}; --card-active-bg:{cardActiveBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --scroll-thumb:{scrollThumb};"
 >
 	<!-- LEFT: report -->
 	<section class="left-panel" style="width:{leftPct}%;">
@@ -1279,7 +1280,7 @@
 		border-left: 4px solid var(--border);
 		border-radius: 8px;
 		margin: 0.6rem 0;
-		transition: border-color 0.15s, box-shadow 0.15s;
+		transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
 	}
 	.reviewer-body .finding:first-child {
 		margin-top: 0;
@@ -1288,6 +1289,7 @@
 		border-color: var(--accent);
 	}
 	.finding.active {
+		background: var(--card-active-bg);
 		box-shadow: 0 0 0 2px var(--accent);
 	}
 	.finding.resolved {
