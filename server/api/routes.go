@@ -1075,6 +1075,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/doc-proc-plans/latest", kbhandler.GetLatestDocProcessPlan)
 	apiGroup.DELETE("/kb/doc-proc-logs/old", kbhandler.DeleteOldDocProcLogs)
 	apiGroup.GET("/kb/doc-review-logs", kbhandler.ListDocReviewLogs)
+	apiGroup.GET("/kb/failed-llm-calls", llmusage.ListFailedCalls)
 	apiGroup.GET("/kb/doc-review-findings", kbhandler.ListDocReviewFindings)
 	apiGroup.GET("/jetstream/monitor", jetstreamhandler.GetMonitor)
 	apiGroup.GET("/jetstream/subjects", jetstreamhandler.GetSubjects)

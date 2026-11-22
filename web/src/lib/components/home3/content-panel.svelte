@@ -28,6 +28,7 @@
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
 	import DocReviewLogsView from '$lib/components/home3/doc-review-logs-view.svelte';
+	import FailedLLMCallsView from '$lib/components/home3/failed-llm-calls-view.svelte';
 	import AlertLogsView from '$lib/components/home3/alert-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
@@ -243,6 +244,7 @@
 		{ id: 'sysadmin-jetstream-events', component: JetStreamEventsView },
 		{ id: 'sysadmin-jetstream-subjects', component: JetStreamSubjectsView },
 		{ id: 'sysadmin-alert-logs', component: AlertLogsView },
+		{ id: 'sysadmin-failed-llm-calls', component: FailedLLMCallsView },
 		{ id: 'sysadmin-db-maint-log', component: DbMaintLogView },
 		{ id: 'sysadmin-system-build-info', component: BuildInfoView },
 		{ id: 'sysadmin-system-monitor', component: SystemMonitorView },
@@ -331,6 +333,7 @@
 			activeMenu?.childId !== 'sysadmin-doc-proc-logs' &&
 			activeMenu?.childId !== 'sysadmin-doc-review-logs' &&
 			activeMenu?.childId !== 'sysadmin-alert-logs' &&
+			activeMenu?.childId !== 'sysadmin-failed-llm-calls' &&
 			activeMenu?.childId !== 'sysadmin-doc-process-config-products' &&
 			!['sysadmin-doc-process-config-metrics-simple', 'sysadmin-doc-process-config-references', 'sysadmin-doc-process-config-provisions'].includes(activeMenu?.childId ?? '') &&
 			activeMenu?.childId !== 'sysadmin-doc-process-semantic-decision-candidates' &&
@@ -418,7 +421,7 @@
 		{#each retainedPages as retained (retained.id)}
 			{#if visitedPages.includes(retained.id)}
 				<div
-					class:h-full={retained.id === 'sysadmin-alert-logs' || retained.id === 'sysadmin-llm-compliance-gold'}
+					class:h-full={retained.id === 'sysadmin-failed-llm-calls' || retained.id === 'sysadmin-alert-logs' || retained.id === 'sysadmin-llm-compliance-gold'}
 					data-retained-page={retained.id}
 					hidden={activeMenu?.childId !== retained.id}
 					inert={activeMenu?.childId !== retained.id}
