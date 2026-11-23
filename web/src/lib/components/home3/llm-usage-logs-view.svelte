@@ -199,7 +199,7 @@
 				if (hidden.length < columns.length) hiddenColumns = hidden;
 			}
 			const saved = Number(sessionStorage.getItem('llmUsageLogsPageSize'));
-			if ([20, 50, 100, 200].includes(saved)) pageSize = saved;
+			if ([20, 50, 100, 200, 500, 1000].includes(saved)) pageSize = saved;
 		} catch { /* storage unavailable */ }
 		load();
 		const onSelChange = () => {
@@ -582,7 +582,7 @@
 					{m.alert_logs_page_size()}
 					<select value={pageSize} onchange={(event) => changePageSize(Number(event.currentTarget.value))} disabled={loading}
 						style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor}; border-radius:4px; padding:4px;">
-						{#each [20, 50, 100, 200] as size}<option value={size}>{size}</option>{/each}
+						{#each [20, 50, 100, 200, 500, 1000] as size}<option value={size}>{size}</option>{/each}
 					</select>
 				</label>
 				<button
