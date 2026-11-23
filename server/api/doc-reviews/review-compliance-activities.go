@@ -41,6 +41,7 @@ type complianceMetricCandidate struct {
 	Context string // kb.metrics.metric_context: the source sentence or table row
 	DocNo   string // kb.inputs.doc_no of the metric's document
 	Title   string // kb.inputs.title
+	complianceMetricFields
 }
 
 // complianceArtifactRow is one metric or provision of the reviewed record.
@@ -119,7 +120,10 @@ func (s complianceSQLStore) ArtifactRows(ctx context.Context, recordID int64) ([
 func (s complianceSQLStore) MetricCandidates(ctx context.Context, artifactIDs []string) (map[string]complianceMetricCandidate, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT sa.artifact_id, COALESCE(m.metric_name, ''), COALESCE(m.metric_subject, ''), COALESCE(m.metric_context, ''),
-			COALESCE(i.doc_no, ''), COALESCE(i.title, '')
+			COALESCE(i.doc_no, ''), COALESCE(i.title, ''),
+			COALESCE(m.table_name_or_section, ''), COALESCE(m.value_class, ''), COALESCE(m.value_range_type, ''),
+			COALESCE(m.metric_value, ''), m.value_min, m.value_max, COALESCE(m.metric_unit, ''), COALESCE(m.condition, ''),
+			COALESCE(m.frame::text, '')
 		FROM kb.search_artifacts sa
 		JOIN kb.metrics m ON m.id = sa.source_row_id AND m.input_record_id = sa.input_record_id
 		LEFT JOIN kb.inputs i ON i.id = m.input_record_id
@@ -130,14 +134,50 @@ func (s complianceSQLStore) MetricCandidates(ctx context.Context, artifactIDs []
 	defer rows.Close()
 	out := make(map[string]complianceMetricCandidate, len(artifactIDs))
 	for rows.Next() {
-		var id string
+		var id, frame string
 		var m complianceMetricCandidate
-		if err := rows.Scan(&id, &m.Name, &m.Subject, &m.Context, &m.DocNo, &m.Title); err != nil {
+		var lo, hi sql.NullFloat64
+		if err := rows.Scan(&id, &m.Name, &m.Subject, &m.Context, &m.DocNo, &m.Title,
+			&m.Clause, &m.ValueClass, &m.RangeType, &m.Value, &lo, &hi, &m.Unit, &m.Condition, &frame); err != nil {
 			return nil, err
 		}
+		if lo.Valid {
+			m.Min = &lo.Float64
+		}
+		if hi.Valid {
+			m.Max = &hi.Float64
+		}
+		m.Frame = complianceFrameValues(frame)
 		out[id] = m
 	}
 	return out, rows.Err()
+}
+
+// complianceFrameValues reads a metric's frame ({"method":[{"label":..,"value":..}],..}) as the
+// values under each key. A key that is not a list of such entries is skipped.
+func complianceFrameValues(raw string) map[string][]string {
+	var frame map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &frame) != nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for key, list := range frame {
+		var entries []struct {
+			Value string `json:"value"`
+		}
+		if json.Unmarshal(list, &entries) != nil {
+			continue
+		}
+		for _, e := range entries {
+			if v := strings.TrimSpace(e.Value); v != "" {
+				out[key] = append(out[key], v)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s complianceSQLStore) Mentions(ctx context.Context, recordID int64) ([]complianceMention, error) {

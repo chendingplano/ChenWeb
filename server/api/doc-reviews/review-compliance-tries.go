@@ -29,6 +29,10 @@ type complianceCall struct {
 	Check      func(map[string]any) error
 	RecordID   int64
 	ChunkIndex *int
+	// TaskFirst sends the prompt as the system message and the input as the user message, so the
+	// fixed prompt is a cacheable prefix of every call of the stage. Without it the input comes first
+	// (the document-first layout that the chunk reviewers share).
+	TaskFirst bool
 }
 
 type complianceFailedTry struct {
@@ -73,6 +77,9 @@ func (r *complianceReviewer) callWithTries(ctx context.Context, cfg ReviewerConf
 		}
 		in := newDocReviewLLMJSONInputWithMetadata(alertCtx, call.PromptRef, call.PromptText, try.model, input,
 			"review_compliance_"+call.Stage, "MID-20261122-41", map[string]any{"attempt": i + 1, "try": try.label})
+		if call.TaskFirst {
+			in.DocumentFirst = false
+		}
 		if previousEventID != "" {
 			in.Metadata["correcting_call_id"] = previousEventID
 		}

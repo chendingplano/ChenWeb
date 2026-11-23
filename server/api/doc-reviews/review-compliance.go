@@ -27,6 +27,9 @@ import (
 const (
 	complianceDefaultTop           = 30
 	complianceDefaultMaxActivities = 100
+	// complianceDefaultEvidenceLines is how many lines before and after a unit's lines the
+	// judgement and verification see when evidence_lines is unset.
+	complianceDefaultEvidenceLines = 10
 	complianceMaxQueries           = 3
 	// complianceEvidenceMax caps the evidence quote derived from the document lines.
 	complianceEvidenceMax = 400
@@ -56,6 +59,9 @@ type complianceSettings struct {
 	// RelevanceMinScore is the lowest relevance score (0-9) a candidate needs to be judged; set by
 	// effort.
 	RelevanceMinScore int
+	// EvidenceLines is how many chunk lines before and after a unit's lines its judgement and
+	// verification see.
+	EvidenceLines int
 }
 
 func complianceSettingsFrom(rc ReviewAspectConfig) complianceSettings {
@@ -73,6 +79,7 @@ func complianceSettingsFrom(rc ReviewAspectConfig) complianceSettings {
 		MaxMetrics:        pick(rc.MaxMetrics, complianceDefaultMaxActivities),
 		MaxProvisions:     pick(rc.MaxProvisions, complianceDefaultMaxActivities),
 		RelevanceMinScore: complianceRelevanceMinScore(rc.Effort),
+		EvidenceLines:     pick(rc.EvidenceLines, complianceDefaultEvidenceLines),
 	}
 }
 

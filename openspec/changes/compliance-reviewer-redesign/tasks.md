@@ -79,3 +79,20 @@
 - [x] 12.3 Unit test: a name-only metric reaches relevance and judgement with all five fields; a metric without source text keeps the index text
 - [x] 12.4 Replay of one saved relevance call (record 825, lines 613–624) recorded in devdoc 2026111201
 - [ ] 12.5 Replay the 30 cut-off activities with the new candidate content and re-check the `effort` cut-offs
+
+## 13. Judgement request (2026-11-23)
+
+Trigger: judgement call `llm-d903b70ada2385ab03800c144f381214` (record 825, chunk 3) sent the whole
+145-line chunk for a 17-line activity, ten metric candidates as bare names, and got ten
+`compatible`/`mandatory` verdicts quoting only those names; nothing in the request could be cached.
+
+- [x] 13.1 `[reviewers.compliance].evidence_lines` (default 10, not negative): the judgement and the verification see the unit's lines plus that many lines before and after, cut from the chunk, instead of the whole chunk; document quotes are checked against those lines
+- [x] 13.2 Relevance, judgement and verification calls put the prompt in the system message and the data in the user message; the judgement and verification input runs `review` (document, assessment date, output language) → `evidence` → `activities` → `candidates` (→ `verdicts`), written without HTML escaping; candidates no longer show `record_id`
+- [x] 13.3 Metric candidates also carry `clause`, `value_class`, `range_type`, `value`, `min`, `max`, `unit`, `condition` and `frame` from `kb.metrics`
+- [x] 13.4 Metric activities search metrics and provisions; provision activities search provisions and metrics
+- [x] 13.5 Answer checks: `compatible` needs binding `mandatory` or `recommendation`; such a binding needs a `candidate_quote` that is more than the candidate's name
+- [x] 13.6 Prompts `prompt-review-compliance-judgement-v4.md` (evidence window, candidate fields, what a candidate can decide, no-requirement rule, evidence before verdict), `prompt-review-compliance-verifier-v6.md`, `prompt-review-compliance-relevance-v5.md`
+- [x] 13.7 Unit tests: evidence window and input order, task-first layout, metric fields, kinds searched, answer checks with a corrected answer accepted
+- [x] 13.8 Devdoc 2026111201, spec and design D5/D7 updated
+- [x] 13.9 Replay of the triggering activity with the new request (design D16)
+- [ ] 13.10 Live review run

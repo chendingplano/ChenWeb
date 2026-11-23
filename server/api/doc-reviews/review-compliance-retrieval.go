@@ -14,22 +14,39 @@ const complianceCandidateTextMax = 2000
 var complianceTextActivityKinds = []string{"provision", "metric", "chunk"}
 
 // complianceCandidate is one knowledge-base artifact found for an activity. A metric also carries
-// its document number, name and subject, and its text is its source sentence or table row (see
-// loadMetricCandidates).
+// its document number, name, subject and stored fields, and its text is its source sentence or
+// table row (see loadMetricCandidates). The record number stays out of the model input: the model
+// mistook a candidate's record number for the reviewed document's.
 type complianceCandidate struct {
-	Key       string   `json:"artifact_key"`
-	Type      string   `json:"type"`
-	ID        string   `json:"-"`
-	RecordID  int64    `json:"record_id"`
-	DocNo     string   `json:"doc_no,omitempty"`
-	Title     string   `json:"title,omitempty"`
-	Name      string   `json:"name,omitempty"`
-	Subject   string   `json:"subject,omitempty"`
-	Text      string   `json:"text"`
-	Truncated bool     `json:"truncated,omitempty"`
+	Key       string `json:"artifact_key"`
+	Type      string `json:"type"`
+	ID        string `json:"-"`
+	RecordID  int64  `json:"-"`
+	DocNo     string `json:"doc_no,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated,omitempty"`
+	complianceMetricFields
 	Cosine    *float64 `json:"-"`
 	LineStart int      `json:"-"`
 	LineEnd   int      `json:"-"`
+}
+
+// complianceMetricFields are a metric candidate's stored fields from kb.metrics, shown after its
+// text. They were extracted from that text, which stays authoritative when they disagree.
+type complianceMetricFields struct {
+	Clause     string   `json:"clause,omitempty"`      // table_name_or_section
+	ValueClass string   `json:"value_class,omitempty"` // requirement, definition, observation, ...
+	RangeType  string   `json:"range_type,omitempty"`  // value_range_type: exact, upper_bound, lower_bound, range, ...
+	Value      string   `json:"value,omitempty"`       // metric_value, as written
+	Min        *float64 `json:"min,omitempty"`         // value_min
+	Max        *float64 `json:"max,omitempty"`         // value_max
+	Unit       string   `json:"unit,omitempty"`        // metric_unit
+	Condition  string   `json:"condition,omitempty"`
+	// Frame holds the values of frame by key (method, uses, procedure), in the source language.
+	Frame map[string][]string `json:"frame,omitempty"`
 }
 
 // complianceTraceResult is one search result as the trace keeps it: which artifact, its ranks and
@@ -66,13 +83,15 @@ type complianceMemberSearch struct {
 	Found  []string // candidate keys in rank order
 }
 
-// memberKinds returns the artifact kinds an activity searches and how many results it keeps.
+// memberKinds returns the artifact kinds an activity searches and how many results it keeps. A
+// metric or provision activity searches metrics and provisions: a limit can be stated in either.
+// Document passages are left out on the assumption that extraction found the requirements they hold.
 func (r *complianceReviewer) memberKinds(m *complianceMember) ([]string, int) {
 	switch m.Kind {
 	case "metric":
-		return []string{"metric"}, r.settings.TopMetrics
+		return []string{"metric", "provision"}, r.settings.TopMetrics
 	case "provision":
-		return []string{"provision"}, r.settings.TopProvisions
+		return []string{"provision", "metric"}, r.settings.TopProvisions
 	default:
 		return complianceTextActivityKinds, r.settings.TopArtifacts
 	}
@@ -326,9 +345,9 @@ func (r *complianceReviewer) loadCandidateTexts(ctx context.Context, pool map[st
 }
 
 // loadMetricCandidates gives each metric candidate its name, subject, document number and title,
-// and its source sentence or table row as its text. The search index holds only a metric's name,
-// and from a name alone the model cannot tell whether the metric applies. A metric without source
-// text keeps the index text.
+// its stored fields (clause, value, range type, unit, condition, frame), and its source sentence or
+// table row as its text. The search index holds only a metric's name, and from a name alone the
+// model cannot tell whether the metric applies. A metric without source text keeps the index text.
 func (r *complianceReviewer) loadMetricCandidates(ctx context.Context, pool map[string]*complianceCandidate) error {
 	var ids []string
 	for _, c := range pool {
@@ -349,6 +368,7 @@ func (r *complianceReviewer) loadMetricCandidates(ctx context.Context, pool map[
 			continue
 		}
 		c.DocNo, c.Name, c.Subject = m.DocNo, m.Name, m.Subject
+		c.complianceMetricFields = m.complianceMetricFields
 		if m.Title != "" {
 			c.Title = m.Title
 		}

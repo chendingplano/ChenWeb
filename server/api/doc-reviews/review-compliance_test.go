@@ -30,6 +30,7 @@ type complianceFakeModel struct {
 	// relevance answers the relevance stage, so a test that replaces answer keeps it.
 	relevance func(input string) (map[string]any, error)
 	inputs    map[string][]string // stage -> inputs received
+	docFirst  map[string][]bool   // stage -> DocumentFirst of each input received
 }
 
 func (f *complianceFakeModel) ExtractJSON(context.Context, llmclients.JSONExtractionInput) (map[string]any, error) {
@@ -41,8 +42,10 @@ func (f *complianceFakeModel) ExtractStructuredJSON(_ context.Context, in llmcli
 	f.mu.Lock()
 	if f.inputs == nil {
 		f.inputs = map[string][]string{}
+		f.docFirst = map[string][]bool{}
 	}
 	f.inputs[stage] = append(f.inputs[stage], in.InputText)
+	f.docFirst[stage] = append(f.docFirst[stage], in.DocumentFirst)
 	f.mu.Unlock()
 	answer := f.answer
 	if stage == "relevance" && f.relevance != nil {
@@ -194,19 +197,28 @@ func noActivities(stage, _ string) (map[string]any, error) {
 	return nil, fmt.Errorf("unexpected stage %s", stage)
 }
 
-// judgeAll returns a verdict for every activity–candidate pair listed in a judgement input.
+// judgeAll returns a verdict for every activity–candidate pair listed in a judgement input:
+// compatible and mandatory, quoting the candidate's whole text, unless verdict overrides fields.
 func judgeAll(input string, verdict func(activityID, key string) map[string]any) map[string]any {
 	var in struct {
 		Activities []struct {
 			ID   string   `json:"activity_id"`
 			Keys []string `json:"candidate_keys"`
 		} `json:"activities"`
+		Candidates []struct {
+			Key  string `json:"artifact_key"`
+			Text string `json:"text"`
+		} `json:"candidates"`
 	}
 	_ = json.Unmarshal([]byte(input), &in)
+	texts := map[string]string{}
+	for _, c := range in.Candidates {
+		texts[c.Key] = c.Text
+	}
 	var out []any
 	for _, a := range in.Activities {
 		for _, k := range a.Keys {
-			v := map[string]any{"activity_id": a.ID, "artifact_key": k, "verdict": "compatible", "binding": "mandatory", "summary": "s"}
+			v := map[string]any{"activity_id": a.ID, "artifact_key": k, "verdict": "compatible", "binding": "mandatory", "summary": "s", "candidate_quote": texts[k]}
 			if verdict != nil {
 				for kk, vv := range verdict(a.ID, k) {
 					v[kk] = vv
@@ -299,7 +311,7 @@ func TestShippedConfigNamesEveryCompliancePrompt(t *testing.T) {
 		}
 	}
 	s := complianceSettingsFrom(rc)
-	if s.TopMetrics != 30 || s.TopProvisions != 30 || s.TopArtifacts != 30 || s.MaxCitedDocuments != 0 || s.MaxMetrics != 100 || s.MaxProvisions != 100 || s.RelevanceMinScore != 3 {
+	if s.TopMetrics != 30 || s.TopProvisions != 30 || s.TopArtifacts != 30 || s.MaxCitedDocuments != 0 || s.MaxMetrics != 100 || s.MaxProvisions != 100 || s.RelevanceMinScore != 3 || s.EvidenceLines != 10 {
 		t.Errorf("shipped settings = %+v", s)
 	}
 }
@@ -324,12 +336,18 @@ func TestParseDocReviewConfigRejectsBadComplianceSizes(t *testing.T) {
 	if _, err := parseDocReviewConfig([]byte("[reviewers.compliance]\nmax_metrics = -1\n")); err == nil || !strings.Contains(err.Error(), "max_metrics") {
 		t.Errorf("max_metrics = -1: err = %v", err)
 	}
-	cfg, err := parseDocReviewConfig([]byte("[reviewers.compliance]\nmax_cited_documents = 2\nmax_provisions = 0\n"))
+	if _, err := parseDocReviewConfig([]byte("[reviewers.compliance]\nevidence_lines = -1\n")); err == nil || !strings.Contains(err.Error(), "evidence_lines") {
+		t.Errorf("evidence_lines = -1: err = %v", err)
+	}
+	cfg, err := parseDocReviewConfig([]byte("[reviewers.compliance]\nmax_cited_documents = 2\nmax_provisions = 0\nevidence_lines = 0\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := complianceSettingsFrom(cfg.Reviewers["compliance"]); s.MaxCitedDocuments != 2 || s.MaxProvisions != 0 || s.TopArtifacts != 30 {
+	if s := complianceSettingsFrom(cfg.Reviewers["compliance"]); s.MaxCitedDocuments != 2 || s.MaxProvisions != 0 || s.TopArtifacts != 30 || s.EvidenceLines != 0 {
 		t.Errorf("settings = %+v", s)
+	}
+	if s := complianceSettingsFrom(ReviewAspectConfig{}); s.EvidenceLines != 10 {
+		t.Errorf("default evidence_lines = %d, want 10", s.EvidenceLines)
 	}
 }
 
@@ -542,14 +560,17 @@ func TestComplianceSearchesEachKindWithItsOwnLimit(t *testing.T) {
 	rig := newComplianceTestRig(t, answer, func(req searchengine.Request) []searchengine.Result {
 		return []searchengine.Result{complianceResult(req.Filters.ArtifactTypes[0], "2_x_1", 2, "text")}
 	})
-	rig.r.settings.TopMetrics, rig.r.settings.TopArtifacts = 7, 11
+	rig.r.settings.TopMetrics, rig.r.settings.TopProvisions, rig.r.settings.TopArtifacts = 7, 9, 11
 	rig.r.duplicateIDs = func(_ context.Context, id int64) ([]int64, error) { return []int64{id, 198}, nil }
-	rig.store.rows = []complianceArtifactRow{{Kind: "metric", RowID: 1, ArtifactID: "7_mtc_1", Label: "temperature", LineStart: 1, LineEnd: 1, DupKey: "t"}}
+	rig.store.rows = []complianceArtifactRow{
+		{Kind: "metric", RowID: 1, ArtifactID: "7_mtc_1", Label: "temperature", LineStart: 1, LineEnd: 1, DupKey: "t"},
+		{Kind: "provision", RowID: 2, ArtifactID: "7_prv_1", Label: "seal", LineStart: 2, LineEnd: 2, DupKey: "x"},
+	}
 	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "t", "x", "fish are kept in tanks"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rig.searches) != 2 {
+	if len(rig.searches) != 3 {
 		t.Fatalf("searches = %d, want one per activity (cited documents are off by default)", len(rig.searches))
 	}
 	for _, req := range rig.searches {
@@ -557,9 +578,15 @@ func TestComplianceSearchesEachKindWithItsOwnLimit(t *testing.T) {
 			t.Errorf("exclude = %v, want the record and its copy", req.Filters.ExcludeRecordIDs)
 		}
 		switch {
-		case req.Query.Ref != nil:
-			if req.Query.Ref.ID != "7_mtc_1" || strings.Join(req.Filters.ArtifactTypes, ",") != "metric" || req.Options.Limit != 7 {
+		case req.Query.Ref != nil && req.Query.Ref.Type == "metric":
+			// A metric activity searches metrics and provisions.
+			if req.Query.Ref.ID != "7_mtc_1" || strings.Join(req.Filters.ArtifactTypes, ",") != "metric,provision" || req.Options.Limit != 7 {
 				t.Errorf("metric search = %+v", req)
+			}
+		case req.Query.Ref != nil:
+			// A provision activity searches provisions and metrics.
+			if req.Query.Ref.ID != "7_prv_1" || strings.Join(req.Filters.ArtifactTypes, ",") != "provision,metric" || req.Options.Limit != 9 {
+				t.Errorf("provision search = %+v", req)
 			}
 		default:
 			if strings.Join(req.Filters.ArtifactTypes, ",") != "provision,metric,chunk" || req.Options.Limit != 11 || len(req.Criteria.Keywords) != 2 {
@@ -690,9 +717,12 @@ func TestComplianceMetricCandidatesCarryTheirSourceText(t *testing.T) {
 			{ArtifactType: "metric", ArtifactID: "3_mtc_1", InputRecordID: 3, Snippet: "heating capacity"},
 		}
 	})
+	upper := 110.0
 	rig.store.metrics = map[string]complianceMetricCandidate{
 		"2_mtc_1": {Name: "heating capacity", Subject: "heat pump unit", Context: "In tests C, D and E the heating capacity shall not exceed 110% of the required load.",
-			DocNo: "STD 2-2020", Title: "Heat pump units"},
+			DocNo: "STD 2-2020", Title: "Heat pump units",
+			complianceMetricFields: complianceMetricFields{Clause: "B.2 Seasonal tests", ValueClass: "requirement", RangeType: "upper_bound", Value: "110",
+				Max: &upper, Unit: "%", Condition: "tests C, D and E", Frame: map[string][]string{"method": {"STD 9"}}}},
 		// No source text: the index text stays.
 		"3_mtc_1": {Name: "heating capacity", Subject: "unit", DocNo: "STD 3-2021", Title: "Multi-split units"},
 	}
@@ -701,7 +731,8 @@ func TestComplianceMetricCandidatesCarryTheirSourceText(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		`"doc_no":"STD 2-2020","title":"Heat pump units","name":"heating capacity","subject":"heat pump unit","text":"In tests C, D and E the heating capacity shall not exceed 110% of the required load."`,
+		`"doc_no":"STD 2-2020","title":"Heat pump units","name":"heating capacity","subject":"heat pump unit","text":"In tests C, D and E the heating capacity shall not exceed 110% of the required load.",` +
+			`"clause":"B.2 Seasonal tests","value_class":"requirement","range_type":"upper_bound","value":"110","max":110,"unit":"%","condition":"tests C, D and E","frame":{"method":["STD 9"]}`,
 		`"doc_no":"STD 3-2021","title":"Multi-split units","name":"heating capacity","subject":"unit","text":"heating capacity"`,
 	}
 	rel := rig.primary.calls("relevance")
@@ -719,6 +750,10 @@ func TestComplianceMetricCandidatesCarryTheirSourceText(t *testing.T) {
 		if !strings.Contains(judge[0], w) {
 			t.Errorf("judgement input lacks %s\ninput: %s", w, judge[0])
 		}
+	}
+	// The model never sees internal record numbers, which it can mistake for the reviewed document.
+	if strings.Contains(rel[0], "record_id") || strings.Contains(judge[0], "record_id") {
+		t.Errorf("record_id reached the model:\n%s\n%s", rel[0], judge[0])
 	}
 }
 
@@ -787,35 +822,51 @@ func TestComplianceRelevanceWrongAnswerIsCorrected(t *testing.T) {
 
 func TestComplianceJudgementCheckReportsEveryProblem(t *testing.T) {
 	s := &complianceUnitState{
-		unit: &complianceUnit{Members: []*complianceMember{{ID: "a1"}, {ID: "a2"}}},
-		pool: map[string]*complianceCandidate{"provision/1": {Key: "provision/1", Text: "Logs shall be kept for six months."}, "metric/2": {Key: "metric/2", Text: "t ≤ 5 mm"}},
-		kept: map[string][]string{"a1": {"provision/1", "metric/2"}, "a2": {"provision/1"}},
+		unit: &complianceUnit{Members: []*complianceMember{{ID: "a1"}, {ID: "a2"}, {ID: "a3"}}},
+		pool: map[string]*complianceCandidate{"provision/1": {Key: "provision/1", Text: "Logs shall be kept for six months."}, "metric/2": {Key: "metric/2", Text: "t ≤ 5 mm"},
+			"metric/3": {Key: "metric/3", Name: "heating capacity", Text: "heating capacity"}},
+		kept: map[string][]string{"a1": {"provision/1", "metric/2"}, "a2": {"provision/1"}, "a3": {"metric/3", "provision/1"}},
 	}
 	lines := []complianceInputLine{{LineNumber: 3, Content: "Logs are kept for 30 days."}}
-	pairs := []string{"a1\x00provision/1", "a1\x00metric/2", "a2\x00provision/1"}
+	pairs := []string{"a1\x00provision/1", "a1\x00metric/2", "a2\x00provision/1", "a3\x00metric/3", "a3\x00provision/1"}
 	_, err := checkComplianceJudgement(map[string]any{"verdicts": []any{
 		map[string]any{"activity_id": "a1", "artifact_key": "provision/1", "verdict": "not_compliant", "binding": "mandatory", "summary": "s",
 			"candidate_quote": "kept for six months", "document_quote": ""},
 		map[string]any{"activity_id": "a1", "artifact_key": "metric/2", "verdict": "compliant", "binding": "recommendation", "summary": "s",
 			"candidate_quote": "not in text", "document_quote": "Logs are kept", "document_line_start": 3, "document_line_end": 3},
 		map[string]any{"activity_id": "a9", "artifact_key": "provision/1", "verdict": "compatible", "binding": "none", "summary": "s"},
+		// A bare name states no requirement, so it cannot carry a binding.
+		map[string]any{"activity_id": "a3", "artifact_key": "metric/3", "verdict": "compatible", "binding": "mandatory", "summary": "s", "candidate_quote": "heating capacity"},
+		// compatible claims a requirement that may apply: it needs a binding and a quote of it.
+		map[string]any{"activity_id": "a3", "artifact_key": "provision/1", "verdict": "compatible", "binding": "none", "summary": "s"},
 	}}, s, pairs, lines)
 	if err == nil {
 		t.Fatal("judgement accepted")
 	}
-	for _, want := range []string{"needs document_quote", "needs binding mandatory", "does not occur in the candidate", "was not asked for", "Activity a2, candidate provision/1: no verdict"} {
+	for _, want := range []string{"needs document_quote", "needs binding mandatory", "does not occur in the candidate", "was not asked for", "Activity a2, candidate provision/1: no verdict",
+		`activity a3, candidate metric/3): candidate_quote "heating capacity" is only the candidate's name`,
+		"activity a3, candidate provision/1): compatible needs binding mandatory or recommendation"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in: %v", want, err)
 		}
+	}
+	// A binding without a quote of the requirement is wrong too.
+	_, err = checkComplianceJudgement(map[string]any{"verdicts": []any{
+		map[string]any{"activity_id": "a2", "artifact_key": "provision/1", "verdict": "compatible", "binding": "mandatory", "summary": "s"},
+	}}, s, []string{"a2\x00provision/1"}, lines)
+	if err == nil || !strings.Contains(err.Error(), "binding mandatory needs candidate_quote") {
+		t.Errorf("binding without a quote: err = %v", err)
 	}
 	// A correct answer passes; quotes may differ in spacing and punctuation.
 	v, err := checkComplianceJudgement(map[string]any{"verdicts": []any{
 		map[string]any{"activity_id": "a1", "artifact_key": "provision/1", "verdict": "not_compliant", "binding": "mandatory", "summary": "s",
 			"candidate_quote": "kept for six months", "document_quote": "Logs are kept for 30 days", "document_line_start": 3, "document_line_end": 3},
 		map[string]any{"activity_id": "a1", "artifact_key": "metric/2", "verdict": "unqualified", "summary": "s"},
-		map[string]any{"activity_id": "a2", "artifact_key": "provision/1", "verdict": "compatible", "binding": "mandatory", "summary": "s"},
+		map[string]any{"activity_id": "a2", "artifact_key": "provision/1", "verdict": "compatible", "binding": "mandatory", "summary": "s", "candidate_quote": "Logs shall be kept"},
+		map[string]any{"activity_id": "a3", "artifact_key": "metric/3", "verdict": "unqualified", "binding": "none", "summary": "s"},
+		map[string]any{"activity_id": "a3", "artifact_key": "provision/1", "verdict": "unqualified", "summary": "s"},
 	}}, s, pairs, lines)
-	if err != nil || len(v) != 3 {
+	if err != nil || len(v) != 5 {
 		t.Fatalf("valid judgement rejected: %v", err)
 	}
 	// A missing binding is accepted for a verdict that does not need one, and read as none.
@@ -888,6 +939,12 @@ func TestComplianceVerifierRejectionLowersVerdict(t *testing.T) {
 	}
 	if !strings.HasPrefix(f.Description, "Candidate verdicts: 1 undetermined") || !strings.Contains(f.Description, "- [provision 2_prv_1] record 2 ") {
 		t.Errorf("description = %s", f.Description)
+	}
+	// The verification puts its prompt in the system message too, and sees the evidence, not the chunk.
+	verify := rig.primary.calls("verify")
+	if len(verify) != 1 || len(rig.primary.docFirst["verify"]) != 1 || rig.primary.docFirst["verify"][0] ||
+		!strings.Contains(verify[0], `"evidence":`) || !strings.Contains(verify[0], `"verdicts":`) || strings.Contains(verify[0], `"chunk"`) {
+		t.Errorf("verify calls = %q, DocumentFirst = %v", verify, rig.primary.docFirst["verify"])
 	}
 }
 
@@ -1130,6 +1187,114 @@ func TestComplianceJudgementWritesInReportLanguage(t *testing.T) {
 	}
 	if f, ok := findingOfType(fs, "compliance_assessment"); !ok || f.Language != "zh" {
 		t.Fatalf("assessment finding language = %q, want zh", f.Language)
+	}
+}
+
+// The judgement sees the unit's lines plus evidence_lines before and after, not the whole chunk,
+// after the fixed prompt, with the review first and the activities and candidates last. A document
+// quote from outside those lines is a wrong answer.
+func TestComplianceJudgementSeesOnlyTheEvidenceWindow(t *testing.T) {
+	rig := newComplianceTestRig(t, nil, func(searchengine.Request) []searchengine.Result {
+		return []searchengine.Result{complianceResult("provision", "2_prv_1", 2, "Keep logs for six months.")}
+	})
+	rig.primary.answer = func(stage, input string) (map[string]any, error) {
+		if stage == "detect" {
+			return map[string]any{"activities": []any{}}, nil
+		}
+		return judgeAll(input, func(string, string) map[string]any {
+			return map[string]any{"document_quote": "line 30 text", "document_line_start": 30, "document_line_end": 30}
+		}), nil
+	}
+	rig.corr.answer = func(stage, input string) (map[string]any, error) {
+		return judgeAll(strings.SplitN(input, "\n\nProblems:", 2)[0], nil), nil
+	}
+	rig.r.settings.EvidenceLines = 3
+	rig.store.rows = []complianceArtifactRow{{Kind: "provision", RowID: 1, ArtifactID: "7_prv_1", Label: "logs", LineStart: 20, LineEnd: 20, DupKey: "l"}}
+	var contents []string
+	for i := 1; i <= 40; i++ {
+		contents = append(contents, fmt.Sprintf("line %d text", i))
+	}
+	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, contents...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	judge := rig.primary.calls("judgement")
+	if len(judge) != 1 {
+		t.Fatalf("judgement calls = %d, want 1", len(judge))
+	}
+	in := judge[0]
+	for _, want := range []string{`"line 17 text"`, `"line 20 text"`, `"line 23 text"`} {
+		if !strings.Contains(in, want) {
+			t.Errorf("judgement input lacks %s", want)
+		}
+	}
+	for _, unwanted := range []string{`"line 16 text"`, `"line 24 text"`, `"line 30 text"`, `"chunk"`} {
+		if strings.Contains(in, unwanted) {
+			t.Errorf("judgement input holds %s", unwanted)
+		}
+	}
+	if !strings.HasPrefix(in, `{"review":{"document":"D","assessment_date":"2026-11-22","output_language":""},"evidence":{"lines":[["flag","line_number","page_number","line_type","content"],["n",17,1,"paragraph","line 17 text"]`) {
+		t.Errorf("judgement input does not start with the review and the evidence:\n%s", in)
+	}
+	if a, c := strings.Index(in, `"activities":`), strings.Index(in, `"candidates":`); a < 0 || c < a {
+		t.Errorf("want activities, then candidates, after the evidence:\n%s", in)
+	}
+	corr := rig.corr.calls("judgement")
+	if len(corr) != 1 || !strings.Contains(corr[0], "document_quote") {
+		t.Fatalf("correction requests = %q, want one naming the document_quote outside the evidence lines", corr)
+	}
+	if f, ok := findingOfType(fs, "compliance_assessment"); !ok || f.ErrorMsg != "" {
+		t.Fatalf("findings = %+v", fs)
+	}
+	// The prompt is the system message and the data the user message for the relevance check and
+	// the judgement; finding text activities keeps the document first, as every chunk reviewer does.
+	for stage, want := range map[string]bool{"relevance": false, "judgement": false, "detect": true} {
+		got := rig.primary.docFirst[stage]
+		if len(got) == 0 {
+			t.Errorf("%s: no call", stage)
+		}
+		for _, df := range got {
+			if df != want {
+				t.Errorf("%s: DocumentFirst = %v, want %v", stage, df, want)
+			}
+		}
+	}
+}
+
+// A verdict that quotes only a metric's name as its requirement is a wrong answer; the correction
+// request says so and a corrected answer (unqualified, binding none) is accepted.
+func TestComplianceNameOnlyQuoteIsCorrected(t *testing.T) {
+	rig := newComplianceTestRig(t, nil, func(searchengine.Request) []searchengine.Result {
+		return []searchengine.Result{{ArtifactType: "metric", ArtifactID: "2_mtc_10", InputRecordID: 2, Snippet: "heating capacity"}}
+	})
+	rig.store.metrics = map[string]complianceMetricCandidate{"2_mtc_10": {Name: "heating capacity", Subject: "unit", DocNo: "STD 2-2022", Title: "Multi-split units",
+		Context: "If the heating capacity exceeds 110% of the required load, COP is calculated by formula A.6."}}
+	rig.primary.answer = func(stage, input string) (map[string]any, error) {
+		if stage == "detect" {
+			return map[string]any{"activities": []any{}}, nil
+		}
+		return judgeAll(input, func(string, string) map[string]any { return map[string]any{"candidate_quote": "heating capacity"} }), nil
+	}
+	rig.corr.answer = func(stage, input string) (map[string]any, error) {
+		return judgeAll(strings.SplitN(input, "\n\nProblems:", 2)[0], func(string, string) map[string]any {
+			return map[string]any{"verdict": "unqualified", "binding": "none", "candidate_quote": ""}
+		}), nil
+	}
+	rig.store.rows = []complianceArtifactRow{{Kind: "metric", RowID: 1, ArtifactID: "7_mtc_1", Label: "heating capacity", LineStart: 1, LineEnd: 1, DupKey: "h"}}
+	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "The heating capacity Qj is interpolated between test points."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr := rig.corr.calls("judgement")
+	if len(corr) != 1 || !strings.Contains(corr[0], `candidate_quote "heating capacity" is only the candidate's name`) {
+		t.Fatalf("correction requests = %q", corr)
+	}
+	f, ok := findingOfType(fs, "compliance_assessment")
+	if !ok || f.ErrorMsg != "" || len(f.RelatedArtifacts) != 1 || f.RelatedArtifacts[0].Relationship != verdictUnqualified {
+		t.Fatalf("finding = %+v", f)
+	}
+	if len(rig.failed) != 1 || rig.failed[0].Outcome != llmusage.FailedCallRecovered {
+		t.Errorf("failed tries = %+v", rig.failed)
 	}
 }
 

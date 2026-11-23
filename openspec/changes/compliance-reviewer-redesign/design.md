@@ -63,7 +63,8 @@ chunk prefix stays byte-identical for prompt caching. Code then drops a text act
 is covered by a metric or provision of the chunk.
 
 **D5. Search per kind.** Metric and provision members search with `Query.Ref` and
-`ArtifactTypes = [own kind]`, limit `top_metrics` / `top_provisions`, taking the fused ranking. Text
+`ArtifactTypes = [metric, provision]` (own kind first; revised 2026-11-23, see D16), limit
+`top_metrics` / `top_provisions`, taking the fused ranking. Text
 activities run each model query over `[provision, metric, chunk]` with limit `top_artifacts` and merge
 the queries' results round-robin by rank until the limit. Cited-document searches (first
 `max_cited_documents`, default 0) add the citation text as one more query of the activity's kinds.
@@ -93,16 +94,20 @@ Yes or no alone, without a score, kept only 69%.
 
 **D7. Judgement call.** Structured calls per unit with `judgement_prompt`, at most 20
 activity–candidate pairs each (the first live run on record 825 had a 48-metric group whose single
-answer was cut off at the output limit); a failed batch keeps the other batches' verdicts. Input: assessment
-date, the chunk lines, the unit's activities (`activity_id`, kind, label, text, lines, context facts,
-relationship, candidate keys) and the candidate texts. Output `verdicts[]`: `activity_id`,
-`artifact_key`, `verdict`, `binding` (`mandatory`, `recommendation`, `none`; optional except for
-strong verdicts, missing means `none`), `summary`,
-`candidate_quote`, `document_quote`, `document_line_start`, `document_line_end`, optional `numeric`
-(the existing `complianceNumeric`). CheckParsed reports every problem at once: missing, repeated or
-unknown pairs; bad enums; empty summary; compliant or not compliant without a mandatory binding or
-without both quotes; quotes that do not match (candidate text by letters and digits; chunk lines by
-the existing evidence check); a recommendation marked compliant or not compliant.
+answer was cut off at the output limit); a failed batch keeps the other batches' verdicts. Input
+(revised 2026-11-23, D16): `review` (document line, assessment date, output language), `evidence`
+(the unit's lines ± `evidence_lines`), the unit's activities (`activity_id`, kind, label, text,
+lines, context facts, relationship, candidate keys) and the candidates. Output `verdicts[]`:
+`activity_id`, `artifact_key`, `candidate_quote`, `document_quote`, `document_line_start`,
+`document_line_end`, optional `numeric` (the existing `complianceNumeric`), `summary`, `binding`
+(`mandatory`, `recommendation`, `none`; optional except for compatible and strong verdicts, missing
+means `none`), `verdict`; the prompt asks for this order so the evidence is written before the
+conclusion. CheckParsed reports every problem at once: missing, repeated or unknown pairs; bad enums;
+empty summary; compliant or not compliant without a mandatory binding or without both quotes;
+compatible without a mandatory or recommendation binding; such a binding without a candidate quote,
+or with a quote that is only the candidate's name; quotes that do not match (candidate text by
+letters and digits; evidence lines by the existing evidence check); a recommendation marked compliant
+or not compliant.
 
 **D8. Numbers through the module.** When a verdict carries `numeric`, binding is mandatory, both
 quotes are present and the verdict is compliant, compatible or not compliant, the existing
@@ -152,6 +157,39 @@ compliance findings have `proc_status = 'failed'`.
 
 **D15. Concurrency.** Units of one chunk run with `runConcurrent`, at most four at a time; chunks
 already run in parallel under `MAX_DOC_REVIEWER_TASKS`.
+
+**D16. The judgement request** (2026-11-23). Judgement call `llm-d903b70ada2385ab03800c144f381214`
+(record 825, chunk 3, judgement v2) judged a 17-line text activity (the interpolation of the heating
+capacity Qj) against ten metric candidates. The request held the whole 145-line chunk (12,907 input
+tokens, none cached), each candidate only as its name, and its record number; the model answered
+`compatible`/`mandatory` for all ten, quoting the names, and read record 824 as the reviewed document.
+- *Evidence window.* The unit's lines ± `evidence_lines` (default 10), cut from the chunk, replace the
+  chunk. The window does not cross the chunk's edges, because the chunk input is all the reviewer
+  holds. All batches of a unit and its verification share the window.
+- *Layout.* The prompt becomes the system message (`DocumentFirst = false`), so it is a prefix shared
+  by every call of the stage. The input runs from most to least shared: `review`, `evidence`,
+  `activities`, `candidates` (`verdicts`). A struct, not a map, fixes the order (map keys came out
+  alphabetical, putting the chunk after the per-call fields). No HTML escaping (`<` came out as
+  `<`). Detect keeps the document-first layout: its chunk prefix is shared with the other chunk
+  reviewers. No dispatch gate was added: a new prefix becomes reusable only 15–60 s after the first
+  call, and a review runs for minutes, so later calls hit it anyway.
+- *Metric fields.* `clause`, `value_class`, `range_type`, `value`, `min`, `max`, `unit`, `condition`,
+  `frame` join the metric candidate (relevance, judgement, verification); the text stays authoritative,
+  because extraction errors exist (the "capacity exceeds 110% of the required load" row is stored as a
+  lower-bound requirement but is the trigger of a calculation step). `record_id` is no longer shown.
+- *Kinds.* Metric and provision activities search metrics and provisions, assuming extraction found
+  the requirements; document passages stay text-activity candidates.
+- *What a candidate can decide.* Judgement v4 says a candidate can decide what the activity does or
+  states, or what it depends on (an input, its measuring conditions), and that anything else, including
+  the same method for another kind of product, is `unqualified`; a calculation is the example, not a
+  rule. Relevance v5 only describes the new fields; its rules are unchanged, so it still removes
+  candidates about "a different step of the same process", which the judgement could now use.
+- *Replay* (dev, deepseek-flash, judgement v4). The same activity and ten candidates: 9,489 input
+  tokens (the window holds line 663, a 4.9 KB table) and ten `unqualified` verdicts with correct
+  reasons (another product type and step; two classification-only definitions with binding `none`;
+  capacity tolerances). A full run of the unit (search, relevance v5, judgement v4) kept 11 of 30
+  candidates, all answered "no" with score 3, and judged all 11 `unqualified`; its judgement call
+  reused 7,424 of 9,657 input tokens from the replay's prefix.
 
 ## Reused modules
 

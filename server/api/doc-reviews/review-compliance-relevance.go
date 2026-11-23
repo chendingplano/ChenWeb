@@ -56,6 +56,7 @@ type complianceRelevanceCandidate struct {
 	Name    string `json:"name,omitempty"`
 	Subject string `json:"subject,omitempty"`
 	Text    string `json:"text"`
+	complianceMetricFields
 }
 
 // checkRelevance asks, in one call for the activity, whether each found candidate could decide
@@ -70,17 +71,18 @@ func (r *complianceReviewer) checkRelevance(ctx context.Context, recordID int64,
 	for i, artifact := range found {
 		keys[i] = "c" + strconv.Itoa(i+1)
 		c := pool[artifact]
-		cands[i] = complianceRelevanceCandidate{Key: keys[i], Type: c.Type, DocNo: c.DocNo, Title: c.Title, Name: c.Name, Subject: c.Subject, Text: c.Text}
+		cands[i] = complianceRelevanceCandidate{Key: keys[i], Type: c.Type, DocNo: c.DocNo, Title: c.Title, Name: c.Name, Subject: c.Subject, Text: c.Text,
+			complianceMetricFields: c.complianceMetricFields}
 	}
-	b, err := json.Marshal(map[string]any{"activity": complianceMemberView(m), "candidates": cands})
+	input, err := complianceRequestJSON(map[string]any{"activity": complianceMemberView(m), "candidates": cands})
 	if err != nil {
 		return nil, nil, "", err
 	}
 	var answers map[string]complianceRelevanceAnswer
 	p := r.prompts["relevance"]
 	_, model, err := r.callWithTries(ctx, cfg, complianceCall{
-		Stage: "relevance", PromptRef: p.Ref, PromptText: p.Text, Input: string(b), Schema: map[string]any{"type": "object"},
-		RecordID: recordID, ChunkIndex: &chunkIndex,
+		Stage: "relevance", PromptRef: p.Ref, PromptText: p.Text, Input: input, Schema: map[string]any{"type": "object"},
+		RecordID: recordID, ChunkIndex: &chunkIndex, TaskFirst: true,
 		Check: func(parsed map[string]any) error {
 			var cerr error
 			answers, cerr = checkComplianceRelevance(parsed, keys)

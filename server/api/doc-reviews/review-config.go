@@ -74,6 +74,9 @@ type ReviewAspectConfig struct {
 	MaxCitedDocuments *int `toml:"max_cited_documents"`
 	MaxMetrics        *int `toml:"max_metrics"`
 	MaxProvisions     *int `toml:"max_provisions"`
+	// EvidenceLines is how many lines before and after an activity's lines the compliance
+	// judgement and verification see (complianceDefaultEvidenceLines when unset).
+	EvidenceLines *int `toml:"evidence_lines"`
 	// Effort is the compliance reviewer's relevance cut-off: "normal" (the default when unset) keeps
 	// candidates scored 3 or more, "high" keeps those scored 2 or more.
 	Effort string `toml:"effort"`
@@ -204,7 +207,8 @@ func parseDocReviewConfig(raw []byte) (*DocReviewConfig, error) {
 				return nil, fmt.Errorf("%s %s must be a positive integer", scope, name)
 			}
 		}
-		for name, v := range map[string]*int{"max_cited_documents": reviewer.MaxCitedDocuments, "max_metrics": reviewer.MaxMetrics, "max_provisions": reviewer.MaxProvisions} {
+		for name, v := range map[string]*int{"max_cited_documents": reviewer.MaxCitedDocuments, "max_metrics": reviewer.MaxMetrics, "max_provisions": reviewer.MaxProvisions,
+			"evidence_lines": reviewer.EvidenceLines} {
 			if v != nil && *v < 0 {
 				return nil, fmt.Errorf("%s %s must not be negative", scope, name)
 			}

@@ -1,6 +1,7 @@
 package docreviews
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,6 +53,95 @@ type complianceUnitState struct {
 	checks    []complianceCheck
 	models    map[string]string
 	errs      []string
+	// document, evidence and lines are what the judgement and verification see of the reviewed
+	// document: its doc_context line and the unit's evidence window (see complianceEvidenceWindow).
+	document string
+	evidence complianceEvidence
+	lines    []complianceInputLine
+}
+
+// complianceUnitRequest is the input of a judgement or verification call. Its fields run from the
+// most shared to the least: the review (every call of the review), the evidence (every call of the
+// unit), then this call's activities, candidates and draft verdicts. With the prompt as the system
+// message (TaskFirst), calls that share a review or a unit share a cacheable prefix.
+type complianceUnitRequest struct {
+	Review     complianceReviewContext `json:"review"`
+	Evidence   complianceEvidence      `json:"evidence"`
+	Activities []map[string]any        `json:"activities"`
+	Candidates []*complianceCandidate  `json:"candidates"`
+	Verdicts   []complianceVerdict     `json:"verdicts,omitempty"`
+}
+
+type complianceReviewContext struct {
+	Document       string `json:"document"`
+	AssessmentDate string `json:"assessment_date"`
+	OutputLanguage string `json:"output_language"`
+}
+
+// complianceEvidence is the part of the chunk a unit is judged on, in the chunk's compact form: a
+// header row, then one row per line.
+type complianceEvidence struct {
+	Lines [][]any `json:"lines"`
+}
+
+// complianceEvidenceWindow cuts lines start..end out of the chunk input. It returns the document's
+// doc_context line, the rows for the model and the lines for the quote checks. The window cannot
+// reach past the chunk, whose input is all the reviewer holds. Rows are decoded so they are written
+// again without the HTML escaping of the chunk envelope.
+func complianceEvidenceWindow(inputJSON string, start, end int) (string, complianceEvidence, []complianceInputLine) {
+	var env struct {
+		DocContext string  `json:"doc_context"`
+		Lines      [][]any `json:"lines"`
+	}
+	if err := json.Unmarshal([]byte(inputJSON), &env); err != nil {
+		// A chunk without a doc_context line arrives as the bare table.
+		env.DocContext = ""
+		if json.Unmarshal([]byte(inputJSON), &env.Lines) != nil {
+			return "", complianceEvidence{}, nil
+		}
+	}
+	if len(env.Lines) < 2 {
+		return env.DocContext, complianceEvidence{}, nil
+	}
+	numCol, contentCol := -1, -1
+	for i, h := range env.Lines[0] {
+		switch h {
+		case "line_number":
+			numCol = i
+		case "content":
+			contentCol = i
+		}
+	}
+	if numCol < 0 || contentCol < 0 {
+		return env.DocContext, complianceEvidence{}, nil
+	}
+	ev := complianceEvidence{Lines: [][]any{env.Lines[0]}}
+	var lines []complianceInputLine
+	for _, row := range env.Lines[1:] {
+		if len(row) <= numCol || len(row) <= contentCol {
+			continue
+		}
+		n, _ := row[numCol].(float64)
+		if int(n) < start || int(n) > end {
+			continue
+		}
+		c, _ := row[contentCol].(string)
+		ev.Lines = append(ev.Lines, row)
+		lines = append(lines, complianceInputLine{LineNumber: int(n), Content: c})
+	}
+	return env.DocContext, ev, lines
+}
+
+// complianceRequestJSON writes a call's input without HTML escaping, so "<" and "&" in the document
+// and the candidates reach the model as written, not as < and &.
+func complianceRequestJSON(v any) (string, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(buf.String(), "\n"), nil
 }
 
 func (s *complianceUnitState) fail(format string, args ...any) {
@@ -99,7 +189,8 @@ func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chu
 	if len(s.kept) == 0 {
 		return r.unitFinding(s, cfg)
 	}
-	lines, _ := parseComplianceInput(input.inputJSON)
+	n := r.settings.EvidenceLines
+	s.document, s.evidence, s.lines = complianceEvidenceWindow(input.inputJSON, u.LineStart-n, u.LineEnd+n)
 	var pairs []string
 	for _, m := range u.Members {
 		for _, k := range s.kept[m.ID] {
@@ -107,7 +198,7 @@ func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chu
 		}
 	}
 	for _, batch := range complianceBatches(pairs, complianceJudgementMaxPairs) {
-		verdicts, model, err := r.judge(ctx, recordID, chunkIndex, cfg, input, lines, s, batch)
+		verdicts, model, err := r.judge(ctx, recordID, chunkIndex, cfg, s, batch)
 		if err != nil {
 			id, _, _ := strings.Cut(batch[0], "\x00")
 			s.fail("judgement of %d candidate(s) from activity %s on: %v", len(batch), id, err)
@@ -120,7 +211,7 @@ func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chu
 		}
 		s.verdicts = append(s.verdicts, verdicts...)
 	}
-	r.verify(ctx, recordID, chunkIndex, cfg, input, s)
+	r.verify(ctx, recordID, chunkIndex, cfg, s)
 	return r.unitFinding(s, cfg)
 }
 
@@ -145,9 +236,10 @@ func complianceKeySet(pairs []string) map[string]bool {
 	return keys
 }
 
-// unitInput is the input of a judgement or verification call: the unit's activities, each with the
-// candidate keys of the given pairs (all kept candidates when keys is nil), and those candidates.
-func (r *complianceReviewer) unitInput(input chunkInput, s *complianceUnitState, keys map[string]bool) map[string]any {
+// unitRequest is the input of a judgement or verification call: the review, the unit's evidence,
+// the unit's activities, each with the candidate keys of the given pairs (all kept candidates when
+// keys is nil), and those candidates.
+func (r *complianceReviewer) unitRequest(s *complianceUnitState, keys map[string]bool) complianceUnitRequest {
 	acts := make([]map[string]any, 0, len(s.unit.Members))
 	for _, m := range s.unit.Members {
 		var candKeys []string
@@ -173,22 +265,25 @@ func (r *complianceReviewer) unitInput(input chunkInput, s *complianceUnitState,
 			}
 		}
 	}
-	return map[string]any{"assessment_date": r.assessmentDate, "output_language": r.language, "chunk": json.RawMessage(input.inputJSON), "activities": acts, "candidates": cands}
+	return complianceUnitRequest{
+		Review:   complianceReviewContext{Document: s.document, AssessmentDate: r.assessmentDate, OutputLanguage: r.language},
+		Evidence: s.evidence, Activities: acts, Candidates: cands,
+	}
 }
 
-func (r *complianceReviewer) judge(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, input chunkInput, lines []complianceInputLine, s *complianceUnitState, pairs []string) ([]complianceVerdict, string, error) {
-	b, err := json.Marshal(r.unitInput(input, s, complianceKeySet(pairs)))
+func (r *complianceReviewer) judge(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, s *complianceUnitState, pairs []string) ([]complianceVerdict, string, error) {
+	input, err := complianceRequestJSON(r.unitRequest(s, complianceKeySet(pairs)))
 	if err != nil {
 		return nil, "", err
 	}
 	var verdicts []complianceVerdict
 	p := r.prompts["judgement"]
 	_, model, err := r.callWithTries(ctx, cfg, complianceCall{
-		Stage: "judgement", PromptRef: p.Ref, PromptText: p.Text, Input: string(b), Schema: complianceJudgementSchema(),
-		RecordID: recordID, ChunkIndex: &chunkIndex,
+		Stage: "judgement", PromptRef: p.Ref, PromptText: p.Text, Input: input, Schema: complianceJudgementSchema(),
+		RecordID: recordID, ChunkIndex: &chunkIndex, TaskFirst: true,
 		Check: func(parsed map[string]any) error {
 			var cerr error
-			verdicts, cerr = checkComplianceJudgement(parsed, s, pairs, lines)
+			verdicts, cerr = checkComplianceJudgement(parsed, s, pairs, s.lines)
 			return cerr
 		},
 	})
@@ -256,14 +351,27 @@ func checkComplianceVerdict(where string, v complianceVerdict, c *complianceCand
 		problems = append(problems, fmt.Sprintf("%s: %s needs candidate_quote, the exact candidate text that states the requirement", where, v.Verdict))
 	}
 	if strong && strings.TrimSpace(v.DocumentQuote) == "" {
-		problems = append(problems, fmt.Sprintf("%s: %s needs document_quote, the exact chunk text that shows what the document states, with its lines", where, v.Verdict))
+		problems = append(problems, fmt.Sprintf("%s: %s needs document_quote, the exact evidence text that shows what the document states, with its lines", where, v.Verdict))
+	}
+	// compatible says the candidate states a requirement that may apply, and a binding says what that
+	// requirement is: both need the candidate text that states it. A bare name states none.
+	if v.Verdict == verdictCompatible && !complianceOneOf(v.Binding, "mandatory", "recommendation") {
+		problems = append(problems, fmt.Sprintf("%s: compatible needs binding mandatory or recommendation, because it says the candidate's requirement may apply; a candidate that states no requirement is unqualified with binding none", where))
+	}
+	if q := strings.TrimSpace(v.CandidateQuote); complianceOneOf(v.Binding, "mandatory", "recommendation") {
+		switch {
+		case q == "" && !strong: // a strong verdict without a quote is reported above
+			problems = append(problems, fmt.Sprintf("%s: binding %s needs candidate_quote, the exact candidate text that states the duty or limit; if the candidate states none, set binding none and verdict unqualified", where, v.Binding))
+		case q != "" && c != nil && c.Name != "" && complianceLooseText(q) == complianceLooseText(c.Name):
+			problems = append(problems, fmt.Sprintf("%s: candidate_quote %q is only the candidate's name, which states no requirement; quote the text that states the duty or limit, or set binding none and verdict unqualified", where, complianceCap(q, 120)))
+		}
 	}
 	if q := strings.TrimSpace(v.CandidateQuote); q != "" && c != nil && !strings.Contains(complianceLooseText(c.Text), complianceLooseText(q)) {
 		problems = append(problems, fmt.Sprintf("%s: candidate_quote %q does not occur in the candidate's text; copy it exactly from the candidate", where, complianceCap(q, 120)))
 	}
 	if q := strings.TrimSpace(v.DocumentQuote); q != "" {
 		if err := complianceQuoteInLines(lines, v.DocumentLineStart, v.DocumentLineEnd, q, true); err != nil {
-			problems = append(problems, fmt.Sprintf("%s: document_quote %v; copy it exactly from chunk lines and give their numbers", where, err))
+			problems = append(problems, fmt.Sprintf("%s: document_quote %v; copy it exactly from the evidence lines and give their numbers", where, err))
 		}
 	}
 	return problems
@@ -310,7 +418,7 @@ func applyComplianceNumeric(v *complianceVerdict) {
 
 // verify checks every compliant and not compliant verdict. A rejected verdict, or every strong
 // verdict when the verification call fails, becomes undetermined with the reason as note.
-func (r *complianceReviewer) verify(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, input chunkInput, s *complianceUnitState) {
+func (r *complianceReviewer) verify(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, s *complianceUnitState) {
 	var strong []complianceVerdict
 	for _, v := range s.verdicts {
 		if v.Verdict == verdictCompliant || v.Verdict == verdictNotCompliant {
@@ -318,25 +426,25 @@ func (r *complianceReviewer) verify(ctx context.Context, recordID int64, chunkIn
 		}
 	}
 	for start := 0; start < len(strong); start += complianceJudgementMaxPairs {
-		r.verifyBatch(ctx, recordID, chunkIndex, cfg, input, s, strong[start:min(start+complianceJudgementMaxPairs, len(strong))])
+		r.verifyBatch(ctx, recordID, chunkIndex, cfg, s, strong[start:min(start+complianceJudgementMaxPairs, len(strong))])
 	}
 }
 
-func (r *complianceReviewer) verifyBatch(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, input chunkInput, s *complianceUnitState, strong []complianceVerdict) {
+func (r *complianceReviewer) verifyBatch(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, s *complianceUnitState, strong []complianceVerdict) {
 	keys := map[string]bool{}
 	for _, v := range strong {
 		keys[v.ActivityID+"\x00"+v.ArtifactKey] = true
 	}
-	in := r.unitInput(input, s, keys)
-	in["verdicts"] = strong
-	b, err := json.Marshal(in)
+	in := r.unitRequest(s, keys)
+	in.Verdicts = strong
+	input, err := complianceRequestJSON(in)
 	if err == nil {
 		var checks []complianceCheck
 		p := r.prompts["verify"]
 		var model string
 		_, model, err = r.callWithTries(ctx, cfg, complianceCall{
-			Stage: "verify", PromptRef: p.Ref, PromptText: p.Text, Input: string(b), Schema: complianceVerifierSchema(),
-			RecordID: recordID, ChunkIndex: &chunkIndex,
+			Stage: "verify", PromptRef: p.Ref, PromptText: p.Text, Input: input, Schema: complianceVerifierSchema(),
+			RecordID: recordID, ChunkIndex: &chunkIndex, TaskFirst: true,
 			Check: func(parsed map[string]any) error {
 				var cerr error
 				checks, cerr = checkComplianceChecks(parsed, keys)

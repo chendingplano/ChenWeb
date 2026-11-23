@@ -81,9 +81,9 @@ explicit quotes whose endpoints are absent or whose text does not match.
 - **THEN** the reviewer rejects the activity and asks for a range within the passage
 
 ### Requirement: Search per activity kind
-A metric activity SHALL search metrics only, by reference to its indexed artifact, keeping at most
-`top_metrics` results; a provision activity SHALL search provisions only, keeping at most
-`top_provisions`; a text activity SHALL search provisions, metrics and document passages together,
+A metric activity SHALL search metrics and provisions, by reference to its indexed artifact, keeping
+at most `top_metrics` results; a provision activity SHALL search provisions and metrics, keeping at
+most `top_provisions`; a text activity SHALL search provisions, metrics and document passages together,
 keeping at most `top_artifacts` distinct results across its queries (defaults 30). Every search SHALL
 exclude the reviewed record and records with the same md5. At most `max_cited_documents` cited
 documents (default 0) SHALL be searched. The names of the activity's cited documents SHALL be saved in
@@ -92,7 +92,7 @@ reference, keywords, kinds, limit, excluded records, a possibly-cut-off flag and
 
 #### Scenario: Metric activity search
 - **WHEN** a metric activity is searched
-- **THEN** the search request uses the metric's search-index reference, the metric kind only, and limit `top_metrics`
+- **THEN** the search request uses the metric's search-index reference, the metric and provision kinds, and limit `top_metrics`
 
 #### Scenario: Cited documents not searched by default
 - **WHEN** a text activity cites "GB/T 1234" and `max_cited_documents` is 0
@@ -126,9 +126,14 @@ no candidate remains, the finding SHALL be `compliance_no_grounding`.
 ### Requirement: Metric candidate content
 The relevance, judgement and verification calls SHALL show each metric candidate with its document's
 number (`doc_no`) and title from `kb.inputs`, and the metric's `name` (`metric_name`) and `subject`
-(`metric_subject`) from `kb.metrics`. The candidate's text SHALL be the metric's source sentence or
-table row (`metric_context`), cut to 2,000 characters. A metric without a source sentence SHALL keep
-the search-index text. Provision and passage candidates SHALL keep their search-index text and title.
+(`metric_subject`) from `kb.metrics`, followed by its stored fields when present: `clause`
+(`table_name_or_section`), `value_class`, `range_type` (`value_range_type`), `value` (`metric_value`),
+`min` and `max` (`value_min`, `value_max`), `unit` (`metric_unit`), `condition`, and `frame` (the
+values of `frame` by key). The candidate's text SHALL be the metric's source sentence or table row
+(`metric_context`), cut to 2,000 characters; the prompts SHALL say that the text holds when the
+stored fields disagree with it. A metric without a source sentence SHALL keep the search-index text.
+Provision and passage candidates SHALL keep their search-index text and title. No candidate SHALL show
+its record number to the model.
 
 #### Scenario: Two metrics with the same name
 - **WHEN** two metric candidates are both named "heating capacity" and the search index holds only that name
@@ -140,14 +145,19 @@ the search-index text. Provision and passage candidates SHALL keep their search-
 
 ### Requirement: Judgement call
 For each text activity and each activity group, the reviewer SHALL send structured calls with
-`judgement_prompt` containing the activity's chunk, the activities and the remaining candidates (text
-cut to 2,000 characters), each call holding at most 20 activity–candidate pairs. A failed call SHALL
+`judgement_prompt` containing the unit's evidence, the activities and the remaining candidates (text
+cut to 2,000 characters), each call holding at most 20 activity–candidate pairs. The evidence SHALL
+be the chunk's lines from the unit's first line minus `evidence_lines` to its last line plus
+`evidence_lines` (`[reviewers.compliance]`, default 10, not negative), within the chunk; the
+verification SHALL get the same evidence. A failed call SHALL
 NOT discard the verdicts of the unit's other calls. Every activity-candidate pair SHALL get exactly one verdict (`compliant`,
 `compatible`, `not_compliant`, `undetermined`, `unqualified`) and a summary; a binding (`mandatory`,
-`recommendation`, `none`) MAY be left out except for compliant and not compliant verdicts, and a
-missing binding SHALL count as `none`. A compliant or not compliant verdict SHALL have a mandatory
-binding, a candidate quote that occurs in the candidate text and a document quote that matches the
-cited chunk lines. A recommendation SHALL never be compliant or not compliant. An answer that breaks
+`recommendation`, `none`) MAY be left out except for compatible, compliant and not compliant
+verdicts, and a missing binding SHALL count as `none`. A compatible verdict SHALL have a mandatory or
+recommendation binding. A mandatory or recommendation binding SHALL have a candidate quote that occurs
+in the candidate text and is more than the candidate's name. A compliant or not compliant verdict
+SHALL have a mandatory binding, a candidate quote and a document quote that matches the cited
+evidence lines. A recommendation SHALL never be compliant or not compliant. An answer that breaks
 these rules SHALL be a wrong answer.
 
 #### Scenario: Large group judged in several calls
@@ -157,6 +167,26 @@ these rules SHALL be a wrong answer.
 #### Scenario: Compliant verdict without a document quote
 - **WHEN** the model returns `compliant` with an empty `document_quote`
 - **THEN** the answer is wrong and the correction request names the activity, the candidate and the field
+
+#### Scenario: Evidence window
+- **WHEN** a provision activity is on line 20 of a chunk holding lines 1–40 and `evidence_lines` is 3
+- **THEN** the judgement input holds lines 17–23 only, and a document quote from line 30 is a wrong answer
+
+#### Scenario: Verdict quoting only a metric's name
+- **WHEN** the model returns `compatible` with binding `mandatory` and a candidate quote equal to the metric candidate's name
+- **THEN** the answer is wrong, the correction request says the quote is only the candidate's name, and a corrected `unqualified` verdict with binding `none` is accepted
+
+### Requirement: Request layout for prompt caching
+The relevance, judgement and verification calls SHALL send their prompt as the system message and
+their input as the user message. The judgement and verification input SHALL be one JSON object whose
+fields come in this order: `review` (the reviewed document's `doc_context` line, the assessment date,
+the output language), `evidence`, `activities`, `candidates`, and for the verification `verdicts`.
+Inputs SHALL be written without HTML escaping. Finding text activities SHALL keep the document-first
+layout that the chunk reviewers share.
+
+#### Scenario: Two batches of one unit
+- **WHEN** a unit is judged in two calls
+- **THEN** both calls start with the same system message, `review` and `evidence`, and differ only from `activities` on
 
 ### Requirement: Numeric comparison
 The quantity-comparison module SHALL decide a verdict that carries a numeric comparison, has a
