@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/buildinfo"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
@@ -43,5 +44,5 @@ func List(c echo.Context) error {
 		}
 	}
 	logger.Info("listed live build info", "running_processes", running, "processes", len(processes))
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "processes": processes})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "processes": processes, "check_build_numbers": strings.TrimSpace(appconfig.AppConfig.Deployment.Role) != "build"})
 }

@@ -7350,6 +7350,7 @@
 	"build_info_unspecified": "Unspecified",
 	"build_info_mismatch": "Running processes have different build numbers",
 	"build_info_consistent": "All reporting processes are running the same build",
+	"build_info_all_running": "All processes are running",
 	"build_info_incomplete": "Build information is incomplete",
 	"build_info_incomplete_detail": "One or more processes are stopped or do not report a build number.",
 	"build_info_stopped_processes": "Stopped: {processes}",

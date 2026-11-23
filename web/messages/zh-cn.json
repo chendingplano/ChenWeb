@@ -7350,6 +7350,7 @@
 	"build_info_unspecified": "未提供",
 	"build_info_mismatch": "运行中的进程使用了不同的构建编号",
 	"build_info_consistent": "所有已上报的进程都运行着同一构建",
+	"build_info_all_running": "所有进程均在运行",
 	"build_info_incomplete": "构建信息不完整",
 	"build_info_incomplete_detail": "有进程已停止或未上报构建编号。",
 	"build_info_stopped_processes": "已停止：{processes}",

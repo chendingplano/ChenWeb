@@ -14,14 +14,15 @@ export type BuildProcess = {
 type ListResponse = {
 	status: boolean;
 	processes?: BuildProcess[];
+	check_build_numbers?: boolean;
 	error_msg?: string;
 };
 
-export async function listBuildProcesses(fetchFn: typeof fetch = fetch): Promise<BuildProcess[]> {
+export async function listBuildProcesses(fetchFn: typeof fetch = fetch): Promise<{ processes: BuildProcess[]; checkBuildNumbers: boolean }> {
 	const response = await fetchFn('/api/v1/system-admin/build-info', { credentials: 'same-origin' });
 	const body = (await response.json()) as ListResponse;
 	if (!response.ok || !body.status) {
 		throw new Error(body.error_msg || `Request failed (${response.status})`);
 	}
-	return body.processes ?? [];
+	return { processes: body.processes ?? [], checkBuildNumbers: body.check_build_numbers !== false };
 }
