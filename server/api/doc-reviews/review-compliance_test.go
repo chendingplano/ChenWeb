@@ -1064,12 +1064,27 @@ func TestComplianceRetryUsageLinks(t *testing.T) {
 			previous := llmclients.DefaultUsageCaptureSink
 			llmclients.DefaultUsageCaptureSink = sink
 			defer func() { llmclients.DefaultUsageCaptureSink = previous }()
-			client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, HTTPClient: srv.Client(), ModelName: "primary-model"}
+			client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, HTTPClient: srv.Client(), ModelName: "primary-model", ThinkingType: "enabled"}
+			modelsPath := filepath.Join(t.TempDir(), "models.toml")
+			models := fmt.Sprintf("[retry-test]\nhost = 'cloud'\nmodel_name = 'retry-model'\napi_key = 'test'\nbase_url = %q\nthinking_type = 'enabled'\n", srv.URL)
+			if err := os.WriteFile(modelsPath, []byte(models), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MODEL_DEF_FILE", modelsPath)
+			t.Setenv(envComplianceCorrectionModel, "retry-test")
+			t.Setenv(envComplianceFallbackModel, "retry-test")
 			rig := newComplianceTestRig(t, nil, func(searchengine.Request) []searchengine.Result { return nil })
 			rig.r.client = client
-			rig.r.correction.client = client
-			rig.r.fallback.client = client
-			_, _, err := rig.r.callWithTries(context.Background(), complianceTestCfg, complianceCall{
+			var err error
+			rig.r.correction, err = complianceTryFromEnv(envComplianceCorrectionModel, "correction")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rig.r.fallback, err = complianceTryFromEnv(envComplianceFallbackModel, "fallback")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = rig.r.callWithTries(context.Background(), complianceTestCfg, complianceCall{
 				Stage: "detect", PromptText: "Return the answer", PromptRef: "test", Input: "block",
 				Schema: map[string]any{"type": "object", "required": []any{"answer"}},
 				Check: func(parsed map[string]any) error {
@@ -1086,6 +1101,14 @@ func TestComplianceRetryUsageLinks(t *testing.T) {
 				t.Fatalf("requests=%d events=%d", len(requests), len(sink.records))
 			}
 			for i, record := range sink.records {
+				wantThinking := "enabled"
+				if i == 1 {
+					wantThinking = "disabled"
+				}
+				thinking, _ := requests[i]["thinking"].(map[string]any)
+				if thinking["type"] != wantThinking {
+					t.Errorf("attempt %d thinking = %v, want %s", i+1, thinking, wantThinking)
+				}
 				succeeded := i == len(tc.answers)-1 && !tc.wantFailure
 				if i == 0 {
 					if strings.Contains(record.ErrorMessage, "correcting call:") {

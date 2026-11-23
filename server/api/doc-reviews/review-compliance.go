@@ -182,13 +182,18 @@ func (r *complianceReviewer) configure(rc ReviewAspectConfig) error {
 }
 
 // complianceTryFromEnv builds the client of the second or third try from a model profile named by
-// an environment variable. The profile's own thinking setting applies.
+// an environment variable. The correction model always runs without reasoning; the fallback
+// keeps the profile's own thinking setting.
 func complianceTryFromEnv(env, label string) (complianceTry, error) {
 	ref := strings.TrimSpace(os.Getenv(env))
 	if ref == "" {
 		return complianceTry{}, fmt.Errorf("%s is not set (the %s model of Compliance Review)", env, label)
 	}
-	client, model, err := docprocessing.BuildReviewerLLMClientWithThinking(ref, "")
+	thinkingType := ""
+	if label == "correction" {
+		thinkingType = "disabled"
+	}
+	client, model, err := docprocessing.BuildReviewerLLMClientWithThinking(ref, thinkingType)
 	if err != nil {
 		return complianceTry{}, fmt.Errorf("%s=%q cannot be used: %v", env, ref, err)
 	}

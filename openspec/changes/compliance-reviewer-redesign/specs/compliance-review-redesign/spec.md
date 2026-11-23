@@ -154,6 +154,10 @@ answer yet SHALL send the original input. The chain SHALL NOT raise warnings. Ev
 written to `kb.failed_llm_calls` with the record, review run, aspect, prompt, attempt number, model,
 error, raw answer and whether a later try succeeded.
 
+The correction model SHALL run with `thinking.type = "disabled"`, overriding its model profile's
+thinking setting, including when retrying after a provider failure. The primary and fallback
+models SHALL retain their existing thinking settings.
+
 Each actual request SHALL produce one usage event with its input, response and outcome. Each retry
 SHALL link the immediately preceding failed event using `metadata_json.correcting_call_id` and the
 note `correcting call: <event-id>` in `error_message`. A successful retry SHALL contain only that note;
@@ -172,6 +176,10 @@ not a shared client's last-usage state. If capture did not persist an event, no 
 #### Scenario: Correction model fixes the answer
 - **WHEN** the reviewer's model returns a wrong answer and the correction model returns a valid one
 - **THEN** the valid answer is used and one `kb.failed_llm_calls` row with attempt 1 and outcome `recovered` is written
+
+#### Scenario: Correction profile enables reasoning
+- **WHEN** the correction model's profile enables thinking and the primary request fails
+- **THEN** the second request sends `thinking.type = "disabled"`, while primary and fallback thinking settings are unchanged
 
 #### Scenario: All three tries fail
 - **WHEN** all three tries return wrong answers
