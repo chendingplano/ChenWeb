@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SystemMonitorView from './system-monitor-view.svelte';
 	import { m } from '$lib/paraglide/messages.js';
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import {
@@ -744,6 +745,7 @@
 					</div>
 				</div>
 			{/if}
+			<SystemMonitorView {darkMode} sourceId="doc-processor" />
 			<div
 				style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; font-size: 0.9rem; padding: 1.5rem 0.25rem;"
 			>
