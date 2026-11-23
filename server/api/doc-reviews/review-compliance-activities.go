@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/lib/pq"
 )
 
 // The processors whose results Compliance Review reads. For now only the simple metric extraction
@@ -27,6 +29,18 @@ type complianceStore interface {
 	ArtifactRows(ctx context.Context, recordID int64) ([]complianceArtifactRow, error)
 	// Mentions returns the record's citations of other documents.
 	Mentions(ctx context.Context, recordID int64) ([]complianceMention, error)
+	// MetricCandidates returns what the model sees of each metric candidate, by search-index id.
+	MetricCandidates(ctx context.Context, artifactIDs []string) (map[string]complianceMetricCandidate, error)
+}
+
+// complianceMetricCandidate is what the relevance check and the judgement see of a metric
+// candidate. The search index holds only the metric's name, which cannot show whether it applies.
+type complianceMetricCandidate struct {
+	Name    string // kb.metrics.metric_name
+	Subject string // kb.metrics.metric_subject
+	Context string // kb.metrics.metric_context: the source sentence or table row
+	DocNo   string // kb.inputs.doc_no of the metric's document
+	Title   string // kb.inputs.title
 }
 
 // complianceArtifactRow is one metric or provision of the reviewed record.
@@ -98,6 +112,30 @@ func (s complianceSQLStore) ArtifactRows(ctx context.Context, recordID int64) ([
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s complianceSQLStore) MetricCandidates(ctx context.Context, artifactIDs []string) (map[string]complianceMetricCandidate, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT sa.artifact_id, COALESCE(m.metric_name, ''), COALESCE(m.metric_subject, ''), COALESCE(m.metric_context, ''),
+			COALESCE(i.doc_no, ''), COALESCE(i.title, '')
+		FROM kb.search_artifacts sa
+		JOIN kb.metrics m ON m.id = sa.source_row_id AND m.input_record_id = sa.input_record_id
+		LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+		WHERE sa.artifact_type = 'metric' AND sa.artifact_id = ANY($1)`, pq.Array(artifactIDs))
+	if err != nil {
+		return nil, fmt.Errorf("compliance: load %d metric candidates: %w", len(artifactIDs), err)
+	}
+	defer rows.Close()
+	out := make(map[string]complianceMetricCandidate, len(artifactIDs))
+	for rows.Next() {
+		var id string
+		var m complianceMetricCandidate
+		if err := rows.Scan(&id, &m.Name, &m.Subject, &m.Context, &m.DocNo, &m.Title); err != nil {
+			return nil, err
+		}
+		out[id] = m
 	}
 	return out, rows.Err()
 }

@@ -49,10 +49,13 @@ type complianceRelevanceAnswer struct {
 
 // complianceRelevanceCandidate is what the relevance call sees of one candidate.
 type complianceRelevanceCandidate struct {
-	Key   string `json:"key"`
-	Type  string `json:"type"`
-	Title string `json:"title,omitempty"`
-	Text  string `json:"text"`
+	Key     string `json:"key"`
+	Type    string `json:"type"`
+	DocNo   string `json:"doc_no,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Text    string `json:"text"`
 }
 
 // checkRelevance asks, in one call for the activity, whether each found candidate could decide
@@ -67,7 +70,7 @@ func (r *complianceReviewer) checkRelevance(ctx context.Context, recordID int64,
 	for i, artifact := range found {
 		keys[i] = "c" + strconv.Itoa(i+1)
 		c := pool[artifact]
-		cands[i] = complianceRelevanceCandidate{Key: keys[i], Type: c.Type, Title: c.Title, Text: c.Text}
+		cands[i] = complianceRelevanceCandidate{Key: keys[i], Type: c.Type, DocNo: c.DocNo, Title: c.Title, Name: c.Name, Subject: c.Subject, Text: c.Text}
 	}
 	b, err := json.Marshal(map[string]any{"activity": complianceMemberView(m), "candidates": cands})
 	if err != nil {

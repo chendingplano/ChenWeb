@@ -72,6 +72,7 @@ type complianceFakeStore struct {
 	missing  []string
 	rows     []complianceArtifactRow
 	mentions map[int64][]complianceMention
+	metrics  map[string]complianceMetricCandidate
 }
 
 func (s *complianceFakeStore) MissingProcessors(context.Context, int64) ([]string, error) {
@@ -82,6 +83,15 @@ func (s *complianceFakeStore) ArtifactRows(context.Context, int64) ([]compliance
 }
 func (s *complianceFakeStore) Mentions(_ context.Context, id int64) ([]complianceMention, error) {
 	return s.mentions[id], nil
+}
+func (s *complianceFakeStore) MetricCandidates(_ context.Context, ids []string) (map[string]complianceMetricCandidate, error) {
+	out := map[string]complianceMetricCandidate{}
+	for _, id := range ids {
+		if m, ok := s.metrics[id]; ok {
+			out[id] = m
+		}
+	}
+	return out, nil
 }
 
 // ---- helpers ----
@@ -659,6 +669,56 @@ func TestComplianceRelevanceRemovesUnrelatedCandidates(t *testing.T) {
 	fs, _ = rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
 	if _, ok := findingOfType(fs, "compliance_no_grounding"); !ok {
 		t.Errorf("findings = %+v, want no grounding", fs)
+	}
+}
+
+// The search index holds only a metric's name. The relevance check and the judgement get the
+// metric's name, subject and source text, and its document's number and title, instead.
+func TestComplianceMetricCandidatesCarryTheirSourceText(t *testing.T) {
+	answer := func(stage, input string) (map[string]any, error) {
+		switch stage {
+		case "detect":
+			return map[string]any{"activities": []any{}}, nil
+		case "judgement":
+			return judgeAll(input, nil), nil
+		}
+		return nil, fmt.Errorf("unexpected stage %s", stage)
+	}
+	rig := newComplianceTestRig(t, answer, func(searchengine.Request) []searchengine.Result {
+		return []searchengine.Result{
+			{ArtifactType: "metric", ArtifactID: "2_mtc_1", InputRecordID: 2, Snippet: "heating capacity"},
+			{ArtifactType: "metric", ArtifactID: "3_mtc_1", InputRecordID: 3, Snippet: "heating capacity"},
+		}
+	})
+	rig.store.metrics = map[string]complianceMetricCandidate{
+		"2_mtc_1": {Name: "heating capacity", Subject: "heat pump unit", Context: "In tests C, D and E the heating capacity shall not exceed 110% of the required load.",
+			DocNo: "STD 2-2020", Title: "Heat pump units"},
+		// No source text: the index text stays.
+		"3_mtc_1": {Name: "heating capacity", Subject: "unit", DocNo: "STD 3-2021", Title: "Multi-split units"},
+	}
+	rig.store.rows = []complianceArtifactRow{{Kind: "metric", RowID: 1, ArtifactID: "7_mtc_1", Label: "heating capacity", Text: "heating capacity 105%", LineStart: 1, LineEnd: 1, DupKey: "h"}}
+	if _, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "heating capacity 105%")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`"doc_no":"STD 2-2020","title":"Heat pump units","name":"heating capacity","subject":"heat pump unit","text":"In tests C, D and E the heating capacity shall not exceed 110% of the required load."`,
+		`"doc_no":"STD 3-2021","title":"Multi-split units","name":"heating capacity","subject":"unit","text":"heating capacity"`,
+	}
+	rel := rig.primary.calls("relevance")
+	if len(rel) != 1 {
+		t.Fatalf("relevance calls = %d, want 1", len(rel))
+	}
+	judge := rig.primary.calls("judgement")
+	if len(judge) != 1 {
+		t.Fatalf("judgement calls = %d, want 1", len(judge))
+	}
+	for _, w := range want {
+		if !strings.Contains(rel[0], w) {
+			t.Errorf("relevance input lacks %s\ninput: %s", w, rel[0])
+		}
+		if !strings.Contains(judge[0], w) {
+			t.Errorf("judgement input lacks %s\ninput: %s", w, judge[0])
+		}
 	}
 }
 

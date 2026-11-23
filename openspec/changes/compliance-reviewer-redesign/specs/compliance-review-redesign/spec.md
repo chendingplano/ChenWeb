@@ -123,6 +123,21 @@ no candidate remains, the finding SHALL be `compliance_no_grounding`.
 - **WHEN** the model gives a candidate score 2
 - **THEN** it is removed when the effort is `normal` and judged when the effort is `high`
 
+### Requirement: Metric candidate content
+The relevance, judgement and verification calls SHALL show each metric candidate with its document's
+number (`doc_no`) and title from `kb.inputs`, and the metric's `name` (`metric_name`) and `subject`
+(`metric_subject`) from `kb.metrics`. The candidate's text SHALL be the metric's source sentence or
+table row (`metric_context`), cut to 2,000 characters. A metric without a source sentence SHALL keep
+the search-index text. Provision and passage candidates SHALL keep their search-index text and title.
+
+#### Scenario: Two metrics with the same name
+- **WHEN** two metric candidates are both named "heating capacity" and the search index holds only that name
+- **THEN** each reaches the relevance and judgement calls with its own document number, title, subject and source sentence
+
+#### Scenario: Metric without a source sentence
+- **WHEN** a metric candidate has no `metric_context`
+- **THEN** its text is the search-index text, and it still carries its document number, title, name and subject
+
 ### Requirement: Judgement call
 For each text activity and each activity group, the reviewer SHALL send structured calls with
 `judgement_prompt` containing the activity's chunk, the activities and the remaining candidates (text

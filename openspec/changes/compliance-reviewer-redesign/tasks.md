@@ -71,3 +71,11 @@
 - [x] 11.3 Prompt `prompt-review-compliance-relevance-v3.md`; offline replay on 30 activities of run 13882 recorded in design D6 and devdoc 2026111201
 - [x] 11.4 Unit tests: one call per activity, score cut-off by effort, wrong answer corrected, three tries, configuration
 - [ ] 11.5 Live review with the new relevance check
+
+## 12. Metric candidate content (2026-11-23)
+
+- [x] 12.1 Metric candidates carry `doc_no` and title (`kb.inputs`), `name` and `subject` (`kb.metrics`), and `metric_context` as their text, in the relevance, judgement and verification calls; a metric without `metric_context` keeps the search-index text
+- [x] 12.2 Prompts `prompt-review-compliance-relevance-v4.md`, `prompt-review-compliance-judgement-v3.md`, `prompt-review-compliance-verifier-v5.md` describe the metric fields
+- [x] 12.3 Unit test: a name-only metric reaches relevance and judgement with all five fields; a metric without source text keeps the index text
+- [x] 12.4 Replay of one saved relevance call (record 825, lines 613–624) recorded in devdoc 2026111201
+- [ ] 12.5 Replay the 30 cut-off activities with the new candidate content and re-check the `effort` cut-offs

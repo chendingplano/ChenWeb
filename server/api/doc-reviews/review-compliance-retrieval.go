@@ -13,13 +13,18 @@ const complianceCandidateTextMax = 2000
 
 var complianceTextActivityKinds = []string{"provision", "metric", "chunk"}
 
-// complianceCandidate is one knowledge-base artifact found for an activity.
+// complianceCandidate is one knowledge-base artifact found for an activity. A metric also carries
+// its document number, name and subject, and its text is its source sentence or table row (see
+// loadMetricCandidates).
 type complianceCandidate struct {
 	Key       string   `json:"artifact_key"`
 	Type      string   `json:"type"`
 	ID        string   `json:"-"`
 	RecordID  int64    `json:"record_id"`
+	DocNo     string   `json:"doc_no,omitempty"`
 	Title     string   `json:"title,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	Subject   string   `json:"subject,omitempty"`
 	Text      string   `json:"text"`
 	Truncated bool     `json:"truncated,omitempty"`
 	Cosine    *float64 `json:"-"`
@@ -297,22 +302,58 @@ func (c *complianceCandidate) setText(text string) {
 }
 
 // loadCandidateTexts replaces the search snippets with the full text the index stores for each
-// candidate (cut to complianceCandidateTextMax).
+// candidate (cut to complianceCandidateTextMax), then gives each metric its source text.
 func (r *complianceReviewer) loadCandidateTexts(ctx context.Context, pool map[string]*complianceCandidate) error {
-	if r.loadArtifacts == nil || len(pool) == 0 {
+	if len(pool) == 0 {
 		return nil
 	}
-	refs := make([]searchengine.ArtifactRef, 0, len(pool))
+	if r.loadArtifacts != nil {
+		refs := make([]searchengine.ArtifactRef, 0, len(pool))
+		for _, c := range pool {
+			refs = append(refs, searchengine.ArtifactRef{Type: c.Type, ID: c.ID})
+		}
+		loaded, err := r.loadArtifacts(ctx, refs)
+		if err != nil {
+			return fmt.Errorf("load candidate text: %w", err)
+		}
+		for _, res := range loaded {
+			if c := pool[res.ArtifactType+"/"+res.ArtifactID]; c != nil && strings.TrimSpace(res.Snippet) != "" {
+				c.setText(res.Snippet)
+			}
+		}
+	}
+	return r.loadMetricCandidates(ctx, pool)
+}
+
+// loadMetricCandidates gives each metric candidate its name, subject, document number and title,
+// and its source sentence or table row as its text. The search index holds only a metric's name,
+// and from a name alone the model cannot tell whether the metric applies. A metric without source
+// text keeps the index text.
+func (r *complianceReviewer) loadMetricCandidates(ctx context.Context, pool map[string]*complianceCandidate) error {
+	var ids []string
 	for _, c := range pool {
-		refs = append(refs, searchengine.ArtifactRef{Type: c.Type, ID: c.ID})
+		if c.Type == "metric" {
+			ids = append(ids, c.ID)
+		}
 	}
-	loaded, err := r.loadArtifacts(ctx, refs)
+	if len(ids) == 0 {
+		return nil
+	}
+	metrics, err := r.store.MetricCandidates(ctx, ids)
 	if err != nil {
-		return fmt.Errorf("load candidate text: %w", err)
+		return fmt.Errorf("load metric candidates: %w", err)
 	}
-	for _, res := range loaded {
-		if c := pool[res.ArtifactType+"/"+res.ArtifactID]; c != nil && strings.TrimSpace(res.Snippet) != "" {
-			c.setText(res.Snippet)
+	for _, c := range pool {
+		m, ok := metrics[c.ID]
+		if c.Type != "metric" || !ok {
+			continue
+		}
+		c.DocNo, c.Name, c.Subject = m.DocNo, m.Name, m.Subject
+		if m.Title != "" {
+			c.Title = m.Title
+		}
+		if strings.TrimSpace(m.Context) != "" {
+			c.setText(m.Context)
 		}
 	}
 	return nil
