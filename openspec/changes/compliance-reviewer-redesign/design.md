@@ -113,7 +113,12 @@ on clients built with `docprocessing.BuildReviewerLLMClientWithThinking` from
 setting). Each try uses `MaxRetries: 0`. A wrong answer is a `StructuredOutputError` with a raw answer
 that is neither a provider failure nor a truncation. The correction request is the original input
 plus the text of `correction_prompt` with `{{errors}}` (the CheckParsed message, unwrapped) and
-`{{previous_answer}}` filled in; it is built from the first wrong answer and reused by later tries. A
+`{{previous_answer}}` filled in; it is rebuilt from the latest wrong answer for the next try. Each retry records
+`correcting call: <previous-event-id>` in its usage event's `error_message` and the same ID in
+`metadata_json.correcting_call_id`. An accepted retry has only the note; a rejected retry keeps the
+error before the note. The usage log and daily summary treat a note-only message as success. The
+structured result or error returns the persisted event ID for that invocation, so concurrent chunk
+calls never obtain it from shared last-usage state. A
 try after a provider failure with no wrong answer yet sends the original input. Alerts of the chain
 are deferred and dropped (`DeferCallAlerts`, finish with `true`). Each failed try becomes a
 `kb.failed_llm_calls` row written after the chain ends, with `outcome` `recovered` or `failed`.

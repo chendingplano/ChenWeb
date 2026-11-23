@@ -911,7 +911,7 @@
 									{/if}
 								</td>
 								<td>{m.llm_activities_ms({ latency_ms: fmtNum(event.latency_ms) })}</td>
-								<td class:error-cell={!!event.error_message}>
+								<td class:error-cell={!!event.error_message && !event.error_message.startsWith('correcting call: ')}>
 									{event.error_message ? event.error_message : 'OK'}
 								</td>
 								<td>{event.call_loc || ''}</td>

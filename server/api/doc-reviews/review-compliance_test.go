@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -844,7 +846,7 @@ func TestComplianceAllTriesFailingRecordsTheErrorAndContinues(t *testing.T) {
 	if len(rig.failed) != 3 || rig.failed[2].Attempt != 3 || rig.failed[2].Model != "fallback-model" || rig.failed[0].Outcome != llmusage.FailedCallFailed {
 		t.Errorf("failed calls = %+v", rig.failed)
 	}
-	// The fallback model gets the same correction request as the correction model.
+	// Identical wrong answers produce identical correction requests.
 	if c, fb := rig.corr.calls("judgement"), rig.fall.calls("judgement"); len(c) != 1 || len(fb) != 1 || c[0] != fb[0] {
 		t.Errorf("correction and fallback requests differ")
 	}
@@ -1016,5 +1018,104 @@ func TestComplianceRelevanceRetriesOnce(t *testing.T) {
 	fs, _ = rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
 	if f, ok := findingOfType(fs, "compliance_incomplete"); !ok || !strings.Contains(f.ErrorMsg, "connection reset") {
 		t.Fatalf("findings = %+v", fs)
+	}
+}
+
+// Exercise the real structured client and usage sink boundary so corrections
+// link persisted event IDs, rather than a shared client's mutable last usage.
+type complianceUsageSink struct {
+	records []llmclients.UsageCaptureRecord
+}
+
+func (s *complianceUsageSink) Capture(_ context.Context, record llmclients.UsageCaptureRecord) (string, error) {
+	s.records = append(s.records, record)
+	return fmt.Sprintf("llm-attempt-%d", len(s.records)), nil
+}
+
+func TestComplianceRetryUsageLinks(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		answers     []string
+		wantFailure bool
+	}{
+		{"primary succeeds", []string{"ok"}, false},
+		{"correction succeeds", []string{"one", "ok"}, false},
+		{"third succeeds", []string{"one", "two", "ok"}, false},
+		{"all fail", []string{"one", "two", "three"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests []map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				requests = append(requests, body)
+				if len(requests) > len(tc.answers) {
+					t.Error("unexpected extra request")
+					w.WriteHeader(500)
+					return
+				}
+				answer, _ := json.Marshal(map[string]any{"answer": tc.answers[len(requests)-1]})
+				fmt.Fprintf(w, `{"id":"provider-%d","choices":[{"message":{"content":%q}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}`, len(requests), string(answer))
+			}))
+			defer srv.Close()
+			sink := &complianceUsageSink{}
+			previous := llmclients.DefaultUsageCaptureSink
+			llmclients.DefaultUsageCaptureSink = sink
+			defer func() { llmclients.DefaultUsageCaptureSink = previous }()
+			client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, HTTPClient: srv.Client(), ModelName: "primary-model"}
+			rig := newComplianceTestRig(t, nil, func(searchengine.Request) []searchengine.Result { return nil })
+			rig.r.client = client
+			rig.r.correction.client = client
+			rig.r.fallback.client = client
+			_, _, err := rig.r.callWithTries(context.Background(), complianceTestCfg, complianceCall{
+				Stage: "detect", PromptText: "Return the answer", PromptRef: "test", Input: "block",
+				Schema: map[string]any{"type": "object", "required": []any{"answer"}},
+				Check: func(parsed map[string]any) error {
+					if parsed["answer"] != "ok" {
+						return fmt.Errorf("reject %v", parsed["answer"])
+					}
+					return nil
+				},
+			})
+			if (err != nil) != tc.wantFailure {
+				t.Fatalf("unexpected chain result: %v", err)
+			}
+			if len(requests) != len(tc.answers) || len(sink.records) != len(requests) {
+				t.Fatalf("requests=%d events=%d", len(requests), len(sink.records))
+			}
+			for i, record := range sink.records {
+				succeeded := i == len(tc.answers)-1 && !tc.wantFailure
+				if i == 0 {
+					if strings.Contains(record.ErrorMessage, "correcting call:") {
+						t.Error("primary has retry note")
+					}
+				} else {
+					note := fmt.Sprintf("correcting call: llm-attempt-%d", i)
+					if succeeded && record.ErrorMessage != note {
+						t.Errorf("successful retry note = %q", record.ErrorMessage)
+					}
+					if !succeeded && !strings.HasSuffix(record.ErrorMessage, "\n"+note) {
+						t.Errorf("failed retry lacks note: %q", record.ErrorMessage)
+					}
+					if record.Metadata["correcting_call_id"] != fmt.Sprintf("llm-attempt-%d", i) {
+						t.Errorf("retry metadata = %v", record.Metadata)
+					}
+				}
+				if !succeeded && (!strings.Contains(record.ErrorMessage, "reject "+tc.answers[i]) || record.RawResponse == "") {
+					t.Errorf("failed event lost its answer/error: %+v", record)
+				}
+				if record.InputTokens != 10 || record.OutputTokens != 2 || len(record.InputBody) == 0 || len(record.OutputBody) == 0 {
+					t.Error("event lost usage or bodies")
+				}
+			}
+			if len(requests) == 3 {
+				b, _ := json.Marshal(requests[2])
+				if !strings.Contains(string(b), "reject two") {
+					t.Errorf("third request must correct the second answer: %s", b)
+				}
+			}
+		})
 	}
 }

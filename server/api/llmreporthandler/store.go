@@ -767,7 +767,7 @@ WHERE workspace_day = $1`
 	const usageQuery = `SELECT
 COALESCE(COUNT(*), 0),
 COALESCE(SUM(total_tokens), 0),
-COALESCE(SUM(CASE WHEN NULLIF(error_message, '') IS NOT NULL THEN 1 ELSE 0 END), 0)
+COALESCE(SUM(CASE WHEN NULLIF(error_message, '') IS NOT NULL AND error_message NOT LIKE 'correcting call: %' THEN 1 ELSE 0 END), 0)
 FROM llm_usage_event
 WHERE workspace_day = $1
   AND event_kind = 'request'`

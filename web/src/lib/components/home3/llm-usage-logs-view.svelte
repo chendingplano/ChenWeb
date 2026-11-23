@@ -662,7 +662,7 @@
 
 								{#if !hiddenColumns.includes('error')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.error_message}
-										<span style="color:{danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
+										<span style="color:{row.error_message.startsWith('correcting call: ') ? success : danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
 											title={row.error_message}>{row.error_message}</span>
 									{:else}
 										<span style="color:{success}; font-size:12px;">{m.llm_usage_logs_ok()}</span>

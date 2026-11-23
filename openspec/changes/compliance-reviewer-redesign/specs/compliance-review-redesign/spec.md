@@ -148,11 +148,26 @@ compliant verdict remains; otherwise informational.
 ### Requirement: Three tries per structured call
 Activity detection, judgement and verification calls SHALL each get up to three tries: the reviewer's
 model; then, after a wrong answer, a correction request (original input plus `correction_prompt` with
-the errors and the previous answer) to `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME`; then the same
-correction request to `DOC_REVIEWER_FALLBACK_MODEL_NAME`. A try after a provider failure with no wrong
+the errors and the previous answer) to `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME`; then a correction
+request using the latest wrong answer and its errors to `DOC_REVIEWER_FALLBACK_MODEL_NAME`. A try after a provider failure with no wrong
 answer yet SHALL send the original input. The chain SHALL NOT raise warnings. Every failed try SHALL be
 written to `kb.failed_llm_calls` with the record, review run, aspect, prompt, attempt number, model,
 error, raw answer and whether a later try succeeded.
+
+Each actual request SHALL produce one usage event with its input, response and outcome. Each retry
+SHALL link the immediately preceding failed event using `metadata_json.correcting_call_id` and the
+note `correcting call: <event-id>` in `error_message`. A successful retry SHALL contain only that note;
+a failed retry SHALL retain its error followed by the note. A note-only message SHALL NOT count as a
+failure in the usage log or daily summary. Event IDs SHALL come from the individual invocation,
+not a shared client's last-usage state. If capture did not persist an event, no ID SHALL be invented.
+
+#### Scenario: Second request succeeds
+- **WHEN** C1 fails validation and C2 succeeds
+- **THEN** C1 retains its rejected response and error, and C2 records `correcting call: <C1-event-id>` without being counted as a failure
+
+#### Scenario: Third request follows another wrong answer
+- **WHEN** C1 and C2 fail validation
+- **THEN** C3 corrects C2's answer and records `correcting call: <C2-event-id>`; a rejected C3 is recorded as failed
 
 #### Scenario: Correction model fixes the answer
 - **WHEN** the reviewer's model returns a wrong answer and the correction model returns a valid one

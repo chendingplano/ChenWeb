@@ -39,9 +39,9 @@ type complianceFailedTry struct {
 }
 
 // callWithTries sends a structured call to up to three models: the reviewer's own, then the
-// correction model, then the fallback model. Each gets one attempt. After the first wrong answer
-// (an answer that fails the schema or the check), later tries get a correction request: the original
-// input plus the correction prompt filled with the problems and the wrong answer. A try after a
+// correction model, then the fallback model. Each gets one attempt. After a wrong answer
+// (an answer that fails the schema or the check), the next try gets a correction request: the original
+// input plus the correction prompt filled with the latest problems and wrong answer. A try after a
 // provider failure, before any wrong answer, sends the original input. The chain raises no warnings;
 // every failed try is written to kb.failed_llm_calls. It returns the accepted answer and the model
 // that gave it.
@@ -61,6 +61,7 @@ func (r *complianceReviewer) callWithTries(ctx context.Context, cfg ReviewerConf
 
 	input := call.Input
 	correction := ""
+	previousEventID := ""
 	var failures []complianceFailedTry
 	for i, try := range tries {
 		if try.client == nil {
@@ -72,6 +73,9 @@ func (r *complianceReviewer) callWithTries(ctx context.Context, cfg ReviewerConf
 		}
 		in := newDocReviewLLMJSONInputWithMetadata(alertCtx, call.PromptRef, call.PromptText, try.model, input,
 			"review_compliance_"+call.Stage, "MID-20261122-41", map[string]any{"attempt": i + 1, "try": try.label})
+		if previousEventID != "" {
+			in.Metadata["correcting_call_id"] = previousEventID
+		}
 		if call.ChunkIndex != nil {
 			in.Metadata["chunk_index"] = *call.ChunkIndex
 		}
@@ -83,11 +87,16 @@ func (r *complianceReviewer) callWithTries(ctx context.Context, cfg ReviewerConf
 		if err == nil {
 			err = fmt.Errorf("empty structured result")
 		}
+		previousEventID = ""
+		var failedCall *llmclients.StructuredOutputError
+		if errors.As(err, &failedCall) {
+			previousEventID = failedCall.EventID
+		}
 		raw := complianceRawAnswer(err)
 		failures = append(failures, complianceFailedTry{attempt: i + 1, model: try.model, err: err, raw: raw})
 		r.logger.Info("compliance structured call try failed", "stage", call.Stage, "record_id", call.RecordID,
 			"attempt", i+1, "model", try.model, "wrong_answer", complianceWrongAnswer(err), "error", err)
-		if correction == "" && complianceWrongAnswer(err) {
+		if complianceWrongAnswer(err) {
 			correction = r.correctionRequest(call.Input, complianceProblems(err), raw)
 		}
 		if correction != "" {
