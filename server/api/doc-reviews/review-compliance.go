@@ -100,6 +100,10 @@ type complianceReviewer struct {
 	mentions       sync.Map // recordID -> *complianceMentionsEntry
 	recordFailed   func(ctx context.Context, call llmusage.FailedCall)
 	assessmentDate string
+	// language is the report language (the first DOC_REVIEW_REPORT_LANGUAGE entry). The judgement
+	// and the verification write their summaries and reasons in it, so the findings need no
+	// translation (devdoc 2026111201, Language of the findings).
+	language string
 }
 
 func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, db *sql.DB, _ int) *complianceReviewer {
@@ -114,6 +118,7 @@ func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, 
 		store:          complianceSQLStore{db: db},
 		settings:       complianceSettingsFrom(rc),
 		assessmentDate: time.Now().UTC().Format("2006-01-02"),
+		language:       docReviewReportLanguagesFromEnv()[0],
 		duplicateIDs:   func(ctx context.Context, id int64) ([]int64, error) { return sameMD5RecordIDs(ctx, db, id) },
 		search: func(ctx context.Context, req searchengine.Request) (*searchengine.Response, error) {
 			return searchengine.Search(ctx, db, cfg, req)

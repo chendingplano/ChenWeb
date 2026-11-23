@@ -394,6 +394,28 @@ func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *tes
 	}
 }
 
+func TestPrepareFindingForStorageNeverTranslatesComplianceFindings(t *testing.T) {
+	t.Setenv("DOC_REVIEW_TRANSLATION", "auto")
+	translator := &fakeFindingTranslator{}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en", "zh"}, ReviewFinding{
+		Aspect:      "compliance",
+		FindingType: "compliance_assessment",
+		Language:    "zh",
+		Title:       "Compliance assessment: 初始水温",
+		Description: "Candidate verdicts: 1 compatible\ncompatible [metric 1_mtc_1] record 1: 候选未给出限值。\n",
+	})
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if translator.normalizeCalls != 0 || len(translator.translateCalls) != 0 {
+		t.Fatalf("normalizeCalls=%d translateCalls=%v, want no translation calls", translator.normalizeCalls, translator.translateCalls)
+	}
+	if got := prepared.Metadata.I18N.Translations["zh"].Title; got != "Compliance assessment: 初始水温" {
+		t.Fatalf("zh title=%q, want the finding stored under its own language", got)
+	}
+}
+
 func TestPrepareFindingForStorageOnDemandSkipsConfiguredDisplayTranslations(t *testing.T) {
 	t.Setenv("DOC_REVIEW_TRANSLATION", "on-demand")
 
@@ -623,6 +645,23 @@ func TestLocalizeFindingTranslatesOnDemandWhenTranslationMissing(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestLocalizeFindingLeavesComplianceFindingUntranslated(t *testing.T) {
+	translator := &fakeFindingTranslator{}
+	ctrl := &DocReviewController{Translator: translator}
+
+	f := FindingItem{ID: 9, Aspect: "compliance", Title: "Compliance assessment: 初始水温", Description: "compatible [metric 1_mtc_1] record 1: 候选未给出限值。"}
+	got, err := ctrl.localizeFinding(context.Background(), "zh-cn", f, []byte(`{"i18n":{"schema_version":1,"translations":{"en":{"title":"Compliance assessment: 初始水温","provenance":"canonical"}}}}`))
+	if err != nil {
+		t.Fatalf("localizeFinding: %v", err)
+	}
+	if got.Title != f.Title || got.Description != f.Description {
+		t.Fatalf("localized finding=%#v, want it unchanged", got)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls = %v, want none", translator.translateCalls)
 	}
 }
 
@@ -1384,6 +1423,47 @@ func TestTranslateFindingAutoTranslatesWhenEnvVarSet(t *testing.T) {
 	}
 	if len(translator.translateCalls) != 1 || translator.translateCalls[0] != "zh-cn" {
 		t.Fatalf("translateCalls = %v, want [zh-cn]", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestTranslateFindingLeavesComplianceFindingUntranslated(t *testing.T) {
+	writeSupportedLanguagesConfig(t)
+	t.Setenv("AUTO_TRANSLATE_FINDINGS", "true")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	metadata := `{"i18n":{"schema_version":1,"translations":{"en":{"title":"Compliance assessment: 初始水温","provenance":"canonical"}}}}`
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
+	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+	       COALESCE(artifact_id,'')
+	FROM kb.doc_review_findings WHERE id = $1`)).
+		WithArgs(int64(43)).
+		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
+			AddRow(int64(43), "P5", "compliance", "info", "compliance_assessment", "Compliance assessment: 初始水温", "候选未给出限值。",
+				"", "1-2", "", 0.0, "pending", metadata, ""))
+
+	translator := &fakeFindingTranslator{}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	result, err := ctrl.TranslateFinding(context.Background(), 43, "zh-cn", false)
+	if err != nil {
+		t.Fatalf("TranslateFinding: %v", err)
+	}
+	if result.Translated || result.NeedsConfirmation {
+		t.Fatalf("result = %+v, want the finding as stored, no translation and no confirmation", result)
+	}
+	if result.Finding.Title != "Compliance assessment: 初始水温" {
+		t.Fatalf("Finding.Title = %q", result.Finding.Title)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls = %v, want none", translator.translateCalls)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

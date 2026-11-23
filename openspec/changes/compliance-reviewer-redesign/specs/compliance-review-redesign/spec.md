@@ -166,3 +166,19 @@ and SHALL skip `compliance_unchecked` findings.
 #### Scenario: Scoring a failed run
 - **WHEN** a run with a failed compliance finding is scored
 - **THEN** the scorer stops with an error that says the run is marked failed
+
+### Requirement: Findings in the report language, never translated
+The reviewer SHALL send the first `DOC_REVIEW_REPORT_LANGUAGE` entry (`en` when unset) as
+`output_language` in every judgement and verification request, and those prompts SHALL write
+summaries and reasons in it. A `compliance_assessment` finding SHALL declare that language. Finding
+translation SHALL NOT run for compliance findings: not at save time in either
+`DOC_REVIEW_TRANSLATION` mode, not when findings are requested in another language, and not when one
+finding is translated on request; the stored finding SHALL be returned as is.
+
+#### Scenario: Chinese report language
+- **WHEN** `DOC_REVIEW_REPORT_LANGUAGE` is `zh` and a unit is judged
+- **THEN** the judgement request holds `"output_language":"zh"` and the assessment finding declares `zh`
+
+#### Scenario: Viewing a compliance finding in another language
+- **WHEN** a compliance finding with no stored translation for `zh-cn` is requested in `zh-cn`
+- **THEN** no translation call is made and the stored finding is returned unchanged

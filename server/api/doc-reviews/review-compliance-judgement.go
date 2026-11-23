@@ -175,7 +175,7 @@ func (r *complianceReviewer) unitInput(input chunkInput, s *complianceUnitState,
 			}
 		}
 	}
-	return map[string]any{"assessment_date": r.assessmentDate, "chunk": json.RawMessage(input.inputJSON), "activities": acts, "candidates": cands}
+	return map[string]any{"assessment_date": r.assessmentDate, "output_language": r.language, "chunk": json.RawMessage(input.inputJSON), "activities": acts, "candidates": cands}
 }
 
 func (r *complianceReviewer) judge(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, input chunkInput, lines []complianceInputLine, s *complianceUnitState, pairs []string) ([]complianceVerdict, string, error) {
@@ -456,6 +456,7 @@ func (r *complianceReviewer) unitFinding(s *complianceUnitState, cfg ReviewerCon
 	switch {
 	case len(s.verdicts) > 0:
 		f.FindingType, f.ResultKind = "compliance_assessment", "compliance_assessment"
+		f.Language = r.language
 		f.Title = "Compliance assessment: " + label
 		related, text := complianceVerdictRows(s.verdicts, s.pool, u)
 		f.RelatedArtifacts = related

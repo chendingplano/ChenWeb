@@ -10,7 +10,7 @@ For every activity with candidates, Compliance Review SHALL give each candidate 
 - `undetermined`: the candidate can be used, but the reviewer could not reach a verdict;
 - `unqualified`: the candidate cannot be used to judge this activity's compliance.
 
-The summary SHALL be written in the activity's language. It SHALL explain how the candidate applies to the activity: what the candidate requires and under which conditions, what the document states about it, and what is missing or in conflict. For `unqualified`, the summary SHALL say why the candidate cannot be used. This applies whether or not any requirement was extracted for the activity.
+The summary SHALL be written in the report language (requirement "Findings in the report language, never translated" of `compliance-reviewer-redesign`). It SHALL explain how the candidate applies to the activity: what the candidate requires and under which conditions, what the document states about it, and what is missing or in conflict. For `unqualified`, the summary SHALL say why the candidate cannot be used. This applies whether or not any requirement was extracted for the activity.
 
 #### Scenario: The document is silent on a candidate's conditions
 - **WHEN** the activity states that live fish are stored in a container, and a candidate requires live sea fish to be stored in a sealed container with 60% air and 40% water at 5–10 °C

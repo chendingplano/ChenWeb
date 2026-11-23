@@ -56,3 +56,10 @@
 - [x] 9.1 Devdoc 2026111201 matches what was built (prompts, settings, tests, where to find it)
 - [x] 9.2 Register the decision-model question code with `create-reusable-module`
 - [x] 9.3 Update module 20261119-01 Recovered LLM Calls (row and doc) for the new columns and writer; run the catalogue check
+
+## 10. Report language (2026-11-23)
+
+- [x] 10.1 `output_language` (first `DOC_REVIEW_REPORT_LANGUAGE`) in judgement and verification input; judgement prompt v2 and verifier prompt v4 write in it; assessment findings declare it
+- [x] 10.2 Compliance findings skip finding translation at save time, on page localization and on single-finding translation
+- [x] 10.3 Unit tests for both; devdoc 2026111201 and ADR 2026063001 updated
+- [ ] 10.4 Live review with the new prompts

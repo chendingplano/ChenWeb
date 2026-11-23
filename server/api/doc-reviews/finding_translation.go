@@ -538,7 +538,7 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		Suggestion:  finding.Suggestion,
 		Confidence:  finding.Confidence,
 	}
-	if docReviewTranslationMode() == "on-demand" {
+	if docReviewTranslationMode() == "on-demand" || !findingTranslatable(finding.Aspect) {
 		return prepareFindingForStorageWithoutTranslation(finding), nil
 	}
 	if translator == nil {
@@ -707,6 +707,14 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 	}, nil
 }
 
+// findingTranslatable reports whether findings of aspect go through finding translation. Compliance
+// Review writes its findings in the report language itself, and one of its findings can hold
+// hundreds of candidate summaries, more than a translation call can return (devdoc 2026111201,
+// Language of the findings).
+func findingTranslatable(aspect string) bool {
+	return aspect != "compliance"
+}
+
 func prepareFindingForStorageWithoutTranslation(finding ReviewFinding) preparedFindingForStorage {
 	sourceLanguage := normalizeReviewFindingLanguage(finding.Language)
 	source := FindingLocalizedContent{
@@ -797,6 +805,9 @@ func (c *DocReviewController) localizeFinding(ctx context.Context, language stri
 	if tr, ok := translationFromMetadata(metadata, language); ok {
 		return applyFindingTranslation(f, tr), nil
 	}
+	if !findingTranslatable(f.Aspect) {
+		return f, nil
+	}
 	return c.translateFindingContent(ctx, language, f)
 }
 
@@ -852,6 +863,9 @@ func (c *DocReviewController) TranslateFinding(ctx context.Context, findingID in
 
 	if tr, ok := translationFromMetadata(metadata, language); ok {
 		return TranslateFindingResult{Finding: applyFindingTranslation(finding, tr)}, nil
+	}
+	if !findingTranslatable(finding.Aspect) {
+		return TranslateFindingResult{Finding: finding}, nil
 	}
 
 	autoTranslate := strings.EqualFold(strings.TrimSpace(os.Getenv("AUTO_TRANSLATE_FINDINGS")), "true")

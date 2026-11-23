@@ -915,6 +915,31 @@ func TestComplianceLargeGroupIsJudgedInBatches(t *testing.T) {
 	}
 }
 
+func TestComplianceJudgementWritesInReportLanguage(t *testing.T) {
+	answer := func(stage, input string) (map[string]any, error) {
+		if stage == "judgement" {
+			return judgeAll(input, nil), nil
+		}
+		return map[string]any{"activities": []any{}}, nil
+	}
+	rig := newComplianceTestRig(t, answer, func(searchengine.Request) []searchengine.Result {
+		return []searchengine.Result{complianceResult("provision", "2_prv_1", 2, "seal")}
+	})
+	rig.r.language = "zh"
+	rig.store.rows = []complianceArtifactRow{{Kind: "provision", RowID: 1, ArtifactID: "7_prv_1", Label: "seal", LineStart: 1, LineEnd: 1, DupKey: "s"}}
+	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := rig.primary.calls("judgement")
+	if len(calls) != 1 || !strings.Contains(calls[0], `"output_language":"zh"`) {
+		t.Fatalf("judgement inputs = %v, want one with output_language zh", calls)
+	}
+	if f, ok := findingOfType(fs, "compliance_assessment"); !ok || f.Language != "zh" {
+		t.Fatalf("assessment finding language = %q, want zh", f.Language)
+	}
+}
+
 func TestComplianceRelevanceRetriesOnce(t *testing.T) {
 	answer := func(stage, input string) (map[string]any, error) {
 		if stage == "judgement" {
