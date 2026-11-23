@@ -30,6 +30,9 @@
 	const buildNumbers = $derived([...new Set(running.map((process) => process.build_number).filter(Boolean))]);
 	const hasMismatch = $derived(buildNumbers.length > 1);
 	const allReported = $derived(processes.length > 0 && processes.every((process) => process.status === 'running' && process.build_number));
+	const stopped = $derived(processes.filter((process) => process.status === 'stopped').map((process) => process.executable));
+	const unreported = $derived(processes.filter((process) => process.status === 'unreported').map((process) => process.executable));
+	const missingBuild = $derived(running.filter((process) => !process.build_number).map((process) => process.executable));
 
 	async function load() {
 		loading = true;
@@ -88,15 +91,22 @@
 				<CircleAlertIcon size={18} />
 				<div><strong>{m.build_info_mismatch()}</strong><span>{buildNumbers.join(' · ')}</span></div>
 			</div>
-		{:else if allReported}
+		{/if}
+		{#if allReported && !hasMismatch}
 			<div class="consistency good" role="status">
 				<CheckCircle2Icon size={18} />
 				<div><strong>{m.build_info_consistent()}</strong><span>{buildNumbers[0]}</span></div>
 			</div>
-		{:else}
+		{:else if !allReported}
 			<div class="consistency warning" role="status">
 				<CircleAlertIcon size={18} />
-				<div><strong>{m.build_info_incomplete()}</strong><span>{m.build_info_incomplete_detail()}</span></div>
+				<div>
+					<strong>{m.build_info_incomplete()}</strong>
+					{#if stopped.length}<span>{m.build_info_stopped_processes({ processes: stopped.join(', ') })}</span>{/if}
+					{#if unreported.length}<span>{m.build_info_unreported_processes({ processes: unreported.join(', ') })}</span>{/if}
+					{#if missingBuild.length}<span>{m.build_info_missing_build_processes({ processes: missingBuild.join(', ') })}</span>{/if}
+					{#if processes.length === 0}<span>{m.build_info_no_processes()}</span>{/if}
+				</div>
 			</div>
 		{/if}
 
