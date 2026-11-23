@@ -28,7 +28,7 @@ Facts the design relies on (checked 2026-11-22 on the development database):
 
 **Goals:**
 - Reuse extracted metrics and provisions as activities; judge each activity in one call.
-- Remove unrelated candidates before judgement with a decision model.
+- Remove unrelated candidates before judgement with one relevance call per activity.
 - Never abort the reviewer for one activity's error; record it and mark the run failed.
 - Three tries per structured model call through two configured models.
 
@@ -72,17 +72,24 @@ keywords, kinds, limit, excluded records, possibly-cut-off flag and results. Can
 `searchengine.Load`, cut to 2,000 characters. The old interleaving of three rankings and the
 list-only mode with `min_cosine` are removed.
 
-**D6. Relevance check: one decision request per activity.** Built from
-`DOC_REVIEWER_RELEVANCE_MODEL_NAME` like `categorytree.NewJevDeciderFromEnv` (`decisionmodel`
-provider config, `llmclients.NewClient`). The prompt file `relevance_prompt` holds the policy, then a
-`## Question` heading whose text contains `{{key}}`. The state carries the activity and a map
-`c1..cN` of candidates; each key gets one `noul` question. A candidate is removed when its probability
-is below 0.2; a missing answer keeps it. Decisions are stored in the trace. A failed decision request
-is retried once, then it is an activity error. The first live run (record 825, lines 1-200) showed
-that prompt v1 ("when unsure, relevant") kept every candidate the judgement later called unqualified
-(93% of judged candidates); v2 asks for the same property or duty on the same kind of object and, at
-0.2, removed 74% of them while keeping 91% of the useful ones (0.5 kept 84%). The relevance check has no three tries: correction and fallback models are chat
-models.
+**D6. Relevance check: one structured call per activity** (revised 2026-11-23). The input holds the
+activity and a list of candidates with keys `c1..cN`; `relevance_prompt` (v3) asks, for each one,
+`relevant` yes or no and a `score` from 0 to 9. The call goes through `callWithTries` like the other
+stages, so it runs at temperature 0, gets the three tries, and a wrong answer (a missing or unknown
+key, an invalid value) gets a correction request naming every problem. `[reviewers.compliance].effort`
+sets the cut-off: `normal` keeps score 3 or more, `high` keeps 2 or more. Decisions, with answer and
+score, are stored in the trace.
+
+The first version asked a decision model one yes-or-no question per candidate in one request. The
+model was an ordinary chat profile run through the emulated decision provider, which sends every
+question as its own one-token call carrying all the candidates: run 13882 (record 825) made 7,170
+relevance calls for 239 activities. One call that answers all candidates writes the answers in
+sequence, so each answer depends on the earlier ones. At temperature 1, which the emulation needs for
+DeepSeek's probabilities, an early answer drawn at random sways the later ones. At temperature 0 the
+answers are stable. Measured on 30 activities (900 candidates) against labels from a reasoning model
+(62 relevant): the per-candidate calls kept 84% of the relevant candidates and passed 372 to the
+judgement; v3 at `normal` kept 89% and passed about 345, and at `high` kept all and passed about 600.
+Yes or no alone, without a score, kept only 69%.
 
 **D7. Judgement call.** Structured calls per unit with `judgement_prompt`, at most 20
 activity–candidate pairs each (the first live run on record 825 had a 48-metric group whose single
@@ -157,8 +164,8 @@ already run in parallel under `MAX_DOC_REVIEWER_TASKS`.
   with attempt columns and a writer for every failed try; its row and doc are updated.
 - **20261114-03 Quantity Constraint Comparison** — through the existing `checkComplianceNumeric`.
 - **20261114-02 Document Identifier Keys** — through the existing cited-document match.
-- **Decision model questions (not catalogued)** — `decisionmodel.ProviderConfig` and the `noul`
-  question pattern of `categorytree.JevDecider`; registered as a module by this change.
+- **Decision model questions (20261122-01)** — used by the first relevance check and registered by
+  this change; the revised relevance check (D6) no longer uses it.
 
 ## Risks / Trade-offs
 

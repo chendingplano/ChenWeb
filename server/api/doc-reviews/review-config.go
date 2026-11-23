@@ -74,6 +74,9 @@ type ReviewAspectConfig struct {
 	MaxCitedDocuments *int `toml:"max_cited_documents"`
 	MaxMetrics        *int `toml:"max_metrics"`
 	MaxProvisions     *int `toml:"max_provisions"`
+	// Effort is the compliance reviewer's relevance cut-off: "normal" (the default when unset) keeps
+	// candidates scored 3 or more, "high" keeps those scored 2 or more.
+	Effort string `toml:"effort"`
 	// ThinkingType overrides the model profile's thinking_type for this reviewer
 	// (e.g. "disabled"). Empty keeps the profile's setting.
 	ThinkingType  string   `toml:"thinking_type"`
@@ -205,6 +208,9 @@ func parseDocReviewConfig(raw []byte) (*DocReviewConfig, error) {
 			if v != nil && *v < 0 {
 				return nil, fmt.Errorf("%s %s must not be negative", scope, name)
 			}
+		}
+		if e := strings.TrimSpace(reviewer.Effort); e != "" && e != "normal" && e != "high" {
+			return nil, fmt.Errorf("%s effort %q must be \"normal\" or \"high\"", scope, reviewer.Effort)
 		}
 	}
 	return &cfg, nil

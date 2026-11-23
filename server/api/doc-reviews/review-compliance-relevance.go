@@ -3,179 +3,166 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"math"
+	"sort"
+	"strconv"
 	"strings"
-
-	"github.com/chendingplano/deepdoc/server/api/decisionmodel"
-	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
-	"github.com/chendingplano/shared/go/api/ApiTypes"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
-// complianceRelevanceThreshold: a candidate whose probability of being relevant is below it is removed.
-// Chosen on the first live run (record 825, lines 1-200, 42 activities, 819 judged candidates, the
-// judgement's verdicts as reference): with prompt-review-compliance-relevance-v2.md, 0.2 removed 74% of
-// the candidates the judgement found unusable and kept 91% of the useful ones; 0.5 kept only 84%.
-const complianceRelevanceThreshold = 0.2
-
-// complianceQuestionHeading separates the relevance prompt's policy from its per-candidate question,
-// which holds complianceQuestionKey where the candidate's key goes.
+// The relevance check sends one call per activity with all its candidates. For each candidate the
+// model answers yes or no and gives a score from 0 to 9; the reviewer keeps a candidate whose score
+// reaches the effort's minimum. The call runs at temperature 0 (every structured call does): the
+// answers are written one after another, and at temperature 1 an early answer drawn at random sways
+// the later ones. Chosen on 30 activities of record 825 (900 candidates) against labels from a
+// reasoning model: normal (score 3 or more) kept 89% of the relevant candidates and passed about 345
+// to the judgement; high (2 or more) kept all of them and passed about 600 (devdoc 2026111201).
 const (
-	complianceQuestionHeading = "\n## Question\n"
-	complianceQuestionKey     = "{{key}}"
+	complianceRelevanceNormalMinScore = 3
+	complianceRelevanceHighMinScore   = 2
 )
 
-// complianceRelevanceRequest asks whether each candidate could apply to one activity.
-type complianceRelevanceRequest struct {
-	RecordID   int64
-	Activity   map[string]any
-	Candidates []*complianceCandidate
-}
-
-// complianceRelevanceDecider returns, per candidate key, the probability that the candidate is
-// relevant. A key without an answer is absent.
-type complianceRelevanceDecider interface {
-	Decide(ctx context.Context, req complianceRelevanceRequest) (map[string]float64, error)
-	Model() string
+// complianceRelevanceMinScore maps [reviewers.compliance].effort to the lowest score a candidate needs.
+// parseDocReviewConfig has already refused any value other than "", "normal" and "high".
+func complianceRelevanceMinScore(effort string) int {
+	if strings.TrimSpace(effort) == "high" {
+		return complianceRelevanceHighMinScore
+	}
+	return complianceRelevanceNormalMinScore
 }
 
 // complianceRelevanceDecision is one candidate's relevance decision, as stored with the finding.
 type complianceRelevanceDecision struct {
-	ActivityID  string   `json:"activity_id"`
-	ArtifactKey string   `json:"artifact_key"`
-	Probability *float64 `json:"probability,omitempty"`
-	Kept        bool     `json:"kept"`
+	ActivityID  string `json:"activity_id"`
+	ArtifactKey string `json:"artifact_key"`
+	Relevant    string `json:"relevant,omitempty"`
+	Score       *int   `json:"score,omitempty"`
+	Kept        bool   `json:"kept"`
 }
 
-// jevComplianceRelevance asks a decision model one yes-or-no question per candidate, all in one
-// request (the pattern of categorytree.JevDecider).
-type jevComplianceRelevance struct {
-	client                llmclients.Client
-	model, profile        string
-	policy, question, ref string
+// complianceRelevanceAnswer is the model's answer for one candidate.
+type complianceRelevanceAnswer struct {
+	Relevant string
+	Score    int
 }
 
-// newComplianceRelevanceDeciderFromEnv builds the decider from DOC_REVIEWER_RELEVANCE_MODEL_NAME (a
-// profile in MODEL_DEF_FILE of type decision-model or llm) and the relevance prompt.
-func newComplianceRelevanceDeciderFromEnv(logger ApiTypes.JimoLogger, prompt compliancePrompt) (complianceRelevanceDecider, error) {
-	ref := strings.TrimSpace(os.Getenv(envComplianceRelevanceModel))
-	if ref == "" {
-		return nil, fmt.Errorf("%s is not set (the decision model of the Compliance Review relevance check)", envComplianceRelevanceModel)
-	}
-	policy, question, ok := strings.Cut(prompt.Text, complianceQuestionHeading)
-	if !ok || !strings.Contains(question, complianceQuestionKey) {
-		return nil, fmt.Errorf("relevance_prompt %s needs a %q heading followed by a question containing %s", prompt.Ref, strings.TrimSpace(complianceQuestionHeading), complianceQuestionKey)
-	}
-	path, err := docprocessing.ResolveModelsFilePath("MODEL_DEF_FILE")
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", envComplianceRelevanceModel, err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("%s: read %s: %w", envComplianceRelevanceModel, path, err)
-	}
-	models := ApiTypes.LLMModelsFile{}
-	if err := docprocessing.ParseTOMLMap(raw, &models); err != nil {
-		return nil, fmt.Errorf("%s: parse %s: %w", envComplianceRelevanceModel, path, err)
-	}
-	def, ok := models[ref]
-	if !ok {
-		return nil, fmt.Errorf("%s=%q is not a profile in %s", envComplianceRelevanceModel, ref, path)
-	}
-	pc, err := decisionmodel.ProviderConfig(ref, def)
-	if err != nil {
-		return nil, fmt.Errorf("%s=%q: %w", envComplianceRelevanceModel, ref, err)
-	}
-	client, err := llmclients.NewClient(pc, logger)
-	if err != nil {
-		return nil, fmt.Errorf("%s=%q: decision client: %w", envComplianceRelevanceModel, ref, err)
-	}
-	return &jevComplianceRelevance{client: client, model: strings.TrimSpace(def.ModelName), profile: ref,
-		policy: strings.TrimSpace(policy), question: strings.TrimSpace(question), ref: prompt.Ref}, nil
+// complianceRelevanceCandidate is what the relevance call sees of one candidate.
+type complianceRelevanceCandidate struct {
+	Key   string `json:"key"`
+	Type  string `json:"type"`
+	Title string `json:"title,omitempty"`
+	Text  string `json:"text"`
 }
 
-func (d *jevComplianceRelevance) Model() string { return d.profile }
-
-func (d *jevComplianceRelevance) Decide(ctx context.Context, req complianceRelevanceRequest) (map[string]float64, error) {
-	if len(req.Candidates) == 0 {
-		return map[string]float64{}, nil
+// checkRelevance asks, in one call for the activity, whether each found candidate could decide
+// whether it complies. It returns the keys it keeps, in found order, every decision, and the model
+// that answered.
+func (r *complianceReviewer) checkRelevance(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, m *complianceMember, found []string, pool map[string]*complianceCandidate) ([]string, []complianceRelevanceDecision, string, error) {
+	if len(found) == 0 {
+		return nil, nil, "", nil
 	}
-	cands := map[string]any{}
-	keyToArtifact := map[string]string{}
-	questions := llmclients.JevQuestions{}
-	for i, c := range req.Candidates {
-		key := fmt.Sprintf("c%d", i+1)
-		keyToArtifact[key] = c.Key
-		cands[key] = map[string]any{"type": c.Type, "title": c.Title, "text": c.Text}
-		questions[key] = llmclients.JevQuestion{Type: "noul", Instructions: strings.ReplaceAll(d.question, complianceQuestionKey, key)}
+	keys := make([]string, len(found))
+	cands := make([]complianceRelevanceCandidate, len(found))
+	for i, artifact := range found {
+		keys[i] = "c" + strconv.Itoa(i+1)
+		c := pool[artifact]
+		cands[i] = complianceRelevanceCandidate{Key: keys[i], Type: c.Type, Title: c.Title, Text: c.Text}
 	}
-	state, err := json.Marshal(map[string]any{"policy": d.policy, "activity": req.Activity, "candidates": cands})
+	b, err := json.Marshal(map[string]any{"activity": complianceMemberView(m), "candidates": cands})
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	resp, err := d.client.Complete(ctx, llmclients.Request{
-		Model:        d.model,
-		UserID:       docprocessing.LLMUserIDFromContext(ctx),
-		RecordID:     req.RecordID,
-		RunID:        llmRunIDFromContext(ctx),
-		PromptName:   d.ref,
-		CallReason:   "review_compliance_relevance",
-		CallLoc:      "MID-20261122-51",
-		Messages:     []llmclients.Message{{Role: llmclients.RoleUser, Content: string(state)}},
-		JevQuestions: questions,
+	var answers map[string]complianceRelevanceAnswer
+	p := r.prompts["relevance"]
+	_, model, err := r.callWithTries(ctx, cfg, complianceCall{
+		Stage: "relevance", PromptRef: p.Ref, PromptText: p.Text, Input: string(b), Schema: map[string]any{"type": "object"},
+		RecordID: recordID, ChunkIndex: &chunkIndex,
+		Check: func(parsed map[string]any) error {
+			var cerr error
+			answers, cerr = checkComplianceRelevance(parsed, keys)
+			return cerr
+		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("relevance check (%s): %w", d.profile, err)
-	}
-	answers, err := llmclients.ParseJevAnswers(resp.Content)
-	if err != nil {
-		return nil, fmt.Errorf("relevance check (%s): %w", d.profile, err)
-	}
-	out := map[string]float64{}
-	for key, a := range answers {
-		if artifact, ok := keyToArtifact[key]; ok && a.Noul != nil {
-			out[artifact] = *a.Noul
-		}
-	}
-	return out, nil
-}
-
-// checkRelevance asks whether each found candidate could apply to the activity and returns the
-// keys it keeps, in found order, and every decision. A candidate without an answer is kept.
-func (r *complianceReviewer) checkRelevance(ctx context.Context, recordID int64, m *complianceMember, found []string, pool map[string]*complianceCandidate) ([]string, []complianceRelevanceDecision, error) {
-	if len(found) == 0 {
-		return nil, nil, nil
-	}
-	cands := make([]*complianceCandidate, 0, len(found))
-	for _, key := range found {
-		cands = append(cands, pool[key])
-	}
-	req := complianceRelevanceRequest{RecordID: recordID, Activity: complianceMemberView(m), Candidates: cands}
-	probs, err := r.relevance.Decide(ctx, req)
-	if err != nil && ctx.Err() == nil {
-		// One retry: the first live run lost three activities to dropped connections.
-		r.logger.Info("compliance relevance request failed; retrying once", "record_id", recordID, "activity", m.Label, "error", err)
-		probs, err = r.relevance.Decide(ctx, req)
-	}
-	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", fmt.Errorf("relevance check: %w", err)
 	}
 	var kept []string
-	decisions := make([]complianceRelevanceDecision, 0, len(found))
-	for _, key := range found {
-		d := complianceRelevanceDecision{ActivityID: m.ID, ArtifactKey: key, Kept: true}
-		if p, ok := probs[key]; ok {
-			p := p
-			d.Probability = &p
-			d.Kept = p >= complianceRelevanceThreshold
+	decisions := make([]complianceRelevanceDecision, len(found))
+	for i, artifact := range found {
+		a := answers[keys[i]]
+		score := a.Score
+		decisions[i] = complianceRelevanceDecision{ActivityID: m.ID, ArtifactKey: artifact, Relevant: a.Relevant, Score: &score,
+			Kept: score >= r.settings.RelevanceMinScore}
+		if decisions[i].Kept {
+			kept = append(kept, artifact)
 		}
-		if d.Kept {
-			kept = append(kept, key)
-		}
-		decisions = append(decisions, d)
 	}
-	return kept, decisions, nil
+	r.logger.Info("compliance relevance check", "record_id", recordID, "activity", m.Label, "candidates", len(found),
+		"kept", len(kept), "min_score", r.settings.RelevanceMinScore, "model", model)
+	return kept, decisions, model, nil
+}
+
+// checkComplianceRelevance decodes one answer per candidate key and reports every problem at once,
+// naming the candidate and the field.
+func checkComplianceRelevance(parsed map[string]any, keys []string) (map[string]complianceRelevanceAnswer, error) {
+	answers := map[string]complianceRelevanceAnswer{}
+	expected := map[string]bool{}
+	var problems []string
+	for _, key := range keys {
+		expected[key] = true
+		raw, ok := parsed[key]
+		if !ok {
+			problems = append(problems, fmt.Sprintf(`Candidate %s: no answer; return {"relevant": "yes" or "no", "score": 0 to 9}`, key))
+			continue
+		}
+		obj, ok := raw.(map[string]any)
+		if !ok {
+			problems = append(problems, fmt.Sprintf(`Candidate %s: the answer must be an object {"relevant": "yes" or "no", "score": 0 to 9}`, key))
+			continue
+		}
+		var a complianceRelevanceAnswer
+		var bad bool
+		if a.Relevant, _ = obj["relevant"].(string); a.Relevant != "yes" && a.Relevant != "no" {
+			problems = append(problems, fmt.Sprintf(`Candidate %s: relevant %v must be "yes" or "no"`, key, complianceJSONValue(obj["relevant"])))
+			bad = true
+		}
+		score, isNumber := obj["score"].(float64)
+		if !isNumber || score != math.Trunc(score) || score < 0 || score > 9 {
+			problems = append(problems, fmt.Sprintf("Candidate %s: score %v must be a whole number from 0 to 9", key, complianceJSONValue(obj["score"])))
+			bad = true
+		}
+		if !bad {
+			a.Score = int(score)
+			answers[key] = a
+		}
+	}
+	var extra []string
+	for key := range parsed {
+		if !expected[key] {
+			extra = append(extra, key)
+		}
+	}
+	sort.Strings(extra)
+	for _, key := range extra {
+		problems = append(problems, fmt.Sprintf("%s is not a candidate key; answer only %s through %s", key, keys[0], keys[len(keys)-1]))
+	}
+	if len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "\n"))
+	}
+	return answers, nil
+}
+
+// complianceJSONValue shows a decoded JSON value as the model wrote it, for correction messages.
+func complianceJSONValue(v any) string {
+	if v == nil {
+		return "(missing)"
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return string(b)
 }
 
 // complianceMemberView is what the relevance and judgement calls see of one activity.

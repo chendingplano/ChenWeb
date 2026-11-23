@@ -4,7 +4,7 @@ Compliance Review costs too much and its results are not good enough. For every 
 eight whole source documents and screens up to 32 chunks of the reviewed document, and one bad model
 answer aborts the whole reviewer and throws away everything it found. The user agreed a redesign on
 2026-11-22 (devdoc 2026111201, sections 3–7): reuse the metrics and provisions that extraction has
-already produced as activities, filter candidates with a decision model, judge each activity in one
+already produced as activities, filter candidates with a relevance check, judge each activity in one
 call, and never let a single error stop the reviewer.
 
 ## What Changes
@@ -22,9 +22,10 @@ call, and never let a single error stop the reviewer.
   (`top_provisions`), both by indexed-artifact reference; text activities search provisions, metrics
   and document passages together (`top_artifacts`). Defaults 30. `max_cited_documents` (default 0)
   limits cited-document searches; cited document names are always saved.
-- **Relevance check (new).** A decision model (`DOC_REVIEWER_RELEVANCE_MODEL_NAME`) answers one
-  yes-or-no question per candidate, in one request per activity, with
-  `prompt-review-compliance-relevance-v1.md`. Irrelevant candidates are removed but kept in the trace.
+- **Relevance check (new).** One structured call per activity answers, for each candidate, yes or no
+  and a score from 0 to 9 (`prompt-review-compliance-relevance-v3.md`); `effort` sets the cut-off.
+  Irrelevant candidates are removed but kept in the trace. (The first version used a decision model,
+  `DOC_REVIEWER_RELEVANCE_MODEL_NAME`; replaced on 2026-11-23, see design D6.)
 - **One judgement call** (`prompt-review-compliance-judgement-v1.md`) per text activity or activity
   group replaces requirement extraction, evidence screening and assessment. Only the activity's own
   chunk is evidence; missing-requirement reports are removed. Numbers keep going through the
@@ -63,8 +64,8 @@ call, and never let a single error stop the reviewer.
   `ChenWeb/server/api/llmusage/recovered_call.go`; `ChenWeb/server/api/compliance-eval/scoreio.go`.
 - Prompts: four new files in `ChenWeb/prompts/`; settings in `ChenWeb/doc-review.local.toml`.
 - Database: two goose migrations in `ChenWeb/project_migrations/`.
-- Environment: `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME`, `DOC_REVIEWER_FALLBACK_MODEL_NAME`,
-  `DOC_REVIEWER_RELEVANCE_MODEL_NAME` (profiles in `MODEL_DEF_FILE`).
+- Environment: `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME`, `DOC_REVIEWER_FALLBACK_MODEL_NAME`
+  (profiles in `MODEL_DEF_FILE`).
 - Reused catalogued modules: 20261111-01 Artifact Search (reference and text queries, Load),
   20261121-01 Structured LLM Output (schema plus CheckParsed, one attempt per model),
   20261119-01 Recovered LLM Calls (`kb.failed_llm_calls`, deferred call alerts; extended),

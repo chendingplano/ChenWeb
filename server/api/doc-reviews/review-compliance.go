@@ -19,11 +19,11 @@ import (
 
 // Compliance Review (openspec compliance-reviewer-redesign; devdoc 2026111201). For each chunk the
 // reviewer collects metric, provision and text activities, groups metrics and provisions that share
-// lines, searches the knowledge base per activity kind, removes unrelated candidates with a decision
-// model, judges each activity or group in one call and verifies the strong verdicts. An error for one
-// activity is recorded with its finding and never stops the reviewer; only a missing prerequisite or
-// setting does. A completed empty search means no candidates found, never that an activity is
-// unregulated.
+// lines, searches the knowledge base per activity kind, removes unrelated candidates with one
+// relevance call per activity, judges each activity or group in one call and verifies the strong
+// verdicts. An error for one activity is recorded with its finding and never stops the reviewer;
+// only a missing prerequisite or setting does. A completed empty search means no candidates found,
+// never that an activity is unregulated.
 const (
 	complianceDefaultTop           = 30
 	complianceDefaultMaxActivities = 100
@@ -36,7 +36,6 @@ const (
 
 	envComplianceCorrectionModel = "DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME"
 	envComplianceFallbackModel   = "DOC_REVIEWER_FALLBACK_MODEL_NAME"
-	envComplianceRelevanceModel  = "DOC_REVIEWER_RELEVANCE_MODEL_NAME"
 )
 
 // complianceStageSettings maps each prompt stage to its [reviewers.compliance] key. The detect
@@ -54,6 +53,9 @@ type complianceSearchFunc func(ctx context.Context, req searchengine.Request) (*
 type complianceSettings struct {
 	TopMetrics, TopProvisions, TopArtifacts      int
 	MaxCitedDocuments, MaxMetrics, MaxProvisions int
+	// RelevanceMinScore is the lowest relevance score (0-9) a candidate needs to be judged; set by
+	// effort.
+	RelevanceMinScore int
 }
 
 func complianceSettingsFrom(rc ReviewAspectConfig) complianceSettings {
@@ -70,6 +72,7 @@ func complianceSettingsFrom(rc ReviewAspectConfig) complianceSettings {
 		MaxCitedDocuments: pick(rc.MaxCitedDocuments, 0),
 		MaxMetrics:        pick(rc.MaxMetrics, complianceDefaultMaxActivities),
 		MaxProvisions:     pick(rc.MaxProvisions, complianceDefaultMaxActivities),
+		RelevanceMinScore: complianceRelevanceMinScore(rc.Effort),
 	}
 }
 
@@ -82,7 +85,6 @@ type complianceReviewer struct {
 	// second and third (see callWithTries).
 	client               LLMJSONExtractor
 	correction, fallback complianceTry
-	relevance            complianceRelevanceDecider
 	logger               ApiTypes.JimoLogger
 	store                complianceStore
 	search               complianceSearchFunc
@@ -134,7 +136,7 @@ func newComplianceReviewer(client LLMJSONExtractor, logger ApiTypes.JimoLogger, 
 	return r
 }
 
-// configure loads the stage prompts and builds the correction, fallback and relevance clients.
+// configure loads the stage prompts and builds the correction and fallback clients.
 // It reports every missing setting and variable at once, naming each.
 func (r *complianceReviewer) configure(rc ReviewAspectConfig) error {
 	var problems []string
@@ -169,11 +171,6 @@ func (r *complianceReviewer) configure(rc ReviewAspectConfig) error {
 	}
 	if r.fallback, err = complianceTryFromEnv(envComplianceFallbackModel, "fallback"); err != nil {
 		problems = append(problems, err.Error())
-	}
-	if p, ok := r.prompts["relevance"]; ok {
-		if r.relevance, err = newComplianceRelevanceDeciderFromEnv(r.logger, p); err != nil {
-			problems = append(problems, err.Error())
-		}
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("compliance: configuration incomplete: %s", strings.Join(problems, "; "))

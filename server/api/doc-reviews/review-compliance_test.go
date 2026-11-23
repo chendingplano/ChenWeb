@@ -27,7 +27,9 @@ type complianceFakeModel struct {
 	mu     sync.Mutex
 	name   string
 	answer func(stage, input string) (map[string]any, error)
-	inputs map[string][]string // stage -> inputs received
+	// relevance answers the relevance stage, so a test that replaces answer keeps it.
+	relevance func(input string) (map[string]any, error)
+	inputs    map[string][]string // stage -> inputs received
 }
 
 func (f *complianceFakeModel) ExtractJSON(context.Context, llmclients.JSONExtractionInput) (map[string]any, error) {
@@ -42,7 +44,11 @@ func (f *complianceFakeModel) ExtractStructuredJSON(_ context.Context, in llmcli
 	}
 	f.inputs[stage] = append(f.inputs[stage], in.InputText)
 	f.mu.Unlock()
-	payload, err := f.answer(stage, in.InputText)
+	answer := f.answer
+	if stage == "relevance" && f.relevance != nil {
+		answer = func(_, input string) (map[string]any, error) { return f.relevance(input) }
+	}
+	payload, err := answer(stage, in.InputText)
 	if err != nil {
 		return nil, &llmclients.StructuredOutputError{Kind: llmclients.ErrStructuredOutputProvider, Err: err}
 	}
@@ -78,41 +84,6 @@ func (s *complianceFakeStore) Mentions(_ context.Context, id int64) ([]complianc
 	return s.mentions[id], nil
 }
 
-type complianceFakeRelevance struct {
-	mu       sync.Mutex
-	probs    map[string]float64
-	err      error
-	failures int // the next failures requests fail
-	asked    [][]string
-}
-
-func (d *complianceFakeRelevance) Model() string { return "decision-model" }
-func (d *complianceFakeRelevance) Decide(_ context.Context, req complianceRelevanceRequest) (map[string]float64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	var keys []string
-	for _, c := range req.Candidates {
-		keys = append(keys, c.Key)
-	}
-	d.asked = append(d.asked, keys)
-	if d.failures > 0 {
-		d.failures--
-		return nil, errors.New("connection reset by peer")
-	}
-	if d.err != nil {
-		return nil, d.err
-	}
-	out := map[string]float64{}
-	for _, k := range keys {
-		if p, ok := d.probs[k]; ok {
-			out[k] = p
-		} else {
-			out[k] = 0.9
-		}
-	}
-	return out, nil
-}
-
 // ---- helpers ----
 
 func complianceChunk(start int, contents ...string) chunkInput {
@@ -129,31 +100,30 @@ func complianceResult(typ, id string, record int64, text string) searchengine.Re
 }
 
 type complianceTestRig struct {
-	r        *complianceReviewer
-	primary  *complianceFakeModel
-	corr     *complianceFakeModel
-	fall     *complianceFakeModel
-	store    *complianceFakeStore
-	rel      *complianceFakeRelevance
-	mu       sync.Mutex
-	searches []searchengine.Request
-	failed   []llmusage.FailedCall
+	r       *complianceReviewer
+	primary *complianceFakeModel
+	corr    *complianceFakeModel
+	fall    *complianceFakeModel
+	store   *complianceFakeStore
+	// relScores is the relevance score every model gives a candidate, by candidate text; unlisted
+	// candidates score 9.
+	relScores map[string]int
+	mu        sync.Mutex
+	searches  []searchengine.Request
+	failed    []llmusage.FailedCall
 }
 
 func newComplianceTestRig(t *testing.T, answer func(stage, input string) (map[string]any, error), results func(req searchengine.Request) []searchengine.Result) *complianceTestRig {
 	t.Helper()
-	rig := &complianceTestRig{
-		primary: &complianceFakeModel{name: "primary", answer: answer},
-		corr:    &complianceFakeModel{name: "correction", answer: answer},
-		fall:    &complianceFakeModel{name: "fallback", answer: answer},
-		store:   &complianceFakeStore{},
-		rel:     &complianceFakeRelevance{probs: map[string]float64{}},
-	}
+	rig := &complianceTestRig{store: &complianceFakeStore{}, relScores: map[string]int{}}
+	relevance := func(input string) (map[string]any, error) { return rig.relevanceAnswer(input), nil }
+	rig.primary = &complianceFakeModel{name: "primary", answer: answer, relevance: relevance}
+	rig.corr = &complianceFakeModel{name: "correction", answer: answer, relevance: relevance}
+	rig.fall = &complianceFakeModel{name: "fallback", answer: answer, relevance: relevance}
 	rig.r = &complianceReviewer{
 		client:     rig.primary,
 		correction: complianceTry{client: rig.corr, model: "correction-model", label: "correction"},
 		fallback:   complianceTry{client: rig.fall, model: "fallback-model", label: "fallback"},
-		relevance:  rig.rel,
 		logger:     loggerutil.CreateDefaultLogger("TEST_COMPLIANCE"),
 		store:      rig.store,
 		prompts: map[string]compliancePrompt{
@@ -176,6 +146,33 @@ func newComplianceTestRig(t *testing.T, answer func(stage, input string) (map[st
 		},
 	}
 	return rig
+}
+
+// relevanceAnswer answers a relevance input (its leading JSON; a correction request appends text):
+// every candidate gets its score from relScores (9 when unlisted), and "yes" when the score is 5 or more.
+func (rig *complianceTestRig) relevanceAnswer(input string) map[string]any {
+	var in struct {
+		Candidates []struct {
+			Key  string `json:"key"`
+			Text string `json:"text"`
+		} `json:"candidates"`
+	}
+	_ = json.NewDecoder(strings.NewReader(input)).Decode(&in)
+	out := map[string]any{}
+	rig.mu.Lock()
+	defer rig.mu.Unlock()
+	for _, c := range in.Candidates {
+		score, ok := rig.relScores[c.Text]
+		if !ok {
+			score = 9
+		}
+		relevant := "no"
+		if score >= 5 {
+			relevant = "yes"
+		}
+		out[c.Key] = map[string]any{"relevant": relevant, "score": float64(score)}
+	}
+	return out
 }
 
 var complianceTestCfg = ReviewerConfig{ModelName: "primary-model", PromptText: "detect", PromptRef: "prompt-detect.md"}
@@ -236,14 +233,14 @@ func TestCompliancePrerequisiteMissingStopsReview(t *testing.T) {
 
 func TestComplianceConfigErrorStopsEveryChunk(t *testing.T) {
 	rig := newComplianceTestRig(t, noActivities, func(searchengine.Request) []searchengine.Result { return nil })
-	rig.r.configErr = errors.New("compliance: configuration incomplete: DOC_REVIEWER_RELEVANCE_MODEL_NAME is not set")
-	if _, err := rig.r.processChunk(context.Background(), 7, 3, complianceTestCfg, complianceChunk(1, "a")); err == nil || !strings.Contains(err.Error(), "DOC_REVIEWER_RELEVANCE_MODEL_NAME") {
+	rig.r.configErr = errors.New("compliance: configuration incomplete: DOC_REVIEWER_FALLBACK_MODEL_NAME is not set")
+	if _, err := rig.r.processChunk(context.Background(), 7, 3, complianceTestCfg, complianceChunk(1, "a")); err == nil || !strings.Contains(err.Error(), "DOC_REVIEWER_FALLBACK_MODEL_NAME") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestComplianceConfigureNamesEverythingMissing(t *testing.T) {
-	for _, env := range []string{envComplianceCorrectionModel, envComplianceFallbackModel, envComplianceRelevanceModel} {
+	for _, env := range []string{envComplianceCorrectionModel, envComplianceFallbackModel} {
 		t.Setenv(env, "")
 	}
 	r := &complianceReviewer{client: &complianceFakeModel{}, logger: loggerutil.CreateDefaultLogger("TEST_COMPLIANCE")}
@@ -260,7 +257,7 @@ func TestComplianceConfigureNamesEverythingMissing(t *testing.T) {
 }
 
 // The shipped doc-review.local.toml names an existing prompt file for every compliance prompt key,
-// and the relevance and correction prompts hold their placeholders.
+// the correction prompt holds its placeholders and the effort is normal.
 func TestShippedConfigNamesEveryCompliancePrompt(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	raw, err := os.ReadFile(filepath.Join(root, "doc-review.local.toml"))
@@ -285,10 +282,6 @@ func TestShippedConfigNamesEveryCompliancePrompt(t *testing.T) {
 			continue
 		}
 		switch key {
-		case "relevance_prompt":
-			if _, q, ok := strings.Cut(string(text), complianceQuestionHeading); !ok || !strings.Contains(q, complianceQuestionKey) {
-				t.Errorf("%s has no question section with %s", file, complianceQuestionKey)
-			}
 		case "correction_prompt":
 			if !strings.Contains(string(text), "{{errors}}") || !strings.Contains(string(text), "{{previous_answer}}") {
 				t.Errorf("%s lacks {{errors}} or {{previous_answer}}", file)
@@ -296,8 +289,21 @@ func TestShippedConfigNamesEveryCompliancePrompt(t *testing.T) {
 		}
 	}
 	s := complianceSettingsFrom(rc)
-	if s.TopMetrics != 30 || s.TopProvisions != 30 || s.TopArtifacts != 30 || s.MaxCitedDocuments != 0 || s.MaxMetrics != 100 || s.MaxProvisions != 100 {
+	if s.TopMetrics != 30 || s.TopProvisions != 30 || s.TopArtifacts != 30 || s.MaxCitedDocuments != 0 || s.MaxMetrics != 100 || s.MaxProvisions != 100 || s.RelevanceMinScore != 3 {
 		t.Errorf("shipped settings = %+v", s)
+	}
+}
+
+// effort sets the relevance cut-off: normal (the default) keeps score 3 and up, high keeps 2 and up.
+func TestComplianceEffortSetsRelevanceCutOff(t *testing.T) {
+	for effort, want := range map[string]int{"": 3, "normal": 3, "high": 2} {
+		if got := complianceSettingsFrom(ReviewAspectConfig{Effort: effort}).RelevanceMinScore; got != want {
+			t.Errorf("effort %q: minimum score = %d, want %d", effort, got, want)
+		}
+	}
+	_, err := parseDocReviewConfig([]byte("[reviewers.compliance]\neffort = \"max\"\n"))
+	if err == nil || !strings.Contains(err.Error(), "effort") || !strings.Contains(err.Error(), "normal") || !strings.Contains(err.Error(), "high") {
+		t.Errorf("effort = max: err = %v, want it to name effort and the allowed values", err)
 	}
 }
 
@@ -615,11 +621,17 @@ func TestComplianceRelevanceRemovesUnrelatedCandidates(t *testing.T) {
 	rig := newComplianceTestRig(t, answer, func(req searchengine.Request) []searchengine.Result {
 		return []searchengine.Result{complianceResult("provision", "2_prv_1", 2, "sealed containers"), complianceResult("provision", "3_prv_1", 3, "frozen fish labels")}
 	})
-	rig.rel.probs["provision/3_prv_1"] = 0.1
+	rig.relScores["frozen fish labels"] = 1
 	rig.store.rows = []complianceArtifactRow{{Kind: "provision", RowID: 1, ArtifactID: "7_prv_1", Label: "seal", LineStart: 1, LineEnd: 1, DupKey: "s"}}
 	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// One relevance call for the activity, with every candidate under its own key.
+	calls := rig.primary.calls("relevance")
+	if len(calls) != 1 || !strings.Contains(calls[0], `"key":"c1"`) || !strings.Contains(calls[0], `"key":"c2"`) ||
+		!strings.Contains(calls[0], "sealed containers") || !strings.Contains(calls[0], "frozen fish labels") {
+		t.Fatalf("relevance calls = %q, want one listing both candidates", calls)
 	}
 	if strings.Contains(judged, "3_prv_1") || !strings.Contains(judged, "2_prv_1") {
 		t.Errorf("judgement input = %s, want only the relevant candidate", judged)
@@ -630,18 +642,86 @@ func TestComplianceRelevanceRemovesUnrelatedCandidates(t *testing.T) {
 	}
 	var meta struct {
 		Relevance []complianceRelevanceDecision `json:"relevance"`
+		Models    map[string]string             `json:"models"`
 	}
 	_ = json.Unmarshal(f.ArtifactFields, &meta)
-	if len(meta.Relevance) != 2 || meta.Relevance[1].Kept {
+	if len(meta.Relevance) != 2 || !meta.Relevance[0].Kept || meta.Relevance[1].Kept ||
+		meta.Relevance[1].Score == nil || *meta.Relevance[1].Score != 1 || meta.Relevance[1].Relevant != "no" {
 		t.Errorf("stored decisions = %+v", meta.Relevance)
+	}
+	if meta.Models["relevance"] != "primary-model" {
+		t.Errorf("models = %v, want the model that answered the relevance call", meta.Models)
 	}
 
 	// When nothing is relevant the finding says no candidate was found.
-	rig.rel.probs["provision/2_prv_1"] = 0.05
+	rig.relScores["sealed containers"] = 2
 	rig.r.plans = sync.Map{}
 	fs, _ = rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
 	if _, ok := findingOfType(fs, "compliance_no_grounding"); !ok {
 		t.Errorf("findings = %+v, want no grounding", fs)
+	}
+}
+
+// High effort keeps a candidate that scores 2; normal effort removes it.
+func TestComplianceRelevanceHighEffortKeepsScoreTwo(t *testing.T) {
+	answer := func(stage, input string) (map[string]any, error) {
+		if stage == "judgement" {
+			return judgeAll(input, nil), nil
+		}
+		return map[string]any{"activities": []any{}}, nil
+	}
+	rig := newComplianceTestRig(t, answer, func(searchengine.Request) []searchengine.Result {
+		return []searchengine.Result{complianceResult("provision", "2_prv_1", 2, "sealed containers")}
+	})
+	rig.relScores["sealed containers"] = 2
+	rig.store.rows = []complianceArtifactRow{{Kind: "provision", RowID: 1, ArtifactID: "7_prv_1", Label: "seal", LineStart: 1, LineEnd: 1, DupKey: "s"}}
+	for effort, want := range map[string]string{"normal": "compliance_no_grounding", "high": "compliance_assessment"} {
+		rig.r.settings = complianceSettingsFrom(ReviewAspectConfig{Effort: effort})
+		rig.r.plans = sync.Map{}
+		fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := findingOfType(fs, want); !ok {
+			t.Errorf("effort %s: findings = %+v, want %s", effort, fs, want)
+		}
+	}
+}
+
+// A wrong relevance answer goes to the correction model with every problem named.
+func TestComplianceRelevanceWrongAnswerIsCorrected(t *testing.T) {
+	answer := func(stage, input string) (map[string]any, error) {
+		if stage == "judgement" {
+			return judgeAll(input, nil), nil
+		}
+		return map[string]any{"activities": []any{}}, nil
+	}
+	rig := newComplianceTestRig(t, answer, func(searchengine.Request) []searchengine.Result {
+		return []searchengine.Result{complianceResult("provision", "2_prv_1", 2, "sealed containers"), complianceResult("provision", "3_prv_1", 3, "frozen fish labels")}
+	})
+	rig.store.rows = []complianceArtifactRow{{Kind: "provision", RowID: 1, ArtifactID: "7_prv_1", Label: "seal", LineStart: 1, LineEnd: 1, DupKey: "s"}}
+	rig.primary.relevance = func(string) (map[string]any, error) {
+		return map[string]any{"c1": map[string]any{"relevant": "maybe", "score": float64(12)}, "c9": map[string]any{"relevant": "no", "score": float64(0)}}, nil
+	}
+	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr := rig.corr.calls("relevance")
+	if len(corr) != 1 {
+		t.Fatalf("correction relevance calls = %d, want 1", len(corr))
+	}
+	for _, want := range []string{"Candidate c1: relevant", "Candidate c1: score 12", "Candidate c2: no answer", "c9 is not a candidate key"} {
+		if !strings.Contains(corr[0], want) {
+			t.Errorf("correction request lacks %q:\n%s", want, corr[0])
+		}
+	}
+	f, ok := findingOfType(fs, "compliance_assessment")
+	if !ok || f.ErrorMsg != "" || !strings.Contains(f.Description, "2_prv_1") || !strings.Contains(f.Description, "3_prv_1") {
+		t.Fatalf("findings = %+v", fs)
+	}
+	if len(rig.failed) != 1 || rig.failed[0].Operation != "review_compliance_relevance" || rig.failed[0].Outcome != llmusage.FailedCallRecovered {
+		t.Errorf("failed tries = %+v", rig.failed)
 	}
 }
 
@@ -993,7 +1073,8 @@ func TestComplianceJudgementWritesInReportLanguage(t *testing.T) {
 	}
 }
 
-func TestComplianceRelevanceRetriesOnce(t *testing.T) {
+// A relevance call goes through the three tries; when all fail, the activity records the error.
+func TestComplianceRelevanceUsesThreeTries(t *testing.T) {
 	answer := func(stage, input string) (map[string]any, error) {
 		if stage == "judgement" {
 			return judgeAll(input, nil), nil
@@ -1004,19 +1085,21 @@ func TestComplianceRelevanceRetriesOnce(t *testing.T) {
 		return []searchengine.Result{complianceResult("provision", "2_prv_1", 2, "seal")}
 	})
 	rig.store.rows = []complianceArtifactRow{{Kind: "provision", RowID: 1, ArtifactID: "7_prv_1", Label: "seal", LineStart: 1, LineEnd: 1, DupKey: "s"}}
-	rig.rel.failures = 1
+	dropped := func(string) (map[string]any, error) { return nil, errors.New("connection reset by peer") }
+	rig.primary.relevance = dropped
 	fs, err := rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f, ok := findingOfType(fs, "compliance_assessment"); !ok || f.ErrorMsg != "" || len(rig.rel.asked) != 2 {
-		t.Fatalf("findings = %+v, relevance requests = %d", fs, len(rig.rel.asked))
+	if f, ok := findingOfType(fs, "compliance_assessment"); !ok || f.ErrorMsg != "" || len(rig.corr.calls("relevance")) != 1 {
+		t.Fatalf("findings = %+v, correction relevance calls = %d", fs, len(rig.corr.calls("relevance")))
 	}
-	// Two failures in a row are an error for the activity.
-	rig.rel.failures = 2
+	// When all three tries fail, the activity records the error.
+	rig.corr.relevance = dropped
+	rig.fall.relevance = dropped
 	rig.r.plans = sync.Map{}
 	fs, _ = rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
-	if f, ok := findingOfType(fs, "compliance_incomplete"); !ok || !strings.Contains(f.ErrorMsg, "connection reset") {
+	if f, ok := findingOfType(fs, "compliance_incomplete"); !ok || !strings.Contains(f.ErrorMsg, "relevance") || !strings.Contains(f.ErrorMsg, "connection reset") {
 		t.Fatalf("findings = %+v", fs)
 	}
 }

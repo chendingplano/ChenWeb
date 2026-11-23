@@ -63,3 +63,11 @@
 - [x] 10.2 Compliance findings skip finding translation at save time, on page localization and on single-finding translation
 - [x] 10.3 Unit tests for both; devdoc 2026111201 and ADR 2026063001 updated
 - [ ] 10.4 Live review with the new prompts
+
+## 11. Relevance in one call per activity (2026-11-23)
+
+- [x] 11.1 Relevance check as one structured call per activity through `callWithTries`: yes or no and a 0–9 score per candidate, correction request naming every problem; `DOC_REVIEWER_RELEVANCE_MODEL_NAME` and the decision-model client removed
+- [x] 11.2 `[reviewers.compliance].effort`: `normal` keeps score 3 or more (default), `high` keeps 2 or more; any other value refused when the configuration loads
+- [x] 11.3 Prompt `prompt-review-compliance-relevance-v3.md`; offline replay on 30 activities of run 13882 recorded in design D6 and devdoc 2026111201
+- [x] 11.4 Unit tests: one call per activity, score cut-off by effort, wrong answer corrected, three tries, configuration
+- [ ] 11.5 Live review with the new relevance check

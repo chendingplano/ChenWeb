@@ -17,13 +17,18 @@ NOT start any extraction.
 ### Requirement: Configuration is complete before review
 The reviewer SHALL stop before reviewing when any of `prompt`, `doc_activity_prompt`,
 `relevance_prompt`, `judgement_prompt`, `verifier_prompt`, `correction_prompt` is unset or names a
-missing file, or when `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME`, `DOC_REVIEWER_FALLBACK_MODEL_NAME` or
-`DOC_REVIEWER_RELEVANCE_MODEL_NAME` is unset or unresolvable. The error SHALL name the setting or
-variable. The reviewer SHALL NOT choose a model or prompt of its own.
+missing file, or when `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME` or `DOC_REVIEWER_FALLBACK_MODEL_NAME`
+is unset or unresolvable. The error SHALL name the setting or variable. The reviewer SHALL NOT choose a
+model or prompt of its own. Loading `doc-review.local.toml` SHALL fail when `effort` in
+`[reviewers.compliance]` is set to anything other than `normal` or `high`.
 
-#### Scenario: Missing relevance model variable
-- **WHEN** `DOC_REVIEWER_RELEVANCE_MODEL_NAME` is unset
-- **THEN** every chunk task fails with an error naming `DOC_REVIEWER_RELEVANCE_MODEL_NAME`
+#### Scenario: Missing fallback model variable
+- **WHEN** `DOC_REVIEWER_FALLBACK_MODEL_NAME` is unset
+- **THEN** every chunk task fails with an error naming `DOC_REVIEWER_FALLBACK_MODEL_NAME`
+
+#### Scenario: Unknown effort
+- **WHEN** `[reviewers.compliance]` sets `effort = "max"`
+- **THEN** loading the configuration fails with an error naming `effort` and the values `normal` and `high`
 
 ### Requirement: Metric and provision activities
 Every metric and provision of the reviewed record SHALL become an activity of the chunk in which its
@@ -94,16 +99,29 @@ reference, keywords, kinds, limit, excluded records, a possibly-cut-off flag and
 - **THEN** no search runs for the citation and `cited_documents` holds "GB/T 1234"
 
 ### Requirement: Relevance check
-After searching, the reviewer SHALL ask the decision model, in one request per activity, one
-yes-or-no question per candidate using `relevance_prompt`. Candidates judged not relevant (probability
-below 0.2) SHALL be removed before judgement and kept in the stored trace with their decision. A
-candidate without an answer SHALL be kept. A failed relevance request SHALL be sent once more before
-it counts as an error for the activity. When no candidate remains, the finding SHALL be
-`compliance_no_grounding`.
+After searching, the reviewer SHALL send one structured call per activity with `relevance_prompt`, the
+activity and all its candidates, each under a key `c1` to `cN`. For every candidate the answer SHALL
+give `relevant` (`yes` or `no`) and `score` (a whole number from 0 to 9). The call SHALL run at
+temperature 0 and SHALL get the three tries of every structured call. An answer that leaves out a
+candidate, names a key that is not a candidate, or gives an invalid value SHALL be a wrong answer, and
+the correction request SHALL name each problem.
+
+A candidate SHALL be kept when its score is at least the minimum that `effort` in
+`[reviewers.compliance]` sets: 3 for `normal` (also when unset) and 2 for `high`. Removed candidates
+SHALL get no verdict and SHALL stay in the stored relevance decisions with their answer and score. When
+no candidate remains, the finding SHALL be `compliance_no_grounding`.
+
+#### Scenario: One call per activity
+- **WHEN** an activity has 30 candidates
+- **THEN** the reviewer sends one relevance call listing all 30, not one call per candidate
 
 #### Scenario: Unrelated candidate removed
-- **WHEN** the decision model gives a candidate probability 0.1
-- **THEN** the candidate gets no verdict, is absent from the finding's candidate list, and appears in the stored relevance decisions
+- **WHEN** the model gives a candidate score 1 and the effort is `normal`
+- **THEN** the candidate gets no verdict, is absent from the finding's candidate list, and appears in the stored relevance decisions with score 1
+
+#### Scenario: High effort keeps a weaker candidate
+- **WHEN** the model gives a candidate score 2
+- **THEN** it is removed when the effort is `normal` and judged when the effort is `high`
 
 ### Requirement: Judgement call
 For each text activity and each activity group, the reviewer SHALL send structured calls with
@@ -146,7 +164,7 @@ compliant verdict remains; otherwise informational.
 - **THEN** the verdict becomes undetermined with the reason as note and the finding is informational
 
 ### Requirement: Three tries per structured call
-Activity detection, judgement and verification calls SHALL each get up to three tries: the reviewer's
+Activity detection, relevance, judgement and verification calls SHALL each get up to three tries: the reviewer's
 model; then, after a wrong answer, a correction request (original input plus `correction_prompt` with
 the errors and the previous answer) to `DOC_REVIEWER_ERROR_CORRECTION_MODEL_NAME`; then a correction
 request using the latest wrong answer and its errors to `DOC_REVIEWER_FALLBACK_MODEL_NAME`. A try after a provider failure with no wrong

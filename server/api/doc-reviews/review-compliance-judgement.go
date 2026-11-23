@@ -85,18 +85,16 @@ func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chu
 		if len(found[m.ID]) == 0 {
 			continue
 		}
-		kept, decisions, err := r.checkRelevance(ctx, recordID, m, found[m.ID], s.pool)
+		kept, decisions, model, err := r.checkRelevance(ctx, recordID, chunkIndex, cfg, m, found[m.ID], s.pool)
 		if err != nil {
 			s.fail("%s: %v", m.Label, err)
 			continue
 		}
+		s.models["relevance"] = model
 		s.relevance = append(s.relevance, decisions...)
 		if len(kept) > 0 {
 			s.kept[m.ID] = kept
 		}
-	}
-	if r.relevance != nil {
-		s.models["relevance"] = r.relevance.Model()
 	}
 	if len(s.kept) == 0 {
 		return r.unitFinding(s, cfg)
