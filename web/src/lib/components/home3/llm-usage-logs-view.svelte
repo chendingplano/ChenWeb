@@ -122,6 +122,7 @@
 
 	// --- State ---
 	let rows      = $state<UsageEventRow[]>([]);
+	let selectedRowId = $state('');
 	let total     = $state(0);
 	let page      = $state(1);
 	let pageSize  = $state(50);
@@ -189,6 +190,7 @@
 
 	onMount(() => {
 		try {
+			selectedRowId = sessionStorage.getItem('llmUsageLogsSelectedRow') || '';
 			const settings = JSON.parse(sessionStorage.getItem('llmUsageLogsColumns') || '{}');
 			for (const key of Object.keys(columnDefaults) as ColumnKey[]) {
 				const width = settings.widths?.[key];
@@ -627,7 +629,12 @@
 					</tr></thead>
 					<tbody>
 						{#each rows as row (row.id)}
-							<tr class="transition-colors hover:bg-white/5">
+							<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+							<tr
+								class="transition-colors hover:bg-white/5"
+								style:background={selectedRowId === row.id ? (darkMode ? '#343a50' : '#e0e7ff') : undefined}
+								onclick={() => { selectedRowId = row.id; try { sessionStorage.setItem('llmUsageLogsSelectedRow', row.id); } catch { /* storage unavailable */ } }}
+							>
 								{#if !hiddenColumns.includes('started_at')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>{/if}
 								{#if !hiddenColumns.includes('model')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>{/if}
 								{#if !hiddenColumns.includes('prompt')}<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
