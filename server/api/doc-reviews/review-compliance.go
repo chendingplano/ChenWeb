@@ -397,14 +397,34 @@ func parseComplianceActivity(i int, item any, docLevel bool, input chunkInput) (
 	if a.Activity == "" {
 		return a, fmt.Errorf("%s: field activity is empty; give a short normalized name", label)
 	}
+	if a.LineStart <= 0 || a.LineEnd < a.LineStart ||
+		(input.startLine > 0 && a.LineStart < input.startLine) ||
+		(input.endLine > 0 && a.LineEnd > input.endLine) {
+		return a, fmt.Errorf("%s: invalid activity range; use supplied lines within this chunk (%d-%d) (ChenWeb#61)", label, input.startLine, input.endLine)
+	}
+	lines, valid := parseComplianceInput(input.inputJSON)
 	derivedEvidence := a.SourceText == ""
 	if derivedEvidence {
 		a.SourceText = complianceLinesText(input.inputJSON, a.LineStart, a.LineEnd)
+		// Image rows are omitted from the input. Keep derived evidence anchored to
+		// the supplied text inside the requested range, including when an endpoint
+		// was an omitted image (ChenWeb#61). Explicit model quotes remain strict.
+		first, last := 0, 0
+		for _, line := range lines {
+			if line.LineNumber >= a.LineStart && line.LineNumber <= a.LineEnd {
+				if first == 0 {
+					first = line.LineNumber
+				}
+				last = line.LineNumber
+			}
+		}
+		if first > 0 {
+			a.LineStart, a.LineEnd = first, last
+		}
 	}
 	if a.SourceText == "" {
 		return a, fmt.Errorf("%s: lines %d-%d are not lines of this chunk (%d-%d); use line numbers from the lines table", label, a.LineStart, a.LineEnd, input.startLine, input.endLine)
 	}
-	lines, valid := parseComplianceInput(input.inputJSON)
 	if valid {
 		quote := a.SourceText
 		if derivedEvidence {

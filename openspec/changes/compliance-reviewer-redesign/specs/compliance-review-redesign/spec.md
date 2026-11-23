@@ -60,6 +60,21 @@ chunk.
 - **WHEN** the model returns a text activity on lines 10–11 and a provision covers lines 10–12
 - **THEN** the text activity is dropped
 
+### Requirement: Derived activity evidence uses supplied text
+When a text activity omits `source_text`, the reviewer SHALL derive its quote from supplied rows
+inside the requested range and normalize its endpoints to the first and last supplied rows in that
+range. Image rows omitted from serialization SHALL NOT cause rejection of otherwise grounded text.
+The reviewer SHALL reject invalid or out-of-passage ranges, ranges containing no supplied text, and
+explicit quotes whose endpoints are absent or whose text does not match.
+
+#### Scenario: Activity ends on an omitted image
+- **WHEN** an activity cites lines 449–453 without `source_text`, lines 449–452 are supplied, and line 453 is an omitted image within the passage
+- **THEN** the reviewer derives the quote from lines 449–452 and stores that range without a correction call
+
+#### Scenario: Activity extends outside the passage
+- **WHEN** an activity's requested range extends outside the passage even though some of its lines are supplied
+- **THEN** the reviewer rejects the activity and asks for a range within the passage
+
 ### Requirement: Search per activity kind
 A metric activity SHALL search metrics only, by reference to its indexed artifact, keeping at most
 `top_metrics` results; a provision activity SHALL search provisions only, keeping at most

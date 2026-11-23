@@ -450,6 +450,57 @@ func TestComplianceDerivedEvidenceFromCompactInput(t *testing.T) {
 	}
 }
 
+// ChenWeb#61: image rows are omitted from the request; derived evidence must cite
+// the text actually supplied, without extending a citation beyond the passage.
+func TestComplianceDerivedEvidenceOmittedImageEndpoints(t *testing.T) {
+	lines := []Line{
+		{LineNo: 448, LineType: "image", Content: "diagram-before.png"},
+		{LineNo: 449, LineType: "heading", Content: "Equipment checks"},
+		{LineNo: 450, LineType: "paragraph", Content: "Check the equipment regularly."},
+		{LineNo: 451, LineType: "image", Content: "diagram-middle.png"},
+		{LineNo: 452, LineType: "paragraph", Content: "Record the results."},
+		{LineNo: 453, LineType: "image", Content: "diagram-after.png"},
+	}
+	input := buildChunkInputs(lines, "Example", 200)[0]
+	for _, tc := range []struct {
+		name       string
+		start, end int
+		quote      string
+		wantError  bool
+	}{
+		{"trailing image", 449, 453, "", false},
+		{"leading image", 448, 452, "", false},
+		{"both images", 448, 453, "", false},
+		{"interior image", 449, 452, "", false},
+		{"only image", 453, 453, "", true},
+		{"before passage", 447, 452, "", true},
+		{"after passage", 449, 454, "", true},
+		{"reversed", 453, 449, "", true},
+		{"explicit missing endpoint", 449, 453, "Equipment checks", true},
+		{"fabricated quote", 449, 452, "Invented text", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			activity := map[string]any{"activity": "check_equipment", "line_start": float64(tc.start), "line_end": float64(tc.end)}
+			if tc.quote != "" {
+				activity["source_text"] = tc.quote
+			}
+			acts, err := parseComplianceActivities(map[string]any{"activities": []any{activity}}, false, input)
+			if tc.wantError {
+				if err == nil {
+					t.Fatal("invalid citation accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(acts) != 1 || acts[0].LineStart != 449 || acts[0].LineEnd != 452 || acts[0].SourceText != "Equipment checks\nCheck the equipment regularly.\nRecord the results." {
+				t.Fatalf("derived activity = %+v", acts)
+			}
+		})
+	}
+}
+
 func TestParseComplianceQueryBilingualKeywords(t *testing.T) {
 	q, ok := parseComplianceQuery([]any{map[string]any{"en": "log", "zh": "日志"}, "retention", map[string]any{"en": "log"}})
 	if !ok || q.Text != "log 日志 retention" || len(q.Keywords) != 3 {
