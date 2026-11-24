@@ -1211,6 +1211,16 @@
 				<button class:active={tab === 'report'} onclick={() => (tab = 'report')}>
 					<FileText size={13} />{m.pmr_tab_report()} <span>{gaps.length}</span>
 				</button>
+				{#if run.status === 'completed' && run.report_md}
+					<a
+						class="report-pdf"
+						href={`/api/v1/kb/product-reviews/runs/${runId}/report.pdf`}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						<FileText size={13} />{m.pmr_view_pdf()}
+					</a>
+				{/if}
 			</div>
 
 			<div
@@ -2168,7 +2178,9 @@
 		border-bottom: 1px solid var(--border);
 		margin-bottom: 16px;
 	}
-	.tabs button {
+	.tabs button,
+	.tabs .report-pdf {
+		text-decoration: none;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
@@ -2181,6 +2193,8 @@
 		font-size: 12px;
 	}
 	.tabs button:hover,
+	.tabs .report-pdf:hover,
+	.tabs .report-pdf:focus-visible,
 	.tabs button.active {
 		color: var(--text);
 		border-color: var(--bronze);

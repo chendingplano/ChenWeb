@@ -4,10 +4,13 @@ import (
 	"encoding/csv"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/docbuilder"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -615,6 +618,49 @@ func ExportProductReviewRunResults(c echo.Context) error {
 	}
 	w.Flush()
 	return w.Error()
+}
+
+// ExportProductReviewReportPDF renders the saved run report as an inline PDF.
+func ExportProductReviewReportPDF(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_PMR_PDF")
+	defer rc.Close()
+	runID, err := idParam(c, "run_id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "bad run id"})
+	}
+	run, err := (RunStore{DB: ApiTypes.ProjectDBHandle}).GetRun(c.Request().Context(), runID)
+	if err != nil {
+		return fail(c, err)
+	}
+	if run == nil {
+		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": "run not found"})
+	}
+	if run.Status != "completed" || strings.TrimSpace(run.ReportMD) == "" {
+		return c.JSON(http.StatusConflict, map[string]any{"status": false, "error_msg": "report is not ready"})
+	}
+	dir, err := os.MkdirTemp("", "product-review-report-")
+	if err != nil {
+		return fail(c, err)
+	}
+	defer os.RemoveAll(dir)
+	src, dst := filepath.Join(dir, "report.md"), filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(src, []byte(run.ReportMD), 0600); err != nil {
+		return fail(c, err)
+	}
+	engine, font := os.Getenv("DOCUMENT_PDF_ENGINE"), os.Getenv("DOCUMENT_PDF_FONT")
+	if engine == "" {
+		engine = "typst"
+	}
+	if font == "" {
+		font = "Helvetica"
+	}
+	if err := docbuilder.PandocConvert(engine, font)(c.Request().Context(), src, dst); err != nil {
+		rc.GetLogger().Error("product review PDF generation failed", "run_id", runID, "error", err)
+		return fail(c, err)
+	}
+	rc.GetLogger().Info("product review PDF generated", "run_id", runID)
+	c.Response().Header().Set("Content-Disposition", "inline; filename=product-review-run-"+strconv.FormatInt(runID, 10)+".pdf")
+	return c.File(dst)
 }
 
 // ── product name catalog ────────────────────────────────────────────────────

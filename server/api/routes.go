@@ -1025,6 +1025,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/product-reviews/runs/:run_id/documents", productreviews.GetProductReviewRunDocuments)
 	apiGroup.GET("/kb/product-reviews/runs/:run_id/diff", productreviews.GetProductReviewRunDiff)
 	apiGroup.GET("/kb/product-reviews/runs/:run_id/export", productreviews.ExportProductReviewRunResults)
+	apiGroup.GET("/kb/product-reviews/runs/:run_id/report.pdf", productreviews.ExportProductReviewReportPDF)
 	apiGroup.GET("/kb/product-reviews/artifacts/:artifact_id/metric", productreviews.GetProductReviewMetricDetail)
 	apiGroup.GET("/kb/product-reviews/objects", productreviews.GetProductReviewObjectNames)
 
