@@ -862,7 +862,7 @@
 		(r) => selectedNodeId == null || r.node_id === selectedNodeId
 	)));
 	let reportWidth = $state(0);
-	const reportColumns = $derived(Math.max(1, Math.floor(reportWidth / 280)));
+	const reportColumns = $derived(Math.max(1, Math.floor((reportWidth + 5) / 285)));
 	const reportRows = $derived.by(() => {
 		const rows = [];
 		for (let i = 0; i < standardGroups.length; i += reportColumns) {
@@ -871,6 +871,7 @@
 		return rows;
 	});
 	const REPORT_ROW_MIN = 180;
+	const REPORT_ROW_MAX = 1200;
 	const REPORT_HEIGHTS_KEY = 'pmr-standard-row-heights';
 	function loadReportHeights(): Record<string, number> {
 		if (!browser) return {};
@@ -881,14 +882,18 @@
 		} catch { return {}; }
 	}
 	let reportHeights = $state<Record<string, number>>(loadReportHeights());
-	let reportDrag: { row: number; columns: number; y: number; upper: number; lower: number } | null = null;
+	let reportDrag: { row: number; columns: number; y: number; upper: number; lower: number | null } | null = null;
 	function reportRowHeight(row: number) {
 		return reportHeights[`${reportColumns}:${row}`] ?? 360;
 	}
 	function persistReportHeights() {
 		try { sessionStorage.setItem(REPORT_HEIGHTS_KEY, JSON.stringify(reportHeights)); } catch { /* storage unavailable */ }
 	}
-	function resizeReportRows(row: number, upper: number, lower: number, delta: number, columns = reportColumns) {
+	function resizeReportRows(row: number, upper: number, lower: number | null, delta: number, columns = reportColumns) {
+		if (lower === null) {
+			reportHeights[`${columns}:${row}`] = Math.max(REPORT_ROW_MIN, Math.min(REPORT_ROW_MAX, upper + delta));
+			return;
+		}
 		const adjustment = Math.max(REPORT_ROW_MIN - upper, Math.min(lower - REPORT_ROW_MIN, delta));
 		reportHeights[`${columns}:${row}`] = upper + adjustment;
 		reportHeights[`${columns}:${row + 1}`] = lower - adjustment;
@@ -897,7 +902,7 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-		reportDrag = { row, columns: reportColumns, y: event.clientY, upper: reportRowHeight(row), lower: reportRowHeight(row + 1) };
+		reportDrag = { row, columns: reportColumns, y: event.clientY, upper: reportRowHeight(row), lower: row === reportRows.length - 1 ? null : reportRowHeight(row + 1) };
 	}
 	function moveReportResize(event: PointerEvent) {
 		if (!reportDrag || reportDrag.columns !== reportColumns) return;
@@ -908,8 +913,9 @@
 		persistReportHeights();
 	}
 	function resizeReportWithKeyboard(event: KeyboardEvent, row: number) {
-		const upper = reportRowHeight(row), lower = reportRowHeight(row + 1);
-		const delta = { ArrowUp: -20, ArrowDown: 20, Home: REPORT_ROW_MIN - upper, End: lower - REPORT_ROW_MIN }[event.key];
+		const upper = reportRowHeight(row);
+		const lower = row === reportRows.length - 1 ? null : reportRowHeight(row + 1);
+		const delta = { ArrowUp: -20, ArrowDown: 20, Home: REPORT_ROW_MIN - upper, End: lower === null ? REPORT_ROW_MAX - upper : lower - REPORT_ROW_MIN }[event.key];
 		if (delta === undefined) return;
 		event.preventDefault();
 		resizeReportRows(row, upper, lower, delta);
@@ -1880,17 +1886,15 @@
 					</section>
 				{/each}
 			</div>
-			{#if rowIndex < reportRows.length - 1}
 				<div class="h-splitter report-row-splitter" role="separator" aria-orientation="horizontal"
-					aria-label={m.pmr_resize_standard_rows({ row: rowIndex + 1 })}
+					aria-label={rowIndex === reportRows.length - 1 ? m.pmr_resize_last_standard_row() : m.pmr_resize_standard_rows({ row: rowIndex + 1 })}
 					aria-valuenow={reportRowHeight(rowIndex)} aria-valuemin={REPORT_ROW_MIN}
-					aria-valuemax={reportRowHeight(rowIndex) + reportRowHeight(rowIndex + 1) - REPORT_ROW_MIN}
+					aria-valuemax={rowIndex === reportRows.length - 1 ? REPORT_ROW_MAX : reportRowHeight(rowIndex) + reportRowHeight(rowIndex + 1) - REPORT_ROW_MIN}
 					tabindex="0"
 					onpointerdown={(event) => startReportResize(event, rowIndex)}
 					onpointermove={moveReportResize} onpointerup={endReportResize}
 					onpointercancel={endReportResize} onlostpointercapture={endReportResize}
 					onkeydown={(event) => resizeReportWithKeyboard(event, rowIndex)}></div>
-			{/if}
 		{/each}
 	</div>
 {/snippet}
@@ -2782,15 +2786,18 @@
 		padding: 0;
 	}
 	.standards-report {
+		background: var(--bg);
 		overflow: auto;
 		max-height: calc(100vh - 200px);
 	}
 	.standards-columns {
 		display: grid;
+		column-gap: 5px;
 		min-width: 0;
 		align-items: stretch;
 	}
 	.standard-column {
+		background: var(--surface);
 		display: flex;
 		flex-direction: column;
 		min-height: 0;

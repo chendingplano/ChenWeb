@@ -9505,5 +9505,6 @@
   "pmr_standard_other": "Other",
   "pmr_standards_report": "Metrics by standard",
   "pmr_no_standard_metrics": "No metrics in this category",
-  "pmr_resize_standard_rows": "Resize standard rows at row {row}"
+  "pmr_resize_standard_rows": "Resize standard rows at row {row}",
+  "pmr_resize_last_standard_row": "Resize the last standard row"
 }
