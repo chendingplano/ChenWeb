@@ -12,6 +12,7 @@
 	import NavRail from '$lib/components/home3/nav-rail.svelte';
 	import ContentPanel from '$lib/components/home3/content-panel.svelte';
 	import ContextShelf from '$lib/components/home3/context-shelf.svelte';
+	import { findingShelf } from './finding-shelf-store.svelte';
 	import {
 		createRailState,
 		handleRailButtonAction,
@@ -79,6 +80,10 @@
 	let railExpanded = $state(false);
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
+	$effect(() => {
+		findingShelf.onOpen = () => (shelfOpen = true);
+		return () => { findingShelf.onOpen = null; };
+	});
 	let metricDetails = $state<Snippet | null>(null);
 	let summaryDetails = $state<Snippet | null>(null);
 	let referenceDetails = $state<KbReferenceDetails | null>(null);

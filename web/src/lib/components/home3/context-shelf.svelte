@@ -16,7 +16,6 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
-	import FindingDetailsPanel from '$lib/components/home3/finding-details-panel.svelte';
 	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
 	import {
 		rangeTypeMapShelf,
@@ -365,7 +364,7 @@
 				{:else if provisionDetails}{msg.context_shelf_provision_details()}
 				{:else if productDetails}{msg.context_shelf_product_details()}
 				{:else if metricDetails || selectedMetrics}{msg.context_shelf_metric_details()}
-				{:else if findingShelf.active}{msg.context_shelf_finding()}
+				{:else if findingShelf.active}{msg.doc_review_report_document_review_report()}
 				{:else if rangeTypeMapShelf.active}{msg.context_shelf_value_range_type_map()}
 				{:else if sectionId === 'dashboard'}{msg.context_shelf_system_status()}
 				{:else if sectionId === 'agents'}{msg.context_shelf_agent_insights()}
@@ -538,14 +537,7 @@
 			</div>
 		{:else if findingShelf.active}
 			<div class="finding-shelf-body">
-				<FindingDetailsPanel
-					finding={findingShelf.finding}
-					requestId={findingShelf.requestId}
-					runId={findingShelf.runId}
-					dark={darkMode}
-					onFocusMatchedUnit={findingShelf.onFocusMatchedUnit ?? undefined}
-					onCloseMatchedUnits={findingShelf.onCloseMatchedUnits ?? undefined}
-				/>
+				{@render findingShelf.reportPanel?.()}
 			</div>
 		{:else if rangeTypeMapShelf.active}
 			<div class="flex items-center justify-between gap-2">

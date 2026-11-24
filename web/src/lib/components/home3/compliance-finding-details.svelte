@@ -22,7 +22,7 @@
 		type FindingDetails,
 		type FindingItem
 	} from '$lib/services/docReviewService';
-	import { cacheDetails, cachedDetails, complianceSearchCounts, detailsCacheKey, verdictCounts, withoutActivityLines } from './compliance-finding-panel.js';
+	import { cacheDetails, cachedDetails, complianceSearchCounts, detailsCacheKey, readableActivityLabel, verdictCounts, withoutActivityLines } from './compliance-finding-panel.js';
 
 	let {
 		finding,
@@ -268,7 +268,7 @@
 		<span class="cf-label">{m.finding_details_panel_activity()}</span>
 		<div class="cf-value">
 			{#each activities as a (a.activity_id)}
-				<div>{m.finding_details_panel_activity_value({ label: a.label, kind: a.kind, start: a.line_start ?? 0, end: a.line_end ?? 0 })}</div>
+				<div>{m.finding_details_panel_activity_value({ label: readableActivityLabel(a.label), kind: a.kind, start: a.line_start ?? 0, end: a.line_end ?? 0 })}</div>
 			{/each}
 			{#if activityCursor}
 				<button type="button" class="cf-btn" disabled={moreBusy} onclick={moreActivities}>{m.compliance_finding_details_more_activities()}</button>
@@ -330,7 +330,7 @@
 						{/if}
 						<span class="cf-ref">{m.finding_details_panel_record({ related_record_id: c.candidate_record_id ?? '—', related_artifact_id: c.candidate_id })}</span>
 					</button>
-					{#if group}<div class="cf-sub">{m.compliance_finding_details_for_activity({ label: c.local_label, activity: c.activity_label })}</div>{/if}
+					{#if group}<div class="cf-sub">{m.compliance_finding_details_for_activity({ label: c.local_label, activity: readableActivityLabel(c.activity_label) })}</div>{/if}
 					{#if c.document_title}<div class="cf-sub">{c.document_title}</div>{/if}
 					{#if c.summary}<p class="cf-summary">{c.summary}</p>{/if}
 					{#if c.note}<p class="cf-sub"><span class="cf-strong">{m.finding_details_panel_verdict_note()}</span> {c.note}</p>{/if}

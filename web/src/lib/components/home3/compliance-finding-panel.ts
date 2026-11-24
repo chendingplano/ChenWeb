@@ -27,6 +27,11 @@ export function verdictCounts(counts: ComplianceCounts | undefined | null): { ve
 
 const ACTIVITY_LINE = /^Activity \S+ \[[^\],]+, lines \d+-\d+\]: /;
 
+// Activity labels may be stored as slugs; keep the stored identifiers intact.
+export function readableActivityLabel(label: string): string {
+	return label.replace(/_/g, ' ');
+}
+
 // A legacy description without its "Activity a1 [text, lines 49-52]: ..." lines.
 export function withoutActivityLines(description: string): string {
 	return description

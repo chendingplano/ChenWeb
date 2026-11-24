@@ -3,6 +3,7 @@
 	import { getDocReviewLogsFor, type FindingItem, type DocReviewLogRow } from '$lib/services/docReviewService';
 	import { artifactTypeFromKey, getArtifactWiki } from './artifact-key.js';
 	import ComplianceFindingDetails from './compliance-finding-details.svelte';
+	import { readableActivityLabel } from './compliance-finding-panel.js';
 	import { getLLMUsageEventsByIds, type LLMUsageEventDetail } from './llm-activities-client.js';
 	import { buildFindingsSections, buildJsonSections, buildJsonTree, formatCompactContent, lineNumbersFromSpans, matchedUnitFocusTarget, matchedUnitLabel, relatedArtifactsFromMetadata, type JsonDialogSection, type JsonTreeNode, type RelatedArtifact } from './doc-review-json-dialog.js';
 	import JsonTreeDialog from './json-tree-dialog.svelte';
@@ -346,7 +347,7 @@
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_aspect()}</span><span class="fd-value">{finding.aspect}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_severity()}</span><span class="fd-value">{finding.severity}</span></div>
 					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_finding_type()}</span><span class="fd-value">{finding.finding_type}</span></div>
-					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_title()}</span><span class="fd-value">{finding.title}</span></div>
+					<div class="fd-row"><span class="fd-label">{m.finding_details_panel_title()}</span><span class="fd-value">{isCompliance ? readableActivityLabel(finding.title) : finding.title}</span></div>
 					{#if isCompliance}
 						<ComplianceFindingDetails {finding} onOpenCandidate={openCandidate} onViewAudit={openAuditDialog} />
 					{:else}

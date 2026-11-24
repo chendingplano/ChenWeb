@@ -9522,5 +9522,6 @@
 	"nav_apps_technical_document_compliance_review": "Technical Document Compliance Review",
 	"nav_apps_company_policy_compliance_review": "Company Policy Compliance Review",
 	"nav_apps_user_manual_compliance_review": "User Manual Compliance Review",
-	"nav_apps_installation_manual_compliance_review": "Installation Manual Compliance Review"
+	"nav_apps_installation_manual_compliance_review": "Installation Manual Compliance Review",
+	"doc_review_report_summary_tab": "Report Summary"
 }

@@ -12,12 +12,13 @@
 		type FindingItem,
 		type ReviewPackageInfo
 	} from '$lib/services/docReviewService';
-	import { verdictCounts } from '$lib/components/home3/compliance-finding-panel.js';
+	import { readableActivityLabel, verdictCounts } from '$lib/components/home3/compliance-finding-panel.js';
 	import { getKbFrontendConfig } from '$lib/services/kbService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
 	import { findingShelf } from '$lib/components/home3/finding-shelf-store.svelte';
+	import FindingDetailsPanel from './finding-details-panel.svelte';
 
 	let {
 		reportId,
@@ -77,6 +78,7 @@
 	let skeleton = $state<ReportSkeleton | null>(null);
 	let totals = $state({ total: 0, high: 0, medium: 0, low: 0 });
 	let activeKey = $state<string | null>(null);
+	let reportTab = $state<'summary' | 'finding'>('summary');
 
 	// DR16: live findings (with ids + review_status) drive the action buttons.
 	let findings = $state<FindingItem[]>([]);
@@ -346,6 +348,8 @@
 	// actually changes so re-resolving doesn't reset the box's drag position.
 	function onFocusFinding(f: FindingItem) {
 		activeKey = String(f.id);
+		reportTab = 'finding';
+		findingShelf.onOpen?.();
 		const desired = [f];
 		if (!sameFindingIds(activeFindings, desired)) activeFindings = desired;
 		void structureView?.focusFindingTarget(`finding:${f.id}`);
@@ -384,6 +388,7 @@
 		findingShelf.active = true;
 		return () => {
 			findingShelf.active = false;
+			findingShelf.reportPanel = null;
 			findingShelf.finding = null;
 			findingShelf.findings = [];
 			findingShelf.requestId = null;
@@ -394,6 +399,7 @@
 	});
 	$effect(() => {
 		if (!active) return;
+		findingShelf.reportPanel = reportPanel;
 		findingShelf.finding = selectedFinding;
 		findingShelf.findings = activeFindings;
 		findingShelf.requestId = requestId;
@@ -704,6 +710,95 @@
 	}
 </script>
 
+{#snippet reportPanel()}
+	<div
+		class="report-shelf select-text"
+		style="--card-bg:{cardBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted};"
+	>
+		<div class="report-tabs" role="tablist" aria-label={msg.doc_review_report_document_review_report()}>
+			{#each [{ id: 'summary' as const, label: msg.doc_review_report_summary_tab() }, { id: 'finding' as const, label: msg.context_shelf_finding() }] as tab (tab.id)}
+				<button
+					type="button"
+					role="tab"
+					id={`report-${reportId}-${tab.id}-tab`}
+					aria-controls={`report-${reportId}-${tab.id}-panel`}
+					aria-selected={reportTab === tab.id}
+					tabindex={reportTab === tab.id ? 0 : -1}
+					class:active={reportTab === tab.id}
+					onclick={() => (reportTab = tab.id)}
+					onkeydown={(event) => {
+						if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+						event.preventDefault();
+						reportTab = event.key === 'Home' ? 'summary' : event.key === 'End' ? 'finding' : reportTab === 'summary' ? 'finding' : 'summary';
+						document.getElementById(`report-${reportId}-${reportTab}-tab`)?.focus();
+					}}
+				>{tab.label}</button>
+			{/each}
+		</div>
+		<div
+			role="tabpanel"
+			id={`report-${reportId}-summary-panel`}
+			aria-labelledby={`report-${reportId}-summary-tab`}
+			hidden={reportTab !== 'summary'}
+			tabindex="0"
+		>
+			{#if loading}
+				<p class="body-text">{msg.doc_review_report_loading_report()}</p>
+			{:else if errorMsg}
+				<p class="state error">{errorMsg}</p>
+			{:else if skeleton}
+				<p class="meta">
+					{msg.doc_review_report_document_id({ document_title: skeleton.meta?.document_title || '—', inputRecordId: inputRecordId ?? '—' })}<br />
+					{msg.doc_review_report_generated({ generated_at: skeleton.meta?.generated_at || '—' })}<br />
+					{msg.doc_review_report_review_request_id({ requestId: requestId ?? '—' })}<br />
+					{msg.doc_review_report_run_id({ reportRunId: reportRunId ?? '—' })}
+				</p>
+
+				<div class="summary-cards">
+					<div class="summary-card"><div class="count">{totals.total}</div><div class="label">{msg.doc_review_report_total()}</div></div>
+					<div class="summary-card"><div class="count" style="color:#dc2626;">{totals.high}</div><div class="label">{msg.doc_review_report_high()}</div></div>
+					<div class="summary-card"><div class="count" style="color:#f59e0b;">{totals.medium}</div><div class="label">{msg.doc_review_report_medium()}</div></div>
+					<div class="summary-card"><div class="count" style="color:#10b981;">{totals.low}</div><div class="label">{msg.doc_review_report_low()}</div></div>
+				</div>
+
+				{#if skeleton.executive_summary}
+					<h2>{msg.doc_review_report_executive_summary()}</h2>
+					<p class="body-text">{skeleton.executive_summary.text}</p>
+					{#if skeleton.executive_summary.overall_assessment}
+						<p class="body-text">
+							{msg.doc_review_report_assessment()}
+							<span class="assessment">{skeleton.executive_summary.overall_assessment}</span>
+						</p>
+					{/if}
+					{#if skeleton.executive_summary.top_findings?.length}
+						<h3>{msg.doc_review_report_top_findings()}</h3>
+						<ul class="top-findings">
+							{#each skeleton.executive_summary.top_findings as t}<li>{t}</li>{/each}
+						</ul>
+					{/if}
+				{/if}
+
+			{/if}
+		</div>
+		<div
+			role="tabpanel"
+			id={`report-${reportId}-finding-panel`}
+			aria-labelledby={`report-${reportId}-finding-tab`}
+			hidden={reportTab !== 'finding'}
+			tabindex="0"
+		>
+			<FindingDetailsPanel
+				finding={selectedFinding}
+				{requestId}
+				runId={reportRunId}
+				{dark}
+				onFocusMatchedUnit={findingShelf.onFocusMatchedUnit ?? undefined}
+				onCloseMatchedUnits={findingShelf.onCloseMatchedUnits ?? undefined}
+			/>
+		</div>
+	</div>
+{/snippet}
+
 <svelte:head>
 	{#if !embedded}
 		<title>{msg.doc_review_report_report({ document_title: skeleton?.meta?.document_title || msg.doc_review_report_document_review() })}</title>
@@ -711,7 +806,7 @@
 </svelte:head>
 
 <div
-	class="report-page"
+	class="report-page select-text"
 	bind:this={containerEl}
 	style="--page-bg:{pageBg}; --card-bg:{cardBg}; --card-active-bg:{cardActiveBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --scroll-thumb:{scrollThumb};"
 >
@@ -726,36 +821,6 @@
 			<div class="title-row">
 				<h1 class="report-title">{msg.doc_review_report_document_review_report()}</h1>
 			</div>
-			<p class="meta">
-				{msg.doc_review_report_document_id({ document_title: skeleton.meta?.document_title || '—', inputRecordId: inputRecordId ?? '—' })}<br />
-				{msg.doc_review_report_generated({ generated_at: skeleton.meta?.generated_at || '—' })}<br />
-				{msg.doc_review_report_review_request_id({ requestId: requestId ?? '—' })}<br />
-				{msg.doc_review_report_run_id({ reportRunId: reportRunId ?? '—' })}
-			</p>
-
-			<div class="summary-cards">
-				<div class="summary-card"><div class="count">{totals.total}</div><div class="label">{msg.doc_review_report_total()}</div></div>
-				<div class="summary-card"><div class="count" style="color:#dc2626;">{totals.high}</div><div class="label">{msg.doc_review_report_high()}</div></div>
-				<div class="summary-card"><div class="count" style="color:#f59e0b;">{totals.medium}</div><div class="label">{msg.doc_review_report_medium()}</div></div>
-				<div class="summary-card"><div class="count" style="color:#10b981;">{totals.low}</div><div class="label">{msg.doc_review_report_low()}</div></div>
-			</div>
-
-			{#if skeleton.executive_summary}
-				<h2>{msg.doc_review_report_executive_summary()}</h2>
-				<p class="body-text">{skeleton.executive_summary.text}</p>
-				{#if skeleton.executive_summary.overall_assessment}
-					<p class="body-text">
-						{msg.doc_review_report_assessment()}
-						<span class="assessment">{skeleton.executive_summary.overall_assessment}</span>
-					</p>
-				{/if}
-				{#if skeleton.executive_summary.top_findings?.length}
-					<h3>{msg.doc_review_report_top_findings()}</h3>
-					<ul class="top-findings">
-						{#each skeleton.executive_summary.top_findings as t}<li>{t}</li>{/each}
-					</ul>
-				{/if}
-			{/if}
 
 			<div class="show-mode-bar">
 				<button
@@ -820,7 +885,7 @@
 					>
 						<div class="finding-head">
 							<span class="finding-id">#{f.id}</span>
-							<strong>{f.title}</strong>
+							<strong>{f.aspect === 'compliance' ? readableActivityLabel(f.title) : f.title}</strong>
 							<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
 							<span class="badge">{f.aspect}</span>
 							{#if f.review_status === 'fixed'}
@@ -979,6 +1044,11 @@
 			<div class="state">{msg.doc_review_report_no_source_document_linked_to()}</div>
 		{/if}
 	</section>
+	{#if !embedded}
+		<aside class="standalone-shelf">
+			{@render reportPanel()}
+		</aside>
+	{/if}
 </div>
 
 {#if toast}
@@ -1007,6 +1077,45 @@
 {/if}
 
 <style>
+	.report-shelf {
+		color: var(--text-primary);
+		overflow-wrap: anywhere;
+	}
+	.standalone-shelf {
+		flex: 0 0 min(360px, 30%);
+		min-width: 0;
+		padding: 1rem;
+		overflow-y: auto;
+		border-left: 1px solid var(--border);
+		box-sizing: border-box;
+	}
+	.report-tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		border-bottom: 1px solid var(--border);
+		margin-bottom: 1rem;
+	}
+	.report-tabs button {
+		padding: 0.5rem 0.65rem;
+		background: transparent;
+		border: 0;
+		border-bottom: 2px solid transparent;
+		color: var(--text-secondary);
+		font: inherit;
+		font-size: 0.82rem;
+		cursor: pointer;
+	}
+	.report-tabs button.active {
+		border-bottom-color: var(--accent);
+		color: var(--accent);
+		font-weight: 600;
+	}
+	.report-tabs button:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: -2px;
+	}
+
 	.report-page {
 		display: flex;
 		height: 100%;
@@ -1127,7 +1236,8 @@
 		color: var(--text-primary);
 	}
 	.summary-cards {
-		display: flex;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 0.75rem;
 		margin: 1rem 0;
 	}
@@ -1433,6 +1543,9 @@
 	}
 	.finding-head strong {
 		font-size: 0.92rem;
+		min-width: 0;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 	.sev {
 		font-weight: 600;

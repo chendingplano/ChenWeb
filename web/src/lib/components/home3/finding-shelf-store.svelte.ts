@@ -1,4 +1,5 @@
 import type { FindingItem } from '$lib/services/docReviewService';
+import type { Snippet } from 'svelte';
 
 // Bridges the Document Review report's currently-selected finding across the
 // content/shelf boundary: the report view (rendered inside the content panel)
@@ -10,6 +11,8 @@ type FocusFn = (recordId: number, lineNumbers: number[]) => void;
 
 export const findingShelf = $state<{
 	active: boolean;
+	reportPanel: Snippet | null;
+	onOpen: (() => void) | null;
 	finding: FindingItem | null;
 	// The set of findings to highlight in the PDF. A single finding click yields a
 	// one-element list; clicking a reviewer/aspect folder yields all its findings.
@@ -20,6 +23,8 @@ export const findingShelf = $state<{
 	onCloseMatchedUnits: (() => void) | null;
 }>({
 	active: false,
+	reportPanel: null,
+	onOpen: null,
 	finding: null,
 	findings: [],
 	requestId: null,

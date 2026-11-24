@@ -9522,5 +9522,6 @@
 	"nav_apps_technical_document_compliance_review": "技术文档合规审查",
 	"nav_apps_company_policy_compliance_review": "公司政策合规审查",
 	"nav_apps_user_manual_compliance_review": "用户手册合规审查",
-	"nav_apps_installation_manual_compliance_review": "安装手册合规审查"
+	"nav_apps_installation_manual_compliance_review": "安装手册合规审查",
+	"doc_review_report_summary_tab": "报告摘要"
 }
