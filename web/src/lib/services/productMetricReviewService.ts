@@ -448,8 +448,25 @@ export function getRunDocuments(
 	return call(`/product-reviews/runs/${runId}/documents`);
 }
 
-export function getRunDiff(runId: number): Promise<{ status: true; diff: RunDiff }> {
-	return call(`/product-reviews/runs/${runId}/diff`);
+export async function getRunDiff(runId: number): Promise<{ status: true; diff: RunDiff }> {
+	const response = await call<{
+		status: true;
+		diff: Omit<RunDiff, 'added' | 'removed' | 'retiered'> & {
+			added?: ArtifactRef[] | null;
+			removed?: ArtifactRef[] | null;
+			retiered?: TierChange[] | null;
+		};
+	}>(`/product-reviews/runs/${runId}/diff`);
+	// Go serializes empty diff slices as null. Keep the UI's array contract.
+	return {
+		...response,
+		diff: {
+			...response.diff,
+			added: response.diff.added ?? [],
+			removed: response.diff.removed ?? [],
+			retiered: response.diff.retiered ?? []
+		}
+	};
 }
 
 export function getMetricDetail(

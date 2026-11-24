@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
 	createReview,
 	getRunResults,
+	getRunDiff,
 	listAspects,
 	listProfiles,
 	rerunReview,
@@ -32,6 +33,38 @@ function stubFetch(response: unknown, status = 200): { restore: () => void; last
 	}) as typeof fetch;
 	return { restore: () => void (globalThis.fetch = original), last: () => captured };
 }
+
+test('getRunDiff treats null or missing comparison lists as empty arrays', async () => {
+	for (const lists of [{ added: null, removed: null, retiered: null }, {}]) {
+		const metadata = { profile_version_changed: false, previous_run_number: 1 };
+		const f = stubFetch({ status: true, diff: { ...metadata, ...lists } });
+		try {
+			const out = await getRunDiff(11);
+			assert.equal(f.last().url, '/api/v1/kb/product-reviews/runs/11/diff');
+			assert.deepEqual(out.diff, { ...metadata, added: [], removed: [], retiered: [] });
+		} finally {
+			f.restore();
+		}
+	}
+});
+
+test('getRunDiff preserves populated comparison lists and version changes', async () => {
+	const diff = {
+		added: [{ artifact_type: 'metric', artifact_id: 'test-added', tier: 'direct' }],
+		removed: [{ artifact_type: 'metric', artifact_id: 'test-removed', tier: 'part' }],
+		retiered: [{ artifact_type: 'metric', artifact_id: 'test-retiered', from: 'part', to: 'direct' }],
+		profile_version_changed: true,
+		previous_run_number: 1,
+		previous_profile_version: 2,
+		current_profile_version: 3
+	};
+	const f = stubFetch({ status: true, diff });
+	try {
+		assert.deepEqual((await getRunDiff(11)).diff, diff);
+	} finally {
+		f.restore();
+	}
+});
 
 test('createReview POSTs the review body to the reviews endpoint', async () => {
 	const f = stubFetch({ status: true, run: { id: 5, run_number: 1, status: 'completed' } });
