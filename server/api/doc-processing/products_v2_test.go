@@ -943,3 +943,31 @@ func TestProductsV2RejectsConflictingComparisonParameters(t *testing.T) {
 		}
 	}
 }
+
+func TestProductsV2RetriesMisplacedObligationCode(t *testing.T) {
+	for _, code := range []string{"p", "r"} {
+		t.Run(code, func(t *testing.T) {
+			wire := `{"v":2,"p":[{"n":"sample device","t":"eq","r":"` + code + `","d":"Device installation","s":[10],"o":"` + code + `","q":1}]}`
+			var requests []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				requests = append(requests, string(body))
+				content := wire
+				if len(requests) > 1 {
+					content = strings.Replace(wire, `"r":"`+code+`"`, `"r":"inst"`, 1)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+			}))
+			defer srv.Close()
+			client := &llmclients.OpenAIJSONClient{BaseURL: srv.URL, APIKey: "test", HTTPClient: srv.Client()}
+			p := NewProductsProcessor(nil, nil, client, loggerutil.CreateDefaultLogger("20261123-165"))
+			got, err := p.extractProductPayload(context.Background(), client, "extract products merged", "input", "prompt", "prompt-extract-products-merged-v3.md", "primary-model", productSourceLines{10: "sample device may be installed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(requests) != 2 || !strings.Contains(requests[1], "ChenWeb#65") || !strings.Contains(requests[1], "obligation") || len(got["products"].([]any)) != 1 {
+				t.Fatalf("missing correction or result: requests=%v result=%v", requests, got)
+			}
+		})
+	}
+}

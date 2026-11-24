@@ -168,6 +168,11 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		if relationCode == "" {
 			return nil, fmt.Errorf("(MID_20261118_003) product %d has a blank relation code", i+1)
 		}
+		if (relationCode == "p" || relationCode == "r") && relationCode == asString(raw["o"]) {
+			codes := provisionV2Enum(productV2Relations)["enum"].([]string)
+			validationErrs = append(validationErrs, fmt.Errorf("product %d %q: r=%q repeats the obligation code from o. Keep the obligation in o; r describes how the document concerns the product. Choose the supported relation from %s (ChenWeb#65)", i+1, name, relationCode, strings.Join(codes, ", ")))
+			continue
+		}
 		typeCode := asString(raw["t"])
 		if productV2Types[typeCode] == "" {
 			if typeCode == relationCode && productV2Relations[typeCode] != "" {
