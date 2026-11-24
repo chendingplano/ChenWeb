@@ -135,6 +135,7 @@
 	// panel inside it, to the right of the PDF.
 	type ReviewLayout = {
 		scopeW: number;
+		headerH: number;
 		detailW: number;
 		attrsW: number;
 		scopeCollapsed?: boolean;
@@ -142,10 +143,12 @@
 	const LAYOUT_KEY = 'pmr-review-layout';
 	const LAYOUT_DEFAULTS: ReviewLayout = {
 		scopeW: 320,
+		headerH: 240,
 		detailW: 760,
 		attrsW: 320,
 		scopeCollapsed: false
 	};
+	const HEADER_MIN = 160, HEADER_MAX = 600;
 	const SCOPE_MIN = 240,
 		SCOPE_MAX = 480;
 	const SCOPE_RAIL = 40; // width of the scope tree when collapsed (toggle button only)
@@ -163,6 +166,8 @@
 				const p = JSON.parse(raw) as Partial<ReviewLayout>;
 				return {
 					scopeW: typeof p.scopeW === 'number' ? p.scopeW : LAYOUT_DEFAULTS.scopeW,
+					headerH: typeof p.headerH === 'number' && Number.isFinite(p.headerH)
+						? Math.max(HEADER_MIN, Math.min(HEADER_MAX, p.headerH)) : LAYOUT_DEFAULTS.headerH,
 					detailW:
 						typeof p.detailW === 'number' ? Math.max(DETAIL_MIN, p.detailW) : LAYOUT_DEFAULTS.detailW,
 					attrsW: typeof p.attrsW === 'number' ? p.attrsW : LAYOUT_DEFAULTS.attrsW,
@@ -197,16 +202,23 @@
 
 	const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-	type ResizeKey = 'scopeW' | 'detailW' | 'attrsW';
-	let drag: { key: ResizeKey; startX: number; startVal: number } | null = null;
+	type ResizeKey = 'scopeW' | 'detailW' | 'attrsW' | 'headerH';
+	let drag: { key: ResizeKey; startX: number; startY: number; startVal: number } | null = null;
 
 	function startResize(e: PointerEvent, key: ResizeKey) {
+		if (e.button !== 0) return;
+		e.preventDefault();
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		drag = { key, startX: e.clientX, startVal: layout[key] };
+		drag = { key, startX: e.clientX, startY: e.clientY, startVal: layout[key] };
 		document.body.style.userSelect = 'none';
 	}
 	function moveResize(e: PointerEvent) {
-		if (!drag || !layoutEl) return;
+		if (!drag) return;
+		if (drag.key === 'headerH') {
+			layout.headerH = clamp(drag.startVal + e.clientY - drag.startY, HEADER_MIN, HEADER_MAX);
+			return;
+		}
+		if (!layoutEl) return;
 		const W = layoutEl.clientWidth;
 		if (drag.key === 'scopeW') {
 			const maxScope = Math.max(SCOPE_MIN, W - layout.detailW - MAIN_MIN - 2 * SPLITTER);
@@ -231,6 +243,17 @@
 		}
 		drag = null;
 		document.body.style.userSelect = '';
+		persistLayout();
+	}
+
+	function resizeHeaderWithKeyboard(e: KeyboardEvent) {
+		const heights: Record<string, number> = {
+			ArrowUp: layout.headerH - 10, ArrowDown: layout.headerH + 10,
+			Home: HEADER_MIN, End: HEADER_MAX
+		};
+		if (!(e.key in heights)) return;
+		e.preventDefault();
+		layout.headerH = clamp(heights[e.key], HEADER_MIN, HEADER_MAX);
 		persistLayout();
 	}
 
@@ -1038,7 +1061,8 @@
 				</div>
 			{/if}
 
-			<div class="title-row">
+			<div class="title-row" class:resizable-header={tab === 'results' && !!profile}
+				style={`--header-height:${layout.headerH}px`}>
 				<div>
 					<p class="kicker">{m.pmr_review_of()}</p>
 					<h1>{profileName || m.pmr_untitled()}</h1>
@@ -1126,6 +1150,25 @@
 					</button>
 				</div>
 			</div>
+
+			{#if tab === 'results' && profile}
+				<div
+					class="h-splitter"
+					role="separator"
+					tabindex="0"
+					aria-label={m.pmr_resize_header()}
+					aria-orientation="horizontal"
+					aria-valuemin={HEADER_MIN}
+					aria-valuemax={HEADER_MAX}
+					aria-valuenow={layout.headerH}
+					onpointerdown={(e) => startResize(e, 'headerH')}
+					onpointermove={moveResize}
+					onpointerup={endResize}
+					onpointercancel={endResize}
+					onlostpointercapture={endResize}
+					onkeydown={resizeHeaderWithKeyboard}
+				></div>
+			{/if}
 
 			<div class="tabs">
 				<button class:active={tab === 'results'} onclick={() => (tab = 'results')}>
@@ -2135,22 +2178,50 @@
 	.v-splitter:hover::after {
 		background: var(--bronze);
 	}
+	.title-row.resizable-header {
+		height: var(--header-height);
+		box-sizing: border-box;
+		padding: 15px 0;
+		margin: 0;
+		flex-wrap: nowrap;
+	}
+	.h-splitter {
+		height: 12px;
+		position: relative;
+		cursor: row-resize;
+		touch-action: none;
+		user-select: none;
+	}
+	.h-splitter::after {
+		content: '';
+		position: absolute;
+		inset: 5px 0;
+		background: var(--border);
+	}
+	.h-splitter:hover::after,
+	.h-splitter:focus-visible::after {
+		background: var(--bronze);
+	}
 	.header-drawing {
 		flex: 1 1 280px;
+		height: 100%;
+		overflow: auto;
 		min-width: 0;
 	}
 	.drawing-kept,
 	.drawing-pending {
+		height: 100%;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		flex-wrap: wrap;
 		gap: 12px;
 	}
 	.drawing-kept img,
 	.drawing-pending img {
-		width: 140px;
-		height: 140px;
+		width: calc(var(--header-height) - 30px);
+		height: 100%;
+		min-width: 0;
+		flex-shrink: 1;
 		object-fit: contain;
 	}
 	.drawing-pending-actions {

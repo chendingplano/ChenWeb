@@ -96,3 +96,23 @@ The app shell's generic context panel ("APP STATUS") and its open/close toggle S
 - **WHEN** a user navigates away from Product Review to another dashboard page
 - **THEN** the context panel and its toggle are shown again, respecting whatever open/closed state the user
   last had on that other page
+
+### Requirement: Resizable product drawing header
+
+On the Results tab, the product drawing SHALL fill the header height with 15px of space above
+and below its image box, preserving the image proportions. The default header height SHALL be
+240px. A horizontal divider between the header and the result tabs SHALL resize the header and
+image together, between 160px and 600px. The chosen height SHALL persist with the existing browser
+layout preferences. The Report tab SHALL retain its existing header layout.
+
+#### Scenario: Resize the header
+
+- **WHEN** a user drags the horizontal divider down or up
+- **THEN** the header and image grow or shrink together, preserving the 15px vertical spacing
+- **AND** reopening the page restores the chosen height
+
+#### Scenario: Resize using a keyboard
+
+- **WHEN** the divider has keyboard focus
+- **THEN** Arrow Up and Arrow Down change the height by 10px
+- **AND** Home selects the minimum height and End selects the maximum height
