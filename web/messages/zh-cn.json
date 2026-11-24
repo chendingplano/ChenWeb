@@ -9506,5 +9506,8 @@
   "pmr_standards_report": "按标准分类的指标",
   "pmr_no_standard_metrics": "此分类暂无指标",
   "pmr_resize_standard_rows": "调整第 {row} 行上下标准列表的高度",
-  "pmr_resize_last_standard_row": "调整最后一行标准列表的高度"
+  "pmr_resize_last_standard_row": "调整最后一行标准列表的高度",
+  "pmr_reorder_standard_list": "调整{name}列表顺序",
+  "pmr_reorder_standard_list_hint": "拖动以调整列表顺序，或在聚焦后使用方向键。",
+  "pmr_standard_list_moved": "{name}已移至第{position}个位置，共{total}个列表。"
 }

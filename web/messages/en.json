@@ -9506,5 +9506,8 @@
   "pmr_standards_report": "Metrics by standard",
   "pmr_no_standard_metrics": "No metrics in this category",
   "pmr_resize_standard_rows": "Resize standard rows at row {row}",
-  "pmr_resize_last_standard_row": "Resize the last standard row"
+  "pmr_resize_last_standard_row": "Resize the last standard row",
+  "pmr_reorder_standard_list": "Reorder {name}",
+  "pmr_reorder_standard_list_hint": "Drag to reorder lists, or use the arrow keys when focused.",
+  "pmr_standard_list_moved": "{name} moved to position {position} of {total}."
 }

@@ -1,5 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyStandard, groupStandardMetrics } from './product-review-standards';
+import { classifyStandard, groupStandardMetrics, normalizeStandardOrder, moveStandardCategory, standardCategories } from './product-review-standards';
+
+describe('Product Review list order', () => {
+	test('restores unique known categories and includes missing categories', () => {
+		expect(normalizeStandardOrder(['other', 'other', 'removed', 'national'])).toEqual([
+			'other', 'national', 'international', 'eu', 'us', 'industry', 'local', 'association', 'enterprise'
+		]);
+		for (const invalid of [null, {}, 42, 'national']) {
+			expect(normalizeStandardOrder(invalid)).toEqual([...standardCategories]);
+		}
+	});
+	test('moves across row boundaries in both directions without losing lists', () => {
+		const forward = moveStandardCategory([...standardCategories], 'national', 'local');
+		expect(forward).toEqual(['international', 'eu', 'us', 'industry', 'local', 'national', 'association', 'enterprise', 'other']);
+		expect(moveStandardCategory(forward, 'national', 'international')).toEqual([...standardCategories]);
+		expect(moveStandardCategory(forward, 'national', 'national')).toEqual(forward);
+	});
+});
 
 describe('Product Review standard classification', () => {
 	for (const [docNo, category] of [

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
-	import { groupStandardMetrics, type StandardCategory } from './product-review-standards';
+	import { onMount, untrack, tick } from 'svelte';
+	import { groupStandardMetrics, normalizeStandardOrder, moveStandardCategory, type StandardCategory } from './product-review-standards';
 	import { browser } from '$app/environment';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
@@ -12,6 +12,7 @@
 		Download,
 		FileText,
 		FolderTree,
+		GripVertical,
 		Layers,
 		PanelLeftClose,
 		PanelLeftOpen,
@@ -865,14 +866,67 @@
 		(r) => selectedNodeId == null || r.node_id === selectedNodeId
 	)));
 	let reportWidth = $state(0);
+	let reportElement: HTMLDivElement;
+	const REPORT_ORDER_KEY = 'pmr-standard-list-order';
+	function loadReportOrder() {
+		if (!browser) return normalizeStandardOrder(null);
+		try { return normalizeStandardOrder(JSON.parse(sessionStorage.getItem(REPORT_ORDER_KEY) ?? 'null')); }
+		catch { return normalizeStandardOrder(null); }
+	}
+	let reportOrder = $state<StandardCategory[]>(loadReportOrder());
+	let listDrag = $state<{ category: StandardCategory; pointerId: number; x: number; y: number; active: boolean } | null>(null);
+	let listDropTarget = $state<StandardCategory | null>(null);
+	let reorderAnnouncement = $state('');
+	const orderedStandardGroups = $derived(reportOrder.map(category => standardGroups.find(group => group.category === category)!));
 	const reportColumns = $derived(Math.max(1, Math.floor((reportWidth + 5) / 285)));
 	const reportRows = $derived.by(() => {
 		const rows = [];
-		for (let i = 0; i < standardGroups.length; i += reportColumns) {
-			rows.push(standardGroups.slice(i, i + reportColumns));
+		for (let i = 0; i < orderedStandardGroups.length; i += reportColumns) {
+			rows.push(orderedStandardGroups.slice(i, i + reportColumns));
 		}
 		return rows;
 	});
+	async function reorderStandardList(category: StandardCategory, target: StandardCategory) {
+		if (category === target) return;
+		reportOrder = moveStandardCategory(reportOrder, category, target);
+		try { sessionStorage.setItem(REPORT_ORDER_KEY, JSON.stringify(reportOrder)); } catch { /* storage unavailable */ }
+		reorderAnnouncement = m.pmr_standard_list_moved({ name: standardLabel(category), position: reportOrder.indexOf(category) + 1, total: reportOrder.length });
+		await tick();
+		reportElement.querySelector<HTMLButtonElement>(`[data-standard-handle="${category}"]`)?.focus({ preventScroll: true });
+	}
+	function startListDrag(event: PointerEvent, category: StandardCategory) {
+		if (event.button !== 0 || listDrag) return;
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		listDrag = { category, pointerId: event.pointerId, x: event.clientX, y: event.clientY, active: false };
+	}
+	function moveListDrag(event: PointerEvent) {
+		if (!listDrag || event.pointerId !== listDrag.pointerId) return;
+		if (Math.hypot(event.clientX - listDrag.x, event.clientY - listDrag.y) < 5 && !listDrag.active) return;
+		listDrag.active = true;
+		const column = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-standard-category]');
+		listDropTarget = column && reportElement.contains(column) ? column.dataset.standardCategory as StandardCategory : null;
+	}
+	function cancelListDrag() {
+		listDrag = null;
+		listDropTarget = null;
+	}
+	function endListDrag(event: PointerEvent) {
+		if (!listDrag || event.pointerId !== listDrag.pointerId) return;
+		moveListDrag(event);
+		const category = listDrag.category;
+		const target = listDrag.active ? listDropTarget : null;
+		cancelListDrag();
+		if (target) void reorderStandardList(category, target);
+	}
+	function reorderListWithKeyboard(event: KeyboardEvent, category: StandardCategory) {
+		if (event.key === 'Escape') { cancelListDrag(); return; }
+		const index = reportOrder.indexOf(category);
+		const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -reportColumns, ArrowDown: reportColumns }[event.key];
+		if (offset === undefined) return;
+		event.preventDefault();
+		const target = reportOrder[Math.max(0, Math.min(reportOrder.length - 1, index + offset))];
+		void reorderStandardList(category, target);
+	}
 	const REPORT_ROW_MIN = 180;
 	const REPORT_ROW_MAX = 1200;
 	const REPORT_HEIGHTS_KEY = 'pmr-standard-row-heights';
@@ -1873,12 +1927,23 @@
 {/snippet}
 
 {#snippet reportView()}
-	<div class="standards-report" bind:clientWidth={reportWidth} role="region" aria-label={m.pmr_standards_report()} tabindex="0">
+	<div class="standards-report" bind:this={reportElement} bind:clientWidth={reportWidth} role="region" aria-label={m.pmr_standards_report()} tabindex="0">
+		<span class="sr-only" aria-live="polite">{reorderAnnouncement}</span>
 		{#each reportRows as row, rowIndex (`${reportColumns}:${rowIndex}`)}
 			<div class="standards-columns" style={`grid-template-columns:repeat(${reportColumns}, minmax(0, 1fr));height:${reportRowHeight(rowIndex)}px`}>
 				{#each row as group (group.category)}
-					<section class="standard-column" aria-label={standardLabel(group.category)}>
-						<h3>{standardLabel(group.category)} <span>{group.rows.length}</span></h3>
+					<section class="standard-column" data-standard-category={group.category}
+						class:list-dragging={listDrag?.active && listDrag.category === group.category}
+						class:list-drop-target={listDrag?.active && listDropTarget === group.category && listDrag.category !== group.category}
+						aria-label={standardLabel(group.category)}>
+						<h3><button type="button" class="standard-list-handle" data-standard-handle={group.category}
+							aria-label={m.pmr_reorder_standard_list({ name: standardLabel(group.category) })}
+							title={m.pmr_reorder_standard_list_hint()}
+							onpointerdown={(event) => startListDrag(event, group.category)} onpointermove={moveListDrag}
+							onpointerup={endListDrag} onpointercancel={cancelListDrag} onlostpointercapture={cancelListDrag}
+							onkeydown={(event) => reorderListWithKeyboard(event, group.category)}>
+							<GripVertical size={16} aria-hidden="true" />{standardLabel(group.category)}
+						</button><span>{group.rows.length}</span></h3>
 						<div class="standard-cards">
 							{#each group.rows as r (`${r.artifact_type}:${r.artifact_id}`)}
 								{@render resultCard(r)}
@@ -2838,6 +2903,25 @@
 		color: var(--bronze);
 		font-variant-numeric: tabular-nums;
 	}
+	.standard-list-handle {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		padding: 4px 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: grab;
+		touch-action: none;
+		user-select: none;
+	}
+	.standard-list-handle:active { cursor: grabbing; }
+	.standard-list-handle:focus-visible { outline: 2px solid var(--bronze); outline-offset: 4px; }
+	.standard-column.list-dragging { opacity: 0.5; }
+	.standard-column.list-drop-target { outline: 2px solid var(--bronze); outline-offset: -2px; }
 	.standard-cards {
 		flex: 1;
 		min-height: 0;
