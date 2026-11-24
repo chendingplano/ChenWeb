@@ -127,14 +127,13 @@
 	let editLabel = $state('');
 	let busyNode = $state<number | null>(null);
 
-	// ── resizable layout (results tab) — drag handles between the drawing area
-	// and the scope-tree / results / metric-details panes, sizes persisted per
+	// ── resizable layout (results tab) — drag handles between the
+	// scope-tree / results / metric-details panes, sizes persisted per
 	// browser (spec: product-review-results-layout; pattern mirrors
 	// metric-ontology-explorer/panel-shell.svelte's splitter) ─────────────────
 	// detailW = whole right-hand pane (PDF + metric details); attrsW = the metric-details
 	// panel inside it, to the right of the PDF.
 	type ReviewLayout = {
-		drawingH: number;
 		scopeW: number;
 		detailW: number;
 		attrsW: number;
@@ -142,7 +141,6 @@
 	};
 	const LAYOUT_KEY = 'pmr-review-layout';
 	const LAYOUT_DEFAULTS: ReviewLayout = {
-		drawingH: 320,
 		scopeW: 320,
 		detailW: 760,
 		attrsW: 320,
@@ -156,8 +154,6 @@
 	const DETAIL_MIN = ATTRS_MIN + PDF_MIN + 9; // right-hand pane minimum (9 = one SPLITTER)
 	const MAIN_MIN = 240; // Entry list minimum width in px; the Entry list fills the remaining space
 	const SPLITTER = 9; // width of one v-splitter handle
-	const DRAWING_MIN = 140,
-		DRAWING_MAX = 940;
 
 	function loadLayout(): ReviewLayout {
 		if (!browser) return { ...LAYOUT_DEFAULTS };
@@ -166,7 +162,6 @@
 			if (raw) {
 				const p = JSON.parse(raw) as Partial<ReviewLayout>;
 				return {
-					drawingH: typeof p.drawingH === 'number' ? p.drawingH : LAYOUT_DEFAULTS.drawingH,
 					scopeW: typeof p.scopeW === 'number' ? p.scopeW : LAYOUT_DEFAULTS.scopeW,
 					detailW:
 						typeof p.detailW === 'number' ? Math.max(DETAIL_MIN, p.detailW) : LAYOUT_DEFAULTS.detailW,
@@ -202,12 +197,12 @@
 
 	const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-	type ResizeKey = 'drawingH' | 'scopeW' | 'detailW' | 'attrsW';
-	let drag: { key: ResizeKey; startX: number; startY: number; startVal: number } | null = null;
+	type ResizeKey = 'scopeW' | 'detailW' | 'attrsW';
+	let drag: { key: ResizeKey; startX: number; startVal: number } | null = null;
 
 	function startResize(e: PointerEvent, key: ResizeKey) {
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		drag = { key, startX: e.clientX, startY: e.clientY, startVal: layout[key] };
+		drag = { key, startX: e.clientX, startVal: layout[key] };
 		document.body.style.userSelect = 'none';
 	}
 	function moveResize(e: PointerEvent) {
@@ -225,8 +220,6 @@
 			// the splitter sits between the PDF (left) and the details panel (right)
 			const maxAttrs = layout.detailW - PDF_MIN - SPLITTER;
 			layout.attrsW = clamp(drag.startVal - (e.clientX - drag.startX), ATTRS_MIN, maxAttrs);
-		} else {
-			layout.drawingH = clamp(drag.startVal + (e.clientY - drag.startY), DRAWING_MIN, DRAWING_MAX);
 		}
 	}
 	function endResize(e: PointerEvent) {
@@ -1061,6 +1054,71 @@
 						{/if}
 					</p>
 				</div>
+				{#if tab === 'results' && profile}
+					<div class="header-drawing">
+						{#if drawingId != null && !showDrawingGenerator}
+							<div class="drawing-kept">
+								<img src={productDrawingContentUrl(drawingId)} alt={profileName} />
+								<button class="ghost" onclick={openRegenerate} disabled={drawingBusy}>
+									<RefreshCw size={13} />{m.pmr_drawing_regenerate()}
+								</button>
+							</div>
+						{:else if pendingDrawing}
+							<div class="drawing-pending">
+								<img src={pendingProductDrawingContentUrl(pendingDrawing.token)} alt={profileName} />
+								<div class="drawing-pending-actions">
+									<button class="primary" onclick={keepDrawing} disabled={drawingBusy}
+										>{m.pmr_drawing_keep()}</button
+									>
+									<button class="ghost" onclick={discardDrawing} disabled={drawingBusy}
+										>{m.pmr_drawing_discard()}</button
+									>
+								</div>
+								{#if drawingError}
+									<p class="drawing-error">{drawingError}</p>
+								{/if}
+							</div>
+						{:else}
+							<div class="drawing-generator">
+								<div class="pane-head"><span>{m.pmr_drawing_heading()}</span></div>
+								<label class="drawing-prompt-label" for="pmr-drawing-prompt"
+									>{m.pmr_drawing_prompt_label()}</label
+								>
+								<textarea
+									id="pmr-drawing-prompt"
+									rows="2"
+									bind:value={drawingPrompt}
+									oninput={() => (drawingPromptTouched = true)}
+								></textarea>
+								<div class="drawing-generator-actions">
+									<label class="drawing-model-label" for="pmr-drawing-model"
+										>{m.pmr_drawing_model_label()}</label
+									>
+									<select id="pmr-drawing-model" class="drawing-model-select" bind:value={drawingModel}>
+										{#each imageGenerationModels as imageModel}
+											<option value={imageModel}>{imageModel}</option>
+										{/each}
+									</select>
+									<button
+										class="primary"
+										onclick={generateDrawing}
+										disabled={drawingGenerating || !drawingPrompt.trim()}
+									>
+										{drawingGenerating ? m.pmr_drawing_generating() : m.pmr_drawing_generate()}
+									</button>
+									{#if drawingId != null}
+										<button class="linky" onclick={() => (showDrawingGenerator = false)}
+											>{m.pmr_cancel()}</button
+										>
+									{/if}
+								</div>
+								{#if drawingError}
+									<p class="drawing-error">{drawingError}</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
 				<div class="title-actions">
 					<a class="ghost" href={runExportUrl(runId)}><Download size={13} />{m.pmr_export()}</a>
 					<button class="ghost" onclick={doRerun} disabled={busyNode === -1}>
@@ -1077,81 +1135,6 @@
 					<FileText size={13} />{m.pmr_tab_report()} <span>{gaps.length}</span>
 				</button>
 			</div>
-
-			{#if tab === 'results' && profile}
-				<div class="drawing-area" style="height:{layout.drawingH}px">
-					{#if drawingId != null && !showDrawingGenerator}
-						<div class="drawing-kept">
-							<img src={productDrawingContentUrl(drawingId)} alt={profileName} />
-							<button class="ghost drawing-regenerate" onclick={openRegenerate} disabled={drawingBusy}>
-								<RefreshCw size={13} />{m.pmr_drawing_regenerate()}
-							</button>
-						</div>
-					{:else if pendingDrawing}
-						<div class="drawing-pending">
-							<img src={pendingProductDrawingContentUrl(pendingDrawing.token)} alt={profileName} />
-							<div class="drawing-pending-actions">
-								<button class="primary" onclick={keepDrawing} disabled={drawingBusy}
-									>{m.pmr_drawing_keep()}</button
-								>
-								<button class="ghost" onclick={discardDrawing} disabled={drawingBusy}
-									>{m.pmr_drawing_discard()}</button
-								>
-							</div>
-							{#if drawingError}
-								<p class="drawing-error">{drawingError}</p>
-							{/if}
-						</div>
-					{:else}
-						<div class="drawing-generator">
-							<div class="pane-head"><span>{m.pmr_drawing_heading()}</span></div>
-							<label class="drawing-prompt-label" for="pmr-drawing-prompt"
-								>{m.pmr_drawing_prompt_label()}</label
-							>
-							<textarea
-								id="pmr-drawing-prompt"
-								rows="2"
-								bind:value={drawingPrompt}
-								oninput={() => (drawingPromptTouched = true)}
-							></textarea>
-							<div class="drawing-generator-actions">
-								<label class="drawing-model-label" for="pmr-drawing-model"
-									>{m.pmr_drawing_model_label()}</label
-								>
-								<select id="pmr-drawing-model" class="drawing-model-select" bind:value={drawingModel}>
-									{#each imageGenerationModels as imageModel}
-										<option value={imageModel}>{imageModel}</option>
-									{/each}
-								</select>
-								<button
-									class="primary"
-									onclick={generateDrawing}
-									disabled={drawingGenerating || !drawingPrompt.trim()}
-								>
-									{drawingGenerating ? m.pmr_drawing_generating() : m.pmr_drawing_generate()}
-								</button>
-								{#if drawingId != null}
-									<button class="linky" onclick={() => (showDrawingGenerator = false)}
-										>{m.pmr_cancel()}</button
-									>
-								{/if}
-							</div>
-							{#if drawingError}
-								<p class="drawing-error">{drawingError}</p>
-							{/if}
-						</div>
-					{/if}
-				</div>
-				<div
-					class="h-splitter"
-					role="separator"
-					aria-orientation="horizontal"
-					onpointerdown={(e) => startResize(e, 'drawingH')}
-					onpointermove={moveResize}
-					onpointerup={endResize}
-					onpointercancel={endResize}
-				></div>
-			{/if}
 
 			<div
 				class="layout"
@@ -2025,7 +2008,8 @@
 		display: flex;
 		justify-content: space-between;
 		gap: 24px;
-		align-items: end;
+		align-items: center;
+		flex-wrap: wrap;
 		margin: 22px 0 18px;
 	}
 	.title-row h1 {
@@ -2151,46 +2135,34 @@
 	.v-splitter:hover::after {
 		background: var(--bronze);
 	}
-	.drawing-area {
-		border: 1px solid var(--border);
-		background: var(--surface);
-		box-shadow: var(--shadow);
-		margin-bottom: 0;
-		overflow: hidden;
+	.header-drawing {
+		flex: 1 1 280px;
+		min-width: 0;
 	}
 	.drawing-kept,
 	.drawing-pending {
-		position: relative;
-		height: 100%;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: var(--bg);
+		flex-wrap: wrap;
+		gap: 12px;
 	}
 	.drawing-kept img,
 	.drawing-pending img {
-		max-width: 100%;
-		max-height: 100%;
+		width: 140px;
+		height: 140px;
 		object-fit: contain;
 	}
-	.drawing-regenerate {
-		position: absolute;
-		top: 10px;
-		right: 10px;
-	}
 	.drawing-pending-actions {
-		position: absolute;
-		bottom: 10px;
-		right: 10px;
 		display: flex;
+		flex-wrap: wrap;
 		gap: 8px;
 	}
 	.drawing-generator {
-		height: 100%;
-		padding: 14px;
+		max-width: 560px;
+		margin: 0 auto;
 		display: flex;
 		flex-direction: column;
-		overflow: auto;
 	}
 	.drawing-prompt-label {
 		font-size: 11px;
@@ -2232,25 +2204,6 @@
 		margin: 8px 0 0;
 		font-size: 11px;
 		color: var(--red, #c0392b);
-	}
-	.h-splitter {
-		height: 9px;
-		margin: -1px 0;
-		cursor: row-resize;
-		background: transparent;
-		position: relative;
-	}
-	.h-splitter::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: 4px;
-		height: 1px;
-		background: var(--border);
-	}
-	.h-splitter:hover::after {
-		background: var(--bronze);
 	}
 	.pane-head {
 		display: flex;
@@ -2892,13 +2845,12 @@
 			width: auto !important;
 			max-height: none;
 		}
-		.v-splitter,
-		.h-splitter {
+		.v-splitter {
 			display: none;
 		}
-		.drawing-area {
-			height: auto !important;
-			max-height: 260px;
+		.title-actions,
+		.drawing-generator-actions {
+			flex-wrap: wrap;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
