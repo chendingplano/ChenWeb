@@ -359,6 +359,7 @@
 //   grounding-refs   – array of reference entries (id, title, description)
 //   supporting-refs  – array of reference entries (id, title, description)
 //   body             – optional additional content appended at the end
+//   contents-depth   – maximum heading depth in the contents; none includes all levels
 #let document-review-report(
   lang: "en",
   font: "Linux Libertine",
@@ -375,6 +376,7 @@
   grounding-refs: (),
   supporting-refs: (),
   body: [],
+  contents-depth: none,
 ) = {
   let label(key) = labels.at(key, default: key)
   // ── Page setup ──────────────────────────────────────────────
@@ -471,7 +473,7 @@
 
   // ── Table of Contents ───────────────────────────────────────
   heading(level: 1, label("table-of-contents"))
-  outline(title: none)
+  outline(title: none, depth: contents-depth)
   pagebreak()
 
   // ── Chapter 1 – Basic Information ───────────────────────────

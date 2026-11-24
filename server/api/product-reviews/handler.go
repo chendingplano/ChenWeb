@@ -5,12 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
-	"github.com/chendingplano/deepdoc/server/api/docbuilder"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -635,27 +635,34 @@ func ExportProductReviewReportPDF(c echo.Context) error {
 	if run == nil {
 		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": "run not found"})
 	}
-	if run.Status != "completed" || strings.TrimSpace(run.ReportMD) == "" {
+	if run.Status != RunCompleted {
 		return c.JSON(http.StatusConflict, map[string]any{"status": false, "error_msg": "report is not ready"})
+	}
+	ctx := c.Request().Context()
+	report, err := loadDetailedReport(ctx, ApiTypes.ProjectDBHandle, run)
+	if err != nil {
+		rc.GetLogger().Error("product review report loading failed", "run_id", runID, "error", err)
+		return fail(c, err)
 	}
 	dir, err := os.MkdirTemp("", "product-review-report-")
 	if err != nil {
 		return fail(c, err)
 	}
 	defer os.RemoveAll(dir)
-	src, dst := filepath.Join(dir, "report.md"), filepath.Join(dir, "report.pdf")
-	if err := os.WriteFile(src, []byte(run.ReportMD), 0600); err != nil {
+	templatePath := strings.TrimSpace(os.Getenv("DOC_REVIEW_TEMPLATE_FILENAME"))
+	if templatePath == "" {
+		templatePath = "docs/doc-templates/template-document-report.typ"
+	}
+	templatePath, err = filepath.Abs(templatePath)
+	if err != nil {
 		return fail(c, err)
 	}
-	engine, font := os.Getenv("DOCUMENT_PDF_ENGINE"), os.Getenv("DOCUMENT_PDF_FONT")
-	if engine == "" {
-		engine = "typst"
+	src, dst := filepath.Join(dir, "report.typ"), filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(src, []byte(renderDetailedReportTypst(report, templatePath, c.QueryParam("lang"))), 0600); err != nil {
+		return fail(c, err)
 	}
-	if font == "" {
-		font = "Helvetica"
-	}
-	if err := docbuilder.PandocConvert(engine, font)(c.Request().Context(), src, dst); err != nil {
-		rc.GetLogger().Error("product review PDF generation failed", "run_id", runID, "error", err)
+	if output, err := exec.CommandContext(ctx, "typst", "compile", "--root", "/", src, dst).CombinedOutput(); err != nil {
+		rc.GetLogger().Error("product review PDF generation failed", "run_id", runID, "error", err, "output", string(output))
 		return fail(c, err)
 	}
 	rc.GetLogger().Info("product review PDF generated", "run_id", runID)

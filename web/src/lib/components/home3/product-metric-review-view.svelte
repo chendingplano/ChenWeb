@@ -1211,10 +1211,10 @@
 				<button class:active={tab === 'report'} onclick={() => (tab = 'report')}>
 					<FileText size={13} />{m.pmr_tab_report()} <span>{gaps.length}</span>
 				</button>
-				{#if run.status === 'completed' && run.report_md}
+				{#if run.status === 'completed'}
 					<a
 						class="report-pdf"
-						href={`/api/v1/kb/product-reviews/runs/${runId}/report.pdf`}
+						href={`/api/v1/kb/product-reviews/runs/${runId}/report.pdf?lang=${getLocale()}`}
 						target="_blank"
 						rel="noopener noreferrer"
 					>
