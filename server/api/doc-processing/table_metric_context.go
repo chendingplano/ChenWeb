@@ -349,6 +349,23 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 				}
 			}
 		}
+		// Values can be printed in a form heading or a header-only table.
+		// An explicit header citation must retain the cell containing the value (ChenWeb#63).
+		if ids := cited[n].Rows; len(ids) == 1 && strings.HasPrefix(ids[0], "h") {
+			if row, ok := g.Row(ids[0]); ok && (cited[n].RowHash[row.ID] == "" || cited[n].RowHash[row.ID] == row.Hash) {
+				if cells, text := tableMetricHeaderQuantity(row, metric); len(cells) > 0 {
+					res.Refs = append(res.Refs, TableRowRef{Line: n, Rows: ids, Cells: cells, RowHash: map[string]string{row.ID: row.Hash}})
+					if caption := idx.caption(n); caption != "" {
+						text = caption + "\n" + text
+					}
+					blocks = append(blocks, text)
+					if outcomeRank[tableRowsFromLLM] > outcomeRank[res.Outcome] {
+						res.Outcome = tableRowsFromLLM
+					}
+					continue
+				}
+			}
+		}
 		rows, outcome := selectTableRows(g, cited[n], evidence)
 		needsRow := outcome == tableRowsWholeTable || outcome == tableRowsUnmatched
 		var combinedNameCell string
@@ -703,6 +720,37 @@ func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]Tabl
 		return g.Rows, tableRowsWholeTable
 	}
 	return nil, tableRowsUnmatched
+}
+
+// tableMetricHeaderQuantity uses only an explicitly cited header. A matching
+// whole cell or complete value with its unit supports the citation (ChenWeb#63).
+func tableMetricHeaderQuantity(row TableRow, metric map[string]any) ([]string, string) {
+	value := normalizeTableMatchText(asString(metric["metric_value"]))
+	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
+	if value == "" {
+		return nil, ""
+	}
+	var quantity *regexp.Regexp
+	if unit != "" {
+		quantity = regexp.MustCompile(`(?:^|[^\pN.])` + regexp.QuoteMeta(value+unit) + `(?:$|[^\pN\p{Latin}/])`)
+	}
+	var cells, parts []string
+	for i, cell := range row.Cells {
+		if i < len(row.Spans) && row.Spans[i] == 0 {
+			continue
+		}
+		normalized := normalizeTableMatchText(strings.ReplaceAll(strings.ReplaceAll(cell, `\pm`, "±"), "$", ""))
+		if normalized != value && (quantity == nil || !quantity.MatchString(normalized)) {
+			continue
+		}
+		id := fmt.Sprintf("%s:c%d", row.ID, i+1)
+		cells = append(cells, id)
+		parts = append(parts, "["+id+"] "+cell)
+	}
+	if len(cells) > 0 && len(row.Cells) > 0 && strings.TrimSpace(row.Cells[0]) != "" && !slices.Contains(cells, row.ID+":c1") {
+		parts = append([]string{"[" + row.ID + "] " + truncateRunesEllipsis(row.Cells[0], tableContextMaxCellRunes)}, parts...)
+	}
+	return cells, strings.Join(parts, "\n")
 }
 
 // matchTableMetricFootnote recovers an uncited note only when both a scalar

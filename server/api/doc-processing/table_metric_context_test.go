@@ -646,3 +646,29 @@ func TestBuildTableMetricContext_Record404RepeatedValue(t *testing.T) {
 		})
 	}
 }
+
+func TestTableMetricContextPreservesHeaderQuantities(t *testing.T) {
+	cases := []struct{ name, html, value, unit, want string }{
+		{"form setting", `<table><tr><td>Test form</td><td>` + strings.Repeat("instrument ", 70) + `</td><td>settings: pressure=95 500 Pa; humidity=65%</td></tr>` + strings.Repeat(`<tr><td></td><td></td><td></td></tr>`, 7) + `</table>`, "95500", "Pa", "95 500 Pa"},
+		{"header only observation", `<table><tr><td>Sample content</td><td>8.2</td><td>8.1</td></tr></table>`, "8.2", "%", "8.2"},
+		{"heading tolerance", `<table><tr><td>Group</td><td>Speed $r/s$ $\pm 4r/s$</td></tr>` + strings.Repeat(`<tr><td>A</td><td>150</td></tr>`, 7) + `</table>`, "±4", "r/s", `\pm 4r/s`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			metric := map[string]any{"metric_name": "sample setting", "metric_value": tc.value, "metric_unit": tc.unit, "source_line_spans": []string{"10"}, "source_table_rows": []TableRowRef{{Line: 10, Rows: []string{"h0"}}}}
+			res := buildTableMetricContext(newTableLineIndex([]Line{{LineNo: 10, LineType: "table", Content: tc.html}}), metric)
+			if !strings.Contains(res.Context, tc.want) || len(res.Refs) != 1 || strings.Join(res.Refs[0].Rows, ",") != "h0" {
+				t.Fatalf("header value missing: %#v", res)
+			}
+		})
+	}
+}
+
+func TestTableMetricHeaderQuantityRequiresCompleteValue(t *testing.T) {
+	row := TableRow{ID: "h0", Cells: []string{"Limit 14 Pa"}, Spans: []int{1}}
+	for _, value := range []string{"4", "1"} {
+		if cells, _ := tableMetricHeaderQuantity(row, map[string]any{"metric_value": value, "unit": "Pa"}); len(cells) > 0 {
+			t.Fatalf("partial number %q matched", value)
+		}
+	}
+}
