@@ -2601,36 +2601,20 @@
 		flex-direction: column;
 		gap: 6px;
 		padding: 10px;
-		border: 1px solid #172554;
+		border: 1px solid var(--border);
 		border-radius: 6px;
-		background: #172554;
-		color: #eff6ff;
+		background: var(--bg);
+		color: var(--text);
 		cursor: pointer;
 		text-align: left;
 		font-size: 11px;
 	}
 	.pmr-shell .rcard:hover {
-		border-color: #1e40af;
+		border-color: var(--bronze);
 	}
 	.pmr-shell .rcard.sel {
-		background: #2563eb;
-		color: #ffffff;
-		border-color: #1d4ed8;
-		box-shadow: inset 3px 0 0 #1e3a8a;
-	}
-	.pmr-shell:not(.dark) .rcard {
-		background: #2563eb;
-		border-color: #2563eb;
-		color: #ffffff;
-	}
-	.pmr-shell:not(.dark) .rcard:hover {
-		border-color: #1d4ed8;
-	}
-	.pmr-shell:not(.dark) .rcard.sel {
-		background: #bfdbfe;
-		color: #0b1f3a;
-		border-color: #60a5fa;
-		box-shadow: inset 3px 0 0 #1d4ed8;
+		background: color-mix(in oklch, var(--bronze) 12%, var(--bg));
+		border-color: var(--bronze);
 	}
 	.rc-row {
 		display: flex;
@@ -2652,16 +2636,7 @@
 		font-weight: 600;
 	}
 	.pmr-shell .rcard .rc-k {
-		color: #7fa6d9;
-	}
-	.pmr-shell .rcard.sel .rc-k {
-		color: #dbeafe;
-	}
-	.pmr-shell:not(.dark) .rcard .rc-k {
-		color: #dbeafe;
-	}
-	.pmr-shell:not(.dark) .rcard.sel .rc-k {
-		color: #1e3a8a;
+		color: var(--subtle);
 	}
 	.empty-state {
 		padding: 40px 0;
