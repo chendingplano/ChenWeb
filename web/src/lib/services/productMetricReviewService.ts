@@ -8,6 +8,17 @@
 
 const BASE = '/api/v1/kb';
 
+export async function resolveProfileNodeGrounding(profileId: number, nodeId: number,
+	input: import('$lib/components/shared-ui/object-grounding-types').GroundingInput
+): Promise<{ object_id: string }> {
+	const response = await fetch(`${BASE}/product-profiles/${profileId}/nodes/${nodeId}/grounding`, {
+		method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
+	});
+	const payload = await response.json().catch(() => ({}));
+	if (!response.ok || payload.status !== true) throw Object.assign(new Error('grounding failed'), { code: payload.error_code });
+	return payload;
+}
+
 // ── shared shapes ───────────────────────────────────────────────────────────
 
 export type NodeKind = 'product' | 'module' | 'part' | 'aspect';

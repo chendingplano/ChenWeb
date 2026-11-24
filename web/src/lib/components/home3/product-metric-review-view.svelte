@@ -34,6 +34,7 @@
 		listAspects,
 		needsReconcileReview,
 		rejectNode,
+		resolveProfileNodeGrounding,
 		rerunReview,
 		runExportUrl,
 		setProfileDrawing,
@@ -72,6 +73,8 @@
 	} from './metric-detail-groups';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import MetricInfoCard from './metric-info-card.svelte';
+	import ObjectGroundingResolver from '$lib/components/shared-ui/object-grounding-resolver.svelte';
+	import type { GroundingItem, GroundingInput } from '$lib/components/shared-ui/object-grounding-types';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
 	// `embedded`/`onBack`: rendered inside content-panel.svelte's app shell —
@@ -108,6 +111,40 @@
 	let profileName = $state('');
 	let profile = $state<Profile | null>(null);
 	let nodes = $state<ProfileNode[]>([]);
+	let groundingAnchor = $state<DOMRect>();
+	const ungroundedItems: GroundingItem[] = $derived(nodes
+		.filter((node) => (node.node_kind === 'module' || node.node_kind === 'part') && node.status !== 'rejected'
+			&& (!node.grounding || node.grounding === 'ungrounded'))
+		.map((node) => ({ id: String(node.id), label: displayNodeLabel(node), name: node.label,
+			nameEN: node.label_en, nameZH: node.label, kind: enumLabel(node.node_kind),
+			aliases: node.aliases, description: node.rationale,
+			details: [
+				{ label: m.grounding_parent(), value: nodes.find((parent) => parent.id === node.parent_node_id)?.label ?? '—' },
+				{ label: m.grounding_source_refs(), value: JSON.stringify(node.source_refs ?? []) }
+			] })));
+
+	async function resolveGrounding(item: GroundingItem, input: GroundingInput) {
+		if (!profileId) throw new Error(m.grounding_save_failed());
+		try {
+			const result = await resolveProfileNodeGrounding(profileId, Number(item.id), input);
+			nodes = nodes.map((node) => String(node.id) === item.id
+				? { ...node, grounding: 'object_node', object_id: result.object_id } : node);
+			await reloadNodesAndResults();
+		} catch (e) {
+			const code = (e as { code?: string }).code;
+			throw new Error(code === 'duplicate' ? m.grounding_error_duplicate()
+				: code === 'stale' || code === 'missing' ? m.grounding_error_stale()
+				: code === 'object' ? m.grounding_error_object() : m.grounding_save_failed());
+		}
+	}
+
+	async function openGrounding(event: MouseEvent) {
+		groundingAnchor = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		if (profileId) {
+			try { nodes = (await getProfile(profileId)).nodes; }
+			catch { error = m.grounding_save_failed(); }
+		}
+	}
 	let aspectNames = $state<Record<string, string>>({});
 	$effect(() => {
 		const locale = getLocale();
@@ -1221,6 +1258,9 @@
 						<FileText size={13} />{m.pmr_view_pdf()}
 					</a>
 				{/if}
+				<button onclick={openGrounding}>
+					<CircleDot size={13} />{m.grounding_title()} <span>{ungroundedItems.length}</span>
+				</button>
 			</div>
 
 			<div
@@ -1874,6 +1914,11 @@
 		{/if}
 	</div>
 {/snippet}
+
+{#if groundingAnchor && profileId}
+	<ObjectGroundingResolver items={ungroundedItems} resolve={resolveGrounding} anchor={groundingAnchor}
+		{darkMode} afterResolveHint={m.pmr_grounding_report_hint()} onclose={() => groundingAnchor = undefined} />
+{/if}
 
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');

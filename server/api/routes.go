@@ -1013,6 +1013,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PATCH("/kb/product-profiles/:id/drawing", productreviews.SetProductProfileDrawing)
 	apiGroup.POST("/kb/product-profiles/:id/nodes", productreviews.AddProductProfileNode)
 	apiGroup.PATCH("/kb/product-profiles/:id/nodes/:node_id", productreviews.UpdateProductProfileNode)
+	apiGroup.POST("/kb/product-profiles/:id/nodes/:node_id/grounding", productreviews.ResolveProductProfileGrounding)
 	apiGroup.DELETE("/kb/product-profiles/:id/nodes/:node_id", productreviews.DeleteProductProfileNode)
 	apiGroup.GET("/kb/product-reviews/aspects", productreviews.ListProductReviewAspects)
 	apiGroup.POST("/kb/product-reviews", productreviews.CreateProductReview)

@@ -173,6 +173,17 @@ func (s ObjectNodeSQLStore) CreateNode(ctx context.Context, obj ArtifactObject) 
 	if s.DB == nil {
 		return ObjectNode{}, fmt.Errorf("db is nil")
 	}
+	return createObjectNode(ctx, s.DB, obj)
+}
+
+// CreateNodeInTx lets a caller create an object and its first link atomically.
+func (s ObjectNodeSQLStore) CreateNodeInTx(ctx context.Context, tx *sql.Tx, obj ArtifactObject) (ObjectNode, error) {
+	return createObjectNode(ctx, tx, obj)
+}
+
+func createObjectNode(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, obj ArtifactObject) (ObjectNode, error) {
 	sourceRecordID := obj.SourceRecordID
 	if sourceRecordID <= 0 {
 		sourceRecordID = obj.InputRecordID
@@ -201,7 +212,7 @@ func (s ObjectNodeSQLStore) CreateNode(ctx context.Context, obj ArtifactObject) 
 	acronyms, _ := json.Marshal(orEmptySlice(node.Acronyms))
 	names, _ := json.Marshal(orEmptySlice(node.NormalizedNames))
 	ext, _ := json.Marshal(node.ExtInfo)
-	err := s.DB.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 INSERT INTO kb.object_nodes (
 	object_id, canonical_name, canonical_name_en, canonical_name_zh,
 	primary_language, object_type, aliases, acronyms, normalized_names,
