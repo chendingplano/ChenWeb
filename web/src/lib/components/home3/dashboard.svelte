@@ -196,10 +196,13 @@
 		}
 		if (selection.childId !== HYBRID_BENCH_RUN_CHILD) analyzeResultId = null;
 		activeMenu = selection;
-		const url = selectionUrl(page.url, selection);
+		// Shallow replaceState leaves page.url at the originally loaded URL. Use
+		// the address bar so returning to that view also replaces the previous URL.
+		const currentUrl = new URL(window.location.href);
+		const url = selectionUrl(currentUrl, selection);
 		if (analyzeResultId === null) url.searchParams.delete('analyze');
 		// Restoring the existing URL during mount runs before SvelteKit's router is ready.
-		if (url.href !== page.url.href) replaceState(url, page.state);
+		if (url.href !== currentUrl.href) replaceState(url, page.state);
 	}
 
 	async function handleLogout() {

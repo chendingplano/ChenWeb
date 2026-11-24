@@ -110,4 +110,34 @@ with sync_playwright() as p:
     assert len(documents) == document_count
     assert not errors, errors
     print('PASS: dashboard nested selection and breadcrumb translate without remounting the view')
+    page.get_by_role('button', name='切换语言', exact=True).click()
+    page.get_by_role('menuitem', name='English', exact=True).click()
+
+    # Returning to the page loaded with the document must update the address bar too.
+    # SvelteKit's shallow replaceState keeps page.url at that original URL.
+    page.goto(BASE + '/development?view=applications&child=apps-product-review&dark=1#intake')
+    expect(page.locator('.pmr-shell')).to_be_visible()
+    page.get_by_role('button', name='Document Review', exact=True).click()
+    page.get_by_role('button', name='Product Review', exact=True).click()
+    expect(page.locator('.pmr-shell')).to_be_visible()
+    assert 'child=apps-product-review' in page.url, page.url
+    assert 'dark=1' in page.url and page.url.endswith('#intake'), page.url
+    intake = page.locator('.pmr-shell')
+    intake.evaluate('(el) => el.dataset.preserved = "yes"')
+    intake.locator('textarea').first.fill('Keep this unfinished description')
+    original_url = page.url
+    document_count = len(documents)
+    for language_button, language_item, breadcrumb_text in [
+        ('Switch language', '中文', '产品审查'),
+        ('切换语言', 'English', 'Product Review'),
+    ]:
+        page.get_by_role('button', name=language_button, exact=True).click()
+        page.get_by_role('menuitem', name=language_item, exact=True).click()
+        expect(page.locator('main nav').filter(has_text=breadcrumb_text)).to_be_visible()
+        expect(intake).to_have_attribute('data-preserved', 'yes')
+        expect(intake.locator('textarea').first).to_have_value('Keep this unfinished description')
+        assert page.url == original_url, page.url
+        assert len(documents) == document_count, documents
+    assert not errors, errors
+    print('PASS: returning to Product Review preserves the URL and both language switches retain the mounted form and unfinished text')
     browser.close()
