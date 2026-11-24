@@ -9517,5 +9517,10 @@
 	"standard_compliance_review_reviewer": "审查员：",
 	"standard_compliance_review_compliance_reviewer": "合规审查员",
 	"document_review_subtitle": "提交文档，使用 AI 从质量、合规和技术等方面进行审查。",
-	"document_review_step_4_review_details": "第 4 步：审查详情"
+	"document_review_step_4_review_details": "第 4 步：审查详情",
+	"nav_apps_product_compliance_review": "产品合规审查",
+	"nav_apps_technical_document_compliance_review": "技术文档合规审查",
+	"nav_apps_company_policy_compliance_review": "公司政策合规审查",
+	"nav_apps_user_manual_compliance_review": "用户手册合规审查",
+	"nav_apps_installation_manual_compliance_review": "安装手册合规审查"
 }

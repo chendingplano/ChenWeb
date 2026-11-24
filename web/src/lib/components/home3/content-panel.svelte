@@ -236,6 +236,11 @@
 	const retainedPages = [
 		{ id: 'apps-document-review', component: DocumentReviewView },
 		{ id: 'apps-standard-compliance-review', component: DocumentReviewView },
+		{ id: 'apps-product-compliance-review', component: DocumentReviewView },
+		{ id: 'apps-technical-document-compliance-review', component: DocumentReviewView },
+		{ id: 'apps-company-policy-compliance-review', component: DocumentReviewView },
+		{ id: 'apps-user-manual-compliance-review', component: DocumentReviewView },
+		{ id: 'apps-installation-manual-compliance-review', component: DocumentReviewView },
 		{ id: 'sysadmin-scientific-paper-config', component: ScientificPaperConfigView },
 		{ id: 'scientific-paper-search', component: ScientificPaperSearchView },
 		{ id: 'doc-processor-dashboard', component: DocProcessorDashboardView },
@@ -251,6 +256,14 @@
 		{ id: 'sysadmin-system-monitor', component: SystemMonitorView },
 		{ id: 'sysadmin-system-deployment', component: DeploymentView }
 	];
+	let compliancePageTitles = $derived<Record<string, string>>({
+		'apps-standard-compliance-review': m.nav_apps_standard_compliance_review(),
+		'apps-product-compliance-review': m.nav_apps_product_compliance_review(),
+		'apps-technical-document-compliance-review': m.nav_apps_technical_document_compliance_review(),
+		'apps-company-policy-compliance-review': m.nav_apps_company_policy_compliance_review(),
+		'apps-user-manual-compliance-review': m.nav_apps_user_manual_compliance_review(),
+		'apps-installation-manual-compliance-review': m.nav_apps_installation_manual_compliance_review()
+	});
 	let visitedPages = $state<string[]>([]);
 	let contentMain: HTMLElement;
 	let previousPage: string | undefined;
@@ -433,7 +446,13 @@
 					inert={activeMenu?.childId !== retained.id}
 				>
 					{#if retained.component === DocumentReviewView}
-						<DocumentReviewView {darkMode} complianceOnly={retained.id === 'apps-standard-compliance-review'} active={activeMenu?.childId === retained.id} />
+						<DocumentReviewView
+							{darkMode}
+							complianceOnly={retained.id in compliancePageTitles}
+							pageTitle={compliancePageTitles[retained.id]}
+							pageConfigKey={retained.id.slice('apps-'.length)}
+							active={activeMenu?.childId === retained.id}
+						/>
 					{:else}
 						<retained.component {darkMode} />
 					{/if}

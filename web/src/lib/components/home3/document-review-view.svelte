@@ -20,7 +20,7 @@
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
     import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
-    let { darkMode = true, complianceOnly = false, active = true }: { darkMode: boolean; complianceOnly?: boolean; active?: boolean } = $props();
+    let { darkMode = true, complianceOnly = false, active = true, pageTitle = '', pageConfigKey = 'standard-compliance-review' }: { darkMode: boolean; complianceOnly?: boolean; active?: boolean; pageTitle?: string; pageConfigKey?: string } = $props();
 
     const formId = $props.id();
 
@@ -299,7 +299,7 @@
     onMount(async () => {
         // Resolve configurable static text for the current locale; fail open to
         // the hardcoded defaults on error (§11.2).
-        getPageConfig(complianceOnly ? 'standard-compliance-review' : 'doc-review', getLocale())
+        getPageConfig(complianceOnly ? pageConfigKey : 'doc-review', getLocale())
             .then((cfg) => { pageConfig = cfg; })
             .catch(() => {});
         try {
@@ -443,7 +443,7 @@
     />
 {:else}
     <div class="select-text" style="padding: 1.5rem; color: {textPrimary};">
-        <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">{labelFor('dr-title', complianceOnly ? m.nav_apps_standard_compliance_review() : m.nav_apps_document_review())}</h1>
+        <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">{labelFor('dr-title', complianceOnly ? (pageTitle || m.nav_apps_standard_compliance_review()) : m.nav_apps_document_review())}</h1>
         {#if isVisible('dr-subtitle')}
             <p style="color: {textSecondary}; margin-bottom: 1.25rem;">
                 {labelFor('dr-subtitle', complianceOnly ? m.standard_compliance_review_subtitle() : m.document_review_subtitle())}

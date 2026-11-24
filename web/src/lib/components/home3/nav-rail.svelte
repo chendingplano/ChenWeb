@@ -182,7 +182,14 @@
 				{ id: 'apps-document-review', label: m.nav_apps_document_review() },
 				...(pageKey === 'development' ? [{
 					id: 'apps-compliance-review', label: m.nav_apps_compliance_review(),
-					children: [{ id: 'apps-standard-compliance-review', label: m.nav_apps_standard_compliance_review() }]
+					children: [
+						{ id: 'apps-standard-compliance-review', label: m.nav_apps_standard_compliance_review() },
+						{ id: 'apps-product-compliance-review', label: m.nav_apps_product_compliance_review() },
+						{ id: 'apps-technical-document-compliance-review', label: m.nav_apps_technical_document_compliance_review() },
+						{ id: 'apps-company-policy-compliance-review', label: m.nav_apps_company_policy_compliance_review() },
+						{ id: 'apps-user-manual-compliance-review', label: m.nav_apps_user_manual_compliance_review() },
+						{ id: 'apps-installation-manual-compliance-review', label: m.nav_apps_installation_manual_compliance_review() }
+					]
 				}] : []),
 				{ id: 'apps-product-review', label: m.nav_apps_product_review() }
 			]

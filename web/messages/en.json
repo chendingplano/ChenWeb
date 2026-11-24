@@ -9517,5 +9517,10 @@
 	"standard_compliance_review_reviewer": "Reviewer:",
 	"standard_compliance_review_compliance_reviewer": "Compliance reviewer",
 	"document_review_subtitle": "Submit a document for AI-powered review across quality, compliance, and technical aspects.",
-	"document_review_step_4_review_details": "Step 4: Review Details"
+	"document_review_step_4_review_details": "Step 4: Review Details",
+	"nav_apps_product_compliance_review": "Product Compliance Review",
+	"nav_apps_technical_document_compliance_review": "Technical Document Compliance Review",
+	"nav_apps_company_policy_compliance_review": "Company Policy Compliance Review",
+	"nav_apps_user_manual_compliance_review": "User Manual Compliance Review",
+	"nav_apps_installation_manual_compliance_review": "Installation Manual Compliance Review"
 }
