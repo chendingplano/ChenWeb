@@ -9450,5 +9450,19 @@
 	"doc_processor_dashboard_name_normalize_assertions": "Normalize Assertions",
 	"doc_processor_dashboard_name_associate_semantics": "Associate Semantics",
 	"doc_processor_dashboard_name_project_semantics": "Project Semantics",
-	"doc_processor_dashboard_name_extract_summaries": "Extract Summaries"
+	"doc_processor_dashboard_name_extract_summaries": "Extract Summaries",
+	"pmr_label_product": "Product",
+	"pmr_label_metric": "Metric",
+	"pmr_label_llm": "AI",
+	"pmr_label_graph": "Graph",
+	"pmr_label_user": "User",
+	"pmr_label_object_node": "Object node",
+	"pmr_label_keyword_concept": "Keyword concept",
+	"pmr_label_ontology_term": "Ontology term",
+	"pmr_label_ungrounded": "Ungrounded",
+	"pmr_label_ambiguous": "Ambiguous",
+	"pmr_label_pending_review": "Pending review",
+	"pmr_label_target": "Target",
+	"pmr_label_number": "Number",
+	"pmr_label_exact": "Exact"
 }

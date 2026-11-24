@@ -31,6 +31,7 @@
 		getRunDiff,
 		getRunDocuments,
 		getRunResults,
+		listAspects,
 		needsReconcileReview,
 		rejectNode,
 		rerunReview,
@@ -107,6 +108,37 @@
 	let profileName = $state('');
 	let profile = $state<Profile | null>(null);
 	let nodes = $state<ProfileNode[]>([]);
+	let aspectNames = $state<Record<string, string>>({});
+	$effect(() => {
+		const locale = getLocale();
+		let active = true;
+		void listAspects(locale).then(({ aspects }) => {
+			if (active) aspectNames = Object.fromEntries(aspects.map((a) => [a.aspect_key, a.name]));
+		}).catch(() => { if (active) aspectNames = {}; });
+		return () => { active = false; };
+	});
+
+	function displayNodeLabel(node: ProfileNode): string {
+		if (node.node_kind === 'aspect' && aspectNames[node.aspect_key]) return aspectNames[node.aspect_key];
+		return getLocale() === 'en' ? node.label_en || node.label : node.label;
+	}
+
+	function enumLabel(value: string): string {
+		const labels: Record<string, () => string> = {
+			product: m.pmr_label_product, module: m.product_metric_review_module,
+			part: m.product_metric_review_part, aspect: m.product_metric_review_aspect,
+			direct: m.product_metric_review_direct, document_scope: m.product_metric_review_document_scope,
+			document_first: m.product_metric_review_document_first, metric: m.pmr_label_metric,
+			llm_proposed: m.pmr_label_llm, graph_expanded: m.pmr_label_graph, user_added: m.pmr_label_user,
+			pending: m.pmr_intake_history_status_pending, running: m.pmr_intake_history_status_running,
+			completed: m.pmr_intake_history_status_completed, failed: m.pmr_intake_history_status_failed,
+			object_node: m.pmr_label_object_node, keyword_concept: m.pmr_label_keyword_concept,
+			ontology_term: m.pmr_label_ontology_term, ungrounded: m.pmr_label_ungrounded,
+			ambiguous: m.pmr_label_ambiguous, pending_review: m.pmr_label_pending_review,
+			target: m.pmr_label_target, number: m.pmr_label_number, exact: m.pmr_label_exact
+		};
+		return labels[value]?.() ?? value;
+	}
 	let results = $state<ResultRow[]>([]);
 	let scopedDocs = $state<ScopedDocument[]>([]);
 	let diff = $state<RunDiff | null>(null);
@@ -746,7 +778,7 @@
 
 	const nodeLabel = $derived.by(() => {
 		const map = new Map<number, string>();
-		for (const n of nodes) map.set(n.id, n.label);
+		for (const n of nodes) map.set(n.id, displayNodeLabel(n));
 		return map;
 	});
 
@@ -999,7 +1031,7 @@
 	}
 </script>
 
-<div class="pmr-shell" class:dark={darkMode} class:embedded>
+<div class="pmr-shell select-text" class:dark={darkMode} class:embedded>
 	{#if !embedded}
 		<header class="topbar">
 			<div class="brand">
@@ -1070,7 +1102,7 @@
 					<h1>{profileName || m.pmr_untitled()}</h1>
 					<p class="lede">
 						{m.pmr_run_summary({
-							status: run.status,
+							status: enumLabel(run.status),
 							attributed: run.attributed_count,
 							scope: run.document_scope_count,
 							docs: run.scoped_document_count
@@ -1401,7 +1433,7 @@
 									<p>{m.pmr_detail_empty()}</p>
 								</div>
 							{:else}
-								<p class="kicker">{selectedResult.tier} · {selectedResult.artifact_type}</p>
+								<p class="kicker">{enumLabel(selectedResult.tier)} · {enumLabel(selectedResult.artifact_type)}</p>
 								<h3 class="detail-title">
 									{selectedResult.primary_label || selectedResult.artifact_id}
 								</h3>
@@ -1435,7 +1467,7 @@
 											: m.pmr_none()}
 									</dd>
 									<dt>{m.pmr_field_paths()}</dt>
-									<dd class="mono">{selectedResult.paths.join(' · ') || '—'}</dd>
+									<dd>{selectedResult.paths.map(enumLabel).join(' · ') || '—'}</dd>
 									<dt>{m.pmr_field_value()}</dt>
 									<dd>{metricDetail?.value || '—'}</dd>
 									<dt>{m.pmr_field_threshold()}</dt>
@@ -1445,11 +1477,11 @@
 									<dt>{m.pmr_field_frequency()}</dt>
 									<dd>{metricDetail?.frequency || '—'}</dd>
 									<dt>{m.pmr_field_class()}</dt>
-									<dd>{metricDetail?.class || '—'}</dd>
+									<dd>{enumLabel(metricDetail?.class || '—')}</dd>
 									<dt>{m.pmr_field_data_type()}</dt>
-									<dd>{metricDetail?.data_type || '—'}</dd>
+									<dd>{enumLabel(metricDetail?.data_type || '—')}</dd>
 									<dt>{m.pmr_field_range_type()}</dt>
-									<dd>{metricDetail?.range_type || '—'}</dd>
+									<dd>{enumLabel(metricDetail?.range_type || '—')}</dd>
 									<dt>{m.pmr_field_score()}</dt>
 									<dd class="mono">{fmtScore(selectedResult.score)}</dd>
 									<dt>{m.pmr_field_line_spans()}</dt>
@@ -1615,19 +1647,15 @@
 				<span class="twist-spacer"></span>
 			{/if}
 			<button class="tnode-label" onclick={() => selectNode(node.id)}>
-				<span class="badge k-{node.node_kind}">{node.node_kind}</span>
-				<span class="t-name">{node.label}</span>
+				<span class="badge k-{node.node_kind}">{enumLabel(node.node_kind)}</span>
+				<span class="t-name">{displayNodeLabel(node)}</span>
 				{#if needsReconcileReview(node)}
-					<span class="flag" title={node.reconcile_status}><AlertTriangle size={11} /></span>
+					<span class="flag" title={enumLabel(node.reconcile_status)}><AlertTriangle size={11} /></span>
 				{/if}
-				<span class="ground g-{node.grounding}" title={node.grounding}><CircleDot size={10} /></span
+				<span class="ground g-{node.grounding}" title={enumLabel(node.grounding)}><CircleDot size={10} /></span
 				>
 				<span class="origin"
-					>{node.origin === 'llm_proposed'
-						? 'llm'
-						: node.origin === 'graph_expanded'
-							? 'graph'
-							: 'user'}</span
+					>{enumLabel(node.origin)}</span
 				>
 				{#if cov}<span class="t-count">{cov.artifacts}</span>{/if}
 			</button>
@@ -1766,9 +1794,9 @@
 				<tbody>
 					{#each rep?.coverage ?? [] as c (c.node_id)}
 						<tr class:zero={c.artifact_count === 0}>
-							<td>{c.label}</td>
-							<td class="mono">{c.kind}</td>
-							<td class="mono">{c.grounding}</td>
+							<td>{nodeLabel.get(c.node_id) ?? c.label}</td>
+							<td>{enumLabel(c.kind)}</td>
+							<td>{enumLabel(c.grounding)}</td>
 							<td class="num">{c.artifact_count}</td>
 							<td class="num">{c.document_count}</td>
 						</tr>
@@ -1783,7 +1811,7 @@
 		{:else}
 			<ul class="gaps">
 				{#each gaps as g (g.node_id)}
-					<li><strong>{g.label}</strong> <span class="mono">{g.kind} · {g.grounding}</span></li>
+					<li><strong>{nodeLabel.get(g.node_id) ?? g.label}</strong> <span>{enumLabel(g.kind)} · {enumLabel(g.grounding)}</span></li>
 				{/each}
 			</ul>
 		{/if}
@@ -1841,6 +1869,8 @@
 	@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 	.pmr-shell {
+		container: pmr-review / inline-size;
+		min-width: 0;
 		--bg: oklch(0.965 0.014 78);
 		--surface: oklch(0.985 0.009 78);
 		--text: oklch(0.23 0.025 63);
@@ -1873,6 +1903,7 @@
 		overflow: hidden;
 	}
 	.embedded .content {
+		min-width: 0;
 		flex: 1;
 		min-height: 0;
 		width: 100%;
@@ -1886,7 +1917,8 @@
 	.embedded .layout {
 		flex: 1;
 		min-height: 0;
-		overflow: auto;
+		overflow-x: hidden;
+		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
 	.pmr-shell.dark {
@@ -2177,14 +2209,16 @@
 		gap: 0;
 	}
 	.layout.resizable .scope-pane {
-		flex: 0 0 auto;
+		flex: 0 1 auto;
+		min-width: 0;
 	}
 	.layout.resizable .main-pane {
-		flex: 1 1 0;
+		flex: 1 0 240px;
 		min-width: 0;
 	}
 	.layout.resizable .detail-pane {
-		flex: 0 0 auto;
+		flex: 0 1 auto;
+		min-width: min(489px, 100%);
 	}
 	.v-splitter {
 		flex: 0 0 auto;
@@ -2331,7 +2365,7 @@
 	}
 	.scope-pane {
 		position: sticky;
-		top: 14px;
+		top: 0;
 		max-height: calc(100vh - 40px);
 		overflow: auto;
 	}
@@ -2356,7 +2390,7 @@
 	/* metric-details pane */
 	.detail-pane {
 		position: sticky;
-		top: 14px;
+		top: 0;
 		display: flex;
 		flex-direction: row;
 		align-items: stretch;
@@ -2367,7 +2401,8 @@
 		background: var(--surface);
 		box-shadow: var(--shadow);
 		padding: 14px;
-		flex: 0 0 auto;
+		flex: 0 1 auto;
+		min-width: min(240px, 100%);
 		min-height: 0;
 		overflow: auto;
 	}
@@ -2384,7 +2419,7 @@
 	}
 	.detail-pdf {
 		flex: 1 1 0;
-		min-width: 0;
+		min-width: min(240px, 100%);
 		min-height: 320px;
 		border: 1px solid var(--border);
 		background: var(--surface);
@@ -2811,7 +2846,7 @@
 	/* metric-details attrs (formerly the evidence drawer) */
 	.drawer-fields {
 		display: grid;
-		grid-template-columns: 108px 1fr;
+		grid-template-columns: minmax(0, 108px) minmax(0, 1fr);
 		gap: 9px 12px;
 		margin: 14px 0 0;
 		font-size: 12px;
@@ -2826,6 +2861,8 @@
 		padding-top: 2px;
 	}
 	.drawer-fields dd {
+		min-width: 0;
+		overflow-wrap: anywhere;
 		margin: 0;
 		word-break: break-word;
 	}
@@ -2920,7 +2957,7 @@
 		min-width: 0;
 	}
 
-	@media (max-width: 1000px) {
+	@container pmr-review (max-width: 900px) {
 		.layout,
 		.layout.report-mode {
 			grid-template-columns: 1fr;
@@ -2929,8 +2966,9 @@
 			flex-direction: column;
 		}
 		.layout.resizable .scope-pane,
+		.layout.resizable .main-pane,
 		.layout.resizable .detail-pane {
-			width: auto !important;
+			width: 100% !important;
 			flex: 1 1 auto;
 		}
 		.scope-pane,
