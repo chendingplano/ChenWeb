@@ -39,6 +39,9 @@ var productV2RelatedRelationships = map[string]string{
 
 // productV2Span matches a line (143), an inclusive range ("150-151"), or one row
 // of a table line as the input labels it ("116#r3", "116#h0").
+// A numeric comparison can be misplaced as an empty-valued parameter key (ChenWeb#62).
+var productV2ComparisonKey = regexp.MustCompile(`^[<>≤≥]=?-?[0-9]+(?:\.[0-9]+)?$`)
+
 var productV2Span = regexp.MustCompile(`^([1-9][0-9]*)(?:-([1-9][0-9]*)|#([hr][0-9]+))?$`)
 
 // productSourceLines maps each line number a compact merged call sent to the
@@ -83,6 +86,9 @@ func productMergedV2Schema() map[string]any {
 	params := schemaArrayOfObjects(map[string]any{
 		"n": text, "v": schemaScalar("string", "number"), "u": schemaString(),
 	}, []string{"n"}, false)
+	params["items"].(map[string]any)["patternProperties"] = map[string]any{
+		productV2ComparisonKey.String(): map[string]any{"const": ""},
+	}
 	related := schemaArrayOfObjects(map[string]any{
 		"n": text, "r": provisionV2Enum(productV2RelatedRelationships),
 	}, []string{"n", "r"}, false)
@@ -195,6 +201,14 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		params := make([]any, 0)
 		for _, param := range objectItemsFromValue(raw["p"]) {
 			value, hasValue := param["v"]
+			for key := range param {
+				if productV2ComparisonKey.MatchString(key) {
+					if hasValue {
+						return nil, fmt.Errorf("parameter %q has conflicting values; return one value in v (ChenWeb#62)", asString(param["n"]))
+					}
+					value, hasValue = key, true
+				}
+			}
 			if !hasValue {
 				continue
 			}

@@ -922,3 +922,24 @@ func TestProductsV2MissingRelationWithoutIndependentTypeRequestsCorrection(t *te
 		t.Fatalf("missing correction: %v", err)
 	}
 }
+
+func TestProductsV2RecoversComparisonParameterKey(t *testing.T) {
+	wire := `{"v":2,"p":[{"n":"sample part","t":"cmp","r":"perf","d":"Wear limit","s":[10],"o":"m","q":1,"p":[{"n":"wear","u":"%",">8":""}]}]}`
+	rows := decodeProductV2Test(t, wire, productSourceLines{10: "sample part wear shall not exceed 8%"})
+	params := rows[0]["relation_details"].(map[string]any)["thresholds_or_parameters"].([]any)
+	if len(params) != 1 || params[0].(map[string]any)["value"] != ">8" {
+		t.Fatalf("lost value: %#v", params)
+	}
+}
+
+func TestProductsV2RejectsConflictingComparisonParameters(t *testing.T) {
+	for _, param := range []string{`{"n":"wear","v":8,">9":""}`, `{"n":"wear",">8":"","<9":""}`, `{"n":"wear","unknown":""}`, `{"n":"wear",">8":"different"}`} {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(`{"v":2,"p":[{"n":"sample part","t":"cmp","r":"perf","d":"Wear limit","s":[10],"o":"m","q":1,"p":[`+param+`]}]}`), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := decodeProductMergedV2(raw, productSourceLines{10: "Wear limit"}); err == nil {
+			t.Fatalf("accepted ambiguous parameter %s", param)
+		}
+	}
+}
