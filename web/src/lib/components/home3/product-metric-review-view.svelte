@@ -288,7 +288,8 @@
 		if (!layoutEl) return;
 		const W = layoutEl.clientWidth;
 		if (drag.key === 'scopeW') {
-			const maxScope = Math.max(SCOPE_MIN, W - layout.detailW - MAIN_MIN - 2 * SPLITTER);
+			const rightWidth = tab === 'report' ? layout.attrsW : layout.detailW;
+			const maxScope = Math.max(SCOPE_MIN, W - rightWidth - MAIN_MIN - 2 * SPLITTER);
 			layout.scopeW = clamp(drag.startVal + (e.clientX - drag.startX), SCOPE_MIN, Math.min(SCOPE_MAX, maxScope));
 		} else if (drag.key === 'detailW') {
 			const maxDetail = Math.max(DETAIL_MIN, W - scopeWidth - MAIN_MIN - 2 * SPLITTER);
@@ -297,7 +298,9 @@
 			layout.attrsW = Math.min(layout.attrsW, layout.detailW - PDF_MIN - SPLITTER);
 		} else if (drag.key === 'attrsW') {
 			// the splitter sits between the PDF (left) and the details panel (right)
-			const maxAttrs = layout.detailW - PDF_MIN - SPLITTER;
+			const maxAttrs = tab === 'report'
+				? Math.max(ATTRS_MIN, W - scopeWidth - MAIN_MIN - 2 * SPLITTER)
+				: layout.detailW - PDF_MIN - SPLITTER;
 			layout.attrsW = clamp(drag.startVal - (e.clientX - drag.startX), ATTRS_MIN, maxAttrs);
 		}
 	}
@@ -1490,19 +1493,19 @@
 					{/if}
 				</section>
 
-				{#if tab === 'results'}
 					<div
 						class="v-splitter"
 						role="separator"
 						aria-orientation="vertical"
-						onpointerdown={(e) => startResize(e, 'detailW')}
+						onpointerdown={(e) => startResize(e, tab === 'report' ? 'attrsW' : 'detailW')}
 						onpointermove={moveResize}
 						onpointerup={endResize}
 						onpointercancel={endResize}
 					></div>
 
 					<!-- metric details -->
-					<aside class="detail-pane" style="width:{layout.detailW}px">
+					<aside class="detail-pane" style="width:{tab === 'report' ? layout.attrsW : layout.detailW}px">
+						{#if tab === 'results'}
 						<div class="detail-pdf">
 							{#if !selectedResult}
 								<!-- nothing to show until a result is selected -->
@@ -1540,6 +1543,7 @@
 							onpointerup={endResize}
 							onpointercancel={endResize}
 						></div>
+						{/if}
 						<div class="detail-attrs" style="width:{layout.attrsW}px">
 							<div class="pane-head">
 								<FileText size={13} /><span>{m.pmr_detail_heading()}</span>
@@ -1615,7 +1619,6 @@
 							{/if}
 						</div>
 					</aside>
-				{/if}
 			</div>
 		{/if}
 	</div>
@@ -1848,7 +1851,7 @@
 	<button
 		class="rcard"
 		class:sel={selectedResult?.artifact_id === r.artifact_id}
-		onclick={() => { tab = 'results'; selectResult(r); }}
+		onclick={() => selectResult(r)}
 	>
 		<span class="rc-row">
 			{@render kv(m.pmr_field_artifact(), r.artifact_id)}
@@ -2791,6 +2794,13 @@
 		min-width: 0;
 		padding: 0;
 	}
+	.layout.resizable.report-mode .detail-pane {
+		min-width: min(240px, 100%);
+		height: calc(100vh - 200px);
+	}
+	.layout.report-mode .detail-attrs {
+		flex: 1;
+	}
 	.standards-report {
 		background: var(--bg);
 		overflow: auto;
@@ -2990,6 +3000,10 @@
 			overflow: auto;
 			overscroll-behavior: contain;
 			scrollbar-gutter: stable;
+		}
+		.embedded .layout.report-mode > .detail-pane {
+			height: 100%;
+			max-height: 100%;
 		}
 		.embedded .detail-pdf {
 			min-height: 0;
