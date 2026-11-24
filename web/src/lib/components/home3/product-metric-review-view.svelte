@@ -2482,6 +2482,7 @@
 
 	/* tree */
 	.tnode-row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 2px;
@@ -2597,14 +2598,19 @@
 		color: var(--subtle);
 	}
 	.tnode-actions {
+		position: absolute;
+		inset-inline-end: 0;
+		background: var(--surface);
 		display: flex;
 		gap: 1px;
-		flex-shrink: 0;
 		opacity: 0;
+		pointer-events: none;
 		transition: opacity 120ms;
 	}
-	.tnode-row:hover .tnode-actions {
+	.tnode-row:hover .tnode-actions,
+	.tnode-row:focus-within .tnode-actions {
 		opacity: 1;
+		pointer-events: auto;
 	}
 	.mini {
 		width: 20px;
