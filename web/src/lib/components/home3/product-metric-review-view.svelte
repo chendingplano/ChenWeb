@@ -2851,13 +2851,17 @@
 		flex-shrink: 0;
 	}
 	.report-row-splitter {
+		height: 30px;
 		margin: 0;
+	}
+	.report-row-splitter::after {
+		inset: 14px 0;
 	}
 	.report-row-splitter::before {
 		content: '';
 		position: absolute;
 		z-index: 1;
-		top: 4px;
+		top: 13px;
 		left: calc(50% - 20px);
 		width: 40px;
 		height: 4px;
