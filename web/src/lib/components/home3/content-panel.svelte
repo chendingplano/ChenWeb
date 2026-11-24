@@ -299,6 +299,7 @@
 	// embedded results view (same nav item, no navigation away from the
 	// shell); leaving the nav item resets back to the intake view.
 	let productReviewRunId = $state<number | null>(null);
+	let productReviewOpen = $derived(activeMenu?.childId === 'apps-product-review' && !!productReviewRunId);
 	$effect(() => {
 		if (activeMenu?.childId !== 'apps-product-review') {
 			productReviewRunId = null;
@@ -311,6 +312,7 @@
 	// An open Document Review report (findingShelf.active) hides it too.
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
+			!productReviewOpen &&
 			!findingShelf.active &&
 			activeMenu?.childId !== 'sysadmin-system-monitor' &&
 			activeMenu?.childId !== 'dev-demos-customers' &&
@@ -348,7 +350,7 @@
 
 <main
 	bind:this={contentMain}
-	class="relative flex min-w-0 flex-1 flex-col {activeMenu?.childId === 'sysadmin-llm-chat-sessions'
+	class="relative flex min-h-0 min-w-0 flex-1 flex-col {activeMenu?.childId === 'sysadmin-llm-chat-sessions' || productReviewOpen
 		? 'overflow-hidden'
 		: 'overflow-y-auto'}"
 	style="background:{pageBg}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"

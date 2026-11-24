@@ -1867,6 +1867,27 @@
 	}
 	.pmr-shell.embedded {
 		min-height: 0;
+		height: 100%;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.embedded .content {
+		flex: 1;
+		min-height: 0;
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		padding-bottom: 0;
+	}
+	.embedded .content > :not(.layout) {
+		flex-shrink: 0;
+	}
+	.embedded .layout {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+		overscroll-behavior: contain;
 	}
 	.pmr-shell.dark {
 		--bg: #111827;
