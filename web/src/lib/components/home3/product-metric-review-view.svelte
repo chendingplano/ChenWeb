@@ -870,7 +870,13 @@
 	const REPORT_ORDER_KEY = 'pmr-standard-list-order';
 	function loadReportOrder() {
 		if (!browser) return normalizeStandardOrder(null);
-		try { return normalizeStandardOrder(JSON.parse(sessionStorage.getItem(REPORT_ORDER_KEY) ?? 'null')); }
+		try {
+			// Carry forward the order saved by earlier versions in this tab.
+			const saved = localStorage.getItem(REPORT_ORDER_KEY) ?? sessionStorage.getItem(REPORT_ORDER_KEY);
+			const order = normalizeStandardOrder(JSON.parse(saved ?? 'null'));
+			if (saved !== null) localStorage.setItem(REPORT_ORDER_KEY, JSON.stringify(order));
+			return order;
+		}
 		catch { return normalizeStandardOrder(null); }
 	}
 	let reportOrder = $state<StandardCategory[]>(loadReportOrder());
@@ -889,7 +895,7 @@
 	async function reorderStandardList(category: StandardCategory, target: StandardCategory) {
 		if (category === target) return;
 		reportOrder = moveStandardCategory(reportOrder, category, target);
-		try { sessionStorage.setItem(REPORT_ORDER_KEY, JSON.stringify(reportOrder)); } catch { /* storage unavailable */ }
+		try { localStorage.setItem(REPORT_ORDER_KEY, JSON.stringify(reportOrder)); } catch { /* storage unavailable */ }
 		reorderAnnouncement = m.pmr_standard_list_moved({ name: standardLabel(category), position: reportOrder.indexOf(category) + 1, total: reportOrder.length });
 		await tick();
 		reportElement.querySelector<HTMLButtonElement>(`[data-standard-handle="${category}"]`)?.focus({ preventScroll: true });
