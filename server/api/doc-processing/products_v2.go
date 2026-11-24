@@ -91,7 +91,7 @@ func productMergedV2Schema() map[string]any {
 		"d": text, "s": spans, "o": provisionV2Enum(productV2Obligations), "x": schemaString(),
 		"cnd": schemaStringArray(), "exc": schemaStringArray(), "p": params, "rp": related, "a": schemaString(),
 		"q": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "cr": schemaString(),
-	}, []string{"n", "t", "r", "d", "s", "o", "q"}, false)
+	}, []string{"n", "t", "d", "s", "o", "q"}, false)
 	return map[string]any{
 		"type": "object", "required": []string{"v", "p"}, "additionalProperties": false,
 		"properties": map[string]any{
@@ -155,6 +155,10 @@ func decodeProductMergedV2(payload map[string]any, lines productSourceLines) (ma
 		// decoding (ProductsProcessor.resolveProductRelations); an unlisted code is
 		// proposed, not rejected. Only a blank code is a contract failure.
 		relationCode := strings.ToLower(strings.TrimSpace(asString(raw["r"])))
+		// Recover a relation misplaced in t before checking the omitted r (ChenWeb#48).
+		if _, supplied := raw["r"]; !supplied && productV2Types[asString(raw["t"])] == "" && productV2Relations[asString(raw["t"])] != "" {
+			relationCode = asString(raw["t"])
+		}
 		if relationCode == "" {
 			return nil, fmt.Errorf("(MID_20261118_003) product %d has a blank relation code", i+1)
 		}

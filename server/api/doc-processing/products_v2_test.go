@@ -905,3 +905,20 @@ func TestProductsV2RetryIdentifiesTypeAsSeparateFromRelation(t *testing.T) {
 		t.Fatalf("missing targeted retry guidance: %v", err)
 	}
 }
+
+func TestProductsV2RecoversOmittedRelationFromMisplacedType(t *testing.T) {
+	wire := `{"v":2,"p":[{"n":"sample device","t":"eq","r":"sc","d":"Defines device","s":[10],"o":"d","q":1},{"n":"sample device","t":"perf","d":"Device must run quietly","s":[10],"o":"m","q":1}]}`
+	rows := decodeProductV2Test(t, wire, productSourceLines{10: "sample device must run quietly"})
+	if len(rows) != 2 || rows[1]["product_type"] != "equipment" || rows[1]["relation_type"] != "performance_requirement" {
+		t.Fatalf("lost type or relation: %#v", rows)
+	}
+}
+
+func TestProductsV2MissingRelationWithoutIndependentTypeRequestsCorrection(t *testing.T) {
+	var raw map[string]any
+	json.Unmarshal([]byte(`{"v":2,"p":[{"n":"sample device","t":"perf","d":"Device must run quietly","s":[10],"o":"m","q":1}]}`), &raw)
+	_, err := decodeProductMergedV2(raw, productSourceLines{10: "sample device must run quietly"})
+	if err == nil || !strings.Contains(err.Error(), "t describes what the product is") || !strings.Contains(err.Error(), "ChenWeb#48") {
+		t.Fatalf("missing correction: %v", err)
+	}
+}
