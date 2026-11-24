@@ -2613,8 +2613,11 @@
 		border-color: var(--bronze);
 	}
 	.pmr-shell .rcard.sel {
-		background: color-mix(in oklch, var(--bronze) 12%, var(--bg));
+		background: var(--surface);
 		border-color: var(--bronze);
+	}
+	.pmr-shell.dark .rcard.sel {
+		background: color-mix(in oklch, var(--bronze) 24%, var(--surface));
 	}
 	.rc-row {
 		display: flex;
