@@ -861,6 +861,61 @@
 	const standardGroups = $derived(groupStandardMetrics(results.filter(
 		(r) => selectedNodeId == null || r.node_id === selectedNodeId
 	)));
+	let reportWidth = $state(0);
+	const reportColumns = $derived(Math.max(1, Math.floor(reportWidth / 280)));
+	const reportRows = $derived.by(() => {
+		const rows = [];
+		for (let i = 0; i < standardGroups.length; i += reportColumns) {
+			rows.push(standardGroups.slice(i, i + reportColumns));
+		}
+		return rows;
+	});
+	const REPORT_ROW_MIN = 180;
+	const REPORT_HEIGHTS_KEY = 'pmr-standard-row-heights';
+	function loadReportHeights(): Record<string, number> {
+		if (!browser) return {};
+		try {
+			const saved = JSON.parse(sessionStorage.getItem(REPORT_HEIGHTS_KEY) ?? '{}');
+			return Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, number] =>
+				typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] >= REPORT_ROW_MIN));
+		} catch { return {}; }
+	}
+	let reportHeights = $state<Record<string, number>>(loadReportHeights());
+	let reportDrag: { row: number; columns: number; y: number; upper: number; lower: number } | null = null;
+	function reportRowHeight(row: number) {
+		return reportHeights[`${reportColumns}:${row}`] ?? 360;
+	}
+	function persistReportHeights() {
+		try { sessionStorage.setItem(REPORT_HEIGHTS_KEY, JSON.stringify(reportHeights)); } catch { /* storage unavailable */ }
+	}
+	function resizeReportRows(row: number, upper: number, lower: number, delta: number, columns = reportColumns) {
+		const adjustment = Math.max(REPORT_ROW_MIN - upper, Math.min(lower - REPORT_ROW_MIN, delta));
+		reportHeights[`${columns}:${row}`] = upper + adjustment;
+		reportHeights[`${columns}:${row + 1}`] = lower - adjustment;
+	}
+	function startReportResize(event: PointerEvent, row: number) {
+		if (event.button !== 0) return;
+		event.preventDefault();
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		reportDrag = { row, columns: reportColumns, y: event.clientY, upper: reportRowHeight(row), lower: reportRowHeight(row + 1) };
+	}
+	function moveReportResize(event: PointerEvent) {
+		if (!reportDrag || reportDrag.columns !== reportColumns) return;
+		resizeReportRows(reportDrag.row, reportDrag.upper, reportDrag.lower, event.clientY - reportDrag.y, reportDrag.columns);
+	}
+	function endReportResize() {
+		reportDrag = null;
+		persistReportHeights();
+	}
+	function resizeReportWithKeyboard(event: KeyboardEvent, row: number) {
+		const upper = reportRowHeight(row), lower = reportRowHeight(row + 1);
+		const delta = { ArrowUp: -20, ArrowDown: 20, Home: REPORT_ROW_MIN - upper, End: lower - REPORT_ROW_MIN }[event.key];
+		if (delta === undefined) return;
+		event.preventDefault();
+		resizeReportRows(row, upper, lower, delta);
+		persistReportHeights();
+	}
+
 	function standardLabel(category: StandardCategory): string {
 		return {
 			national: m.pmr_standard_national(), international: m.pmr_standard_international(),
@@ -1809,21 +1864,34 @@
 {/snippet}
 
 {#snippet reportView()}
-	<div class="standards-report" role="region" aria-label={m.pmr_standards_report()} tabindex="0">
-		<div class="standards-columns">
-			{#each standardGroups as group (group.category)}
-				<section class="standard-column" aria-label={standardLabel(group.category)}>
-					<h3>{standardLabel(group.category)} <span>{group.rows.length}</span></h3>
-					<div class="standard-cards">
-						{#each group.rows as r (`${r.artifact_type}:${r.artifact_id}`)}
-							{@render resultCard(r)}
-						{:else}
-							<p class="standard-empty">{m.pmr_no_standard_metrics()}</p>
-						{/each}
-					</div>
-				</section>
-			{/each}
-		</div>
+	<div class="standards-report" bind:clientWidth={reportWidth} role="region" aria-label={m.pmr_standards_report()} tabindex="0">
+		{#each reportRows as row, rowIndex (`${reportColumns}:${rowIndex}`)}
+			<div class="standards-columns" style={`grid-template-columns:repeat(${reportColumns}, minmax(0, 1fr));height:${reportRowHeight(rowIndex)}px`}>
+				{#each row as group (group.category)}
+					<section class="standard-column" aria-label={standardLabel(group.category)}>
+						<h3>{standardLabel(group.category)} <span>{group.rows.length}</span></h3>
+						<div class="standard-cards">
+							{#each group.rows as r (`${r.artifact_type}:${r.artifact_id}`)}
+								{@render resultCard(r)}
+							{:else}
+								<p class="standard-empty">{m.pmr_no_standard_metrics()}</p>
+							{/each}
+						</div>
+					</section>
+				{/each}
+			</div>
+			{#if rowIndex < reportRows.length - 1}
+				<div class="h-splitter report-row-splitter" role="separator" aria-orientation="horizontal"
+					aria-label={m.pmr_resize_standard_rows({ row: rowIndex + 1 })}
+					aria-valuenow={reportRowHeight(rowIndex)} aria-valuemin={REPORT_ROW_MIN}
+					aria-valuemax={reportRowHeight(rowIndex) + reportRowHeight(rowIndex + 1) - REPORT_ROW_MIN}
+					tabindex="0"
+					onpointerdown={(event) => startReportResize(event, rowIndex)}
+					onpointermove={moveReportResize} onpointerup={endReportResize}
+					onpointercancel={endReportResize} onlostpointercapture={endReportResize}
+					onkeydown={(event) => resizeReportWithKeyboard(event, rowIndex)}></div>
+			{/if}
+		{/each}
 	</div>
 {/snippet}
 
@@ -2719,10 +2787,13 @@
 	}
 	.standards-columns {
 		display: grid;
-		grid-template-columns: repeat(9, minmax(280px, 1fr));
+		min-width: 0;
 		align-items: stretch;
 	}
 	.standard-column {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
 		min-width: 0;
 		border-right: 1px solid var(--border);
 	}
@@ -2745,10 +2816,30 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.standard-cards {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
 		padding: 14px;
+	}
+	.standard-cards :global(.rcard) {
+		flex-shrink: 0;
+	}
+	.report-row-splitter {
+		margin: 0;
+	}
+	.report-row-splitter::before {
+		content: '';
+		position: absolute;
+		z-index: 1;
+		top: 4px;
+		left: calc(50% - 20px);
+		width: 40px;
+		height: 4px;
+		border-radius: 2px;
+		background: var(--subtle);
 	}
 	.standard-empty {
 		margin: 12px 0;

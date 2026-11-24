@@ -9504,5 +9504,6 @@
   "pmr_standard_enterprise": "Enterprise standards",
   "pmr_standard_other": "Other",
   "pmr_standards_report": "Metrics by standard",
-  "pmr_no_standard_metrics": "No metrics in this category"
+  "pmr_no_standard_metrics": "No metrics in this category",
+  "pmr_resize_standard_rows": "Resize standard rows at row {row}"
 }

@@ -9504,5 +9504,6 @@
   "pmr_standard_enterprise": "企业标准",
   "pmr_standard_other": "其他",
   "pmr_standards_report": "按标准分类的指标",
-  "pmr_no_standard_metrics": "此分类暂无指标"
+  "pmr_no_standard_metrics": "此分类暂无指标",
+  "pmr_resize_standard_rows": "调整第 {row} 行上下标准列表的高度"
 }
