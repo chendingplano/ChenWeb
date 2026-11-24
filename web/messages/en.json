@@ -9493,5 +9493,16 @@
 	"pmr_label_pending_review": "Pending review",
 	"pmr_label_target": "Target",
 	"pmr_label_number": "Number",
-	"pmr_label_exact": "Exact"
+	"pmr_label_exact": "Exact",
+  "pmr_standard_national": "Chinese national standards",
+  "pmr_standard_international": "International standards",
+  "pmr_standard_eu": "European standards",
+  "pmr_standard_us": "US standards",
+  "pmr_standard_industry": "Industry standards",
+  "pmr_standard_local": "Local standards",
+  "pmr_standard_association": "Association standards",
+  "pmr_standard_enterprise": "Enterprise standards",
+  "pmr_standard_other": "Other",
+  "pmr_standards_report": "Metrics by standard",
+  "pmr_no_standard_metrics": "No metrics in this category"
 }

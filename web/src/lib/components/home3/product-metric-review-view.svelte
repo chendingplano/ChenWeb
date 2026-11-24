@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { groupStandardMetrics, type StandardCategory } from './product-review-standards';
 	import { browser } from '$app/environment';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale } from '$lib/paraglide/runtime';
@@ -28,7 +29,6 @@
 		getRun,
 		getMetricDetail,
 		getObjectNames,
-		getRunDiff,
 		getRunDocuments,
 		getRunResults,
 		listAspects,
@@ -44,7 +44,6 @@
 		type ProfileNode,
 		type ResultRow,
 		type ReviewRun,
-		type RunDiff,
 		type ScopedDocument
 	} from '$lib/services/productMetricReviewService';
 	import {
@@ -178,7 +177,6 @@
 	}
 	let results = $state<ResultRow[]>([]);
 	let scopedDocs = $state<ScopedDocument[]>([]);
-	let diff = $state<RunDiff | null>(null);
 
 	// ── ui state ──────────────────────────────────────────────────────────────
 	let tab = $state<'results' | 'report'>('results');
@@ -702,14 +700,12 @@
 			currentProfileVersion = prof.profile.version;
 			profile = prof.profile;
 			nodes = prof.nodes;
-			const [res, docs, d] = await Promise.all([
+			const [res, docs] = await Promise.all([
 				getRunResults(runId),
-				getRunDocuments(runId),
-				getRunDiff(runId).catch(() => ({ diff: null as unknown as RunDiff }))
+				getRunDocuments(runId)
 			]);
 			results = res.results;
 			scopedDocs = docs.documents;
-			diff = d.diff;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -861,6 +857,18 @@
 			return true;
 		});
 	});
+
+	const standardGroups = $derived(groupStandardMetrics(results.filter(
+		(r) => selectedNodeId == null || r.node_id === selectedNodeId
+	)));
+	function standardLabel(category: StandardCategory): string {
+		return {
+			national: m.pmr_standard_national(), international: m.pmr_standard_international(),
+			eu: m.pmr_standard_eu(), us: m.pmr_standard_us(), industry: m.pmr_standard_industry(),
+			local: m.pmr_standard_local(), association: m.pmr_standard_association(),
+			enterprise: m.pmr_standard_enterprise(), other: m.pmr_standard_other()
+		}[category];
+	}
 
 	const groups = $derived.by(() => {
 		const attributed = new Map<number, ResultRow[]>();
@@ -1088,7 +1096,7 @@
 		</header>
 	{/if}
 
-	<div class="content" class:wide={tab === 'results' && !!run}>
+	<div class="content" class:wide={!!run}>
 		{#if error}
 			<div class="note error">{error}</div>
 		{/if}
@@ -1127,7 +1135,7 @@
 				</div>
 			{/if}
 
-			<div class="title-row" class:resizable-header={tab === 'results' && !!profile}
+			<div class="title-row" class:resizable-header={!!profile}
 				style={`--header-height:${layout.headerH}px`}>
 				<div>
 					<div class="review-heading">
@@ -1149,7 +1157,7 @@
 						{/if}
 					</p>
 				</div>
-				{#if tab === 'results' && profile}
+				{#if profile}
 					<div class="header-drawing">
 						{#if drawingId != null && !showDrawingGenerator}
 							<div class="drawing-kept">
@@ -1222,7 +1230,7 @@
 				</div>
 			</div>
 
-			{#if tab === 'results' && profile}
+			{#if profile}
 				<div
 					class="h-splitter"
 					role="separator"
@@ -1246,7 +1254,7 @@
 					<Layers size={13} />{m.pmr_tab_results()} <span>{results.length}</span>
 				</button>
 				<button class:active={tab === 'report'} onclick={() => (tab = 'report')}>
-					<FileText size={13} />{m.pmr_tab_report()} <span>{gaps.length}</span>
+					<FileText size={13} />{m.pmr_tab_report()} <span>{results.filter(r => r.artifact_type === 'metric').length}</span>
 				</button>
 				{#if run.status === 'completed'}
 					<a
@@ -1264,19 +1272,18 @@
 			</div>
 
 			<div
-				class="layout"
+				class="layout resizable"
 				class:report-mode={tab === 'report'}
-				class:resizable={tab === 'results'}
 				bind:this={layoutEl}
 			>
 				<!-- scope tree -->
 				<aside
 					class="scope-pane"
-					class:collapsed={tab === 'results' && layout.scopeCollapsed}
-					style={tab === 'results' ? `width:${scopeWidth}px` : ''}
+					class:collapsed={layout.scopeCollapsed}
+					style={`width:${scopeWidth}px`}
 				>
 					<div class="pane-head">
-						{#if tab === 'results' && layout.scopeCollapsed}
+						{#if layout.scopeCollapsed}
 							<button
 								class="linky icon-btn"
 								onclick={toggleScopeCollapsed}
@@ -1291,7 +1298,6 @@
 							{#if selectedNodeId != null}
 								<button class="linky" onclick={() => (selectedNodeId = null)}>{m.pmr_clear()}</button>
 							{/if}
-							{#if tab === 'results'}
 								<button
 									class="linky icon-btn"
 									onclick={toggleScopeCollapsed}
@@ -1301,10 +1307,9 @@
 								>
 									<PanelLeftClose size={14} />
 								</button>
-							{/if}
 						{/if}
 					</div>
-					{#if !(tab === 'results' && layout.scopeCollapsed)}
+					{#if !layout.scopeCollapsed}
 						<div class="tree">
 							{#each tree as root (root.id)}
 								{@render treeNode(root, 0)}
@@ -1313,7 +1318,7 @@
 					{/if}
 				</aside>
 
-				{#if tab === 'results' && !layout.scopeCollapsed}
+				{#if !layout.scopeCollapsed}
 					<div
 						class="v-splitter"
 						role="separator"
@@ -1374,7 +1379,7 @@
 								<p>{m.pmr_no_results()}</p>
 								{#if gaps.length > 0}
 									<button class="linky" onclick={() => (tab = 'report')}
-										>{m.pmr_see_gaps({ n: gaps.length })}</button
+										>{m.pmr_tab_report()}</button
 									>
 								{/if}
 							</div>
@@ -1782,11 +1787,11 @@
 	<button
 		class="rcard"
 		class:sel={selectedResult?.artifact_id === r.artifact_id}
-		onclick={() => selectResult(r)}
+		onclick={() => { tab = 'results'; selectResult(r); }}
 	>
 		<span class="rc-row">
 			{@render kv(m.pmr_field_artifact(), r.artifact_id)}
-			{@render kv(m.pmr_field_document(), `#${r.input_record_id}`)}
+			{@render kv(m.pmr_field_document(), r.doc_no ? `${r.doc_no} · #${r.input_record_id}` : `#${r.input_record_id}`)}
 			{@render kv(m.pmr_field_score(), fmtScore(r.score))}
 		</span>
 		<span class="rc-row">
@@ -1804,114 +1809,21 @@
 {/snippet}
 
 {#snippet reportView()}
-	{@const rep = run?.report_json as
-		| {
-				coverage?: {
-					node_id: number;
-					label: string;
-					kind: string;
-					grounding: string;
-					artifact_count: number;
-					document_count: number;
-				}[];
-				per_document_truncated?: Record<string, number>;
-		  }
-		| undefined}
-	<div class="report">
-		<div class="metrics-strip">
-			<div><strong>{run?.attributed_count ?? 0}</strong><span>{m.pmr_attributed()}</span></div>
-			<div>
-				<strong>{run?.document_scope_count ?? 0}</strong><span>{m.pmr_document_scope()}</span>
-			</div>
-			<div>
-				<strong>{run?.scoped_document_count ?? 0}</strong><span>{m.pmr_docs_in_scope()}</span>
-			</div>
-			<div class:warn-tone={(run?.truncated_count ?? 0) > 0}>
-				<strong>{run?.truncated_count ?? 0}</strong><span>{m.pmr_truncated_label()}</span>
-			</div>
+	<div class="standards-report" role="region" aria-label={m.pmr_standards_report()} tabindex="0">
+		<div class="standards-columns">
+			{#each standardGroups as group (group.category)}
+				<section class="standard-column" aria-label={standardLabel(group.category)}>
+					<h3>{standardLabel(group.category)} <span>{group.rows.length}</span></h3>
+					<div class="standard-cards">
+						{#each group.rows as r (`${r.artifact_type}:${r.artifact_id}`)}
+							{@render resultCard(r)}
+						{:else}
+							<p class="standard-empty">{m.pmr_no_standard_metrics()}</p>
+						{/each}
+					</div>
+				</section>
+			{/each}
 		</div>
-
-		<h3>{m.pmr_coverage()}</h3>
-		<div class="tbl-wrap">
-			<table>
-				<thead>
-					<tr
-						><th>{m.pmr_node()}</th><th>{m.pmr_kind()}</th><th>{m.pmr_grounding()}</th><th
-							class="num">{m.pmr_metrics()}</th
-						><th class="num">{m.pmr_documents()}</th></tr
-					>
-				</thead>
-				<tbody>
-					{#each rep?.coverage ?? [] as c (c.node_id)}
-						<tr class:zero={c.artifact_count === 0}>
-							<td>{nodeLabel.get(c.node_id) ?? c.label}</td>
-							<td>{enumLabel(c.kind)}</td>
-							<td>{enumLabel(c.grounding)}</td>
-							<td class="num">{c.artifact_count}</td>
-							<td class="num">{c.document_count}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-
-		<h3>{m.pmr_gaps_heading({ n: gaps.length })}</h3>
-		{#if gaps.length === 0}
-			<p class="muted">{m.pmr_no_gaps()}</p>
-		{:else}
-			<ul class="gaps">
-				{#each gaps as g (g.node_id)}
-					<li><strong>{nodeLabel.get(g.node_id) ?? g.label}</strong> <span>{enumLabel(g.kind)} · {enumLabel(g.grounding)}</span></li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#if rep?.per_document_truncated && Object.keys(rep.per_document_truncated).length > 0}
-			<h3>{m.pmr_truncation()}</h3>
-			<ul class="gaps">
-				{#each Object.entries(rep.per_document_truncated) as [doc, n] (doc)}
-					<li><span class="mono">#{doc}</span> — {m.pmr_truncated({ n })}</li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#if diff && (diff.added.length || diff.removed.length || diff.retiered.length || diff.profile_version_changed)}
-			<h3>{m.pmr_diff_heading({ prev: diff.previous_run_number })}</h3>
-			{#if diff.profile_version_changed}
-				<p class="warn-text">
-					{m.pmr_diff_version({
-						a: diff.previous_profile_version,
-						b: diff.current_profile_version
-					})}
-				</p>
-			{/if}
-			<div class="diff-cols">
-				<div>
-					<h4>{m.pmr_added({ n: diff.added.length })}</h4>
-					<ul>
-						{#each diff.added as a (a.artifact_id)}<li class="mono">
-								{a.artifact_id} <em>{a.tier}</em>
-							</li>{/each}
-					</ul>
-				</div>
-				<div>
-					<h4>{m.pmr_removed({ n: diff.removed.length })}</h4>
-					<ul>
-						{#each diff.removed as a (a.artifact_id)}<li class="mono">
-								{a.artifact_id} <em>{a.tier}</em>
-							</li>{/each}
-					</ul>
-				</div>
-				<div>
-					<h4>{m.pmr_retiered({ n: diff.retiered.length })}</h4>
-					<ul>
-						{#each diff.retiered as a (a.artifact_id)}<li class="mono">
-								{a.artifact_id} <em>{a.from}→{a.to}</em>
-							</li>{/each}
-					</ul>
-				</div>
-			</div>
-		{/if}
 	</div>
 {/snippet}
 
@@ -2795,111 +2707,53 @@
 		font-size: 12px;
 	}
 
-	/* report */
-	.report h3 {
-		margin: 22px 0 10px;
+	/* Standard columns use the page palette in both light and dark mode. */
+	.layout.report-mode .main-pane {
+		flex: 1 1 0;
+		min-width: 0;
+		padding: 0;
+	}
+	.standards-report {
+		overflow: auto;
+		max-height: calc(100vh - 200px);
+	}
+	.standards-columns {
+		display: grid;
+		grid-template-columns: repeat(9, minmax(280px, 1fr));
+		align-items: stretch;
+	}
+	.standard-column {
+		min-width: 0;
+		border-right: 1px solid var(--border);
+	}
+	.standard-column h3 {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin: 0;
+		padding: 16px;
 		font-size: 14px;
-		letter-spacing: -0.02em;
+		background: var(--surface);
+		border-bottom: 2px solid var(--bronze);
 	}
-	.report h4 {
-		margin: 0 0 6px;
-		font:
-			500 10px 'DM Mono',
-			monospace;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
+	.standard-column h3 span {
 		color: var(--bronze);
+		font-variant-numeric: tabular-nums;
 	}
-	.metrics-strip {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-		gap: 8px;
+	.standard-cards {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 14px;
 	}
-	.metrics-strip > div {
-		padding: 12px 13px;
-		border: 1px solid var(--border);
-		border-top: 2px solid var(--bronze);
-		background: var(--bg);
-	}
-	.metrics-strip > div.warn-tone {
-		border-top-color: var(--red);
-	}
-	.metrics-strip strong {
-		display: block;
-		font:
-			700 22px 'DM Mono',
-			monospace;
-		letter-spacing: -0.06em;
-	}
-	.metrics-strip span {
-		font-size: 10px;
+	.standard-empty {
+		margin: 12px 0;
 		color: var(--subtle);
-	}
-	.tbl-wrap {
-		overflow-x: auto;
-		border: 1px solid var(--border);
-	}
-	.report table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 11px;
-		min-width: 460px;
-	}
-	.report th {
-		padding: 9px 12px;
-		text-align: left;
-		color: var(--subtle);
-		font:
-			500 9px 'DM Mono',
-			monospace;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		border-bottom: 1px solid var(--border);
-	}
-	.report td {
-		padding: 9px 12px;
-		border-bottom: 1px solid var(--border);
-	}
-	.report th.num,
-	.report td.num {
-		text-align: right;
-		font-family: 'DM Mono', monospace;
-	}
-	.report tr.zero td {
-		color: var(--subtle);
-	}
-	.gaps {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-	.gaps li {
-		padding: 7px 0;
-		border-bottom: 1px solid var(--border);
 		font-size: 12px;
-	}
-	.gaps .mono {
-		color: var(--subtle);
-		font-size: 10px;
-		margin-left: 6px;
-	}
-	.diff-cols {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		gap: 14px;
-	}
-	.diff-cols ul {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-	.diff-cols li {
-		padding: 4px 0;
-		font-size: 10px;
-	}
-	.diff-cols em {
-		color: var(--bronze);
-		font-style: normal;
 	}
 
 	/* metric-details attrs (formerly the evidence drawer) */

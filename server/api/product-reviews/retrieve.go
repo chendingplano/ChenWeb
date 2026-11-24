@@ -45,6 +45,7 @@ const exactMatchNodeScore = 2.0
 
 // Result is one retrieved artifact with its provenance.
 type Result struct {
+	DocNo           string          `json:"doc_no"`
 	ArtifactType    string          `json:"artifact_type"`
 	ArtifactID      string          `json:"artifact_id"`
 	SourceRowID     int64           `json:"source_row_id"`

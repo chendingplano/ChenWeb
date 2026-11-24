@@ -9493,5 +9493,16 @@
 	"pmr_label_pending_review": "待审核",
 	"pmr_label_target": "目标值",
 	"pmr_label_number": "数值",
-	"pmr_label_exact": "精确值"
+	"pmr_label_exact": "精确值",
+  "pmr_standard_national": "中国国家标准",
+  "pmr_standard_international": "国际标准",
+  "pmr_standard_eu": "欧盟标准",
+  "pmr_standard_us": "美国标准",
+  "pmr_standard_industry": "行业标准",
+  "pmr_standard_local": "地方标准",
+  "pmr_standard_association": "团体标准",
+  "pmr_standard_enterprise": "企业标准",
+  "pmr_standard_other": "其他",
+  "pmr_standards_report": "按标准分类的指标",
+  "pmr_no_standard_metrics": "此分类暂无指标"
 }

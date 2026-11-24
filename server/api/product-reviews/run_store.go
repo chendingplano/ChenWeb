@@ -444,9 +444,11 @@ func (s RunStore) LoadResults(ctx context.Context, runID int64, f ResultFilters)
 		       r.node_id, r.tier, r.score, r.paths, r.inclusion_reason, r.source_line_spans,
 		       COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, ''),
 		       COALESCE(m.metric_subject, ''), COALESCE(m.metric_subject_en, ''),
-		       COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''), COALESCE(m.metric_unit_en, '')
+		       COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''), COALESCE(m.metric_unit_en, ''),
+		       COALESCE(i.doc_no, '')
 		FROM (` + q + `) r
 		LEFT JOIN kb.metrics m ON m.id = r.source_row_id AND m.ref_mention_id IS NULL
+		LEFT JOIN kb.inputs i ON i.id = r.input_record_id
 		ORDER BY r.score DESC, r.artifact_type, r.artifact_id`
 
 	rows, err := s.DB.QueryContext(ctx, q, args...)
@@ -464,7 +466,7 @@ func (s RunStore) LoadResults(ctx context.Context, runID int64, f ResultFilters)
 		)
 		if err := rows.Scan(&r.ArtifactType, &r.ArtifactID, &r.SourceRowID, &r.InputRecordID,
 			&nodeID, &r.Tier, &r.Score, &pathsRaw, &r.InclusionReason, &spansRaw,
-			&r.MetricName, &r.MetricNameEn, &r.Subject, &r.SubjectEn, &r.Value, &r.Unit, &r.UnitEn); err != nil {
+			&r.MetricName, &r.MetricNameEn, &r.Subject, &r.SubjectEn, &r.Value, &r.Unit, &r.UnitEn, &r.DocNo); err != nil {
 			return nil, err
 		}
 		if nodeID.Valid {

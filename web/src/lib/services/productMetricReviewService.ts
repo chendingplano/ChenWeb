@@ -147,6 +147,7 @@ export type ReviewRun = {
 };
 
 export type ResultRow = {
+	doc_no?: string;
 	artifact_type: string;
 	artifact_id: string;
 	source_row_id: number;

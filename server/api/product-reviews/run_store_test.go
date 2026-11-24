@@ -204,9 +204,9 @@ func TestLoadResultsExcludeTier(t *testing.T) {
 			"artifact_type", "artifact_id", "source_row_id", "input_record_id",
 			"node_id", "tier", "score", "paths", "inclusion_reason", "source_line_spans",
 			"metric_name", "metric_name_en", "metric_subject", "metric_subject_en",
-			"metric_value", "metric_unit", "metric_unit_en",
+			"metric_value", "metric_unit", "metric_unit_en", "doc_no",
 		}).AddRow("metric", "42_mtc_1", int64(900), int64(42), int64(2), TierPart, 1.2, []byte(`["direct"]`), "x", []byte(`[]`),
-			"显示亮度", "Display Luminance", "光柱式血压计", "Sphygmomanometer", "120", "cd/m2", "cd/m2"))
+			"显示亮度", "Display Luminance", "光柱式血压计", "Sphygmomanometer", "120", "cd/m2", "cd/m2", "GB/T 123-2026"))
 
 	got, err := (RunStore{DB: db}).LoadResults(context.Background(), 500, ResultFilters{
 		ExcludeTiers: []string{TierDocumentScope},
@@ -216,6 +216,9 @@ func TestLoadResultsExcludeTier(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Tier != TierPart || got[0].NodeID == nil {
 		t.Fatalf("got %+v", got)
+	}
+	if got[0].DocNo != "GB/T 123-2026" {
+		t.Fatalf("source document number = %q", got[0].DocNo)
 	}
 	if got[0].MetricNameEn != "Display Luminance" || got[0].Value != "120" || got[0].UnitEn != "cd/m2" {
 		t.Fatalf("display fields = %+v", got[0])
