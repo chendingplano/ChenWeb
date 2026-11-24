@@ -9509,5 +9509,13 @@
   "pmr_resize_last_standard_row": "Resize the last standard row",
   "pmr_reorder_standard_list": "Reorder {name}",
   "pmr_reorder_standard_list_hint": "Drag to reorder lists, or use the arrow keys when focused.",
-  "pmr_standard_list_moved": "{name} moved to position {position} of {total}."
+  "pmr_standard_list_moved": "{name} moved to position {position} of {total}.",
+	"nav_apps_compliance_review": "Compliance Review",
+	"nav_apps_standard_compliance_review": "Standard Compliance Review",
+	"standard_compliance_review_subtitle": "Submit a document for review with the compliance reviewer selected automatically.",
+	"standard_compliance_review_details": "Step 2: Review Details",
+	"standard_compliance_review_reviewer": "Reviewer:",
+	"standard_compliance_review_compliance_reviewer": "Compliance reviewer",
+	"document_review_subtitle": "Submit a document for AI-powered review across quality, compliance, and technical aspects.",
+	"document_review_step_4_review_details": "Step 4: Review Details"
 }

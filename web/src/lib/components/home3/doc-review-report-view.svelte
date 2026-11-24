@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { m as msg } from '$lib/paraglide/messages.js';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	import {
 		getReport,
 		getRequest,
@@ -22,11 +22,13 @@
 	let {
 		reportId,
 		darkMode = true,
-		embedded = false
+		embedded = false,
+		active = true
 	}: {
 		reportId: number;
 		darkMode?: boolean;
 		embedded?: boolean;
+		active?: boolean;
 	} = $props();
 
 	let dark = $derived(darkMode);
@@ -377,19 +379,21 @@
 
 	// Publish the selected finding to the page-level context shelf, which renders
 	// the Finding details panel while this report is open (see finding-shelf-store).
-	onMount(() => {
+	$effect(() => {
+		if (!active) return;
 		findingShelf.active = true;
-	});
-	onDestroy(() => {
-		findingShelf.active = false;
-		findingShelf.finding = null;
-		findingShelf.findings = [];
-		findingShelf.requestId = null;
-		findingShelf.runId = null;
-		findingShelf.onFocusMatchedUnit = null;
-		findingShelf.onCloseMatchedUnits = null;
+		return () => {
+			findingShelf.active = false;
+			findingShelf.finding = null;
+			findingShelf.findings = [];
+			findingShelf.requestId = null;
+			findingShelf.runId = null;
+			findingShelf.onFocusMatchedUnit = null;
+			findingShelf.onCloseMatchedUnits = null;
+		};
 	});
 	$effect(() => {
+		if (!active) return;
 		findingShelf.finding = selectedFinding;
 		findingShelf.findings = activeFindings;
 		findingShelf.requestId = requestId;
@@ -398,6 +402,7 @@
 	// The focus callbacks close over the DocStructureView instance so the shelf's
 	// related_artifacts / matched_units can still drive the PDF panel.
 	$effect(() => {
+		if (!active) return;
 		const sv = structureView;
 		findingShelf.onFocusMatchedUnit = sv
 			? (recordId, lineNumbers) => void sv.focusExternalArtifact(recordId, lineNumbers)

@@ -20,7 +20,9 @@
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
     import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
-    let { darkMode = true }: { darkMode: boolean } = $props();
+    let { darkMode = true, complianceOnly = false, active = true }: { darkMode: boolean; complianceOnly?: boolean; active?: boolean } = $props();
+
+    const formId = $props.id();
 
     // Design tokens
     let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -123,7 +125,10 @@
     }
 
     // Derived: the aspects to submit are exactly the shared selection.
-    let effectiveAspects = $derived([...selectedAspects]);
+    let effectiveAspects = $derived(complianceOnly ? ['compliance'] : [...selectedAspects]);
+    let steps = $derived(complianceOnly ? [1, 4] : [1, 2, 3, 4]);
+    let stepLabels = $derived([m.document_review_select_document(), m.document_review_check_level(), m.document_review_references(), m.document_review_submit()]);
+    const stepIds = ['dr-step-select-document', 'dr-step-check-level', 'dr-step-references', 'dr-step-submit'];
 
     // Check-level label for the summary: if the selection exactly matches one tier's
     // full aspect set, show that tier; otherwise list the tiers that are On, or "—".
@@ -137,7 +142,7 @@
     // Tier key persisted with the request (one of the built-in keys, or "custom").
     let submitTier = $derived.by(() => {
         const exact = tiers.find(t => t.aspect_names.length > 0 && t.aspect_names.length === selectedAspects.size && t.aspect_names.every(n => selectedAspects.has(n)));
-        return exact ? exact.key : 'custom';
+        return !complianceOnly && exact ? exact.key : 'custom';
     });
 
     // Group (package) labels. Sourced from [packages.*] in doc-review.local.toml
@@ -294,7 +299,7 @@
     onMount(async () => {
         // Resolve configurable static text for the current locale; fail open to
         // the hardcoded defaults on error (§11.2).
-        getPageConfig('doc-review', getLocale())
+        getPageConfig(complianceOnly ? 'standard-compliance-review' : 'doc-review', getLocale())
             .then((cfg) => { pageConfig = cfg; })
             .catch(() => {});
         try {
@@ -320,7 +325,7 @@
     function selectDoc(doc: {id: number; title: string}) {
         selectedDocId = doc.id;
         selectedDocTitle = doc.title;
-        currentStep = 2;
+        currentStep = complianceOnly ? 4 : 2;
     }
 
     function onSearchSelect(records: KbInputRecord[]) {
@@ -429,6 +434,7 @@
 {#if viewingRun}
     <DocReviewResultsView
         {darkMode}
+        {active}
         requestId={viewingRun.requestId}
         runId={viewingRun.runId ?? 0}
         reportId={viewingRun.reportId ?? 0}
@@ -436,11 +442,11 @@
         onNewReview={() => { viewingRun = null; }}
     />
 {:else}
-    <div style="padding: 1.5rem; color: {textPrimary};">
-        <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">{labelFor('dr-title', 'Document Review')}</h1>
+    <div class="select-text" style="padding: 1.5rem; color: {textPrimary};">
+        <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">{labelFor('dr-title', complianceOnly ? m.nav_apps_standard_compliance_review() : m.nav_apps_document_review())}</h1>
         {#if isVisible('dr-subtitle')}
             <p style="color: {textSecondary}; margin-bottom: 1.25rem;">
-                {labelFor('dr-subtitle', 'Submit a document for AI-powered review across quality, compliance, and technical aspects.')}
+                {labelFor('dr-subtitle', complianceOnly ? m.standard_compliance_review_subtitle() : m.document_review_subtitle())}
             </p>
         {/if}
 
@@ -456,14 +462,14 @@
 
         <!-- Step indicators -->
         <div style="display: flex; gap: 0.5rem; margin-bottom: 2rem; font-size: 0.8rem;">
-            {#each [['dr-step-select-document', m.document_review_select_document()], ['dr-step-check-level', m.document_review_check_level()], ['dr-step-references', m.document_review_references()], ['dr-step-submit', m.document_review_submit()]] as [stepId, step], i}
+            {#each steps as step, i}
                 <div style="display: flex; align-items: center; gap: 0.25rem;">
                     <div style="width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-                        background: {i + 1 <= currentStep ? accent : borderColor}; color: {i + 1 <= currentStep ? '#fff' : textMuted};
+                        background: {step <= currentStep ? accent : borderColor}; color: {step <= currentStep ? '#fff' : textMuted};
                         font-size: 0.75rem; font-weight: 600;">
-                        {i + 1 <= currentStep ? '✓' : i + 1}
+                        {step <= currentStep ? '✓' : i + 1}
                     </div>
-                    <span style="color: {i + 1 === currentStep ? accent : textMuted}; white-space: nowrap;">{labelFor(stepId, step)}</span>
+                    <span style="color: {step === currentStep ? accent : textMuted}; white-space: nowrap;">{labelFor(stepIds[step - 1], stepLabels[step - 1])}</span>
                 </div>
             {/each}
         </div>
@@ -569,7 +575,7 @@
                     </div>
                 {/if}
             </div>
-            <button onclick={() => selectedDocId && (currentStep = 2)}
+            <button onclick={() => selectedDocId && (currentStep = complianceOnly ? 4 : 2)}
                 disabled={!selectedDocId}
                 style="padding: 0.6rem 1.5rem; background: {selectedDocId ? accent : borderColor}; color: {selectedDocId ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {selectedDocId ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">
                 {labelFor('dr-btn-next', 'Next →')}
@@ -577,7 +583,7 @@
         {/if}
 
         <!-- Step 2: Check Level & Aspects -->
-        {#if currentStep === 2}
+        {#if !complianceOnly && currentStep === 2}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.35rem;">{labelFor('dr-s2-heading', 'Step 2: Choose Check Level')}</h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
@@ -690,7 +696,7 @@
         {/if}
 
         <!-- Step 3: Supporting Documents -->
-        {#if currentStep === 3}
+        {#if !complianceOnly && currentStep === 3}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s3-heading', 'Step 3: Supporting Documents')} <span style="font-weight: 400; color: {textMuted};">{m.document_review_optional()}</span></h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
@@ -708,29 +714,29 @@
         <!-- Step 4: Notes & Submit -->
         {#if currentStep === 4}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s4-heading', 'Step 4: Review Details')}</h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">{labelFor('dr-s4-heading', complianceOnly ? m.standard_compliance_review_details() : m.document_review_step_4_review_details())}</h2>
                 <div style="margin-bottom: 1rem;">
-                    <label for="review-requester-name" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-name-label', 'Your Name *')}</label>
-                    <input id="review-requester-name" type="text" bind:value={requesterName} placeholder={m.document_review_enter_your_name()}
+                    <label for={formId + '-requester-name'} style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-name-label', 'Your Name *')}</label>
+                    <input id={formId + '-requester-name'} type="text" bind:value={requesterName} placeholder={m.document_review_enter_your_name()}
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
                 <div style="margin-bottom: 1rem;">
-                    <label for="review-notes" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-notes-label', 'Notes (optional)')}</label>
-                    <textarea id="review-notes" bind:value={notes} placeholder={m.document_review_e_g_focus_on_sterilization()}
+                    <label for={formId + '-notes'} style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-notes-label', 'Notes (optional)')}</label>
+                    <textarea id={formId + '-notes'} bind:value={notes} placeholder={m.document_review_e_g_focus_on_sterilization()}
                         rows={4}
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem; resize: vertical;"></textarea>
                 </div>
                 {#if isVisible('dr-s4-report-label')}
                     <div style="margin-bottom: 1rem;">
-                        <label for="review-report-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-report-label', 'Report Template (optional)')}</label>
-                        <input id="review-report-template" type="text" bind:value={reportTemplate} placeholder={m.document_review_template_name_or_path()}
+                        <label for={formId + '-report-template'} style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-report-label', 'Report Template (optional)')}</label>
+                        <input id={formId + '-report-template'} type="text" bind:value={reportTemplate} placeholder={m.document_review_template_name_or_path()}
                             style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                     </div>
                 {/if}
                 {#if isVisible('dr-s4-doctpl-label')}
                     <div style="margin-bottom: 1rem;">
-                        <label for="review-doc-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-doctpl-label', 'Doc Template (optional)')}</label>
-                        <input id="review-doc-template" type="text" bind:value={docTemplate} placeholder={m.document_review_template_name_or_path()}
+                        <label for={formId + '-doc-template'} style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">{labelFor('dr-s4-doctpl-label', 'Doc Template (optional)')}</label>
+                        <input id={formId + '-doc-template'} type="text" bind:value={docTemplate} placeholder={m.document_review_template_name_or_path()}
                             style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                     </div>
                 {/if}
@@ -742,8 +748,8 @@
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem;">
                     <div style="color: {textSecondary};">{labelFor('dr-summary-document', 'Document:')}</div>
                     <div style="color: {textPrimary};">{selectedDocTitle}</div>
-                    <div style="color: {textSecondary};">{labelFor('dr-summary-checklevel', 'Check Level:')}</div>
-                    <div style="color: {textPrimary};">{checkLevelLabel}</div>
+                    <div style="color: {textSecondary};">{complianceOnly ? m.standard_compliance_review_reviewer() : labelFor('dr-summary-checklevel', 'Check Level:')}</div>
+                    <div style="color: {textPrimary};">{complianceOnly ? m.standard_compliance_review_compliance_reviewer() : checkLevelLabel}</div>
                     <div style="color: {textSecondary};">{labelFor('dr-summary-aspects', 'Aspects:')}</div>
                     <div style="color: {textPrimary};">{m.document_review_selected_2({ effectiveAspectsCount: effectiveAspects.length })}</div>
                     <div style="color: {textSecondary};">{labelFor('dr-summary-depth', 'Review Depth:')}</div>
@@ -760,7 +766,7 @@
             {/if}
 
             <div style="display: flex; gap: 0.5rem;">
-                <button onclick={() => currentStep = 3}
+                <button onclick={() => currentStep = complianceOnly ? 1 : 3}
                     disabled={isSubmitting}
                     style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">{labelFor('dr-btn-back', '← Back')}</button>
                 <button onclick={handleSubmit}

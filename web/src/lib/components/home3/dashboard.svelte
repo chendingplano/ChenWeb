@@ -104,7 +104,6 @@
 	// it's the active content, without touching the stored shelfOpen toggle so
 	// other pages keep whatever open/closed state the user last left them in.
 	let shelfVisible = $derived(shelfOpen && activeMenu?.childId !== 'apps-product-review' && activeMenu?.childId !== 'sysadmin-llm-review-metrics' && activeMenu?.childId !== 'sysadmin-llm-products-gold' && activeMenu?.childId !== 'sysadmin-llm-compliance-gold');
-	let docReviewKey = $state(0);
 	let settingsHydrated = $state(false);
 	let railExpandedBeforeFocus = false;
 	let contentFocusActive = false;
@@ -190,9 +189,6 @@
 		if (selection.itemId === '__logout__') {
 			handleLogout();
 			return;
-		}
-		if (selection.childId === 'apps-document-review') {
-			docReviewKey++;
 		}
 		if (selection.childId !== HYBRID_BENCH_RUN_CHILD) analyzeResultId = null;
 		activeMenu = selection;
@@ -324,7 +320,6 @@
 			{activeMenu}
 			{shelfOpen}
 			{autoShrinkExpand}
-			{docReviewKey}
 			{siteConfig}
 			{analyzeResultId}
 			onReferenceDetailsChange={(details) => {

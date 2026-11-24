@@ -131,7 +131,6 @@
 		activeMenu = null,
 		shelfOpen = true,
 		autoShrinkExpand = false,
-		docReviewKey = 0,
 		railOffset = 56,
 		siteConfig,
 		analyzeResultId = null,
@@ -158,7 +157,6 @@
 		activeMenu: ActiveSelection | null;
 		shelfOpen: boolean;
 		autoShrinkExpand?: boolean;
-		docReviewKey?: number;
 		railOffset?: number;
 		siteConfig: SiteConfig;
 		/** Hybrid Search Benchmark result shown by the run page's Analyze tab. */
@@ -236,6 +234,8 @@
 
 	// These pages have been reviewed for safe retention; other pages keep their existing lifecycle.
 	const retainedPages = [
+		{ id: 'apps-document-review', component: DocumentReviewView },
+		{ id: 'apps-standard-compliance-review', component: DocumentReviewView },
 		{ id: 'sysadmin-scientific-paper-config', component: ScientificPaperConfigView },
 		{ id: 'scientific-paper-search', component: ScientificPaperSearchView },
 		{ id: 'doc-processor-dashboard', component: DocProcessorDashboardView },
@@ -427,11 +427,16 @@
 			{#if visitedPages.includes(retained.id)}
 				<div
 					class:h-full={retained.id === 'sysadmin-failed-llm-calls' || retained.id === 'sysadmin-alert-logs' || retained.id === 'sysadmin-llm-compliance-gold'}
+					class:select-text={retained.component === DocumentReviewView}
 					data-retained-page={retained.id}
 					hidden={activeMenu?.childId !== retained.id}
 					inert={activeMenu?.childId !== retained.id}
 				>
-					<retained.component {darkMode} />
+					{#if retained.component === DocumentReviewView}
+						<DocumentReviewView {darkMode} complianceOnly={retained.id === 'apps-standard-compliance-review'} active={activeMenu?.childId === retained.id} />
+					{:else}
+						<retained.component {darkMode} />
+					{/if}
 				</div>
 			{/if}
 		{/each}
@@ -476,10 +481,6 @@
 			<SummaryGoldView {darkMode} {onSummaryDetailsChange} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
-		{:else if activeMenu?.childId === 'apps-document-review'}
-			{#key docReviewKey}
-				<DocumentReviewView {darkMode} />
-			{/key}
 		{:else if activeMenu?.childId === 'apps-product-review'}
 			{#if productReviewRunId}
 				<ProductMetricReviewView

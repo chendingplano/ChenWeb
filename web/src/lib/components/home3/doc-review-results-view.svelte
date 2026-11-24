@@ -32,6 +32,7 @@
 
 	let {
 		darkMode = true,
+		active = true,
 		requestId = 0,
 		runId = 0,
 		reportId = 0,
@@ -39,6 +40,7 @@
 		onNewReview
 	}: {
 		darkMode: boolean;
+		active?: boolean;
 		requestId: number;
 		runId?: number;
 		reportId?: number;
@@ -786,7 +788,7 @@
 				</div>
 				{:else if activeTab === 'report'}
 					<div style="height: calc(100vh - 220px); min-height: 640px;">
-						<DocReviewReportView reportId={linkReportId} {darkMode} embedded={true} />
+						<DocReviewReportView reportId={linkReportId} {darkMode} {active} embedded={true} />
 					</div>
 				{:else if activeTab === 'semantic'}
 					<div style="height: calc(100vh - 220px); min-height: 640px;">

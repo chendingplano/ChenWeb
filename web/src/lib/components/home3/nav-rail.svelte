@@ -180,6 +180,10 @@
 				{ id: 'apps-configure', label: m.nav_apps_configure() },
 				{ id: 'apps-generate-doc', label: m.nav_apps_generate_doc() },
 				{ id: 'apps-document-review', label: m.nav_apps_document_review() },
+				...(pageKey === 'development' ? [{
+					id: 'apps-compliance-review', label: m.nav_apps_compliance_review(),
+					children: [{ id: 'apps-standard-compliance-review', label: m.nav_apps_standard_compliance_review() }]
+				}] : []),
 				{ id: 'apps-product-review', label: m.nav_apps_product_review() }
 			]
 		},

@@ -9509,5 +9509,13 @@
   "pmr_resize_last_standard_row": "调整最后一行标准列表的高度",
   "pmr_reorder_standard_list": "调整{name}列表顺序",
   "pmr_reorder_standard_list_hint": "拖动以调整列表顺序，或在聚焦后使用方向键。",
-  "pmr_standard_list_moved": "{name}已移至第{position}个位置，共{total}个列表。"
+  "pmr_standard_list_moved": "{name}已移至第{position}个位置，共{total}个列表。",
+	"nav_apps_compliance_review": "合规审查",
+	"nav_apps_standard_compliance_review": "标准合规审查",
+	"standard_compliance_review_subtitle": "提交文档进行审查，系统将自动选择合规审查员。",
+	"standard_compliance_review_details": "第 2 步：审查详情",
+	"standard_compliance_review_reviewer": "审查员：",
+	"standard_compliance_review_compliance_reviewer": "合规审查员",
+	"document_review_subtitle": "提交文档，使用 AI 从质量、合规和技术等方面进行审查。",
+	"document_review_step_4_review_details": "第 4 步：审查详情"
 }
