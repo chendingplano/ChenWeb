@@ -265,6 +265,9 @@ func loadReportFindingsWithMetadata(ctx context.Context, db *sql.DB, req *Reques
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
+	if err := hydrateComplianceFindings(ctx, db, findings); err != nil {
+		return nil, nil, err
+	}
 	return findings, metadataByFindingID, nil
 }
 

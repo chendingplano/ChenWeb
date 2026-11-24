@@ -1341,11 +1341,13 @@ func TestTranslateFindingReturnsCachedTranslationWithoutLLMCall(t *testing.T) {
 	defer db.Close()
 
 	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"},"zh-cn":{"title":"中文标题","description":"中文描述","suggestion":"中文建议","provenance":"llm_translation"}}`
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
-	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-	       COALESCE(artifact_id,'')
-	FROM kb.doc_review_findings WHERE id = $1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+	       COALESCE(d.description, f.description), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+	       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+	       COALESCE(f.metadata, '{}'::jsonb)::text, COALESCE(f.artifact_id,'')
+	FROM kb.doc_review_findings f
+	LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+	WHERE f.id = $1`)).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
 			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
@@ -1385,11 +1387,13 @@ func TestTranslateFindingAutoTranslatesWhenEnvVarSet(t *testing.T) {
 	defer db.Close()
 
 	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"}}`
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
-	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-	       COALESCE(artifact_id,'')
-	FROM kb.doc_review_findings WHERE id = $1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+	       COALESCE(d.description, f.description), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+	       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+	       COALESCE(f.metadata, '{}'::jsonb)::text, COALESCE(f.artifact_id,'')
+	FROM kb.doc_review_findings f
+	LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+	WHERE f.id = $1`)).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
 			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
@@ -1439,11 +1443,13 @@ func TestTranslateFindingLeavesComplianceFindingUntranslated(t *testing.T) {
 	defer db.Close()
 
 	metadata := `{"i18n":{"schema_version":1,"translations":{"en":{"title":"Compliance assessment: 初始水温","provenance":"canonical"}}}}`
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
-	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-	       COALESCE(artifact_id,'')
-	FROM kb.doc_review_findings WHERE id = $1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+	       COALESCE(d.description, f.description), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+	       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+	       COALESCE(f.metadata, '{}'::jsonb)::text, COALESCE(f.artifact_id,'')
+	FROM kb.doc_review_findings f
+	LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+	WHERE f.id = $1`)).
 		WithArgs(int64(43)).
 		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
 			AddRow(int64(43), "P5", "compliance", "info", "compliance_assessment", "Compliance assessment: 初始水温", "候选未给出限值。",
@@ -1479,11 +1485,13 @@ func TestTranslateFindingNeedsConfirmationWhenAutoOffAndNotConfirmed(t *testing.
 	defer db.Close()
 
 	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"}}`
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
-	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-	       COALESCE(artifact_id,'')
-	FROM kb.doc_review_findings WHERE id = $1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+	       COALESCE(d.description, f.description), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+	       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+	       COALESCE(f.metadata, '{}'::jsonb)::text, COALESCE(f.artifact_id,'')
+	FROM kb.doc_review_findings f
+	LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+	WHERE f.id = $1`)).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
 			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
@@ -1522,11 +1530,13 @@ func TestTranslateFindingTranslatesWhenConfirmed(t *testing.T) {
 	defer db.Close()
 
 	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"}}`
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
-	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-	       COALESCE(artifact_id,'')
-	FROM kb.doc_review_findings WHERE id = $1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+	       COALESCE(d.description, f.description), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+	       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+	       COALESCE(f.metadata, '{}'::jsonb)::text, COALESCE(f.artifact_id,'')
+	FROM kb.doc_review_findings f
+	LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+	WHERE f.id = $1`)).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
 			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",

@@ -260,12 +260,15 @@ func (r *complianceReviewer) processChunk(ctx context.Context, recordID int64, i
 	var findings []ReviewFinding
 	if index == 0 {
 		if f, ok := complianceUncheckedFinding(plan, r.settings, input, cfg.ModelName); ok {
+			f.Compliance.Run = r.runContext(cfg)
 			findings = append(findings, f)
 		}
 	}
 	texts, detectErrs := r.detectTextActivities(ctx, recordID, index, cfg, input, members)
 	if len(detectErrs) > 0 {
-		findings = append(findings, complianceDetectFailureFinding(input, errors.Join(detectErrs...), cfg.ModelName))
+		f := complianceDetectFailureFinding(input, errors.Join(detectErrs...), cfg.ModelName)
+		f.Compliance.Run = r.runContext(cfg)
+		findings = append(findings, f)
 	}
 	units := buildComplianceUnits(members, texts)
 	unitFindings, err := runConcurrent(ctx, complianceUnitConcurrency, len(units), func(unitCtx context.Context, i int) (ReviewFinding, error) {

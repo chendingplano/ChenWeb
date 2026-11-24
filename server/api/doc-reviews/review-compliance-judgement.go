@@ -53,6 +53,12 @@ type complianceUnitState struct {
 	checks    []complianceCheck
 	models    map[string]string
 	errs      []string
+	// found, relevanceErrs and judgeErrs keep what a failed call left, so the candidate
+	// rows carry the failure: each activity's found candidates and its relevance error, and
+	// the error of each pair whose judgement batch failed.
+	found         map[string][]string
+	relevanceErrs map[string]string
+	judgeErrs     map[string]string
 	// document, evidence and lines are what the judgement and verification see of the reviewed
 	// document: its doc_context line and the unit's evidence window (see complianceEvidenceWindow).
 	document string
@@ -151,13 +157,14 @@ func (s *complianceUnitState) fail(format string, args ...any) {
 // reviewUnit reviews one text activity or activity group. It never returns an error: a failure is
 // recorded in the finding's error message and the reviewer moves on.
 func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chunkIndex int, cfg ReviewerConfig, input chunkInput, u *complianceUnit) ReviewFinding {
-	s := &complianceUnitState{unit: u, pool: map[string]*complianceCandidate{}, kept: map[string][]string{}, models: map[string]string{}}
+	s := &complianceUnitState{unit: u, pool: map[string]*complianceCandidate{}, kept: map[string][]string{}, models: map[string]string{},
+		found: map[string][]string{}, relevanceErrs: map[string]string{}, judgeErrs: map[string]string{}}
 	exclude, err := r.excludeIDs(ctx, recordID)
 	if err != nil {
 		s.fail("excluded records: %v", err)
 		return r.unitFinding(s, cfg)
 	}
-	found := map[string][]string{}
+	found := s.found
 	for _, m := range u.Members {
 		res, err := r.searchMember(ctx, exclude, m, s.pool)
 		s.traces = append(s.traces, res.Traces...)
@@ -178,6 +185,7 @@ func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chu
 		kept, decisions, model, err := r.checkRelevance(ctx, recordID, chunkIndex, cfg, m, found[m.ID], s.pool)
 		if err != nil {
 			s.fail("%s: %v", m.Label, err)
+			s.relevanceErrs[m.ID] = fmt.Sprintf("relevance check: %v", err)
 			continue
 		}
 		s.models["relevance"] = model
@@ -202,6 +210,9 @@ func (r *complianceReviewer) reviewUnit(ctx context.Context, recordID int64, chu
 		if err != nil {
 			id, _, _ := strings.Cut(batch[0], "\x00")
 			s.fail("judgement of %d candidate(s) from activity %s on: %v", len(batch), id, err)
+			for _, pair := range batch {
+				s.judgeErrs[pair] = fmt.Sprintf("judgement: %v", err)
+			}
 			continue
 		}
 		s.models["judgement"] = model
@@ -535,38 +546,26 @@ func complianceVerifierSchema() map[string]any {
 	}
 }
 
-// unitFinding writes one finding for a unit: the verdicts when there are any, "no grounding" when
-// nothing was left to judge, and "incomplete" when an error stopped the review before any verdict.
+// unitFinding writes one finding for a unit: an assessment when there are verdicts, "no
+// grounding" when nothing was left to judge, and "incomplete" when an error stopped the review
+// before any verdict. Its activities, searches, candidates and verdicts go to its compliance
+// record (openspec compliance-review-storage); the description holds only finding-level text.
 func (r *complianceReviewer) unitFinding(s *complianceUnitState, cfg ReviewerConfig) ReviewFinding {
 	u := s.unit
 	label := u.label()
 	f := ReviewFinding{
 		Pass: "P5", Aspect: "compliance", Severity: "info", ResultKind: "compliance_activity",
-		Location: fmt.Sprintf("%d-%d", u.LineStart, u.LineEnd), ModelName: cfg.ModelName,
-		Evidence: complianceUnitEvidence(u), ErrorMsg: strings.Join(s.errs, "\n"),
+		Location: fmt.Sprintf("%d-%d", u.LineStart, u.LineEnd), LineStart: u.LineStart, LineEnd: u.LineEnd,
+		ModelName: cfg.ModelName, Evidence: complianceUnitEvidence(u), ErrorMsg: strings.Join(s.errs, "\n"),
 	}
 	if len(u.Members) > 0 && u.Members[0].Kind != "text" {
 		f.ArtifactID = u.Members[0].ArtifactID
 	}
-	seenDoc := map[string]bool{}
-	for _, m := range u.Members {
-		for _, d := range m.CitedDocs {
-			if !seenDoc[d.Name] {
-				seenDoc[d.Name] = true
-				f.CitedDocuments = append(f.CitedDocuments, d.Name)
-			}
-		}
-	}
-
-	var b strings.Builder
 	switch {
 	case len(s.verdicts) > 0:
 		f.FindingType, f.ResultKind = "compliance_assessment", "compliance_assessment"
 		f.Language = r.language
 		f.Title = "Compliance assessment: " + label
-		related, text := complianceVerdictRows(s.verdicts, s.pool, u)
-		f.RelatedArtifacts = related
-		b.WriteString(text)
 		for _, v := range s.verdicts {
 			if v.Verdict == verdictNotCompliant {
 				f.Severity = "medium"
@@ -575,74 +574,180 @@ func (r *complianceReviewer) unitFinding(s *complianceUnitState, cfg ReviewerCon
 	case len(s.errs) > 0:
 		f.FindingType = "compliance_incomplete"
 		f.Title = "Compliance review incomplete: " + label
-		b.WriteString("The review of this activity stopped because of an error; see the error message.\n\n")
+		f.Description = "The review of this activity stopped because of an error; see the error message."
 	default:
 		f.FindingType = "compliance_no_grounding"
 		f.Title = "Activity with no grounding candidates found: " + label
-		b.WriteString("No candidate was left after the knowledge-base search and the relevance check. " +
-			"This does not mean the activity is unregulated.\n\n")
+		f.Description = "No candidate was left after the knowledge-base search and the relevance check. " +
+			"This does not mean the activity is unregulated."
 	}
-	for _, m := range u.Members {
-		fmt.Fprintf(&b, "Activity %s [%s, lines %d-%d]: %s\n", m.ID, m.Kind, m.LineStart, m.LineEnd, m.Label)
+	stageModels := map[string]string{}
+	for stage, m := range s.models {
+		stageModels[stage] = m
 	}
-	// The plain candidate list, in the form compliance-score reads: only judged candidates.
-	judged := complianceJudgedKeys(s.verdicts)
-	if len(judged) > 0 {
-		fmt.Fprintf(&b, "\nJudged %d candidate artifact(s) from the knowledge base:\n", len(judged))
-		var refs []complianceArtifactRef
-		for _, key := range judged {
-			c := s.pool[key]
-			if c == nil {
-				continue
-			}
-			cos := ""
-			if c.Cosine != nil {
-				cos = fmt.Sprintf(" (cosine %.3f)", *c.Cosine)
-			}
-			fmt.Fprintf(&b, "- [%s %s]%s record %d %s: %s\n", c.Type, c.ID, cos, c.RecordID, c.Title, complianceCap(c.Text, 300))
-			refs = append(refs, complianceArtifactRef{Type: c.Type, ID: c.ID, RecordID: c.RecordID})
-		}
-		if len(refs) > 0 {
-			f.RelatedArtifactID, f.RelatedRecordID = refs[0].ID, refs[0].RecordID
-			f.RelatedArtifactFields, _ = json.Marshal(refs)
-		}
-	}
-	f.Description = b.String()
+	f.Compliance = &complianceRecord{Run: r.runContext(cfg), Activities: complianceActivityRecords(s), StageModels: stageModels}
+	return f
+}
 
+// complianceRecordVersion is the reviewer output version of normalized findings; legacy
+// findings stored version 3 in metadata.artifact_fields.
+const complianceRecordVersion = 4
+
+// runContext is the configuration every finding of this review shares.
+func (r *complianceReviewer) runContext(cfg ReviewerConfig) *complianceRunContext {
 	prompts := map[string]string{"detect": cfg.PromptRef}
 	for stage, p := range r.prompts {
 		prompts[stage] = p.Ref
 	}
-	models := map[string]string{"primary": cfg.ModelName, "correction": r.correction.model, "fallback": r.fallback.model}
-	for stage, m := range s.models {
-		models[stage] = m
+	st := r.settings
+	return &complianceRunContext{
+		AssessmentDate: r.assessmentDate, SchemaVersion: complianceRecordVersion, Prompts: prompts,
+		Models: map[string]string{"primary": cfg.ModelName, "correction": r.correction.model, "fallback": r.fallback.model},
+		Settings: map[string]any{"top_metrics": st.TopMetrics, "top_provisions": st.TopProvisions, "top_artifacts": st.TopArtifacts,
+			"max_cited_documents": st.MaxCitedDocuments, "max_metrics": st.MaxMetrics, "max_provisions": st.MaxProvisions,
+			"relevance_min_score": st.RelevanceMinScore, "evidence_lines": st.EvidenceLines, "output_language": r.language},
 	}
-	f.ArtifactFields, _ = json.Marshal(map[string]any{
-		"version": 3, "assessment_date": r.assessmentDate, "document_level": u.documentLevel(),
-		"activities": u.Members, "retrieval_trace": s.traces, "relevance": s.relevance,
-		"candidate_verdicts": orderComplianceVerdicts(s.verdicts), "verification": s.checks,
-		"prompts": prompts, "models": models, "errors": s.errs,
-	})
-	return f
 }
 
-// complianceArtifactRef names a judged candidate in related_artifact_fields.
-type complianceArtifactRef struct {
-	Type     string `json:"type"`
-	ID       string `json:"id"`
-	RecordID int64  `json:"record_id"`
-}
-
-func complianceJudgedKeys(verdicts []complianceVerdict) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, v := range verdicts {
-		if !seen[v.ArtifactKey] {
-			seen[v.ArtifactKey] = true
-			out = append(out, v.ArtifactKey)
+// complianceActivityRecords turns a reviewed unit into activity records. Candidates are
+// numbered for display across the finding: judged ones in verdict display order, then the
+// others in activity and relevance order.
+func complianceActivityRecords(s *complianceUnitState) []complianceActivityRecord {
+	pairKey := func(activity, key string) string { return activity + "\x00" + key }
+	verdictOf := map[string]int{}
+	for i, v := range s.verdicts {
+		verdictOf[pairKey(v.ActivityID, v.ArtifactKey)] = i
+	}
+	displayOf := map[string]int{}
+	for i, v := range orderComplianceVerdicts(s.verdicts) {
+		displayOf[pairKey(v.ActivityID, v.ArtifactKey)] = i
+	}
+	checkOf := map[string]complianceCheck{}
+	for _, c := range s.checks {
+		checkOf[pairKey(c.ActivityID, c.ArtifactKey)] = c
+	}
+	next := len(s.verdicts)
+	out := make([]complianceActivityRecord, 0, len(s.unit.Members))
+	for _, m := range s.unit.Members {
+		a := complianceActivityRecord{LocalLabel: m.ID, Kind: m.Kind, Label: m.Label, LineStart: m.LineStart, LineEnd: m.LineEnd,
+			SourceText: m.Text, Details: complianceMemberDetails(m)}
+		if m.Kind == "metric" || m.Kind == "provision" {
+			a.SourceType, a.SourceID, a.SourceRowID = m.Kind, m.ArtifactID, m.RowID
 		}
+		for _, t := range s.traces {
+			if t.ActivityID == m.ID {
+				a.Searches = append(a.Searches, complianceSearchFromTrace(t))
+			}
+		}
+		add := func(key string, cand complianceCandidateRecord) {
+			c := s.pool[key]
+			if c != nil {
+				cand.Type, cand.ID, cand.RecordID, cand.Title, cand.Cosine = c.Type, c.ID, c.RecordID, c.Title, c.Cosine
+			} else {
+				cand.Type, cand.ID, _ = strings.Cut(key, "/")
+			}
+			pair := pairKey(m.ID, key)
+			if i, ok := verdictOf[pair]; ok {
+				v := s.verdicts[i]
+				order := i
+				cand.Status, cand.Verdict, cand.Binding, cand.Summary, cand.Note = candidateJudged, v.Verdict, v.Binding, v.Summary, v.Note
+				cand.JudgementOrder = &order
+				cand.DisplayOrder = displayOf[pair]
+				cand.Evidence = complianceVerdictEvidence(v, checkOf[pair], c)
+			} else {
+				if cand.Status == "" {
+					cand.Status = candidatePending
+				}
+				if msg, ok := s.judgeErrs[pair]; ok && cand.Kept {
+					cand.Status, cand.Error = candidateJudgementFailed, msg
+				}
+				cand.DisplayOrder = next
+				next++
+			}
+			a.Candidates = append(a.Candidates, cand)
+		}
+		for _, d := range s.relevance {
+			if d.ActivityID != m.ID {
+				continue
+			}
+			cand := complianceCandidateRecord{RelevanceAnswer: d.Relevant, RelevanceScore: d.Score, Kept: d.Kept}
+			if !d.Kept {
+				cand.Status = candidateRejected
+			}
+			add(d.ArtifactKey, cand)
+		}
+		if msg, failed := s.relevanceErrs[m.ID]; failed {
+			for _, key := range s.found[m.ID] {
+				add(key, complianceCandidateRecord{Status: candidateRelevanceFailed, Error: msg})
+			}
+		}
+		out = append(out, a)
 	}
 	return out
+}
+
+// complianceMemberDetails holds an activity's variable fields: the structured text activity
+// (without its source text, which the activity row keeps), duplicate locations, cited
+// documents and the document-level flag.
+func complianceMemberDetails(m *complianceMember) map[string]any {
+	d := map[string]any{}
+	if len(m.Copies) > 0 {
+		d["copies"] = m.Copies
+	}
+	if len(m.CitedDocs) > 0 {
+		d["cited_documents"] = m.CitedDocs
+	}
+	if m.Activity != nil {
+		var ta map[string]any
+		if b, err := json.Marshal(m.Activity); err == nil && json.Unmarshal(b, &ta) == nil {
+			delete(ta, "source_text")
+			d["text_activity"] = ta
+		}
+		if m.Activity.DocumentLevel {
+			d["document_level"] = true
+		}
+	}
+	return d
+}
+
+func complianceSearchFromTrace(t complianceRetrievalTrace) complianceSearchRecord {
+	filters := map[string]any{"artifact_types": t.ArtifactTypes, "excluded_record_ids": t.ExcludedRecordIDs}
+	if len(t.RecordIDs) > 0 {
+		filters["record_ids"] = t.RecordIDs
+	}
+	return complianceSearchRecord{Purpose: t.Purpose, Query: t.Query, Reference: t.Reference, CitedDocument: t.CitedDocument,
+		Keywords: t.Keywords, Filters: filters, Limit: t.Limit, PotentiallyTruncated: t.PotentiallyTruncated, Results: t.Results}
+}
+
+// complianceVerdictEvidence is what a judged candidate shows when it is expanded: the quotes,
+// the numeric check, the draft verdict, the verification and an excerpt of the candidate text
+// as the reviewer saw it.
+func complianceVerdictEvidence(v complianceVerdict, check complianceCheck, c *complianceCandidate) map[string]any {
+	e := map[string]any{}
+	set := func(k, val string) {
+		if val != "" {
+			e[k] = val
+		}
+	}
+	set("candidate_quote", v.CandidateQuote)
+	set("document_quote", v.DocumentQuote)
+	if v.DocumentLineStart > 0 {
+		e["document_line_start"], e["document_line_end"] = v.DocumentLineStart, v.DocumentLineEnd
+	}
+	if v.Numeric != nil {
+		e["numeric"] = v.Numeric
+	}
+	set("numeric_result", v.NumericResult)
+	set("draft_verdict", v.DraftVerdict)
+	if check.Reason != "" {
+		e["verification"] = map[string]any{"valid": check.Valid, "reason": check.Reason}
+	} else if v.Verification != "" {
+		e["verification"] = map[string]any{"reason": v.Verification}
+	}
+	if c != nil {
+		set("candidate_excerpt", complianceCap(c.Text, 300))
+	}
+	return e
 }
 
 func complianceUnitEvidence(u *complianceUnit) string {
@@ -666,11 +771,12 @@ func complianceUncheckedFinding(p *compliancePlan, s complianceSettings, input c
 	if p.WithoutLines > 0 {
 		fmt.Fprintf(&b, "%d metric(s) or provision(s) have no source lines and were not checked.\n", p.WithoutLines)
 	}
-	artifactFields, _ := json.Marshal(map[string]any{"unchecked_metrics": p.UncheckedMetrics, "unchecked_provisions": p.UncheckedProvisions,
-		"without_lines": p.WithoutLines, "max_metrics": s.MaxMetrics, "max_provisions": s.MaxProvisions})
+	extra := map[string]any{"unchecked_metrics": p.UncheckedMetrics, "unchecked_provisions": p.UncheckedProvisions,
+		"without_lines": p.WithoutLines, "max_metrics": s.MaxMetrics, "max_provisions": s.MaxProvisions}
 	return ReviewFinding{Pass: "P5", Aspect: "compliance", Severity: "info", FindingType: "compliance_unchecked", ResultKind: "compliance_unchecked",
 		Title: "Activities not checked because of limits", Description: b.String(), ModelName: model,
-		Location: fmt.Sprintf("%d-%d", input.startLine, input.endLine), ArtifactFields: artifactFields}, true
+		Location: fmt.Sprintf("%d-%d", input.startLine, input.endLine), LineStart: input.startLine, LineEnd: input.endLine,
+		Compliance: &complianceRecord{Extra: extra}}, true
 }
 
 // complianceDetectFailureFinding reports that the text activities of a chunk could not be found.
@@ -678,6 +784,7 @@ func complianceDetectFailureFinding(input chunkInput, err error, model string) R
 	label := fmt.Sprintf("text activities of lines %d-%d", input.startLine, input.endLine)
 	return ReviewFinding{Pass: "P5", Aspect: "compliance", Severity: "info", FindingType: "compliance_incomplete", ResultKind: "compliance_activity",
 		Title: "Compliance review incomplete: " + label, ModelName: model, ErrorMsg: err.Error(),
-		Description: "The " + label + " could not be found because of an error; see the error message. Their metrics and provisions were still reviewed.\n",
-		Location:    fmt.Sprintf("%d-%d", input.startLine, input.endLine)}
+		Description: "The " + label + " could not be found because of an error; see the error message. Their metrics and provisions were still reviewed.",
+		Location:    fmt.Sprintf("%d-%d", input.startLine, input.endLine), LineStart: input.startLine, LineEnd: input.endLine,
+		Compliance: &complianceRecord{}}
 }

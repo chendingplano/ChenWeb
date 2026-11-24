@@ -78,6 +78,13 @@ type ReviewFinding struct {
 	CitedDocuments []string `json:"cited_documents,omitempty"`
 	ErrorMsg       string   `json:"error_msg,omitempty"`
 	ProcStatus     string   `json:"proc_status,omitempty"`
+
+	// LineStart/LineEnd are the finding's source lines, and Compliance is what a normalized
+	// compliance finding stores in its own tables (openspec compliance-review-storage). A
+	// finding with Compliance set is saved by saveComplianceFinding, not as metadata.
+	LineStart  int               `json:"line_start,omitempty"`
+	LineEnd    int               `json:"line_end,omitempty"`
+	Compliance *complianceRecord `json:"-"`
 }
 
 // RelatedArtifactAnalysis is one candidate's comparison result within a
@@ -252,6 +259,8 @@ type ReviewFindingsSQLStore struct {
 	DB         *sql.DB
 	Translator FindingTranslator
 	Languages  []string
+	// ActivityIDs allocates compliance activity IDs; nil uses the shared ID manager.
+	ActivityIDs complianceActivityIDs
 }
 
 func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64, runID int64, findings []ReviewFinding) (int64, error) {
@@ -269,6 +278,36 @@ INSERT INTO kb.doc_review_findings
      cited_documents, error_msg, proc_status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 
+	// Normalized compliance findings go to their own tables, one transaction each, after
+	// the run context they share.
+	var inserted int64
+	var legacy []ReviewFinding
+	runContextSaved := false
+	ids := s.ActivityIDs
+	if ids == nil {
+		ids = defaultComplianceActivityIDs(nil)
+	}
+	for _, f := range findings {
+		if f.Compliance == nil {
+			legacy = append(legacy, f)
+			continue
+		}
+		if !runContextSaved && f.Compliance.Run != nil {
+			if err := upsertComplianceRunContext(ctx, s.DB, runID, f.Compliance.Run); err != nil {
+				return inserted, err
+			}
+			runContextSaved = true
+		}
+		if _, err := saveComplianceFinding(ctx, s.DB, ids, recordID, runID, f); err != nil {
+			return inserted, fmt.Errorf("save compliance finding %q: %w", f.Title, err)
+		}
+		inserted++
+	}
+	findings = legacy
+	if len(findings) == 0 {
+		return inserted, nil
+	}
+
 	languages := s.Languages
 	if len(languages) == 0 {
 		languages = docReviewReportLanguagesFromEnv()
@@ -281,10 +320,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		return prepared, nil
 	})
 	if err != nil {
-		return 0, err
+		return inserted, err
 	}
 
-	var inserted int64
 	for _, prepared := range preparedFindings {
 		var evidence, location, suggestion any
 		if prepared.Canonical.Evidence != "" {
@@ -630,9 +668,9 @@ type ReviewProcessor struct {
 	StandardsCompliancePromptRef  string
 	StandardsCompliancePromptText string
 
-	ComplianceModelName       string
-	CompliancePromptRef       string
-	CompliancePromptText      string
+	ComplianceModelName  string
+	CompliancePromptRef  string
+	CompliancePromptText string
 
 	LegalComplianceModelName  string
 	LegalCompliancePromptRef  string

@@ -928,11 +928,15 @@ func (c *DocReviewController) translateFindingContent(ctx context.Context, langu
 func (c *DocReviewController) loadFindingWithMetadata(ctx context.Context, id int64) (FindingItem, []byte, error) {
 	var f FindingItem
 	var metadata string
-	err := c.DB.QueryRowContext(ctx, `SELECT id, pass, aspect, severity, finding_type, title, description,
-	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-	       COALESCE(artifact_id,'')
-	FROM kb.doc_review_findings WHERE id = $1`, id,
+	// A normalized compliance finding keeps its content in its details row (openspec
+	// compliance-review-storage).
+	err := c.DB.QueryRowContext(ctx, `SELECT f.id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+	       COALESCE(d.description, f.description), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+	       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+	       COALESCE(f.metadata, '{}'::jsonb)::text, COALESCE(f.artifact_id,'')
+	FROM kb.doc_review_findings f
+	LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+	WHERE f.id = $1`, id,
 	).Scan(&f.ID, &f.Pass, &f.Aspect, &f.Severity, &f.FindingType,
 		&f.Title, &f.Description, &f.Evidence, &f.Location, &f.Suggestion,
 		&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID)

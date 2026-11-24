@@ -30,11 +30,11 @@ func TestDocReviewFindingSQLStore_ListDocReviewFindings_AppliesAllFiltersAndPagi
 		Page:          2,
 		PageSize:      25,
 	}
-	where := "input_record_id = $1 AND run_id = $2 AND pass = $3 AND aspect = $4 AND severity = $5 AND review_status = $6 AND finding_type = $7 AND artifact_id ILIKE $8 ESCAPE '\\' AND title ILIKE $9 ESCAPE '\\'"
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings WHERE "+where)).
+	where := "f.input_record_id = $1 AND f.run_id = $2 AND f.pass = $3 AND f.aspect = $4 AND f.severity = $5 AND f.review_status = $6 AND f.finding_type = $7 AND (f.artifact_id ILIKE $8 ESCAPE '\\' OR EXISTS (SELECT 1 FROM kb.doc_review_compliance_activities a WHERE a.finding_id = f.id AND a.source_artifact_id ILIKE $8 ESCAPE '\\')) AND f.title ILIKE $9 ESCAPE '\\'"
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings f WHERE "+where)).
 		WithArgs(inputRecordID, runID, "P5", "metrics", "high", "pending", "issue", "%91\\_mtc%", "%Mismatch%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(26))
-	mock.ExpectQuery(`SELECT id, input_record_id, run_id, pass, aspect, severity, finding_type, title,.*FROM kb\.doc_review_findings\s+WHERE input_record_id = \$1 AND run_id = \$2 AND pass = \$3 AND aspect = \$4 AND severity = \$5 AND review_status = \$6 AND finding_type = \$7 AND artifact_id ILIKE \$8 ESCAPE '\\' AND title ILIKE \$9 ESCAPE '\\'\s+ORDER BY run_id DESC, id ASC\s+LIMIT \$10 OFFSET \$11`).
+	mock.ExpectQuery(`SELECT f\.id, f\.input_record_id, .*FROM kb\.doc_review_findings f\s+LEFT JOIN kb\.doc_review_finding_details d ON d\.finding_id = f\.id\s+` + regexp.QuoteMeta("WHERE "+where) + `\s+ORDER BY f\.run_id DESC, f\.id ASC\s+LIMIT \$10 OFFSET \$11`).
 		WithArgs(inputRecordID, runID, "P5", "metrics", "high", "pending", "issue", "%91\\_mtc%", "%Mismatch%", 25, 25).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "input_record_id", "run_id", "pass", "aspect", "severity", "finding_type", "title",
@@ -60,7 +60,7 @@ func TestDocReviewFindingSQLStore_ListDocReviewFindings_ReturnsCountError(t *tes
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings ")).WillReturnError(errors.New("database unavailable"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings f ")).WillReturnError(errors.New("database unavailable"))
 
 	rows, total, err := (DocReviewFindingSQLStore{DB: db}).ListDocReviewFindings(context.Background(), DocReviewFindingFilter{})
 	if err == nil || rows != nil || total != 0 {
@@ -77,10 +77,11 @@ func TestDocReviewFindingSQLStore_ListDocReviewFindings_EscapesLikeFilters(t *te
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings WHERE artifact_id ILIKE $1 ESCAPE '\\' AND title ILIKE $2 ESCAPE '\\'")).
+	escWhere := "WHERE (f.artifact_id ILIKE $1 ESCAPE '\\' OR EXISTS (SELECT 1 FROM kb.doc_review_compliance_activities a WHERE a.finding_id = f.id AND a.source_artifact_id ILIKE $1 ESCAPE '\\')) AND f.title ILIKE $2 ESCAPE '\\'"
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings f " + escWhere)).
 		WithArgs("%a\\_b\\%c\\\\d%", "%x\\_y\\%z\\\\q%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(`SELECT id, input_record_id, run_id, pass, aspect, severity, finding_type, title,.*FROM kb\.doc_review_findings\s+WHERE artifact_id ILIKE \$1 ESCAPE '\\' AND title ILIKE \$2 ESCAPE '\\'\s+ORDER BY run_id DESC, id ASC\s+LIMIT \$3 OFFSET \$4`).
+	mock.ExpectQuery(`SELECT f\.id, .*FROM kb\.doc_review_findings f\s+LEFT JOIN kb\.doc_review_finding_details d ON d\.finding_id = f\.id\s+` + regexp.QuoteMeta(escWhere) + `\s+ORDER BY f\.run_id DESC, f\.id ASC\s+LIMIT \$3 OFFSET \$4`).
 		WithArgs("%a\\_b\\%c\\\\d%", "%x\\_y\\%z\\\\q%", 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "input_record_id", "run_id", "pass", "aspect", "severity", "finding_type", "title",

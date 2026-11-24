@@ -65,7 +65,7 @@ func (s DocReviewFindingSQLStore) ListDocReviewFindings(ctx context.Context, f D
 
 	where, args, index := make([]string, 0, 9), make([]any, 0, 9), 1
 	add := func(column, operator string, value any) {
-		where = append(where, column+" "+operator+" $"+strconv.Itoa(index))
+		where = append(where, "f."+column+" "+operator+" $"+strconv.Itoa(index))
 		args = append(args, value)
 		index++
 	}
@@ -91,12 +91,16 @@ func (s DocReviewFindingSQLStore) ListDocReviewFindings(ctx context.Context, f D
 		add("finding_type", "=", f.FindingType)
 	}
 	if f.ArtifactID != "" {
-		where = append(where, "artifact_id ILIKE $"+strconv.Itoa(index)+" ESCAPE '\\'")
+		// A compliance finding names only its first activity's artifact; its other activities
+		// carry their own (openspec compliance-review-storage).
+		p := "$" + strconv.Itoa(index)
+		where = append(where, "(f.artifact_id ILIKE "+p+" ESCAPE '\\' OR EXISTS (SELECT 1 FROM kb.doc_review_compliance_activities a"+
+			" WHERE a.finding_id = f.id AND a.source_artifact_id ILIKE "+p+" ESCAPE '\\'))")
 		args = append(args, "%"+escapeDocReviewLogLike(f.ArtifactID)+"%")
 		index++
 	}
 	if f.Title != "" {
-		where = append(where, "title ILIKE $"+strconv.Itoa(index)+" ESCAPE '\\'")
+		where = append(where, "f.title ILIKE $"+strconv.Itoa(index)+" ESCAPE '\\'")
 		args = append(args, "%"+escapeDocReviewLogLike(f.Title)+"%")
 		index++
 	}
@@ -106,19 +110,25 @@ func (s DocReviewFindingSQLStore) ListDocReviewFindings(ctx context.Context, f D
 	}
 
 	var total int64
-	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM kb.doc_review_findings "+whereClause, args...).Scan(&total); err != nil {
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM kb.doc_review_findings f "+whereClause, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
+	// A compliance finding returns marker metadata, and a normalized one its content from its
+	// details row (openspec compliance-review-storage).
 	stmt := `
-SELECT id, input_record_id, run_id, pass, aspect, severity, finding_type, title,
-       COALESCE(description,''), COALESCE(evidence,''), COALESCE(location,''),
-       COALESCE(suggestion,''), COALESCE(confidence,0), COALESCE(review_status,'pending'),
-       COALESCE(artifact_id,''), COALESCE(metadata, '{}'::jsonb)::text,
-       COALESCE(reference_doc, '{}'::jsonb)::text
-FROM kb.doc_review_findings
+SELECT f.id, f.input_record_id, f.run_id, f.pass, f.aspect, f.severity, f.finding_type, f.title,
+       COALESCE(d.description, f.description, ''), COALESCE(d.evidence, f.evidence, ''), COALESCE(f.location,''),
+       COALESCE(d.suggestion, f.suggestion, ''), COALESCE(f.confidence,0), COALESCE(f.review_status,'pending'),
+       COALESCE(f.artifact_id,''),
+       CASE WHEN f.aspect = 'compliance' THEN jsonb_strip_nulls(jsonb_build_object('schema_version', f.metadata->'schema_version',
+            'result_kind', f.metadata->'result_kind', 'storage_version', f.storage_version))::text
+            ELSE COALESCE(f.metadata, '{}'::jsonb)::text END,
+       COALESCE(f.reference_doc, '{}'::jsonb)::text
+FROM kb.doc_review_findings f
+LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
 ` + whereClause + `
-ORDER BY run_id DESC, id ASC
+ORDER BY f.run_id DESC, f.id ASC
 LIMIT $` + strconv.Itoa(index) + ` OFFSET $` + strconv.Itoa(index+1)
 	rows, err := s.DB.QueryContext(ctx, stmt, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {

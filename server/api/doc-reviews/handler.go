@@ -188,14 +188,19 @@ func GetRequest(c echo.Context) error {
 	})
 }
 
-// GetReport returns the full report JSON.
+// GetReport returns the full report JSON. With ?view=summary it leaves out the report's
+// finding arrays, which the report view loads separately (openspec compliance-review-storage).
 func GetReport(c echo.Context) error {
 	id, err := parseID(c, "id")
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
 	gen := NewDocReviewReportGenerator()
-	report, err := gen.GetReport(c.Request().Context(), id)
+	load := gen.GetReport
+	if c.QueryParam("view") == "summary" {
+		load = gen.GetReportSummary
+	}
+	report, err := load(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": err.Error()})
 	}

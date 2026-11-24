@@ -107,6 +107,23 @@ export type FindingItem = {
 	run_id?: number;
 	metadata?: unknown;
 	reference_doc?: unknown;
+	// Summary fields of a compliance finding (openspec compliance-review-storage). Compliance
+	// findings arrive without description, evidence, suggestion or metadata; their details
+	// load on demand with getFindingDetails.
+	line_start?: number;
+	line_end?: number;
+	proc_status?: string;
+	storage_version?: number;
+	counts?: ComplianceCounts;
+};
+
+export type ComplianceCounts = {
+	activities: number;
+	search_results: number;
+	selected: number;
+	relevant: number;
+	judged: number;
+	verdicts: Record<string, number>;
 };
 
 // listAspects loads the review aspects and package (group) list. Labels and
@@ -218,8 +235,10 @@ export async function getDocReviewLogsFor(unitKey: string, runId: number): Promi
 	return rows.find((row) => row.unit_key === unitKey || row.unit_key.startsWith(`${unitKey}#`)) ?? null;
 }
 
-export async function getReport(id: number): Promise<any> {
-	const res = await fetch(`${BASE}/reports/${id}`, { credentials: 'same-origin' });
+// getReport loads a report; view 'summary' leaves out its finding arrays, which the report
+// view loads through getRequest and listRunFindings instead.
+export async function getReport(id: number, view?: 'summary'): Promise<any> {
+	const res = await fetch(`${BASE}/reports/${id}${view ? `?view=${view}` : ''}`, { credentials: 'same-origin' });
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load report');
 	return data.report;
@@ -444,4 +463,166 @@ export async function listReviewRuns(filter: ReviewRunListFilter = {}): Promise<
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load review runs');
 	return data.runs || [];
+}
+
+// ── Compliance review storage (openspec compliance-review-storage) ─────────────
+
+export type Page<T> = { items: T[]; total?: number; next_cursor?: string };
+
+async function getJSON(url: string, fallback: string): Promise<any> {
+	const res = await fetch(url, { credentials: 'same-origin' });
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || fallback);
+	return data;
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+	const q = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') q.set(k, String(v));
+	const s = q.toString();
+	return s ? `?${s}` : '';
+}
+
+// listRunFindings returns one page of a run's finding summaries for an aspect.
+export async function listRunFindings(
+	runId: number,
+	opts: { aspect: string; cursor?: string; limit?: number; excludeStatus?: string[] }
+): Promise<Page<FindingItem>> {
+	const data = await getJSON(
+		`${BASE}/runs/${runId}/findings${query({ aspect: opts.aspect, cursor: opts.cursor, limit: opts.limit, exclude_status: opts.excludeStatus?.join(',') })}`,
+		'Failed to load findings'
+	);
+	return { items: data.items || [], total: data.total ?? 0, next_cursor: data.next_cursor || undefined };
+}
+
+export type ComplianceActivitySummary = {
+	activity_id: number;
+	local_label: string;
+	display_order: number;
+	kind: string;
+	label: string;
+	line_start?: number;
+	line_end?: number;
+	source_artifact_type?: string;
+	source_artifact_id?: string;
+	document_level?: boolean;
+};
+
+export type ComplianceCandidateSummary = {
+	id: number;
+	activity_id: number;
+	activity_label: string;
+	local_label: string;
+	candidate_type: string;
+	candidate_id: string;
+	candidate_record_id?: number;
+	document_title?: string;
+	relevance_answer?: string;
+	relevance_score?: number;
+	kept: boolean;
+	status: string; // rejected | relevance_failed | pending | judgement_failed | judged
+	verdict?: string;
+	binding?: string;
+	summary?: string;
+	note?: string;
+	display_order: number;
+};
+
+export type ComplianceCandidateDetail = ComplianceCandidateSummary & {
+	finding_id: number;
+	cosine?: number;
+	error_message?: string;
+	judgement_order?: number;
+	evidence: Record<string, unknown>;
+};
+
+export type FindingDetails = {
+	finding: FindingItem;
+	content?: {
+		description: string;
+		evidence: string;
+		suggestion: string;
+		error_message?: string;
+		canonical_language?: string;
+		stage_models?: Record<string, string>;
+		extra?: Record<string, unknown>;
+		language?: string;
+	};
+	run_context?: { assessment_date?: string; schema_version: number; prompts?: Record<string, string>; models?: Record<string, string>; review_flags?: string[] } | null;
+	activities?: Page<ComplianceActivitySummary>;
+	candidates?: Page<ComplianceCandidateSummary>;
+	legacy?: { description: string; evidence: string; suggestion: string; error_msg?: string };
+};
+
+export type CandidateFilter = 'judged' | 'all';
+
+export async function getFindingDetails(id: number, opts: { language?: string; filter?: CandidateFilter } = {}): Promise<FindingDetails> {
+	const data = await getJSON(`${BASE}/findings/${id}/details${query({ language: opts.language, filter: opts.filter })}`, 'Failed to load finding details');
+	return data.details as FindingDetails;
+}
+
+export async function listFindingActivities(id: number, cursor?: string): Promise<Page<ComplianceActivitySummary>> {
+	const data = await getJSON(`${BASE}/findings/${id}/activities${query({ cursor })}`, 'Failed to load activities');
+	return { items: data.items || [], next_cursor: data.next_cursor || undefined };
+}
+
+export async function listFindingCandidates(id: number, filter: CandidateFilter, cursor?: string): Promise<Page<ComplianceCandidateSummary>> {
+	const data = await getJSON(`${BASE}/findings/${id}/candidates${query({ filter, cursor })}`, 'Failed to load candidates');
+	return { items: data.items || [], total: data.total ?? 0, next_cursor: data.next_cursor || undefined };
+}
+
+export async function getComplianceCandidate(id: number): Promise<ComplianceCandidateDetail> {
+	const data = await getJSON(`${BASE}/compliance/candidates/${id}`, 'Failed to load candidate');
+	return data.candidate as ComplianceCandidateDetail;
+}
+
+export type ComplianceSearchSummary = {
+	id: number;
+	activity_id: number;
+	local_label: string;
+	activity_label: string;
+	ordinal: number;
+	purpose: string;
+	query?: string;
+	reference?: string;
+	cited_document?: string;
+	keywords: string[];
+	filters: Record<string, unknown>;
+	result_limit: number;
+	potentially_truncated: boolean;
+	result_count: number;
+};
+
+export type ComplianceSearchResult = {
+	rank: number;
+	candidate_type: string;
+	candidate_id: string;
+	candidate_record_id?: number;
+	document_title?: string;
+	score?: number;
+	diagnostics: Record<string, unknown>;
+};
+
+export async function listFindingSearches(id: number): Promise<ComplianceSearchSummary[]> {
+	const data = await getJSON(`${BASE}/findings/${id}/searches`, 'Failed to load search history');
+	return data.items || [];
+}
+
+export async function listSearchResults(searchId: number, cursor?: string): Promise<Page<ComplianceSearchResult>> {
+	const data = await getJSON(`${BASE}/compliance/searches/${searchId}/results${query({ cursor })}`, 'Failed to load search results');
+	return { items: data.items || [], next_cursor: data.next_cursor || undefined };
+}
+
+// exportFinding loads a finding's complete audit record, assembled on the server.
+export async function exportFinding(id: number): Promise<unknown> {
+	const res = await fetch(findingExportUrl(id), { credentials: 'same-origin' });
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({}));
+		throw new Error(data.error_msg || 'Failed to export finding');
+	}
+	return res.json();
+}
+
+export function findingExportUrl(id: number): string {
+	return `${BASE}/findings/${id}/export`;
 }

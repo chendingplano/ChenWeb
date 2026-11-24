@@ -105,6 +105,14 @@ type FindingItem struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 	// ReferenceDoc is the raw kb.doc_review_findings.reference_doc JSONB blob.
 	ReferenceDoc json.RawMessage `json:"reference_doc,omitempty"`
+	// LineStart/LineEnd, ProcStatus, StorageVersion and Counts are the summary fields of a
+	// compliance finding (openspec compliance-review-storage). Compliance findings in a
+	// request carry no description, evidence, suggestion or metadata; details load on demand.
+	LineStart      int               `json:"line_start,omitempty"`
+	LineEnd        int               `json:"line_end,omitempty"`
+	ProcStatus     string            `json:"proc_status,omitempty"`
+	StorageVersion int               `json:"storage_version,omitempty"`
+	Counts         *ComplianceCounts `json:"counts,omitempty"`
 }
 
 // FindingLocalizedContent stores localized prose for one language.

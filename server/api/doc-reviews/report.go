@@ -312,15 +312,29 @@ func (g *DocReviewReportGenerator) Persist(ctx context.Context, req *RequestStat
 
 // GetReport returns the full report from the database.
 func (g *DocReviewReportGenerator) GetReport(ctx context.Context, reportID int64) (*ReportDetail, error) {
+	return g.getReport(ctx, reportID, false)
+}
+
+// GetReportSummary returns a report without its finding arrays and markdown, which the
+// database leaves out (openspec compliance-review-storage).
+func (g *DocReviewReportGenerator) GetReportSummary(ctx context.Context, reportID int64) (*ReportDetail, error) {
+	return g.getReport(ctx, reportID, true)
+}
+
+func (g *DocReviewReportGenerator) getReport(ctx context.Context, reportID int64, summary bool) (*ReportDetail, error) {
 	var d ReportDetail
 	var execSummary, markdown string
 	var reportJSONBytes []byte
 
+	columns := "report_json::text, report_markdown"
+	if summary {
+		columns = "(report_json - 'findings' - 'findings_by_pass')::text, ''"
+	}
 	err := g.DB.QueryRowContext(ctx, `
 		SELECT id, request_id, input_record_id, run_id,
 		       total_findings, high_count, medium_count, low_count,
 		       overall_assessment, create_time::text,
-		       executive_summary, report_json::text, report_markdown
+		       executive_summary, `+columns+`
 		FROM kb.doc_review_reports WHERE id = $1`, reportID,
 	).Scan(&d.ID, &d.RequestID, &d.InputRecordID, &d.RunID,
 		&d.TotalFindings, &d.HighCount, &d.MediumCount, &d.LowCount,

@@ -23,9 +23,9 @@ func TestListDocReviewFindings_ReturnsRowsAndPagination(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings ")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings f ")).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
-	mock.ExpectQuery(`SELECT id, input_record_id, run_id, pass, aspect, severity, finding_type, title,.*FROM kb\.doc_review_findings\s+ORDER BY run_id DESC, id ASC\s+LIMIT \$1 OFFSET \$2`).
+	mock.ExpectQuery(`SELECT f\.id, f\.input_record_id, f\.run_id, f\.pass, f\.aspect, f\.severity, f\.finding_type, f\.title,.*FROM kb\.doc_review_findings f\s+LEFT JOIN kb\.doc_review_finding_details d ON d\.finding_id = f\.id\s+ORDER BY f\.run_id DESC, f\.id ASC\s+LIMIT \$1 OFFSET \$2`).
 		WithArgs(50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "input_record_id", "run_id", "pass", "aspect", "severity", "finding_type", "title",
@@ -113,8 +113,8 @@ func TestListDocReviewFindings_NormalizesPaginationBounds(t *testing.T) {
 			oldDB := ApiTypes.ProjectDBHandle
 			ApiTypes.ProjectDBHandle = db
 			defer func() { ApiTypes.ProjectDBHandle = oldDB }()
-			mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings ")).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-			mock.ExpectQuery(`SELECT id, input_record_id, run_id, pass, aspect, severity, finding_type, title,.*FROM kb\.doc_review_findings\s+ORDER BY run_id DESC, id ASC\s+LIMIT \$1 OFFSET \$2`).
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_review_findings f ")).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			mock.ExpectQuery(`SELECT f\.id, f\.input_record_id, f\.run_id, f\.pass, f\.aspect, f\.severity, f\.finding_type, f\.title,.*FROM kb\.doc_review_findings f\s+LEFT JOIN kb\.doc_review_finding_details d ON d\.finding_id = f\.id\s+ORDER BY f\.run_id DESC, f\.id ASC\s+LIMIT \$1 OFFSET \$2`).
 				WithArgs(test.wantQueryArgs...).
 				WillReturnRows(sqlmock.NewRows([]string{
 					"id", "input_record_id", "run_id", "pass", "aspect", "severity", "finding_type", "title",

@@ -8,9 +8,11 @@
 		translateFinding,
 		regenerateReport,
 		generateCorrectionReport,
+		listRunFindings,
 		type FindingItem,
 		type ReviewPackageInfo
 	} from '$lib/services/docReviewService';
+	import { verdictCounts } from '$lib/components/home3/compliance-finding-panel.js';
 	import { getKbFrontendConfig } from '$lib/services/kbService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
@@ -77,7 +79,20 @@
 	// DR16: live findings (with ids + review_status) drive the action buttons.
 	let findings = $state<FindingItem[]>([]);
 	// The finding shown in the Document Structure panel's Finding Details view.
-	let selectedFinding = $derived(findings.find((f) => String(f.id) === activeKey) ?? null);
+	// Compliance findings arrive as compact entries (enough to count and highlight them all);
+	// their list renders summary pages of COMPLIANCE_PAGE loaded from the server
+	// (openspec compliance-review-storage).
+	const COMPLIANCE_PAGE = 25;
+	let complianceRows = $state<FindingItem[]>([]);
+	let complianceTotal = $state(0);
+	let complianceCursor = $state<string | undefined>(undefined);
+	let complianceLoading = $state(false);
+	let complianceLoadedFor = $state('');
+
+	// A compliance row selected from a loaded summary page carries its counters.
+	let selectedFinding = $derived(
+		complianceRows.find((f) => String(f.id) === activeKey) ?? findings.find((f) => String(f.id) === activeKey) ?? null
+	);
 	let packages = $state<ReviewPackageInfo[]>([]);
 	let supportedLanguages = $state<string[]>(['en']);
 	let defaultLanguage = $state('en');
@@ -402,7 +417,7 @@
 				supportedLanguages = ['en'];
 				defaultLanguage = 'en';
 			}
-			const report = await getReport(reportId);
+			const report = await getReport(reportId, 'summary');
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
 			requestId = report?.request_id ?? null;
 			reportRunId = report?.run_id ?? null;
@@ -438,6 +453,70 @@
 
 	function setFindingStatus(id: number, status: string) {
 		findings = findings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
+		complianceRows = complianceRows.map((f) => (f.id === id ? { ...f, review_status: status } : f));
+	}
+
+	function complianceExcluded(): string[] {
+		return showMode === 'active' ? ['deleted', 'corrected'] : ['deleted'];
+	}
+
+	async function loadCompliancePage(reset: boolean) {
+		if (reportRunId == null || complianceLoading) return;
+		complianceLoading = true;
+		try {
+			const page = await listRunFindings(reportRunId, {
+				aspect: 'compliance',
+				limit: COMPLIANCE_PAGE,
+				cursor: reset ? undefined : complianceCursor,
+				excludeStatus: complianceExcluded()
+			});
+			complianceRows = reset ? page.items : [...complianceRows, ...page.items];
+			complianceTotal = page.total ?? complianceRows.length;
+			complianceCursor = page.next_cursor;
+			complianceLoadedFor = `${reportRunId}|${showMode}`;
+		} catch (e) {
+			showToast('warn', msg.doc_review_report_could_not_load_editable_findings() + (e instanceof Error ? e.message : String(e)));
+		} finally {
+			complianceLoading = false;
+		}
+	}
+
+	// Load the first page when the Compliance list is open, and again when the run or the
+	// active/all filter changes.
+	$effect(() => {
+		const open = Object.entries(expandedReviewers).some(([key, v]) => v && key.endsWith('::compliance'));
+		const want = `${reportRunId}|${showMode}`;
+		if (open && want !== complianceLoadedFor) void loadCompliancePage(true);
+	});
+
+	function verdictName(v: string): string {
+		switch (v) {
+			case 'compliant':
+				return msg.finding_details_panel_verdict_compliant();
+			case 'compatible':
+				return msg.finding_details_panel_verdict_compatible();
+			case 'not_compliant':
+				return msg.finding_details_panel_verdict_not_compliant();
+			case 'undetermined':
+				return msg.finding_details_panel_verdict_undetermined();
+			case 'unqualified':
+				return msg.finding_details_panel_verdict_unqualified();
+		}
+		return v;
+	}
+
+	// The loaded compliance rows the active/all filter shows (a deleted row stays hidden).
+	let visibleComplianceRows = $derived(
+		complianceRows.filter((f) => f.review_status !== 'deleted' && !(showMode === 'active' && f.review_status === 'corrected'))
+	);
+
+	function complianceCountsText(f: FindingItem): string {
+		const c = f.counts;
+		if (!c) return '';
+		const verdicts = verdictCounts(c)
+			.map((v) => msg.doc_review_report_verdict_count({ count: v.count, verdict: verdictName(v.verdict) }))
+			.join(', ');
+		return msg.doc_review_report_compliance_counts({ activities: c.activities, relevant: c.relevant, selected: c.selected, judged: c.judged, verdicts: verdicts || '—' });
 	}
 
 	function applyTranslatedFinding(id: number, translated: FindingItem, language: string) {
@@ -749,6 +828,7 @@
 						</div>
 						{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
 						{#if f.suggestion}<p class="finding-sug"><em>{msg.doc_review_report_suggestion()}</em> {f.suggestion}</p>{/if}
+						{#if f.counts}<p class="finding-loc">{complianceCountsText(f)}</p>{/if}
 						<p class="finding-loc">{msg.doc_review_report_confidence({ value: Math.round(f.confidence * 100) })}</p>
 						{#if f.location}<p class="finding-loc">{msg.doc_review_report_location({ location: f.location })}</p>{/if}
 					</button>
@@ -816,9 +896,22 @@
 
 										{#if isReviewerExpanded(rkey)}
 											<div class="reviewer-body">
-												{#each rv.items as f (f.id)}
-													{@render findingRow(f)}
-												{/each}
+												{#if rv.aspect === 'compliance'}
+													{#each visibleComplianceRows as f (f.id)}
+														{@render findingRow(f)}
+													{/each}
+													{#if complianceLoading}
+														<p class="finding-loc">{msg.doc_review_report_loading_findings()}</p>
+													{:else if complianceCursor}
+														<button type="button" class="act load-more" onclick={() => loadCompliancePage(false)}>
+															{msg.doc_review_report_load_more({ shown: complianceRows.length, total: complianceTotal })}
+														</button>
+													{/if}
+												{:else}
+													{#each rv.items as f (f.id)}
+														{@render findingRow(f)}
+													{/each}
+												{/if}
 											</div>
 										{/if}
 									</div>
@@ -1210,6 +1303,9 @@
 		font-size: 0.76rem;
 		cursor: pointer;
 		transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+	}
+	.act.load-more {
+		margin: 0.4rem 0 0.6rem 0.75rem;
 	}
 	.act:hover:not(:disabled) {
 		border-color: var(--accent);

@@ -336,8 +336,14 @@ func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID,
 	if err != nil || req == nil || req.Request.Status != "completed" {
 		return
 	}
+	// The request's compliance findings are compact entries; the report needs their full text.
+	findings, _, err := loadReportFindingsWithMetadata(ctx, c.DB, &req.Request)
+	if err != nil {
+		logger.Warn("background report findings load failed", "request_id", requestID, "error", err)
+		return
+	}
 	gen := NewDocReviewReportGenerator()
-	report, buildErr := gen.Build(ctx, &req.Request, req.Findings)
+	report, buildErr := gen.Build(ctx, &req.Request, findings)
 	if buildErr != nil {
 		logger.Warn("background report build failed", "request_id", requestID, "error", buildErr)
 		return
@@ -392,13 +398,21 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		}
 	}
 
-	// Only return findings if completed.
+	// Only return findings if completed. Compliance findings are compact entries: identity,
+	// title, severity, statuses and source range, without description, evidence, suggestion
+	// or metadata (openspec compliance-review-storage); their details load on demand.
 	if effectiveRequestRunStatus(req) == "completed" && req.LatestRunID > 0 {
 		rows, err := c.DB.QueryContext(ctx, `
-			SELECT id, pass, aspect, severity, finding_type, title, description,
-			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
-			       COALESCE(artifact_id,''), COALESCE(reference_doc, '{}'::jsonb)::text
+			SELECT id, pass, aspect, severity, finding_type, title,
+			       CASE WHEN aspect = 'compliance' THEN '' ELSE description END,
+			       CASE WHEN aspect = 'compliance' THEN '' ELSE COALESCE(evidence,'') END,
+			       COALESCE(location,''),
+			       CASE WHEN aspect = 'compliance' THEN '' ELSE COALESCE(suggestion,'') END,
+			       COALESCE(confidence,0), COALESCE(review_status,'pending'),
+			       CASE WHEN aspect = 'compliance' THEN '' ELSE COALESCE(metadata, '{}'::jsonb)::text END,
+			       COALESCE(artifact_id,''),
+			       CASE WHEN aspect = 'compliance' THEN '' ELSE COALESCE(reference_doc, '{}'::jsonb)::text END,
+			       COALESCE(line_start, 0), COALESCE(line_end, 0), COALESCE(proc_status, ''), storage_version
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND run_id = $2
 			  AND ($3 = '' OR pass = $3)
@@ -416,9 +430,19 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 			var metadata, referenceDoc string
 			if err := rows.Scan(&f.ID, &f.Pass, &f.Aspect, &f.Severity, &f.FindingType,
 				&f.Title, &f.Description, &f.Evidence, &f.Location, &f.Suggestion,
-				&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID, &referenceDoc); err != nil {
+				&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID, &referenceDoc,
+				&f.LineStart, &f.LineEnd, &f.ProcStatus, &f.StorageVersion); err != nil {
 				return nil, fmt.Errorf("scan finding: %w", err)
 			}
+			if f.Aspect == "compliance" {
+				f.RunID = req.LatestRunID
+				if f.LineStart == 0 {
+					f.LineStart, f.LineEnd = parseLineRange(f.Location)
+				}
+				localized = append(localized, f)
+				continue
+			}
+			f.LineStart, f.LineEnd, f.ProcStatus, f.StorageVersion = 0, 0, "", 0
 			metadataByFindingID[f.ID] = []byte(metadata)
 			applyFindingMetadata(&f, []byte(metadata))
 			f.Metadata = json.RawMessage(metadata)

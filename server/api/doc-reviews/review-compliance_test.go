@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -237,6 +238,38 @@ func findingOfType(fs []ReviewFinding, typ string) (ReviewFinding, bool) {
 		}
 	}
 	return ReviewFinding{}, false
+}
+
+// judgedOf returns a finding's judged candidates in display order.
+func judgedOf(f ReviewFinding) []complianceCandidateRecord {
+	var out []complianceCandidateRecord
+	for _, c := range candidatesOf(f) {
+		if c.Status == candidateJudged {
+			out = append(out, c)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].DisplayOrder < out[j].DisplayOrder })
+	return out
+}
+
+// candidatesOf returns every candidate row of a finding, activity by activity.
+func candidatesOf(f ReviewFinding) []complianceCandidateRecord {
+	if f.Compliance == nil {
+		return nil
+	}
+	var out []complianceCandidateRecord
+	for _, a := range f.Compliance.Activities {
+		out = append(out, a.Candidates...)
+	}
+	return out
+}
+
+func judgedIDs(f ReviewFinding) string {
+	var ids []string
+	for _, c := range judgedOf(f) {
+		ids = append(ids, c.ID)
+	}
+	return strings.Join(ids, ",")
 }
 
 // ---- prerequisites and configuration ----
@@ -595,17 +628,17 @@ func TestComplianceSearchesEachKindWithItsOwnLimit(t *testing.T) {
 		}
 	}
 	for _, f := range fs {
-		if strings.Contains(f.Title, "store fish") && (len(f.CitedDocuments) != 1 || f.CitedDocuments[0] != "GB/T 1234") {
-			t.Errorf("cited documents = %v, want [GB/T 1234]", f.CitedDocuments)
+		if strings.Contains(f.Title, "store fish") {
+			cited, _ := f.Compliance.Activities[0].Details["cited_documents"].([]complianceCitedDoc)
+			if len(cited) != 1 || cited[0].Name != "GB/T 1234" {
+				t.Errorf("cited documents = %v, want [GB/T 1234]", cited)
+			}
 		}
 	}
-	var meta struct {
-		Trace []complianceRetrievalTrace `json:"retrieval_trace"`
-	}
 	f, _ := findingOfType(fs, "compliance_assessment")
-	_ = json.Unmarshal(f.ArtifactFields, &meta)
-	if len(meta.Trace) == 0 || len(meta.Trace[0].ExcludedRecordIDs) != 2 || meta.Trace[0].Limit == 0 {
-		t.Errorf("stored trace = %+v", meta.Trace)
+	searches := f.Compliance.Activities[0].Searches
+	if len(searches) == 0 || len(searches[0].Filters["excluded_record_ids"].([]int64)) != 2 || searches[0].Limit == 0 {
+		t.Errorf("stored searches = %+v", searches)
 	}
 }
 
@@ -636,8 +669,11 @@ func TestComplianceCitedDocumentsSearchedWithinTheLimit(t *testing.T) {
 		t.Fatalf("searches = %+v, want the activity search then one search of record 55", rig.searches)
 	}
 	f, _ := findingOfType(fs, "compliance_assessment")
-	if !strings.Contains(f.Description, "[provision 55_prv_9]") {
-		t.Errorf("the referenced document's passage was not judged: %s", f.Description)
+	if !strings.Contains(judgedIDs(f), "55_prv_9") {
+		t.Errorf("the referenced document's passage was not judged: %s", judgedIDs(f))
+	}
+	if s := f.Compliance.Activities[0].Searches; len(s) != 2 || s[1].Purpose != "candidate_reference" {
+		t.Errorf("searches = %+v, want the activity search and the candidate's reference", s)
 	}
 }
 
@@ -674,20 +710,19 @@ func TestComplianceRelevanceRemovesUnrelatedCandidates(t *testing.T) {
 		t.Errorf("judgement input = %s, want only the relevant candidate", judged)
 	}
 	f, _ := findingOfType(fs, "compliance_assessment")
-	if strings.Contains(f.Description, "3_prv_1") {
-		t.Errorf("a removed candidate is listed: %s", f.Description)
+	if judgedIDs(f) != "2_prv_1" || f.Description != "" {
+		t.Errorf("judged = %s, description %q; want only 2_prv_1 and no description", judgedIDs(f), f.Description)
 	}
-	var meta struct {
-		Relevance []complianceRelevanceDecision `json:"relevance"`
-		Models    map[string]string             `json:"models"`
+	cands := candidatesOf(f)
+	if len(cands) != 2 || !cands[0].Kept || cands[1].Kept || cands[1].Status != candidateRejected ||
+		cands[1].RelevanceScore == nil || *cands[1].RelevanceScore != 1 || cands[1].RelevanceAnswer != "no" || cands[1].Verdict != "" {
+		t.Errorf("stored candidates = %+v", cands)
 	}
-	_ = json.Unmarshal(f.ArtifactFields, &meta)
-	if len(meta.Relevance) != 2 || !meta.Relevance[0].Kept || meta.Relevance[1].Kept ||
-		meta.Relevance[1].Score == nil || *meta.Relevance[1].Score != 1 || meta.Relevance[1].Relevant != "no" {
-		t.Errorf("stored decisions = %+v", meta.Relevance)
+	if f.Compliance.StageModels["relevance"] != "primary-model" || f.Compliance.Run.Models["primary"] != "primary-model" {
+		t.Errorf("stage models = %v, run models %v", f.Compliance.StageModels, f.Compliance.Run.Models)
 	}
-	if meta.Models["relevance"] != "primary-model" {
-		t.Errorf("models = %v, want the model that answered the relevance call", meta.Models)
+	if c := f.Compliance; len(c.Activities) != 1 || c.Activities[0].LocalLabel != "a1" || c.Activities[0].SourceID != "7_prv_1" || c.Activities[0].SourceType != "provision" {
+		t.Errorf("activities = %+v", c.Activities)
 	}
 
 	// When nothing is relevant the finding says no candidate was found.
@@ -812,8 +847,8 @@ func TestComplianceRelevanceWrongAnswerIsCorrected(t *testing.T) {
 		}
 	}
 	f, ok := findingOfType(fs, "compliance_assessment")
-	if !ok || f.ErrorMsg != "" || !strings.Contains(f.Description, "2_prv_1") || !strings.Contains(f.Description, "3_prv_1") {
-		t.Fatalf("findings = %+v", fs)
+	if !ok || f.ErrorMsg != "" || judgedIDs(f) != "2_prv_1,3_prv_1" {
+		t.Fatalf("findings = %+v, judged %s", fs, judgedIDs(f))
 	}
 	if len(rig.failed) != 1 || rig.failed[0].Operation != "review_compliance_relevance" || rig.failed[0].Outcome != llmusage.FailedCallRecovered {
 		t.Errorf("failed tries = %+v", rig.failed)
@@ -934,11 +969,15 @@ func TestComplianceVerifierRejectionLowersVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	f, _ := findingOfType(fs, "compliance_assessment")
-	if f.Severity != "info" || len(f.RelatedArtifacts) != 1 || f.RelatedArtifacts[0].Relationship != verdictUndetermined || !strings.Contains(f.RelatedArtifacts[0].Note, "different logs") {
-		t.Fatalf("finding = %+v", f)
+	judged := judgedOf(f)
+	if f.Severity != "info" || len(judged) != 1 || judged[0].Verdict != verdictUndetermined || !strings.Contains(judged[0].Note, "different logs") {
+		t.Fatalf("finding = %+v, judged %+v", f, judged)
 	}
-	if !strings.HasPrefix(f.Description, "Candidate verdicts: 1 undetermined") || !strings.Contains(f.Description, "- [provision 2_prv_1] record 2 ") {
-		t.Errorf("description = %s", f.Description)
+	if v, _ := judged[0].Evidence["verification"].(map[string]any); v["valid"] != false || judged[0].Evidence["draft_verdict"] != verdictNotCompliant {
+		t.Errorf("evidence = %+v, want the rejected verification and the draft verdict", judged[0].Evidence)
+	}
+	if f.Description != "" || judged[0].RecordID != 2 || judged[0].JudgementOrder == nil {
+		t.Errorf("description %q, judged %+v", f.Description, judged[0])
 	}
 	// The verification puts its prompt in the system message too, and sees the evidence, not the chunk.
 	verify := rig.primary.calls("verify")
@@ -1039,6 +1078,10 @@ func TestComplianceAllTriesFailingRecordsTheErrorAndContinues(t *testing.T) {
 		if f.ErrorMsg == "" {
 			t.Errorf("incomplete finding without error: %+v", f)
 		}
+	}
+	// The pair whose judgement failed keeps its row, with the failure.
+	if c := candidatesOf(incomplete[0]); len(c) != 1 || c[0].Status != candidateJudgementFailed || !strings.Contains(c[0].Error, "judgement") || c[0].Verdict != "" {
+		t.Errorf("candidates of the failed judgement = %+v", c)
 	}
 	if len(rig.failed) != 3 || rig.failed[2].Attempt != 3 || rig.failed[2].Model != "fallback-model" || rig.failed[0].Outcome != llmusage.FailedCallFailed {
 		t.Errorf("failed calls = %+v", rig.failed)
@@ -1160,8 +1203,11 @@ func TestComplianceLargeGroupIsJudgedInBatches(t *testing.T) {
 		t.Errorf("judgement calls = %d, want 3 (at most %d pairs each)", len(calls), complianceJudgementMaxPairs)
 	}
 	f, ok := findingOfType(fs, "compliance_assessment")
-	if !ok || len(f.RelatedArtifacts) != 45 || f.ErrorMsg != "" {
-		t.Fatalf("finding = %d verdicts, error %q", len(f.RelatedArtifacts), f.ErrorMsg)
+	if !ok || len(judgedOf(f)) != 45 || f.ErrorMsg != "" {
+		t.Fatalf("finding = %d verdicts, error %q", len(judgedOf(f)), f.ErrorMsg)
+	}
+	if c := f.Compliance.counts(); c.Activities != 3 || c.Judged != 45 || c.Selected != 45 || c.Relevant != 45 {
+		t.Errorf("counts = %+v", c)
 	}
 }
 
@@ -1290,8 +1336,8 @@ func TestComplianceNameOnlyQuoteIsCorrected(t *testing.T) {
 		t.Fatalf("correction requests = %q", corr)
 	}
 	f, ok := findingOfType(fs, "compliance_assessment")
-	if !ok || f.ErrorMsg != "" || len(f.RelatedArtifacts) != 1 || f.RelatedArtifacts[0].Relationship != verdictUnqualified {
-		t.Fatalf("finding = %+v", f)
+	if j := judgedOf(f); !ok || f.ErrorMsg != "" || len(j) != 1 || j[0].Verdict != verdictUnqualified {
+		t.Fatalf("finding = %+v, judged %+v", f, j)
 	}
 	if len(rig.failed) != 1 || rig.failed[0].Outcome != llmusage.FailedCallRecovered {
 		t.Errorf("failed tries = %+v", rig.failed)
@@ -1324,8 +1370,13 @@ func TestComplianceRelevanceUsesThreeTries(t *testing.T) {
 	rig.fall.relevance = dropped
 	rig.r.plans = sync.Map{}
 	fs, _ = rig.r.processChunk(context.Background(), 7, 1, complianceTestCfg, complianceChunk(1, "seal"))
-	if f, ok := findingOfType(fs, "compliance_incomplete"); !ok || !strings.Contains(f.ErrorMsg, "relevance") || !strings.Contains(f.ErrorMsg, "connection reset") {
+	f, ok := findingOfType(fs, "compliance_incomplete")
+	if !ok || !strings.Contains(f.ErrorMsg, "relevance") || !strings.Contains(f.ErrorMsg, "connection reset") {
 		t.Fatalf("findings = %+v", fs)
+	}
+	// The found candidate is recorded as sent to a relevance check that failed.
+	if c := candidatesOf(f); len(c) != 1 || c[0].Status != candidateRelevanceFailed || !strings.Contains(c[0].Error, "connection reset") || c[0].ID != "2_prv_1" {
+		t.Errorf("candidates = %+v", c)
 	}
 }
 

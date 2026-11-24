@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/lib/pq"
@@ -141,8 +142,12 @@ func LoadReviewRows(ctx context.Context, db *sql.DB, runID int64) ([]ReviewRow, 
 	if failed > 0 {
 		return nil, fmt.Errorf("review run %d is marked failed (its Compliance Review recorded errors); the scorer refuses failed runs", runID)
 	}
+	judged, err := loadJudgedCandidates(ctx, db, runID)
+	if err != nil {
+		return nil, err
+	}
 	// compliance_unchecked reports activities skipped by the limits; it is not an activity.
-	rs, err := db.QueryContext(ctx, `SELECT finding_type, title, COALESCE(location, ''), COALESCE(description, '')
+	rs, err := db.QueryContext(ctx, `SELECT id, finding_type, title, COALESCE(location, ''), COALESCE(description, ''), storage_version
 		FROM kb.doc_review_findings WHERE run_id = $1 AND aspect = 'compliance' AND finding_type <> 'compliance_unchecked' ORDER BY id`, runID)
 	if err != nil {
 		return nil, err
@@ -150,13 +155,26 @@ func LoadReviewRows(ctx context.Context, db *sql.DB, runID int64) ([]ReviewRow, 
 	defer rs.Close()
 	var out []ReviewRow
 	for rs.Next() {
+		var id int64
 		var ft, title, loc, desc string
-		if err := rs.Scan(&ft, &title, &loc, &desc); err != nil {
+		var storage int
+		if err := rs.Scan(&id, &ft, &title, &loc, &desc, &storage); err != nil {
 			return nil, err
+		}
+		// A normalized finding (storage version 2) lists its judged candidates as candidate
+		// rows; only a legacy finding's description lists them (openspec compliance-review-storage).
+		if storage == normalizedFindingStorage {
+			desc = ""
 		}
 		row, err := ParseReviewRow(record, ft, title, loc, desc)
 		if err != nil {
 			return nil, fmt.Errorf("review run %d: %w", runID, err)
+		}
+		if storage == normalizedFindingStorage {
+			for _, c := range judged[id] {
+				row.Candidates[c.Record] = true
+				row.Artifacts = append(row.Artifacts, c)
+			}
 		}
 		out = append(out, row)
 	}
@@ -167,4 +185,49 @@ func LoadReviewRows(ctx context.Context, db *sql.DB, runID int64) ([]ReviewRow, 
 		return nil, fmt.Errorf("review run %d has no compliance findings", runID)
 	}
 	return out, nil
+}
+
+// normalizedFindingStorage is kb.doc_review_findings.storage_version of a normalized
+// compliance finding.
+const normalizedFindingStorage = 2
+
+// loadJudgedCandidates returns, per normalized finding of the run, its judged candidates once
+// each, in the order the judgement returned them. The cosine is rounded to three decimals,
+// the precision legacy descriptions printed, so both storage versions score alike.
+func loadJudgedCandidates(ctx context.Context, db *sql.DB, runID int64) (map[int64][]ReviewCandidate, error) {
+	rows, err := db.QueryContext(ctx, `SELECT a.finding_id, c.candidate_type, c.candidate_id, COALESCE(c.candidate_record_id, 0), c.cosine
+		FROM kb.doc_review_compliance_candidates c
+		JOIN kb.doc_review_compliance_activities a ON a.activity_id = c.activity_id
+		JOIN kb.doc_review_findings f ON f.id = a.finding_id
+		WHERE f.run_id = $1 AND f.aspect = 'compliance' AND f.storage_version = 2 AND c.status = 'judged'
+		ORDER BY a.finding_id, c.judgement_order NULLS LAST, c.id`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("review run %d: load judged candidates: %w", runID, err)
+	}
+	defer rows.Close()
+	out := map[int64][]ReviewCandidate{}
+	seen := map[int64]map[string]bool{}
+	for rows.Next() {
+		var finding, record int64
+		var typ, id string
+		var cosine sql.NullFloat64
+		if err := rows.Scan(&finding, &typ, &id, &record, &cosine); err != nil {
+			return nil, err
+		}
+		key := typ + "/" + id
+		if seen[finding] == nil {
+			seen[finding] = map[string]bool{}
+		}
+		if seen[finding][key] {
+			continue
+		}
+		seen[finding][key] = true
+		c := ReviewCandidate{Key: key, Record: record}
+		if cosine.Valid {
+			v := math.Round(cosine.Float64*1000) / 1000
+			c.Cosine = &v
+		}
+		out[finding] = append(out[finding], c)
+	}
+	return out, rows.Err()
 }

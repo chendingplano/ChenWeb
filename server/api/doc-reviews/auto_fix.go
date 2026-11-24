@@ -53,10 +53,12 @@ type findingContext struct {
 func (c *DocReviewController) loadFindingContext(ctx context.Context, id int64) (*findingContext, error) {
 	var f findingContext
 	err := c.DB.QueryRowContext(ctx, `
-		SELECT id, input_record_id, COALESCE(run_id,0), COALESCE(location,''),
-		       title, COALESCE(description,''), COALESCE(suggestion,''),
-		       aspect, severity, COALESCE(evidence,'')
-		FROM kb.doc_review_findings WHERE id = $1`, id,
+		SELECT f.id, f.input_record_id, COALESCE(f.run_id,0), COALESCE(f.location,''),
+		       f.title, COALESCE(d.description, f.description, ''), COALESCE(d.suggestion, f.suggestion, ''),
+		       f.aspect, f.severity, COALESCE(d.evidence, f.evidence, '')
+		FROM kb.doc_review_findings f
+		LEFT JOIN kb.doc_review_finding_details d ON d.finding_id = f.id
+		WHERE f.id = $1`, id,
 	).Scan(&f.ID, &f.InputRecordID, &f.RunID, &f.Location,
 		&f.Title, &f.Description, &f.Suggestion, &f.Aspect, &f.Severity, &f.Evidence)
 	if err != nil {
@@ -616,5 +618,11 @@ func (c *DocReviewController) loadActiveFindings(ctx context.Context, runID int6
 		}
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := hydrateComplianceFindings(ctx, c.DB, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

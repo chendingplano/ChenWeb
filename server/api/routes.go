@@ -1237,6 +1237,16 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PATCH("/doc-review/findings/:id", docreviews.UpdateFinding)
 	apiGroup.POST("/doc-review/findings/:id/translate", docreviews.TranslateFinding)
 	apiGroup.GET("/doc-review/findings/:id/lines", docreviews.GetFindingLines)
+	// Compliance review storage (openspec compliance-review-storage): summary pages and
+	// details on demand.
+	apiGroup.GET("/doc-review/runs/:run_id/findings", docreviews.ListRunFindings)
+	apiGroup.GET("/doc-review/findings/:id/details", docreviews.GetFindingDetails)
+	apiGroup.GET("/doc-review/findings/:id/activities", docreviews.ListFindingActivities)
+	apiGroup.GET("/doc-review/findings/:id/candidates", docreviews.ListFindingCandidates)
+	apiGroup.GET("/doc-review/findings/:id/searches", docreviews.ListFindingSearches)
+	apiGroup.GET("/doc-review/findings/:id/export", docreviews.ExportFinding)
+	apiGroup.GET("/doc-review/compliance/candidates/:id", docreviews.GetComplianceCandidate)
+	apiGroup.GET("/doc-review/compliance/searches/:id/results", docreviews.ListComplianceSearchResults)
 	apiGroup.POST("/doc-review/findings/:id/auto-fix", docreviews.AutoFixFinding)
 	apiGroup.POST("/doc-review/findings/:id/auto-fix/apply", docreviews.ApplyAutoFixFinding)
 	apiGroup.POST("/doc-review/findings/:id/edit", docreviews.EditFindingLines)
