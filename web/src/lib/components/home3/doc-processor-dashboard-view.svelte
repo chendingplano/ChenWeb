@@ -67,6 +67,37 @@
 	let colorWarning = $derived(darkMode ? '#FBBF24' : '#F59E0B');
 	let colorWarningTint = $derived(darkMode ? 'rgba(251,191,36,0.12)' : 'rgba(245,158,11,0.10)');
 
+	// Resolve names at the presentation boundary so language switches preserve selections.
+	let processorLabels: Record<string, string> = $derived({
+		staged: m.doc_processor_dashboard_name_staged(),
+		parsing: m.doc_processor_dashboard_name_parsing(),
+		converting: m.doc_processor_dashboard_name_converting(),
+		blocking: m.doc_processor_dashboard_name_blocking(),
+		static_analyzer: m.doc_processor_dashboard_name_static_analyzer(),
+		chunking: m.doc_processor_dashboard_name_chunking(),
+		extract_doc_metadata: m.doc_processor_dashboard_name_extract_doc_metadata(),
+		generate_scene_blocks: m.doc_processor_dashboard_name_generate_scene_blocks(),
+		extract_metrics: m.doc_processor_dashboard_name_extract_metrics(),
+		extract_metrics_simple: m.doc_processor_dashboard_name_extract_metrics_simple(),
+		extract_references: m.doc_processor_dashboard_name_extract_references(),
+		extract_provisions: m.doc_processor_dashboard_name_extract_provisions(),
+		extract_semantic_projections: m.doc_processor_dashboard_name_extract_semantic_projections(),
+		extract_entity: m.doc_processor_dashboard_name_extract_entity(),
+		extract_relation: m.doc_processor_dashboard_name_extract_relation(),
+		extract_products: m.doc_processor_dashboard_name_extract_products(),
+		generate_topics: m.doc_processor_dashboard_name_generate_topics(),
+		extract_inventory_items: m.doc_processor_dashboard_name_extract_inventory_items(),
+		extract_metric_definitions: m.doc_processor_dashboard_name_extract_metric_definitions(),
+		extract_test_methods: m.doc_processor_dashboard_name_extract_test_methods(),
+		extract_product_structure: m.doc_processor_dashboard_name_extract_product_structure(),
+		normalize_assertions: m.doc_processor_dashboard_name_normalize_assertions(),
+		associate_semantics: m.doc_processor_dashboard_name_associate_semantics(),
+		project_semantics: m.doc_processor_dashboard_name_project_semantics(),
+		extract_summaries: m.doc_processor_dashboard_name_extract_summaries(),
+		parse_file: m.doc_processor_dashboard_parse_file_2(),
+		convert_parse_result: m.doc_processor_dashboard_convert_parse_result_2()
+	});
+
 	// ── Config ────────────────────────────────────────────────────────────
 
 	// requiredProcessors: the configurable processors enabled in config.local.toml.
@@ -424,10 +455,10 @@
 
 	function lastStatusText(record: KbInputRecord): string {
 		const items = record.status ?? [];
-		if (!items.length) return 'staged';
+		if (!items.length) return processorLabels.staged;
 		const last = items[items.length - 1];
 		const ps = last.proc_status ?? last['proc-status'] ?? last.status ?? '';
-		return `${last.operation ?? '?'} · ${ps || 'running'}`;
+		return `${processorLabels[last.operation ?? ''] ?? last.operation ?? '?'} · ${ps || 'running'}`;
 	}
 
 	// ── Sync helpers ─────────────────────────────────────────────────────
@@ -1047,7 +1078,7 @@
 					tooltipState.status
 				)}; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.08em;"
 			>
-				{tooltipState.label} · {tooltipState.status}
+				{processorLabels[tooltipState.stageId] ?? tooltipState.label} · {tooltipState.status}
 			</div>
 			{#if tooltipState.entry}
 				{#if tooltipState.progress}
@@ -1325,7 +1356,7 @@
 											? '80'
 											: ''}; margin-top:4px; text-align:center; white-space:nowrap; max-width:68px; overflow:hidden; text-overflow:ellipsis;"
 									>
-										{stage.label}
+										{processorLabels[stage.id] ?? stage.label}
 									</div>
 								</div>
 								{#if i < stages.length - 1}
@@ -2006,10 +2037,10 @@
 							style="font-size:13px; color:{parseFileChecked
 								? textPrimary
 								: textSecondary}; font-family:monospace;"
-							>{m.doc_processor_dashboard_parse_file()}</span
+							>{m.doc_processor_dashboard_parse_file_2()}</span
 						>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
-							>{m.doc_processor_dashboard_parse_file_2()}</span
+							>{m.doc_processor_dashboard_parse_file()}</span
 						>
 					</label>
 
@@ -2038,10 +2069,10 @@
 							style="font-size:13px; color:{convertChecked
 								? textPrimary
 								: textSecondary}; font-family:monospace;"
-							>{m.doc_processor_dashboard_convert_parse_result()}</span
+							>{m.doc_processor_dashboard_convert_parse_result_2()}</span
 						>
 						<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
-							>{m.doc_processor_dashboard_convert_parse_result_2()}</span
+							>{m.doc_processor_dashboard_convert_parse_result()}</span
 						>
 					</label>
 
@@ -2053,9 +2084,9 @@
 						>
 							<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{colorSuccess};" />
 							<span style="font-size:13px; color:{textSecondary}; font-family:monospace;"
-								>{proc.id}</span
+								>{processorLabels[proc.id] ?? proc.label}</span
 							>
-							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.id}</span>
 							<span
 								style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;"
 								>{m.doc_processor_dashboard_mandatory()}</span
@@ -2089,9 +2120,9 @@
 							<span
 								style="font-size:13px; color:{processors[proc.id]
 									? textPrimary
-									: textSecondary}; font-family:monospace;">{proc.id}</span
+									: textSecondary}; font-family:monospace;">{processorLabels[proc.id] ?? proc.label}</span
 							>
-							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.id}</span>
 						</label>
 					{/each}
 				</div>
@@ -2446,25 +2477,25 @@
 					{#if parseFileChecked}
 						<span
 							style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};"
-							>{m.doc_processor_dashboard_parse_file()}</span
+							>{m.doc_processor_dashboard_parse_file_2()}</span
 						>
 					{/if}
 					{#if convertChecked}
 						<span
 							style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};"
-							>{m.doc_processor_dashboard_convert_parse_result()}</span
+							>{m.doc_processor_dashboard_convert_parse_result_2()}</span
 						>
 					{/if}
 					{#each MANDATORY_DISPLAY_STAGES as stage}
 						<span
 							style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};"
-							>{stage.id}</span
+							>{processorLabels[stage.id] ?? stage.label}</span
 						>
 					{/each}
 					{#each selectableProcessorIds.filter((p) => processors[p]) as p}
 						<span
 							style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};"
-							>{p}</span
+							>{processorLabels[p] ?? p}</span
 						>
 					{/each}
 				</div>
@@ -2643,10 +2674,10 @@
 						style="font-size:13px; color:{restartParseFile
 							? textPrimary
 							: textSecondary}; font-family:monospace;"
-						>{m.doc_processor_dashboard_parse_file()}</span
+						>{m.doc_processor_dashboard_parse_file_2()}</span
 					>
 					<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
-						>{m.doc_processor_dashboard_parse_file_2()}</span
+						>{m.doc_processor_dashboard_parse_file()}</span
 					>
 				</label>
 
@@ -2675,10 +2706,10 @@
 						style="font-size:13px; color:{restartConvert
 							? textPrimary
 							: textSecondary}; font-family:monospace;"
-						>{m.doc_processor_dashboard_convert_parse_result()}</span
+						>{m.doc_processor_dashboard_convert_parse_result_2()}</span
 					>
 					<span style="font-size:12px; color:{textMuted}; margin-left:6px;"
-						>{m.doc_processor_dashboard_convert_parse_result_2()}</span
+						>{m.doc_processor_dashboard_convert_parse_result()}</span
 					>
 				</label>
 
@@ -2690,9 +2721,9 @@
 					>
 						<CheckSquareIcon class="h-4 w-4 shrink-0" style="color:{colorSuccess};" />
 						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;"
-							>{proc.id}</span
+							>{processorLabels[proc.id] ?? proc.label}</span
 						>
-						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.id}</span>
 						<span
 							style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;"
 							>{m.doc_processor_dashboard_mandatory()}</span
@@ -2728,9 +2759,9 @@
 						<span
 							style="font-size:13px; color:{restartProcessors[proc.id]
 								? textPrimary
-								: textSecondary}; font-family:monospace;">{proc.id}</span
+								: textSecondary}; font-family:monospace;">{processorLabels[proc.id] ?? proc.label}</span
 						>
-						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.id}</span>
 					</label>
 				{/each}
 			</div>
