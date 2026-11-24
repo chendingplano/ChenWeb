@@ -2961,6 +2961,28 @@
 		min-width: 0;
 	}
 
+	@container pmr-review (min-width: 901px) {
+		/* Keep each results pane within the space below the review tabs. */
+		.embedded .layout.resizable:not(.report-mode) {
+			align-items: stretch;
+			overflow: hidden;
+		}
+		.embedded .layout:not(.report-mode) > .scope-pane,
+		.embedded .layout:not(.report-mode) > .main-pane,
+		.embedded .layout:not(.report-mode) > .detail-pane {
+			min-height: 0;
+			max-height: none;
+		}
+		.embedded .layout:not(.report-mode) > .main-pane {
+			overflow: auto;
+			overscroll-behavior: contain;
+			scrollbar-gutter: stable;
+		}
+		.embedded .detail-pdf {
+			min-height: 0;
+		}
+	}
+
 	@container pmr-review (max-width: 900px) {
 		.layout,
 		.layout.report-mode {
