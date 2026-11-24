@@ -1020,9 +1020,6 @@
 	{/if}
 
 	<div class="content" class:wide={tab === 'results' && !!run}>
-		{#if onBack}
-			<button class="linky back" onclick={onBack}>← {m.pmr_back()}</button>
-		{/if}
 		{#if error}
 			<div class="note error">{error}</div>
 		{/if}
@@ -1064,7 +1061,12 @@
 			<div class="title-row" class:resizable-header={tab === 'results' && !!profile}
 				style={`--header-height:${layout.headerH}px`}>
 				<div>
-					<p class="kicker">{m.pmr_review_of()}</p>
+					<div class="review-heading">
+						{#if onBack}
+							<button class="linky back" onclick={onBack}>← {m.pmr_back()}</button>
+						{/if}
+						<p class="kicker">{m.pmr_review_of()}</p>
+					</div>
 					<h1>{profileName || m.pmr_untitled()}</h1>
 					<p class="lede">
 						{m.pmr_run_summary({
@@ -1977,6 +1979,8 @@
 	}
 	.content.wide {
 		max-width: none;
+		padding-top: 0;
+		padding-right: 0;
 	}
 
 	.note {
@@ -2014,8 +2018,12 @@
 	}
 	.linky.back {
 		padding: 0;
-		margin-bottom: 14px;
 		font-size: 12px;
+	}
+	.review-heading {
+		display: flex;
+		align-items: center;
+		gap: 12px;
 	}
 
 	.empty-hero {
