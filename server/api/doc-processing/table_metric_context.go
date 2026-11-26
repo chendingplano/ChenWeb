@@ -593,8 +593,8 @@ func matchesTableMetricCondition(g *TableGrid, row TableRow, label, value string
 	return false
 }
 
-// matchTableMetricCombinedName recognizes a metric named for a first-column row
-// label followed by a column heading, as in record 404 Table 6. Require the
+// matchTableMetricCombinedName recognizes a metric named for a row label in any
+// column followed by a column heading (ChenWeb#66). Require the
 // selected cell to carry the extracted value and reject multiple matching cells.
 func matchTableMetricCombinedName(g *TableGrid, metric map[string]any) (TableRow, string) {
 	name := normalizeTableMatchText(asString(metric["metric_name"]))
@@ -606,26 +606,28 @@ func matchTableMetricCombinedName(g *TableGrid, metric map[string]any) (TableRow
 	var matchRow TableRow
 	var matchCell string
 	for _, row := range g.Rows {
-		if len(row.Cells) < 2 || row.Spans[0] != 1 {
-			continue
-		}
-		label := normalizeTableMatchText(row.Cells[0])
-		heading, ok := strings.CutPrefix(name, label)
-		if label == "" || !ok || heading == "" {
-			continue
-		}
-		for col := 1; col < len(row.Cells) && col < len(g.Columns); col++ {
-			if row.Spans[col] != 1 || normalizeTableMatchText(g.Columns[col]) != heading {
+		for labelCol, cell := range row.Cells {
+			if row.Spans[labelCol] != 1 {
 				continue
 			}
-			cellValue := normalizeTableMatchText(row.Cells[col])
-			if cellValue != value && cellValue != value+unit {
+			label := normalizeTableMatchText(cell)
+			heading, ok := strings.CutPrefix(name, label)
+			if label == "" || !ok || heading == "" {
 				continue
 			}
-			if matchCell != "" {
-				return TableRow{}, ""
+			for col := 0; col < len(row.Cells) && col < len(g.Columns); col++ {
+				if col == labelCol || row.Spans[col] != 1 || normalizeTableMatchText(g.Columns[col]) != heading {
+					continue
+				}
+				cellValue := normalizeTableMatchText(row.Cells[col])
+				if cellValue != value && cellValue != value+unit {
+					continue
+				}
+				if matchCell != "" {
+					return TableRow{}, ""
+				}
+				matchRow, matchCell = row, fmt.Sprintf("%s:c%d", row.ID, col+1)
 			}
-			matchRow, matchCell = row, fmt.Sprintf("%s:c%d", row.ID, col+1)
 		}
 	}
 	return matchRow, matchCell
@@ -922,7 +924,7 @@ func applyTableMetricContexts(lines []Line, metrics []map[string]any, logger Api
 		counts[res.Outcome]++
 		if res.Context == "" {
 			if logger != nil {
-				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52)",
+				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52) (ChenWeb#66)",
 					"record_id", recordID,
 					"metric_id", asString(m["metric_id"]),
 					"metric_name", asString(m["metric_name"]),

@@ -46,8 +46,9 @@ For a metric whose spans cover a `table` line, the system SHALL replace `metric_
 - **AND** prose that gives the applicability of the limit, such as an inspection area of 0.1 m², remains condition evidence
 
 #### Scenario: A metric name combines a row label and column heading
-- **WHEN** the metric name is the first-column row label followed by a column heading and exactly one cell at that intersection agrees with the extracted value
+- **WHEN** the metric name is an exact row label from any column followed by a column heading and exactly one cell at that intersection agrees with the extracted value
 - **THEN** the system can narrow a missing citation or a row-only citation covering the whole table to that cell
+- **AND** labels after index or identifier columns are supported, while multiple matching intersections remain ambiguous
 - **AND** the cell stays selected when the stored citation is replayed
 - **AND** record 404 metric `404_mtc_19` cites `214#r2:c2` for the average wet-bulb temperature variation
 
