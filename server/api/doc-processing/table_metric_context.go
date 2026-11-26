@@ -726,6 +726,7 @@ func selectTableRows(g *TableGrid, cited TableRowRef, evidence []string) ([]Tabl
 
 // tableMetricHeaderQuantity uses only an explicitly cited header. A matching
 // whole cell or complete value with its unit supports the citation (ChenWeb#63).
+// Grouping parentheses may enclose the value before its unit, e.g. (240±8%)V.
 func tableMetricHeaderQuantity(row TableRow, metric map[string]any) ([]string, string) {
 	value := normalizeTableMatchText(asString(metric["metric_value"]))
 	unit := normalizeTableMatchText(firstNonEmptyTrimmed(asString(metric["unit"]), asString(metric["metric_unit"])))
@@ -734,7 +735,7 @@ func tableMetricHeaderQuantity(row TableRow, metric map[string]any) ([]string, s
 	}
 	var quantity *regexp.Regexp
 	if unit != "" {
-		quantity = regexp.MustCompile(`(?:^|[^\pN.])` + regexp.QuoteMeta(value+unit) + `(?:$|[^\pN\p{Latin}/])`)
+		quantity = regexp.MustCompile(`(?:^|[^\pN.])(?:` + regexp.QuoteMeta(value+unit) + `|\(` + regexp.QuoteMeta(value) + `\)` + regexp.QuoteMeta(unit) + `)(?:$|[^\pN\p{Latin}/])`)
 	}
 	var cells, parts []string
 	for i, cell := range row.Cells {
@@ -924,7 +925,7 @@ func applyTableMetricContexts(lines []Line, metrics []map[string]any, logger Api
 		counts[res.Outcome]++
 		if res.Context == "" {
 			if logger != nil {
-				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52) (ChenWeb#66)",
+				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52) (ChenWeb#66) (ChenWeb#63)",
 					"record_id", recordID,
 					"metric_id", asString(m["metric_id"]),
 					"metric_name", asString(m["metric_name"]),

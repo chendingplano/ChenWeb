@@ -52,6 +52,12 @@ For a metric whose spans cover a `table` line, the system SHALL replace `metric_
 - **AND** the cell stays selected when the stored citation is replayed
 - **AND** record 404 metric `404_mtc_19` cites `214#r2:c2` for the average wet-bulb temperature variation
 
+#### Scenario: A cited header groups a quantity before its unit
+- **WHEN** an explicitly cited header cell contains the complete metric value enclosed in parentheses followed by its unit, such as `(240±8%)V`
+- **THEN** that header cell and its row hash are retained in the context and citation
+- **AND** full-width parentheses are equivalent to ordinary parentheses
+- **AND** a partial number, missing tolerance, or unit that is only a prefix of another unit does not match
+
 #### Scenario: Ambiguous evidence
 - **WHEN** no row is cited, several rows tie on evidence, and the table has more than 5 data rows
 - **THEN** the LLM's `metric_context` is kept and a warning is logged with the metric ID, line and table size
