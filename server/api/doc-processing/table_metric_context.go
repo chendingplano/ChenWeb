@@ -335,7 +335,7 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 		// nearby data row that happens to repeat the same number (ChenWeb#60).
 		if ids := cited[n].Rows; len(ids) == 1 && len(cited[n].Cells) == 0 {
 			if row, ok := g.Row(ids[0]); ok && (cited[n].RowHash[row.ID] == "" || cited[n].RowHash[row.ID] == row.Hash) {
-				if paragraph := metricTableParagraphText(row); paragraph != "" {
+				if paragraph := metricTableParagraphText(row); strings.HasPrefix(row.ID, "h") && paragraph != "" {
 					res.Refs = append(res.Refs, TableRowRef{Line: n, Rows: ids, RowHash: map[string]string{row.ID: row.Hash}})
 					block := "[" + row.ID + "] " + truncateRunesEllipsis(paragraph, tableContextMaxCellRunes)
 					if caption := idx.caption(n); caption != "" {

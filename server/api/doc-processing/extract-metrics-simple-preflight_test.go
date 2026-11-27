@@ -568,3 +568,106 @@ func TestSimplePreflightGivesMergedMetricParagraphOneOwner(t *testing.T) {
 		t.Fatalf("saved context must retain the paragraph citation: %+v", context)
 	}
 }
+
+func TestSimplePreflightQuantitativeHeaderOwnership(t *testing.T) {
+	lines := []MarkedLine{simpleLine("n", 20, "table", `<table><tr><td rowspan="4"></td><td>Post</td><td>3.00</td></tr><tr><td>Beam</td><td>2.00</td></tr><tr><td>Floor</td><td>1.50</td></tr><tr><td>Roof</td><td>1.00</td></tr><tr><td>Wall</td><td>0.50</td></tr></table>`)}
+	work := newMetricSimpleWork(lines)
+	for _, id := range []string{"h0", "h1", "h2"} {
+		raw := map[string]any{"n": "rating", "v": "2.00", "l": []any{"20"}, "t": []any{"20#" + id}}
+		owners := 0
+		for _, unit := range work.units {
+			accept, err := (metricSimpleSelection{work, []metricSimpleUnit{unit}}).accepts(raw, []string{"20"})
+			if err != nil {
+				t.Fatalf("%s rejected: %v", id, err)
+			}
+			if accept {
+				owners++
+			}
+		}
+		if owners != 1 {
+			t.Fatalf("%s has %d owners", id, owners)
+		}
+	}
+}
+
+func TestSimplePreflightOpeningQuantitativeParagraphOwnership(t *testing.T) {
+	lines := []MarkedLine{simpleLine("n", 20, "table", `<table><tr><td rowspan="5"></td><td colspan="2">Air supply shall be 30 m3/h; use 40 m3/h for clean rooms.</td></tr><tr><td>Season</td><td>Temperature</td></tr><tr><td>Winter</td><td>20~24</td></tr><tr><td>Summer</td><td>25~28</td></tr><tr><td>Other</td><td>10~15</td></tr></table>`)}
+	work := newMetricSimpleWork(lines)
+	raw := map[string]any{"n": "Air supply", "v": "30", "l": []any{"20"}, "t": []any{"20#h0"}}
+	owners := 0
+	for _, unit := range work.units {
+		accept, err := (metricSimpleSelection{work, []metricSimpleUnit{unit}}).accepts(raw, []string{"20"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accept {
+			owners++
+		}
+	}
+	if owners != 1 {
+		t.Fatalf("opening paragraph has %d owners", owners)
+	}
+}
+
+func TestSimplePreflightInfersUniqueParagraphQuantity(t *testing.T) {
+	for _, duplicate := range []bool{false, true} {
+		rows := `<tr><td colspan="2">Output shall be 120 kW; use at most 20% for larger units.</td></tr>`
+		if duplicate {
+			rows += rows
+		}
+		work := newMetricSimpleWork([]MarkedLine{simpleLine("n", 20, "table", `<table><tr><td>Name</td><td>Value</td></tr><tr><td>A</td><td>10</td></tr>`+rows+`</table>`)})
+		raw := map[string]any{"n": "Output", "v": "120", "u": "kW", "l": []any{"20"}}
+		owners := 0
+		for _, unit := range work.units {
+			accept, err := (metricSimpleSelection{work, []metricSimpleUnit{unit}}).accepts(raw, []string{"20"})
+			if duplicate {
+				if err == nil {
+					t.Fatal("ambiguous paragraph was accepted")
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if accept {
+				owners++
+			}
+		}
+		if !duplicate && owners != 1 {
+			t.Fatalf("got %d owners", owners)
+		}
+	}
+}
+
+func TestSimplePreflightInfersPercentParagraph(t *testing.T) {
+	work := newMetricSimpleWork([]MarkedLine{simpleLine("n", 20, "table", `<table><tr><td>Name</td><td>Value</td></tr><tr><td>A</td><td>10</td></tr><tr><td colspan="2">Use 120 kW; larger units shall use at most 20%.</td></tr></table>`)})
+	raw := map[string]any{"v": "20%", "u": "%", "l": []any{"20"}}
+	owners := 0
+	for _, unit := range work.units {
+		yes, err := (metricSimpleSelection{work, []metricSimpleUnit{unit}}).accepts(raw, []string{"20"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if yes {
+			owners++
+		}
+	}
+	if owners != 1 {
+		t.Fatalf("got %d owners", owners)
+	}
+}
+
+func TestSimplePreflightCheckDoesNotChangePayload(t *testing.T) {
+	work := newMetricSimpleWork([]MarkedLine{simpleLine("n", 20, "table", `<table><tr><td>Name</td><td>Value</td></tr><tr><td>A</td><td>10</td></tr><tr><td colspan="2">Use 120 kW; larger units use at most 20%.</td></tr></table>`)})
+	raw := map[string]any{"n": "Output", "v": "120", "u": "kW", "l": []any{"20"}}
+	payload := map[string]any{"m": []any{raw}}
+	before, _ := json.Marshal(payload)
+	selection := metricSimpleSelection{work, work.units[:1]}
+	if err := selection.checkCitations(payload, newSimpleChunkLines(work.source)); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(payload)
+	if string(before) != string(after) {
+		t.Fatal("CheckParsed changed the model response")
+	}
+}

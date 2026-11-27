@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,7 +20,7 @@ const (
 )
 
 var metricSimpleNumbers = regexp.MustCompile(`[+-]?\d+(?:[.,]\d+)?`)
-var errMetricSimpleRowCitation = errors.New("split table output requires valid data-row citations in t")
+var errMetricSimpleRowCitation = errors.New("split table output requires valid value-row citations in t (ChenWeb#68)")
 
 type metricSimpleOverlapCitation struct{ line int }
 
@@ -91,13 +92,13 @@ func newMetricSimpleWork(lines []MarkedLine) *metricSimpleWork {
 	return w
 }
 
-// A merged cell can contain a paragraph of quoted requirements even when the
-// table grid inferred it was a subheader. Give that paragraph a split owner
-// while preserving the row ID used by the full table (ChenWeb#60).
+// Numeric data and quoted requirements can be labelled as headers when blank
+// cells span several rows. Give quantitative rows an owner without changing
+// the stable row IDs used by the full table (ChenWeb#60, ChenWeb#68).
 func addMetricTableParagraphs(grid *TableGrid) {
 	var paragraphs []TableRow
 	grid.Headers = slices.DeleteFunc(grid.Headers, func(row TableRow) bool {
-		if metricTableParagraphText(row) == "" {
+		if !metricSimpleNumbers.MatchString(strings.Join(row.Cells, " ")) {
 			return false
 		}
 		paragraphs = append(paragraphs, row)
@@ -109,9 +110,6 @@ func addMetricTableParagraphs(grid *TableGrid) {
 }
 
 func metricTableParagraphText(row TableRow) string {
-	if !strings.HasPrefix(row.ID, "h") || row.ID == "h0" {
-		return ""
-	}
 	merged := ""
 	for i, cell := range row.Cells {
 		if row.Spans[i] == 0 || strings.TrimSpace(cell) == "" {
@@ -251,7 +249,7 @@ func (s metricSimpleSelection) checkCitations(payload map[string]any, idx simple
 			if key == "x" {
 				accept = s.acceptsSetAside
 			}
-			if _, err := accept(raw, spans); err != nil {
+			if _, err := accept(maps.Clone(raw), spans); err != nil {
 				t, _ := json.Marshal(raw["t"])
 				errs = append(errs, fmt.Errorf("%s[%d] %q cites t=%s: %w", key, i, strings.TrimSpace(asString(raw["n"])), t, err))
 			}
@@ -292,6 +290,35 @@ func (s metricSimpleSelection) accepts(raw map[string]any, spans []string) (bool
 		return true, nil
 	}
 	refs := simpleMetricRowRefs(raw)
+	if len(refs) == 0 {
+		// An uncited value can belong to a quoted paragraph embedded in the
+		// table. Recover only a unique paragraph containing the complete
+		// quantity, never a bare number repeated in ordinary cells (ChenWeb#68).
+		var recovered []TableRowRef
+		for position, grid := range s.work.tables {
+			line := s.work.source[position].Line.LineNo
+			if !slices.Contains(citedLines, line) {
+				continue
+			}
+			for _, row := range grid.Rows {
+				if metricTableParagraphText(row) == "" {
+					continue
+				}
+				value, unit := asString(raw["v"]), asString(raw["u"])
+				if unit != "" {
+					value = strings.TrimSuffix(value, unit)
+				}
+				cells, _ := tableMetricHeaderQuantity(row, map[string]any{"metric_value": value, "unit": unit})
+				if len(cells) > 0 {
+					recovered = append(recovered, TableRowRef{Line: line, Rows: []string{row.ID}})
+				}
+			}
+		}
+		if len(recovered) == 1 {
+			refs = recovered
+			raw["t"] = []any{fmt.Sprintf("%d#%s", refs[0].Line, refs[0].Rows[0])}
+		}
+	}
 	if len(refs) == 0 {
 		return false, errMetricSimpleRowCitation
 	}
