@@ -672,3 +672,28 @@ func TestTableMetricHeaderQuantityRequiresCompleteValue(t *testing.T) {
 		}
 	}
 }
+
+func TestTableMetricContextUsesExplicitContinuation(t *testing.T) {
+	for _, tc := range []struct {
+		name, middle, value, row string
+		want                     bool
+	}{
+		{"next page", "table-image", "25", "r1", true},
+		{"intervening prose", "paragraph", "25", "r1", false},
+		{"wrong value", "table-image", "99", "r1", false},
+		{"missing row", "table-image", "25", "r9", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := []Line{{LineNo: 10, LineType: "table", Content: `<table><tr><td>Name</td><td>Distance</td></tr></table>`}, {LineNo: 11, LineType: tc.middle, Content: "continued"}, {LineNo: 12, LineType: "table", Content: `<table><tr><td>Name</td><td>Distance</td></tr><tr><td>Room A</td><td>25</td></tr></table>`}}
+			metric := map[string]any{"source_line_spans": []string{"10"}, "source_table_rows": []TableRowRef{{Line: 12, Rows: []string{tc.row}}}, "metric_value": tc.value, "metric_name": "Distance"}
+			res := buildTableMetricContext(newTableLineIndex(lines), metric)
+			if tc.want {
+				if len(res.Refs) != 1 || res.Refs[0].Line != 12 || res.Refs[0].RowHash["r1"] == "" || !containsString(normalizeSourceLineSpans(metric["source_line_spans"]), "12") {
+					t.Fatalf("%+v, %+v", res, metric)
+				}
+			} else if len(res.Refs) > 0 {
+				t.Fatalf("unsupported continuation accepted: %+v", res)
+			}
+		})
+	}
+}

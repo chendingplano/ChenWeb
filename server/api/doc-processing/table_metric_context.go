@@ -321,6 +321,43 @@ func buildTableMetricContext(idx *tableLineIndex, metric map[string]any) tableMe
 	cited := map[int]TableRowRef{}
 	for _, r := range tableRowRefsFromValue(metric["source_table_rows"]) {
 		cited[r.Line] = r
+		if slices.Contains(tableLines, r.Line) {
+			continue
+		}
+		// A page break can separate a header-only fragment from its values.
+		// Honor an explicit continuation row only when the next table is
+		// adjacent and that row contains the complete saved value (ChenWeb#69).
+		g, ok := idx.grid(r.Line)
+		if !ok || len(r.Rows) != 1 {
+			continue
+		}
+		row, ok := g.Row(r.Rows[0])
+		if !ok || (r.RowHash[row.ID] != "" && r.RowHash[row.ID] != row.Hash) {
+			continue
+		}
+		if cells, _ := tableMetricHeaderQuantity(row, metric); len(cells) == 0 {
+			continue
+		}
+		for i, n := range tableLines {
+			header, _ := idx.grid(n)
+			if len(header.Rows) != 0 || r.Line <= n || r.Line-n > 8 {
+				continue
+			}
+			adjacent := true
+			for between := n + 1; between < r.Line; between++ {
+				line, exists := idx.byNo[between]
+				if !exists || (line.LineType != "table-image" && line.LineType != "image" && line.LineType != "table-caption") {
+					adjacent = false
+					break
+				}
+			}
+			if adjacent {
+				tableLines[i] = r.Line
+				spans := normalizeSourceLineSpans(metric["source_line_spans"])
+				metric["source_line_spans"] = append(spans, strconv.Itoa(r.Line))
+				break
+			}
+		}
 	}
 	evidence := tableMetricEvidence(metric)
 	metricName := normalizeTableMatchText(asString(metric["metric_name"]))
@@ -925,7 +962,7 @@ func applyTableMetricContexts(lines []Line, metrics []map[string]any, logger Api
 		counts[res.Outcome]++
 		if res.Context == "" {
 			if logger != nil {
-				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52) (ChenWeb#66) (ChenWeb#63)",
+				logger.Warn("table metric context: no row match (ChenWeb#19) (ChenWeb#52) (ChenWeb#66) (ChenWeb#63) (ChenWeb#69)",
 					"record_id", recordID,
 					"metric_id", asString(m["metric_id"]),
 					"metric_name", asString(m["metric_name"]),
