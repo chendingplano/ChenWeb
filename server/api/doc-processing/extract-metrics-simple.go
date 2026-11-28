@@ -400,6 +400,14 @@ func expandSimpleMetricRow(raw map[string]any, idx simpleChunkLines) map[string]
 	nameEn, subjectEn := strings.TrimSpace(asString(raw["ne"])), strings.TrimSpace(asString(raw["se"]))
 	rangeType := strings.TrimSpace(asString(raw["r"]))
 	valueClass := strings.TrimSpace(asString(raw["k"]))
+	formula, structure := raw["d"], raw["vs"]
+	// A formula definition specifies the exact allowable value. Expression
+	// describes its shape, rather than the comparison operator (ChenWeb#71).
+	if rangeType == "expression" && valueClass == "definition" && strings.TrimSpace(asString(raw["v"])) != "" {
+		rangeType = "exact"
+		formula = firstNonEmptyTrimmed(asString(formula), asString(raw["v"]))
+		structure = map[string]any{"kind": "expression"}
+	}
 	row := normalizeMetricList([]any{map[string]any{
 		"metric_name":           name,
 		"metric_name_en":        nameEn,
@@ -414,11 +422,11 @@ func expandSimpleMetricRow(raw map[string]any, idx simpleChunkLines) map[string]
 		"condition_en":          raw["ce"],
 		"source_line_spans":     raw["l"],
 		"source_table_rows":     simpleMetricRowRefs(raw),
-		"value_structure":       raw["vs"],
+		"value_structure":       structure,
 		"value_min":             raw["lo"],
 		"value_max":             raw["hi"],
 		"reasoning_tags":        raw["g"],
-		"formula_or_definition": raw["d"],
+		"formula_or_definition": formula,
 		"metric_categories":     raw["cat"],
 		"keywords":              distinctNonEmpty(name, subject),
 		"keywords_en":           distinctNonEmpty(nameEn, subjectEn),

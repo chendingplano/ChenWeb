@@ -629,3 +629,16 @@ func TestMetricsBatchLogMessagesNameTheProcessor(t *testing.T) {
 		}
 	}
 }
+
+func TestSimpleFormulaDefinitionHasExactRangeType(t *testing.T) {
+	for _, tc := range []struct{ class, want string }{{"definition", "exact"}, {"requirement", "expression"}, {"measured_value", "expression"}} {
+		raw := map[string]any{"n": "Allowable stress", "s": "Sample alloy", "v": "S/2.5", "r": "expression", "k": tc.class, "l": []any{"10"}, "vs": map[string]any{"kind": "expression"}}
+		row := expandSimpleMetricRow(raw, newSimpleChunkLines([]MarkedLine{simpleLine("n", 10, "paragraph", "The allowable stress is S/2.5.")}))
+		if row["value_range_type"] != tc.want {
+			t.Fatalf("%s: %+v", tc.class, row)
+		}
+		if tc.class == "definition" && row["formula_or_definition"] != "S/2.5" {
+			t.Fatalf("formula lost: %+v", row)
+		}
+	}
+}
