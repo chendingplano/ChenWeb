@@ -697,3 +697,18 @@ func TestTableMetricContextUsesExplicitContinuation(t *testing.T) {
 		})
 	}
 }
+
+func TestTableHeaderQuantityMatchesEveryCollectionMember(t *testing.T) {
+	grid, _ := ParseTableGrid(`<table><tr><td>Power</td><td>40</td><td>55</td><td>75</td></tr></table>`)
+	for _, kind := range []string{"alternatives", "required_points"} {
+		metric := map[string]any{"metric_value": "40、55、75", "value_structure": map[string]any{"kind": kind, "values": []string{"40", "55", "75"}}}
+		cells, _ := tableMetricHeaderQuantity(grid.Headers[0], metric)
+		if strings.Join(cells, ",") != "h0:c2,h0:c3,h0:c4" {
+			t.Fatalf("%s: %v", kind, cells)
+		}
+		metric["value_structure"] = map[string]any{"kind": kind, "values": []string{"40", "550"}}
+		if cells, _ := tableMetricHeaderQuantity(grid.Headers[0], metric); len(cells) > 0 {
+			t.Fatal("partial collection accepted")
+		}
+	}
+}
