@@ -971,3 +971,23 @@ func TestProductsV2RetriesMisplacedObligationCode(t *testing.T) {
 		})
 	}
 }
+
+func TestProductSpansDropsInvalidHeaderOnlyWithValidDataCitation(t *testing.T) {
+	lines := productSourceLines{10: "10#h0: Name | Rating\n10#r1: Sample motor | 20 W"}
+	spans, _, err := resolveProductV2Spans([]any{"10#h3", "10#r1"}, lines)
+	if err != nil || strings.Join(spans, ",") != "10#r1" {
+		t.Fatalf("%v, %v", spans, err)
+	}
+	for _, citations := range [][]any{{"10#h3"}, {"10#h3", "10#r9"}, {"10#r0", "10#r1"}} {
+		if _, _, err := resolveProductV2Spans(citations, lines); err == nil {
+			t.Fatalf("unsupported citations accepted: %v", citations)
+		}
+	}
+}
+
+func TestProductMissingLineCorrectionListsSuppliedNeighbours(t *testing.T) {
+	_, _, err := resolveProductV2Spans([]any{10}, productSourceLines{9: "Before", 11: "After"})
+	if err == nil || !strings.Contains(err.Error(), "nearby supplied lines: [9 11]") {
+		t.Fatalf("%v", err)
+	}
+}

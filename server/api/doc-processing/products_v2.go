@@ -277,7 +277,13 @@ func resolveProductV2Spans(items []any, lines productSourceLines) ([]string, str
 		}
 		start, _ := strconv.Atoi(m[1])
 		if _, ok := lines[start]; !ok {
-			return nil, "", fmt.Errorf("span %q cites line %d, which was not in the input", span, start)
+			available := make([]int, 0, len(lines))
+			for number := range lines {
+				available = append(available, number)
+			}
+			sort.Ints(available)
+			at := sort.SearchInts(available, start)
+			return nil, "", fmt.Errorf("span %q cites line %d, which was not in the input. Cite supplied text lines or table-row labels only; nearby supplied lines: %v (ChenWeb#51)", span, start, available[max(0, at-2):min(len(available), at+2)])
 		}
 		switch {
 		case m[2] != "":
@@ -305,6 +311,27 @@ func resolveProductV2Spans(items []any, lines productSourceLines) ([]string, str
 				}
 				if row.id != "" {
 					labels = append(labels, m[1]+"#"+row.id)
+				}
+			}
+			if !found && strings.HasPrefix(m[3], "h") {
+				// A nonexistent header adds no evidence when the same claim
+				// already cites an existing data row of this table (ChenWeb#51).
+				validData := false
+				for _, other := range items {
+					candidate, ok := other.(string)
+					if !ok {
+						continue
+					}
+					match := productV2Span.FindStringSubmatch(candidate)
+					if match == nil || match[1] != m[1] || !strings.HasPrefix(match[3], "r") {
+						continue
+					}
+					for _, label := range labels {
+						validData = validData || label == candidate
+					}
+				}
+				if validData {
+					continue
 				}
 			}
 			if !found && len(labels) == 0 {
