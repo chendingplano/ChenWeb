@@ -123,3 +123,27 @@ func TestReferenceTableRowsHeaderlessFirstListedEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestListedReferenceHeaderWithListMarker(t *testing.T) {
+	for _, prefix := range []string{"—", "–", "-", "•", "·", ""} {
+		grid, err := ParseTableGrid(`<table><tr><td>` + prefix + `EX 41—93</td></tr><tr><td>EX 42—94</td></tr></table>`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row, ok := listedReferenceHeaderRow(grid, "EX 41—93"); !ok || row.ID != "h0" {
+			t.Fatalf("prefix %q: %+v, %t", prefix, row, ok)
+		}
+	}
+	grid, _ := ParseTableGrid(`<table><tr><td>—EX 41—93</td></tr><tr><td>•EX 41—93</td></tr></table>`)
+	if _, ok := listedReferenceHeaderRow(grid, "EX 41—93"); ok {
+		t.Fatal("duplicate reference must remain ambiguous")
+	}
+}
+
+func TestReferenceHeaderIdentifierDoesNotRequireListedForm(t *testing.T) {
+	mentions := []RefMention{{CitedRaw: "EX 41—93", RefForm: "in_text", SourceLineSpans: []string{"20"}}}
+	applyReferenceTableRows([]Line{{LineNo: 20, LineType: "table", Content: `<table><tr><td>—EX 41—93</td></tr><tr><td>—EX 42—94</td></tr></table>`}}, mentions, nil, 1)
+	if len(mentions[0].SourceTableRows) != 1 || mentions[0].SourceTableRows[0].Rows[0] != "h0" {
+		t.Fatalf("%+v", mentions)
+	}
+}

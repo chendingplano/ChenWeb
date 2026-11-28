@@ -50,7 +50,7 @@ func applyReferenceTableRows(lines []Line, mentions []RefMention, logger ApiType
 		// Without header markup the grid labels the first reference as h0.
 		// A unique exact identifier can recover that row without renumbering
 		// the table or changing an ambiguous citation (ChenWeb#59).
-		if m.RefForm == "listed" && len(m.SourceLineSpans) == 1 {
+		if len(m.SourceLineSpans) == 1 {
 			line, end, ok := parseMetricLineSpan(m.SourceLineSpans[0])
 			if ok && line == end {
 				if grid, ok := idx.grid(line); ok {
@@ -77,7 +77,7 @@ func applyReferenceTableRows(lines []Line, mentions []RefMention, logger ApiType
 		if res.Context != "" {
 			m.Evidence = res.Context
 		} else if logger != nil {
-			logger.Warn("reference table rows: no row match", "record_id", recordID,
+			logger.Warn("reference table rows: no row match (ChenWeb#59)", "record_id", recordID,
 				"cited_raw", m.CitedRaw, "source_line_spans", m.SourceLineSpans)
 		}
 	}
@@ -93,7 +93,7 @@ func listedReferenceHeaderRow(grid *TableGrid, cited string) (TableRow, bool) {
 	}
 	matches := func(row TableRow) bool {
 		return slices.ContainsFunc(row.Cells, func(cell string) bool {
-			return normalizeTableMatchText(cell) == id
+			return normalizeTableMatchText(strings.TrimLeft(cell, " \t—–-•·")) == id
 		})
 	}
 	header := grid.Headers[0]
